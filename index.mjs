@@ -21,9 +21,9 @@ export async function OpenAIAuthPlugin({ client }) {
 			provider: "openai",
 			/**
 			 * @param {() => Promise<any>} getAuth
-			 * @param {any} _provider
+			 * @param {any} provider - Provider configuration from opencode.json
 			 */
-			async loader(getAuth, _provider) {
+			async loader(getAuth, provider) {
 				const auth = await getAuth();
 
 				// Only handle OAuth auth type, skip API key auth
@@ -42,6 +42,13 @@ export async function OpenAIAuthPlugin({ client }) {
 					);
 					return {};
 				}
+
+				// Extract user configuration from provider structure
+				// Supports both global options and per-model options following Anthropic pattern
+				const userConfig = {
+					global: provider?.options || {},
+					models: provider?.models || {},
+				};
 
 				// Fetch Codex instructions (cached with ETag)
 				const CODEX_INSTRUCTIONS = await getCodexInstructions();
@@ -118,8 +125,8 @@ export async function OpenAIAuthPlugin({ client }) {
 									body,
 								});
 
-								// Transform request body for Codex API
-								body = transformRequestBody(body, CODEX_INSTRUCTIONS);
+								// Transform request body for Codex API with user configuration
+								body = transformRequestBody(body, CODEX_INSTRUCTIONS, userConfig);
 
 								// Log transformed request
 								logRequest("after-transform", {
@@ -130,6 +137,8 @@ export async function OpenAIAuthPlugin({ client }) {
 									hasInput: !!body.input,
 									inputLength: body.input?.length,
 									reasoning: body.reasoning,
+									textVerbosity: body.text?.verbosity,
+									include: body.include,
 									body,
 								});
 
