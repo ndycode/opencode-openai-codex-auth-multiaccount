@@ -16,7 +16,7 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 - ✅ **Smart auto-updating Codex instructions** - Tracks latest stable release with ETag caching
 - ✅ Full tool support (write, edit, bash, grep, etc.)
 - ✅ Automatic tool remapping (Codex tools → opencode tools)
-- ✅ High reasoning effort with detailed thinking blocks
+- ✅ Configurable reasoning effort and summaries (defaults: medium/auto)
 - ✅ Modular architecture for easy maintenance
 
 ## Installation
@@ -82,17 +82,151 @@ Select "OpenAI" and choose:
 ## Usage
 
 ```bash
-# Use gpt-5-codex with high reasoning (default)
+# Use gpt-5-codex with plugin defaults (medium/auto/medium)
 opencode run "create a hello world file" --model=openai/gpt-5-codex
 
-# Or set as default in opencode.json
-opencode run "solve this complex algorithm problem"
+# Or use regular gpt-5 via ChatGPT subscription
+opencode run "solve this complex problem" --model=openai/gpt-5
+
+# Set as default model in opencode.json
+opencode run "build a web app"
 ```
 
-The plugin automatically configures:
-- **High reasoning effort** for deep thinking
-- **Detailed reasoning summaries** to show thought process
-- **Medium text verbosity** for balanced output
+### Plugin Defaults
+
+When no configuration is specified, the plugin uses these defaults for all GPT-5 models:
+
+```json
+{
+  "reasoningEffort": "medium",
+  "reasoningSummary": "auto",
+  "textVerbosity": "medium"
+}
+```
+
+- **`reasoningEffort: "medium"`** - Balanced computational effort for reasoning
+- **`reasoningSummary: "auto"`** - Automatically adapts summary verbosity
+- **`textVerbosity: "medium"`** - Balanced output length
+
+These defaults match the official Codex CLI behavior and can be customized (see Configuration below).
+
+## Configuration
+
+You can customize model behavior for both `gpt-5` and `gpt-5-codex` models accessed via ChatGPT subscription.
+
+### Available Settings
+
+⚠️ **Important**: The two models have different supported values. Only use values listed in the tables below to avoid API errors.
+
+#### GPT-5 Model
+
+| Setting | Supported Values | Plugin Default | Description |
+|---------|-----------------|----------------|-------------|
+| `reasoningEffort` | `minimal`, `low`, `medium`, `high` | **`medium`** | Computational effort for reasoning |
+| `reasoningSummary` | `auto`, `detailed` | **`auto`** | Verbosity of reasoning summaries |
+| `textVerbosity` | `low`, `medium`, `high` | **`medium`** | Output length and detail level |
+
+#### GPT-5-Codex Model
+
+| Setting | Supported Values | Plugin Default | Description |
+|---------|-----------------|----------------|-------------|
+| `reasoningEffort` | `minimal`*, `low`, `medium`, `high` | **`medium`** | Computational effort for reasoning |
+| `reasoningSummary` | `auto`, `detailed` | **`auto`** | Verbosity of reasoning summaries |
+| `textVerbosity` | `medium` only | **`medium`** | Output length (codex only supports medium) |
+
+\* `minimal` is auto-normalized to `low` for gpt-5-codex
+
+#### Shared Settings (Both Models)
+
+| Setting | Values | Plugin Default | Description |
+|---------|--------|----------------|-------------|
+| `include` | Array of strings | `["reasoning.encrypted_content"]` | Additional response fields (for stateless reasoning) |
+
+### Configuration Examples
+
+#### Global Configuration
+
+Apply the same settings to all GPT-5 models:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-openai-codex-auth"],
+  "model": "openai/gpt-5-codex",
+  "provider": {
+    "openai": {
+      "options": {
+        "reasoningEffort": "high",
+        "reasoningSummary": "detailed",
+        "textVerbosity": "medium"
+      }
+    }
+  }
+}
+```
+
+#### Per-Model Configuration
+
+Different settings for different models:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-openai-codex-auth"],
+  "provider": {
+    "openai": {
+      "models": {
+        "gpt-5-codex": {
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium"
+          }
+        },
+        "gpt-5": {
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "low"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### Mixed Configuration
+
+Global defaults with per-model overrides:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-openai-codex-auth"],
+  "model": "openai/gpt-5-codex",
+  "provider": {
+    "openai": {
+      "options": {
+        "reasoningEffort": "medium",
+        "reasoningSummary": "auto",
+        "textVerbosity": "medium"
+      },
+      "models": {
+        "gpt-5-codex": {
+          "options": {
+            "reasoningSummary": "detailed"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+In this example:
+- `gpt-5-codex` uses: `reasoningEffort: "medium"`, `reasoningSummary: "detailed"` (overridden), `textVerbosity: "medium"`
+- `gpt-5` uses all global defaults: `reasoningEffort: "medium"`, `reasoningSummary: "auto"`, `textVerbosity: "medium"`
 
 ## How It Works
 
@@ -111,13 +245,13 @@ The plugin:
 6. **Tool Remapping**: Injects instructions to map Codex tools to opencode tools:
    - `apply_patch` → `edit`
    - `update_plan` → `todowrite`
-7. **Reasoning Configuration**: Forces high reasoning effort with detailed summaries
-8. **History Filtering**: Removes stored conversation IDs since Codex uses `store: false`
+7. **Reasoning Configuration**: Defaults to medium effort and auto summaries (configurable per-model)
+8. **Encrypted Reasoning**: Includes encrypted reasoning content for stateless multi-turn conversations
+9. **History Filtering**: Removes stored conversation IDs since Codex uses `store: false`
 
 ## Limitations
 
 - **ChatGPT Plus/Pro required**: Must have an active ChatGPT Plus or Pro subscription
-- **Medium text verbosity**: Codex only supports `medium` for text verbosity
 
 ## Troubleshooting
 
