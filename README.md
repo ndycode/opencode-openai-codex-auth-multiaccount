@@ -44,6 +44,12 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 
 2. **That's it!** opencode will auto-install the plugin on first run.
 
+   > **Note on Updates**: opencode does NOT automatically update plugins to new versions. To update:
+   > - Pin to a specific version: `"opencode-openai-codex-auth@1.0.3"` and change the number when updating
+   > - Or clear the plugin cache: `rm -rf ~/.cache/opencode/node_modules/opencode-openai-codex-auth`
+   >
+   > Check [releases](https://github.com/numman-ali/opencode-openai-codex-auth/releases) for the latest version.
+
 > **New to opencode?** Learn more:
 > - [Configuration Guide](https://opencode.ai/docs/config/)
 > - [Plugin Documentation](https://opencode.ai/docs/plugins/)
