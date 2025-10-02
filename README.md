@@ -1,5 +1,8 @@
 # OpenAI ChatGPT OAuth Plugin for opencode
 
+[![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-openai-codex-auth.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth)
+
 This plugin enables opencode to use OpenAI's Codex backend via ChatGPT Plus/Pro OAuth authentication, allowing you to use your ChatGPT subscription instead of OpenAI Platform API credits.
 
 ## Features
@@ -7,7 +10,7 @@ This plugin enables opencode to use OpenAI's Codex backend via ChatGPT Plus/Pro 
 - ✅ ChatGPT Plus/Pro OAuth authentication
 - ✅ **Zero external dependencies** - Lightweight with only @openauthjs/openauth
 - ✅ **Auto-refreshing tokens** - Handles token expiration automatically
-- ✅ **Auto-updating Codex instructions** - Fetches latest from OpenAI's Codex repo (cached 24h)
+- ✅ **Smart auto-updating Codex instructions** - Tracks latest stable release with ETag caching
 - ✅ Full tool support (write, edit, bash, grep, etc.)
 - ✅ Automatic tool remapping (Codex tools → opencode tools)
 - ✅ High reasoning effort with detailed thinking blocks
@@ -87,9 +90,12 @@ The plugin automatically configures:
 The plugin:
 
 1. **Authentication**: Uses ChatGPT OAuth flow with PKCE for secure authentication
-2. **Token Management**: Auto-refreshes tokens using `ai-sdk-provider-chatgpt-oauth`
-3. **Codex Instructions**: Automatically fetches latest instructions from [openai/codex](https://github.com/openai/codex) repository
-   - Cached locally in `~/.opencode/cache/` for 24 hours
+2. **Token Management**: Native token refresh implementation (no external dependencies)
+3. **Codex Instructions**: Automatically fetches from the latest stable release of [openai/codex](https://github.com/openai/codex)
+   - Tracks latest release tag (not main branch) for stability
+   - Uses ETag-based caching for efficient updates (only downloads when content changes)
+   - Cached locally in `~/.opencode/cache/`
+   - Auto-updates when OpenAI publishes new releases
    - Falls back to bundled version if GitHub is unavailable
 4. **Request Transformation**: Routes requests to `https://chatgpt.com/backend-api/codex/responses`
 5. **Model Normalization**: Maps all model names to `gpt-5-codex` (the Codex backend model)

@@ -40,7 +40,7 @@ export async function OpenAIAuthPlugin({ client }) {
 					return {};
 				}
 
-				// Fetch Codex instructions (cached for 24h)
+				// Fetch Codex instructions (cached with ETag)
 				const CODEX_INSTRUCTIONS = await getCodexInstructions();
 
 				// Return options that will be passed to the OpenAI SDK
@@ -100,21 +100,17 @@ export async function OpenAIAuthPlugin({ client }) {
 							try {
 								const body = JSON.parse(init.body);
 
-								// Normalize model name - Codex only supports specific model IDs
-								// Map all variants to their base models
+								// Normalize model name - Codex only supports gpt-5 and gpt-5-codex
 								if (body.model) {
 									if (body.model.includes("codex")) {
 										// Any codex variant → gpt-5-codex
 										body.model = "gpt-5-codex";
-									} else if (
-										body.model.includes("gpt-5") ||
-										body.model.includes("gpt-nano")
-									) {
-										// gpt-5 variants → gpt-5-codex for best tool support
-										body.model = "gpt-5-codex";
+									} else if (body.model.includes("gpt-5")) {
+										// gpt-5 variants → gpt-5 (keep user's choice)
+										body.model = "gpt-5";
 									} else {
-										// Default fallback
-										body.model = "gpt-5-codex";
+										// Default fallback for unsupported models
+										body.model = "gpt-5";
 									}
 								}
 
@@ -153,6 +149,9 @@ export async function OpenAIAuthPlugin({ client }) {
 								}
 								body.reasoning.effort = "high";
 								body.reasoning.summary = "detailed";
+								if (!body.text) {
+									body.text = {};
+								}
 								body.text.verbosity = "medium";
 
 								// Remove unsupported parameters
