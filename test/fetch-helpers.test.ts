@@ -4,7 +4,7 @@ import {
 	extractRequestUrl,
 	rewriteUrlForCodex,
 	createCodexHeaders,
-} from '../lib/fetch-helpers.js';
+} from '../lib/request/fetch-helpers.js';
 import type { Auth } from '../lib/types.js';
 import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES } from '../lib/constants.js';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBrowserOpener } from '../lib/browser.js';
+import { getBrowserOpener } from '../lib/auth/browser.js';
 import { PLATFORM_OPENERS } from '../lib/constants.js';
 
 describe('Browser Module', () => {

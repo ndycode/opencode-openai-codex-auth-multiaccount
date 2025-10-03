@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ensureContentType, convertSseToJson } from '../lib/response-handler.js';
+import { ensureContentType, convertSseToJson } from '../lib/request/response-handler.js';
 
 describe('Response Handler Module', () => {
 	describe('ensureContentType', () => {

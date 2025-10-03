@@ -1,5 +1,6 @@
-import { TOOL_REMAP_MESSAGE } from "./codex.js";
-import type { UserConfig, ConfigOptions, ReasoningConfig, RequestBody, InputItem } from "./types.js";
+import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
+import { CODEX_OPENCODE_BRIDGE } from "../prompts/codex-opencode-bridge.js";
+import type { UserConfig, ConfigOptions, ReasoningConfig, RequestBody, InputItem } from "../types.js";
 
 /**
  * Normalize model name to Codex-supported variants
@@ -88,6 +89,70 @@ export function filterInput(input: InputItem[] | undefined): InputItem[] | undef
 }
 
 /**
+ * Check if an input item is the OpenCode system prompt
+ * @param item - Input item to check
+ * @returns True if this is the OpenCode system prompt
+ */
+export function isOpenCodeSystemPrompt(item: InputItem): boolean {
+	const isSystemRole = item.role === "developer" || item.role === "system";
+	if (!isSystemRole) return false;
+
+	// Check string content
+	if (typeof item.content === "string") {
+		return item.content.startsWith("You are a coding agent running in");
+	}
+
+	// Check array content
+	if (Array.isArray(item.content)) {
+		return item.content.some(
+			(c) => c.type === "input_text" && c.text?.startsWith("You are a coding agent running in")
+		);
+	}
+
+	return false;
+}
+
+/**
+ * Filter out OpenCode system prompts from input
+ * Used in CODEX_MODE to replace OpenCode prompts with Codex-OpenCode bridge
+ * @param input - Input array
+ * @returns Input array without OpenCode system prompts
+ */
+export function filterOpenCodeSystemPrompts(input: InputItem[] | undefined): InputItem[] | undefined {
+	if (!Array.isArray(input)) return input;
+
+	return input.filter((item) => {
+		// Keep user messages
+		if (item.role === "user") return true;
+		// Filter out OpenCode system prompts
+		return !isOpenCodeSystemPrompt(item);
+	});
+}
+
+/**
+ * Add Codex-OpenCode bridge message to input if tools are present
+ * @param input - Input array
+ * @param hasTools - Whether tools are present in request
+ * @returns Input array with bridge message prepended if needed
+ */
+export function addCodexBridgeMessage(input: InputItem[] | undefined, hasTools: boolean): InputItem[] | undefined {
+	if (!hasTools || !Array.isArray(input)) return input;
+
+	const bridgeMessage: InputItem = {
+		type: "message",
+		role: "developer",
+		content: [
+			{
+				type: "input_text",
+				text: CODEX_OPENCODE_BRIDGE,
+			},
+		],
+	};
+
+	return [bridgeMessage, ...input];
+}
+
+/**
  * Add tool remapping message to input if tools are present
  * @param input - Input array
  * @param hasTools - Whether tools are present in request
@@ -121,12 +186,14 @@ export function addToolRemapMessage(input: InputItem[] | undefined, hasTools: bo
  * @param body - Original request body
  * @param codexInstructions - Codex system instructions
  * @param userConfig - User configuration from loader
+ * @param codexMode - Enable CODEX_MODE (bridge prompt instead of tool remap) - defaults to true
  * @returns Transformed request body
  */
 export function transformRequestBody(
 	body: RequestBody,
 	codexInstructions: string,
-	userConfig: UserConfig = { global: {}, models: {} }
+	userConfig: UserConfig = { global: {}, models: {} },
+	codexMode: boolean = true
 ): RequestBody {
 	const originalModel = body.model;
 	const normalizedModel = normalizeModel(body.model);
@@ -145,7 +212,15 @@ export function transformRequestBody(
 	// Filter and transform input
 	if (body.input && Array.isArray(body.input)) {
 		body.input = filterInput(body.input);
-		body.input = addToolRemapMessage(body.input, !!body.tools);
+
+		if (codexMode) {
+			// CODEX_MODE: Remove OpenCode system prompt, add bridge prompt
+			body.input = filterOpenCodeSystemPrompts(body.input);
+			body.input = addCodexBridgeMessage(body.input, !!body.tools);
+		} else {
+			// DEFAULT MODE: Keep original behavior with tool remap message
+			body.input = addToolRemapMessage(body.input, !!body.tools);
+		}
 	}
 
 	// Configure reasoning (use model-specific config)

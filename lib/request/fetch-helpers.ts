@@ -5,11 +5,11 @@
 
 import type { Auth } from "@opencode-ai/sdk";
 import type { OpencodeClient } from "@opencode-ai/sdk";
-import { refreshAccessToken } from "./auth.js";
-import { logRequest } from "./logger.js";
+import { refreshAccessToken } from "../auth/auth.js";
+import { logRequest } from "../logger.js";
 import { transformRequestBody } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
-import type { UserConfig, RequestBody } from "./types.js";
+import type { UserConfig, RequestBody } from "../types.js";
 import {
 	PLUGIN_NAME,
 	HTTP_STATUS,
@@ -18,7 +18,7 @@ import {
 	URL_PATHS,
 	ERROR_MESSAGES,
 	LOG_STAGES,
-} from "./constants.js";
+} from "../constants.js";
 
 /**
  * Determines if the current auth token needs to be refreshed
@@ -104,13 +104,15 @@ export function rewriteUrlForCodex(url: string): string {
  * @param url - Request URL
  * @param codexInstructions - Codex system instructions
  * @param userConfig - User configuration
+ * @param codexMode - Enable CODEX_MODE (bridge prompt instead of tool remap)
  * @returns Transformed body and updated init, or undefined if no body
  */
 export function transformRequestForCodex(
 	init: RequestInit | undefined,
 	url: string,
 	codexInstructions: string,
-	userConfig: UserConfig
+	userConfig: UserConfig,
+	codexMode: boolean = true
 ): { body: RequestBody; updatedInit: RequestInit } | undefined {
 	if (!init?.body) return undefined;
 
@@ -126,11 +128,12 @@ export function transformRequestForCodex(
 			hasTools: !!body.tools,
 			hasInput: !!body.input,
 			inputLength: body.input?.length,
+			codexMode,
 			body: body as unknown as Record<string, unknown>,
 		});
 
 		// Transform request body
-		const transformedBody = transformRequestBody(body, codexInstructions, userConfig);
+		const transformedBody = transformRequestBody(body, codexInstructions, userConfig, codexMode);
 
 		// Log transformed request
 		logRequest(LOG_STAGES.AFTER_TRANSFORM, {

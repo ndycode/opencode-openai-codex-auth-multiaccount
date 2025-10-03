@@ -1,5 +1,5 @@
-import { logRequest, LOGGING_ENABLED } from "./logger.js";
-import type { SSEEventData } from "./types.js";
+import { logRequest, LOGGING_ENABLED } from "../logger.js";
+import type { SSEEventData } from "../types.js";
 
 /**
  * Parse SSE stream to extract final response

@@ -4,7 +4,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { PLATFORM_OPENERS } from "./constants.js";
+import { PLATFORM_OPENERS } from "../constants.js";
 
 /**
  * Gets the platform-specific command to open a URL in the default browser

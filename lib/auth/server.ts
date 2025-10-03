@@ -2,11 +2,11 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { OAuthServerInfo } from "./types.js";
+import type { OAuthServerInfo } from "../types.js";
 
-// Resolve path to oauth-success.html
+// Resolve path to oauth-success.html (one level up from auth/ subfolder)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const successHtml = fs.readFileSync(path.join(__dirname, "oauth-success.html"), "utf-8");
+const successHtml = fs.readFileSync(path.join(__dirname, "..", "oauth-success.html"), "utf-8");
 
 /**
  * Start a small local HTTP server that waits for /auth/callback and returns the code

@@ -1,6 +1,17 @@
 import type { Auth, Provider, Model } from "@opencode-ai/sdk";
 
 /**
+ * Plugin configuration from ~/.opencode/openai-codex-auth-config.json
+ */
+export interface PluginConfig {
+	/**
+	 * Enable CODEX_MODE (Codex-OpenCode bridge prompt instead of tool remap)
+	 * @default true
+	 */
+	codexMode?: boolean;
+}
+
+/**
  * User configuration structure from opencode.json
  */
 export interface UserConfig {

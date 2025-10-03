@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getModelConfig, getReasoningConfig } from '../lib/request-transformer.js';
+import { getModelConfig, getReasoningConfig } from '../lib/request/request-transformer.js';
 import type { UserConfig } from '../lib/types.js';
 
 describe('Configuration Parsing', () => {

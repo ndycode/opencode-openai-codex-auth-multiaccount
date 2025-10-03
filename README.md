@@ -16,9 +16,10 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 - ✅ **Auto-refreshing tokens** - Handles token expiration automatically
 - ✅ **Smart auto-updating Codex instructions** - Tracks latest stable release with ETag caching
 - ✅ **Full tool support** - write, edit, bash, grep, glob, and more
+- ✅ **CODEX_MODE** - Codex-OpenCode bridge prompt for CLI parity (enabled by default)
 - ✅ **Automatic tool remapping** - Codex tools → opencode tools
 - ✅ **Configurable reasoning** - Control effort, summary verbosity, and text output
-- ✅ **Type-safe & tested** - Strict TypeScript with 93 comprehensive tests
+- ✅ **Type-safe & tested** - Strict TypeScript with 123 comprehensive tests
 - ✅ **Modular architecture** - Easy to maintain and extend
 
 ## Installation
@@ -334,6 +335,32 @@ This repository includes ready-to-use configuration examples:
 
 Copy the appropriate file to your opencode configuration location and customize as needed.
 
+### Plugin Configuration
+
+The plugin supports configuration via `~/.opencode/openai-codex-auth-config.json`:
+
+```json
+{
+  "codexMode": true
+}
+```
+
+#### CODEX_MODE Setting
+
+- **`codexMode: true`** (default) - Uses Codex-OpenCode bridge prompt for better Codex CLI parity
+- **`codexMode: false`** - Uses tool remap message (legacy mode)
+
+**Priority order**: `CODEX_MODE` environment variable > config file > default (true)
+
+**Examples**:
+```bash
+# Override config file with environment variable
+CODEX_MODE=0 opencode run "task"  # Disable CODEX_MODE temporarily
+CODEX_MODE=1 opencode run "task"  # Enable CODEX_MODE temporarily
+```
+
+> **Note**: CODEX_MODE is enabled by default for optimal Codex CLI compatibility. Only disable if you experience issues with the bridge prompt.
+
 ## How It Works
 
 The plugin implements a 7-step fetch flow in TypeScript:
@@ -344,7 +371,8 @@ The plugin implements a 7-step fetch flow in TypeScript:
    - Model normalization (`gpt-5-codex` variants → `gpt-5-codex`, `gpt-5` variants → `gpt-5`)
    - Injects Codex instructions from latest [openai/codex](https://github.com/openai/codex) release
    - Applies reasoning configuration (effort, summary, verbosity)
-   - Adds tool remapping instructions (`apply_patch` → `edit`, `update_plan` → `todowrite`)
+   - Adds Codex-OpenCode bridge prompt (CODEX_MODE=true, default) or tool remap message (CODEX_MODE=false)
+   - Filters OpenCode system prompts when in CODEX_MODE
    - Filters conversation history (removes stored IDs for stateless operation)
 4. **Headers**: Adds OAuth token and ChatGPT account ID headers
 5. **Request Execution**: Sends to Codex backend API
@@ -355,9 +383,10 @@ The plugin implements a 7-step fetch flow in TypeScript:
 
 - **Modular Design**: 10 focused helper functions, each < 40 lines
 - **Type-Safe**: Strict TypeScript with comprehensive type definitions
-- **Tested**: 93 tests covering all functionality
+- **Tested**: 123 tests covering all functionality including CODEX_MODE
 - **Zero Dependencies**: Only uses @openauthjs/openauth
 - **Codex Instructions**: ETag-cached from GitHub, auto-updates on new releases
+- **CODEX_MODE**: Configurable bridge prompt for Codex CLI parity (enabled by default)
 - **Stateless Operation**: Uses `store: false` with encrypted reasoning content for multi-turn conversations
 
 ## Limitations

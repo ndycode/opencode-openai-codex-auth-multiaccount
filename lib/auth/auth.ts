@@ -1,6 +1,6 @@
 import { generatePKCE } from "@openauthjs/openauth/pkce";
 import { randomBytes } from "node:crypto";
-import type { PKCEPair, AuthorizationFlow, TokenResult, ParsedAuthInput, JWTPayload } from "./types.js";
+import type { PKCEPair, AuthorizationFlow, TokenResult, ParsedAuthInput, JWTPayload } from "../types.js";
 
 // OAuth constants (from openai/codex)
 export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";

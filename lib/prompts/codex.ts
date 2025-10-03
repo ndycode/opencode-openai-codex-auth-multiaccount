@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import type { GitHubRelease, CacheMetadata } from "./types.js";
+import type { GitHubRelease, CacheMetadata } from "../types.js";
 
 // Codex instructions constants
 const GITHUB_API_RELEASES = "https://api.github.com/repos/openai/codex/releases/latest";

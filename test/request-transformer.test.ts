@@ -1,11 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
 	normalizeModel,
 	filterInput,
 	addToolRemapMessage,
+	isOpenCodeSystemPrompt,
+	filterOpenCodeSystemPrompts,
+	addCodexBridgeMessage,
 	transformRequestBody,
-} from '../lib/request-transformer.js';
-import { TOOL_REMAP_MESSAGE } from '../lib/codex.js';
+} from '../lib/request/request-transformer.js';
+import { TOOL_REMAP_MESSAGE } from '../lib/prompts/codex.js';
+import { CODEX_OPENCODE_BRIDGE } from '../lib/prompts/codex-opencode-bridge.js';
 import type { RequestBody, UserConfig, InputItem } from '../lib/types.js';
 
 describe('Request Transformer Module', () => {
@@ -107,6 +111,122 @@ describe('Request Transformer Module', () => {
 		it('should handle non-array input', () => {
 			const notArray = { notAnArray: true };
 			expect(addToolRemapMessage(notArray as any, true)).toBe(notArray);
+		});
+	});
+
+	describe('isOpenCodeSystemPrompt', () => {
+		it('should detect OpenCode system prompt with string content', () => {
+			const item: InputItem = {
+				type: 'message',
+				role: 'developer',
+				content: 'You are a coding agent running in OpenCode',
+			};
+			expect(isOpenCodeSystemPrompt(item)).toBe(true);
+		});
+
+		it('should detect OpenCode system prompt with array content', () => {
+			const item: InputItem = {
+				type: 'message',
+				role: 'developer',
+				content: [
+					{
+						type: 'input_text',
+						text: 'You are a coding agent running in OpenCode',
+					},
+				],
+			};
+			expect(isOpenCodeSystemPrompt(item)).toBe(true);
+		});
+
+		it('should detect with system role', () => {
+			const item: InputItem = {
+				type: 'message',
+				role: 'system',
+				content: 'You are a coding agent running in OpenCode',
+			};
+			expect(isOpenCodeSystemPrompt(item)).toBe(true);
+		});
+
+		it('should not detect non-system roles', () => {
+			const item: InputItem = {
+				type: 'message',
+				role: 'user',
+				content: 'You are a coding agent running in OpenCode',
+			};
+			expect(isOpenCodeSystemPrompt(item)).toBe(false);
+		});
+
+		it('should not detect different content', () => {
+			const item: InputItem = {
+				type: 'message',
+				role: 'developer',
+				content: 'Different message',
+			};
+			expect(isOpenCodeSystemPrompt(item)).toBe(false);
+		});
+	});
+
+	describe('filterOpenCodeSystemPrompts', () => {
+		it('should filter out OpenCode system prompts', () => {
+			const input: InputItem[] = [
+				{
+					type: 'message',
+					role: 'developer',
+					content: 'You are a coding agent running in OpenCode',
+				},
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = filterOpenCodeSystemPrompts(input);
+			expect(result).toHaveLength(1);
+			expect(result![0].role).toBe('user');
+		});
+
+		it('should keep user messages', () => {
+			const input: InputItem[] = [
+				{ type: 'message', role: 'user', content: 'message 1' },
+				{ type: 'message', role: 'user', content: 'message 2' },
+			];
+			const result = filterOpenCodeSystemPrompts(input);
+			expect(result).toHaveLength(2);
+		});
+
+		it('should keep non-OpenCode developer messages', () => {
+			const input: InputItem[] = [
+				{ type: 'message', role: 'developer', content: 'Custom instruction' },
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = filterOpenCodeSystemPrompts(input);
+			expect(result).toHaveLength(2);
+		});
+
+		it('should return undefined for undefined input', () => {
+			expect(filterOpenCodeSystemPrompts(undefined)).toBeUndefined();
+		});
+	});
+
+	describe('addCodexBridgeMessage', () => {
+		it('should prepend bridge message when tools present', () => {
+			const input: InputItem[] = [
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addCodexBridgeMessage(input, true);
+
+			expect(result).toHaveLength(2);
+			expect(result![0].role).toBe('developer');
+			expect(result![0].type).toBe('message');
+			expect((result![0].content as any)[0].text).toContain('Codex Running in OpenCode');
+		});
+
+		it('should not modify input when tools not present', () => {
+			const input: InputItem[] = [
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addCodexBridgeMessage(input, false);
+			expect(result).toEqual(input);
+		});
+
+		it('should return undefined for undefined input', () => {
+			expect(addCodexBridgeMessage(undefined, true)).toBeUndefined();
 		});
 	});
 
@@ -284,6 +404,104 @@ describe('Request Transformer Module', () => {
 			};
 			const result = transformRequestBody(body, codexInstructions);
 			expect(result.reasoning?.effort).toBe('minimal');
+		});
+
+		describe('CODEX_MODE parameter', () => {
+			it('should use bridge message when codexMode=true and tools present (default)', () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [{ name: 'test_tool' }],
+				};
+				const result = transformRequestBody(body, codexInstructions, undefined, true);
+
+				expect(result.input).toHaveLength(2);
+				expect(result.input![0].role).toBe('developer');
+				expect((result.input![0].content as any)[0].text).toContain('Codex Running in OpenCode');
+			});
+
+			it('should filter OpenCode prompts when codexMode=true', () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [
+						{
+							type: 'message',
+							role: 'developer',
+							content: 'You are a coding agent running in OpenCode',
+						},
+						{ type: 'message', role: 'user', content: 'hello' },
+					],
+					tools: [{ name: 'test_tool' }],
+				};
+				const result = transformRequestBody(body, codexInstructions, undefined, true);
+
+				// Should have bridge message + user message (OpenCode prompt filtered out)
+				expect(result.input).toHaveLength(2);
+				expect(result.input![0].role).toBe('developer');
+				expect((result.input![0].content as any)[0].text).toContain('Codex Running in OpenCode');
+				expect(result.input![1].role).toBe('user');
+			});
+
+			it('should not add bridge message when codexMode=true but no tools', () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+				};
+				const result = transformRequestBody(body, codexInstructions, undefined, true);
+
+				expect(result.input).toHaveLength(1);
+				expect(result.input![0].role).toBe('user');
+			});
+
+			it('should use tool remap message when codexMode=false', () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [{ name: 'test_tool' }],
+				};
+				const result = transformRequestBody(body, codexInstructions, undefined, false);
+
+				expect(result.input).toHaveLength(2);
+				expect(result.input![0].role).toBe('developer');
+				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
+			});
+
+			it('should not filter OpenCode prompts when codexMode=false', () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [
+						{
+							type: 'message',
+							role: 'developer',
+							content: 'You are a coding agent running in OpenCode',
+						},
+						{ type: 'message', role: 'user', content: 'hello' },
+					],
+					tools: [{ name: 'test_tool' }],
+				};
+				const result = transformRequestBody(body, codexInstructions, undefined, false);
+
+				// Should have tool remap + opencode prompt + user message
+				expect(result.input).toHaveLength(3);
+				expect(result.input![0].role).toBe('developer');
+				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
+				expect(result.input![1].role).toBe('developer');
+				expect(result.input![2].role).toBe('user');
+			});
+
+			it('should default to codexMode=true when parameter not provided', () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [{ name: 'test_tool' }],
+				};
+				// Not passing codexMode parameter - should default to true
+				const result = transformRequestBody(body, codexInstructions);
+
+				// Should use bridge message (codexMode=true by default)
+				expect(result.input![0].role).toBe('developer');
+				expect((result.input![0].content as any)[0].text).toContain('Codex Running in OpenCode');
+			});
 		});
 	});
 });

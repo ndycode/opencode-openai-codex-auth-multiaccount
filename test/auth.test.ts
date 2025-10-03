@@ -8,7 +8,7 @@ import {
 	AUTHORIZE_URL,
 	REDIRECT_URI,
 	SCOPE,
-} from '../lib/auth.js';
+} from '../lib/auth/auth.js';
 
 describe('Auth Module', () => {
 	describe('createState', () => {

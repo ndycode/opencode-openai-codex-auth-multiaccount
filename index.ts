@@ -1,10 +1,10 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
-import { createAuthorizationFlow, exchangeAuthorizationCode, decodeJWT, REDIRECT_URI } from "./lib/auth.js";
-import { getCodexInstructions } from "./lib/codex.js";
-import { startLocalOAuthServer } from "./lib/server.js";
+import { createAuthorizationFlow, exchangeAuthorizationCode, decodeJWT, REDIRECT_URI } from "./lib/auth/auth.js";
+import { getCodexInstructions } from "./lib/prompts/codex.js";
+import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { logRequest } from "./lib/logger.js";
-import { openBrowserUrl } from "./lib/browser.js";
+import { openBrowserUrl } from "./lib/auth/browser.js";
 import {
 	shouldRefreshToken,
 	refreshAndUpdateToken,
@@ -14,7 +14,8 @@ import {
 	createCodexHeaders,
 	handleErrorResponse,
 	handleSuccessResponse,
-} from "./lib/fetch-helpers.js";
+} from "./lib/request/fetch-helpers.js";
+import { loadPluginConfig, getCodexMode } from "./lib/config.js";
 import type { UserConfig } from "./lib/types.js";
 import {
 	DUMMY_API_KEY,
@@ -84,6 +85,11 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					models: providerConfig?.models || {},
 				};
 
+				// Load plugin configuration and determine CODEX_MODE
+				// Priority: CODEX_MODE env var > config file > default (true)
+				const pluginConfig = loadPluginConfig();
+				const codexMode = getCodexMode(pluginConfig);
+
 				// Fetch Codex system instructions (cached with ETag for efficiency)
 				const CODEX_INSTRUCTIONS = await getCodexInstructions();
 
@@ -121,7 +127,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const url = rewriteUrlForCodex(originalUrl);
 
 						// Step 3: Transform request body with Codex instructions
-						const transformation = transformRequestForCodex(init, url, CODEX_INSTRUCTIONS, userConfig);
+						const transformation = transformRequestForCodex(init, url, CODEX_INSTRUCTIONS, userConfig, codexMode);
 						const hasTools = transformation?.body.tools !== undefined;
 						const requestInit = transformation?.updatedInit ?? init;
 
