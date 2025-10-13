@@ -69,7 +69,8 @@ For the complete experience with all reasoning variants matching the official Co
         "textVerbosity": "medium",
         "include": [
           "reasoning.encrypted_content"
-        ]
+        ],
+        "store": false
       },
       "models": {
         "gpt-5-codex-low": {
@@ -77,7 +78,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-codex-medium": {
@@ -85,7 +90,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-codex-high": {
@@ -93,7 +102,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-minimal": {
@@ -101,7 +114,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-low": {
@@ -109,7 +126,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-medium": {
@@ -117,7 +138,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-high": {
@@ -125,7 +150,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
-            "textVerbosity": "high"
+            "textVerbosity": "high",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-mini": {
@@ -133,7 +162,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         },
         "gpt-5-nano": {
@@ -141,7 +174,11 @@ For the complete experience with all reasoning variants matching the official Co
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         }
       }

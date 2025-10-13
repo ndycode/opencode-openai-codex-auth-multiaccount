@@ -42,7 +42,8 @@ Add this to `~/.config/opencode/opencode.json`:
         "reasoningEffort": "medium",
         "reasoningSummary": "auto",
         "textVerbosity": "medium",
-        "include": ["reasoning.encrypted_content"]
+        "include": ["reasoning.encrypted_content"],
+        "store": false
       },
       "models": {
         "gpt-5-codex-low": {
@@ -50,7 +51,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-codex-medium": {
@@ -58,7 +61,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-codex-high": {
@@ -66,7 +71,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-minimal": {
@@ -74,7 +81,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-low": {
@@ -82,7 +91,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-medium": {
@@ -90,7 +101,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-high": {
@@ -98,7 +111,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
-            "textVerbosity": "high"
+            "textVerbosity": "high",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-mini": {
@@ -106,7 +121,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         },
         "gpt-5-nano": {
@@ -114,7 +131,9 @@ Add this to `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
-            "textVerbosity": "low"
+            "textVerbosity": "low",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         }
       }

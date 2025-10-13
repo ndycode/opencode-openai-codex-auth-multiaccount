@@ -16,6 +16,7 @@ This uses default settings:
 - `reasoningSummary`: "auto"
 - `textVerbosity`: "medium"
 - `include`: ["reasoning.encrypted_content"]
+- `store`: false (required for AI SDK 2.0.50+ compatibility)
 
 ### full-opencode.json
 Complete configuration example showing all model variants with custom settings.

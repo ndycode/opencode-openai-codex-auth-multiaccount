@@ -14,13 +14,16 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
         "reasoningEffort": "medium",
         "reasoningSummary": "auto",
         "textVerbosity": "medium",
-        "include": ["reasoning.encrypted_content"]
+        "include": ["reasoning.encrypted_content"],
+        "store": false
       },
       "models": {
         "gpt-5-codex-low": {
           "name": "GPT 5 Codex Low (OAuth)",
           "options": {
-            "reasoningEffort": "low"
+            "reasoningEffort": "low",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
           }
         }
       }
@@ -114,6 +117,30 @@ Array of additional response fields to include.
 }
 ```
 
+### store
+
+Controls server-side conversation persistence.
+
+**⚠️ Required**: `false` (for AI SDK 2.0.50+ compatibility)
+
+**Values:**
+- `false` - Stateless mode (required for Codex API)
+- `true` - Server-side storage (not supported by Codex API)
+
+**Why required:**
+AI SDK 2.0.50+ automatically uses `item_reference` items when `store: true`. The Codex API requires stateless operation (`store: false`), where references cannot be resolved.
+
+**Example:**
+```json
+{
+  "options": {
+    "store": false
+  }
+}
+```
+
+**Note:** The plugin automatically injects this via a `chat.params` hook, but explicit configuration is recommended for clarity.
+
 ---
 
 ## Configuration Patterns
@@ -129,7 +156,8 @@ Apply same settings to all models:
     "openai": {
       "options": {
         "reasoningEffort": "high",
-        "textVerbosity": "high"
+        "textVerbosity": "high",
+        "store": false
       }
     }
   }
@@ -148,20 +176,23 @@ Different settings for different models:
   "provider": {
     "openai": {
       "options": {
-        "reasoningEffort": "medium"
+        "reasoningEffort": "medium",
+        "store": false
       },
       "models": {
         "gpt-5-codex-fast": {
           "name": "Fast Codex",
           "options": {
-            "reasoningEffort": "low"
+            "reasoningEffort": "low",
+            "store": false
           }
         },
         "gpt-5-codex-smart": {
           "name": "Smart Codex",
           "options": {
             "reasoningEffort": "high",
-            "reasoningSummary": "detailed"
+            "reasoningSummary": "detailed",
+            "store": false
           }
         }
       }
@@ -216,17 +247,24 @@ Create named variants for common tasks:
   "models": {
     "codex-quick": {
       "name": "⚡ Quick Code",
-      "options": { "reasoningEffort": "low" }
+      "options": {
+        "reasoningEffort": "low",
+        "store": false
+      }
     },
     "codex-balanced": {
       "name": "⚖️ Balanced Code",
-      "options": { "reasoningEffort": "medium" }
+      "options": {
+        "reasoningEffort": "medium",
+        "store": false
+      }
     },
     "codex-quality": {
       "name": "🎯 Max Quality",
       "options": {
         "reasoningEffort": "high",
-        "reasoningSummary": "detailed"
+        "reasoningSummary": "detailed",
+        "store": false
       }
     }
   }
@@ -263,7 +301,8 @@ Global config has defaults, project overrides for specific work:
   "provider": {
     "openai": {
       "options": {
-        "reasoningEffort": "medium"
+        "reasoningEffort": "medium",
+        "store": false
       }
     }
   }
@@ -276,7 +315,8 @@ Global config has defaults, project overrides for specific work:
   "provider": {
     "openai": {
       "options": {
-        "reasoningEffort": "high"
+        "reasoningEffort": "high",
+        "store": false
       }
     }
   }
@@ -390,7 +430,10 @@ Old verbose names still work:
   "models": {
     "gpt-5-codex-low": {
       "name": "GPT 5 Codex Low (OAuth)",
-      "options": { "reasoningEffort": "low" }
+      "options": {
+        "reasoningEffort": "low",
+        "store": false
+      }
     }
   }
 }
@@ -412,15 +455,26 @@ Old verbose names still work:
   "models": {
     "quick-chat": {
       "name": "Quick Chat",
-      "options": { "reasoningEffort": "minimal", "textVerbosity": "low" }
+      "options": {
+        "reasoningEffort": "minimal",
+        "textVerbosity": "low",
+        "store": false
+      }
     },
     "code-gen": {
       "name": "Code Generation",
-      "options": { "reasoningEffort": "medium" }
+      "options": {
+        "reasoningEffort": "medium",
+        "store": false
+      }
     },
     "debug-help": {
       "name": "Debug Analysis",
-      "options": { "reasoningEffort": "high", "reasoningSummary": "detailed" }
+      "options": {
+        "reasoningEffort": "high",
+        "reasoningSummary": "detailed",
+        "store": false
+      }
     }
   }
 }
@@ -433,11 +487,19 @@ Old verbose names still work:
   "models": {
     "economy": {
       "name": "Economy Mode",
-      "options": { "reasoningEffort": "low", "textVerbosity": "low" }
+      "options": {
+        "reasoningEffort": "low",
+        "textVerbosity": "low",
+        "store": false
+      }
     },
     "premium": {
       "name": "Premium Mode",
-      "options": { "reasoningEffort": "high", "textVerbosity": "high" }
+      "options": {
+        "reasoningEffort": "high",
+        "textVerbosity": "high",
+        "store": false
+      }
     }
   }
 }

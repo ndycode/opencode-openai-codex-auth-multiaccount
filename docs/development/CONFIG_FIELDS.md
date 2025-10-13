@@ -374,6 +374,60 @@ const parsedModel: ModelsDev.Model = {
 
 ---
 
+## Required Configuration Fields
+
+### `store` Field: Critical for AI SDK 2.0.50+
+
+**⚠️ Required as of AI SDK 2.0.50 (released Oct 12, 2025)**
+
+```json
+{
+  "provider": {
+    "openai": {
+      "options": {
+        "store": false
+      }
+    }
+  }
+}
+```
+
+**What it does:**
+- `false` (required): Prevents AI SDK from using `item_reference` for conversation history
+- `true` (default): Uses server-side storage with references (incompatible with Codex API)
+
+**Why required:**
+AI SDK 2.0.50 introduced automatic use of `item_reference` items to reduce payload size when `store: true`. However:
+- Codex API requires `store: false` (stateless mode)
+- `item_reference` items cannot be resolved without server-side storage
+- Without this setting, multi-turn conversations fail with: `"Item with id 'fc_xxx' not found"`
+
+**Where to set:**
+```json
+{
+  "provider": {
+    "openai": {
+      "options": {
+        "store": false  // ← Global: applies to all models
+      },
+      "models": {
+        "gpt-5-codex-low": {
+          "options": {
+            "store": false  // ← Per-model: redundant but explicit
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Recommendation:** Set in global `options` since it's required for all models using this plugin.
+
+**Note:** The plugin also includes a `chat.params` hook that automatically injects `store: false`, but explicit configuration is recommended for clarity and forward compatibility.
+
+---
+
 ## Recommended Structure
 
 ### Recommended: Config Key + Name ✅
