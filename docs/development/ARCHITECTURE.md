@@ -284,14 +284,20 @@ let include: Vec<String> = if reasoning.is_some() {
    ├─ Set reasoningSummary (auto/detailed)
    └─ Based on model variant
 
-7. Final Body
+7. Prompt Caching & Session Headers
+   ├─ Preserve host-supplied prompt_cache_key (OpenCode session id)
+   ├─ Add conversation + account headers for Codex debugging when cache key exists
+   └─ Leave headers unset if host does not provide a cache key
+
+8. Final Body
    ├─ store: false
    ├─ stream: true
    ├─ instructions: Codex system prompt
    ├─ input: Filtered messages (no IDs)
    ├─ reasoning: { effort, summary }
    ├─ text: { verbosity }
-   └─ include: ["reasoning.encrypted_content"]
+   ├─ include: ["reasoning.encrypted_content"]
+   └─ prompt_cache_key: conversation-scoped UUID
 ```
 
 **Source**: `lib/request/request-transformer.ts:265-329`
@@ -318,6 +324,7 @@ let include: Vec<String> = if reasoning.is_some() {
 |---------|-----------|-------------|------|
 | **Codex-OpenCode Bridge** | N/A (native) | ✅ Custom prompt | OpenCode → Codex translation |
 | **OpenCode Prompt Filtering** | N/A | ✅ Filter & replace | Remove OpenCode-specific prompts |
+| **Usage-limit messaging** | CLI prints status | ✅ Friendly error summary | Surface 5h/weekly windows in OpenCode |
 | **Per-Model Options** | CLI flags | ✅ Config file | Better UX in OpenCode |
 | **Custom Model Names** | No | ✅ Display names | UI convenience |
 

@@ -48,6 +48,10 @@ Add this to `~/.config/opencode/opencode.json`:
       "models": {
         "gpt-5-codex-low": {
           "name": "GPT 5 Codex Low (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
@@ -58,6 +62,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-codex-medium": {
           "name": "GPT 5 Codex Medium (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
@@ -68,6 +76,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-codex-high": {
           "name": "GPT 5 Codex High (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
@@ -78,6 +90,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-minimal": {
           "name": "GPT 5 Minimal (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
@@ -88,6 +104,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-low": {
           "name": "GPT 5 Low (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
@@ -98,6 +118,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-medium": {
           "name": "GPT 5 Medium (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
@@ -108,6 +132,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-high": {
           "name": "GPT 5 High (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
@@ -118,6 +146,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-mini": {
           "name": "GPT 5 Mini (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
@@ -128,6 +160,10 @@ Add this to `~/.config/opencode/opencode.json`:
         },
         "gpt-5-nano": {
           "name": "GPT 5 Nano (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
@@ -146,8 +182,13 @@ Add this to `~/.config/opencode/opencode.json`:
 - ✅ GPT-5 Codex (Low/Medium/High reasoning)
 - ✅ GPT-5 (Minimal/Low/Medium/High reasoning)
 - ✅ gpt-5-mini, gpt-5-nano (lightweight variants)
+- ✅ 272k context + 128k output window for every preset
 - ✅ All visible in OpenCode model selector
 - ✅ Optimal settings for each reasoning level
+
+Prompt caching is enabled out of the box: when OpenCode sends its session identifier as `prompt_cache_key`, the plugin forwards it untouched so multi-turn runs reuse prior work. The plugin no longer synthesizes cache IDs; if the host omits that field, Codex treats the run as uncached. The CODEX_MODE bridge prompt bundled with the plugin is kept in sync with the latest Codex CLI release, so the OpenCode UI and Codex share the same tool contract. If you hit your ChatGPT subscription limits, the plugin returns a friendly Codex-style message with the 5-hour and weekly usage windows so you know when capacity resets.
+
+> **Heads up:** OpenCode's context auto-compaction and usage sidebar only work when this full configuration is installed. The minimal configuration skips the per-model limits, so OpenCode cannot display token usage or compact history automatically.
 
 #### Option B: Minimal Configuration
 

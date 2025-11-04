@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-	normalizeModel,
-	getModelConfig,
-	filterInput,
-	addToolRemapMessage,
-	isOpenCodeSystemPrompt,
-	filterOpenCodeSystemPrompts,
-	addCodexBridgeMessage,
-	transformRequestBody,
+    normalizeModel,
+    getModelConfig,
+    filterInput,
+    addToolRemapMessage,
+    isOpenCodeSystemPrompt,
+    filterOpenCodeSystemPrompts,
+    addCodexBridgeMessage,
+    transformRequestBody,
 } from '../lib/request/request-transformer.js';
 import { TOOL_REMAP_MESSAGE } from '../lib/prompts/codex.js';
 import { CODEX_OPENCODE_BRIDGE } from '../lib/prompts/codex-opencode-bridge.js';
@@ -531,8 +531,29 @@ describe('Request Transformer Module', () => {
 		});
 	});
 
-	describe('transformRequestBody', () => {
-		const codexInstructions = 'Test Codex Instructions';
+		describe('transformRequestBody', () => {
+			const codexInstructions = 'Test Codex Instructions';
+
+			it('preserves existing prompt_cache_key passed by host (OpenCode)', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5-codex',
+					input: [],
+					// Host-provided key (OpenCode session id)
+					// @ts-expect-error extra field allowed
+					prompt_cache_key: 'ses_host_key_123',
+				};
+				const result: any = await transformRequestBody(body, codexInstructions);
+				expect(result.prompt_cache_key).toBe('ses_host_key_123');
+			});
+
+			it('leaves prompt_cache_key unset when host does not supply one', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [],
+				};
+				const result: any = await transformRequestBody(body, codexInstructions);
+				expect(result.prompt_cache_key).toBeUndefined();
+			});
 
 		it('should set required Codex fields', async () => {
 			const body: RequestBody = {

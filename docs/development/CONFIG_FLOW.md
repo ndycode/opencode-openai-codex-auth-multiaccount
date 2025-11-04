@@ -92,10 +92,20 @@ Plugins can inject options via the `loader()` function.
   "provider": {
     "openai": {
       "models": {
-        "GPT 5 Codex Medium (ChatGPT Subscription)": {
-          "id": "gpt-5-codex",
+        "gpt-5-codex-medium": {
+          "name": "GPT 5 Codex Medium (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
-            "reasoningEffort": "medium"
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
           }
         }
       }
@@ -105,9 +115,9 @@ Plugins can inject options via the `loader()` function.
 ```
 
 **What OpenCode Uses**:
-- **UI Display**: "GPT 5 Codex Medium (ChatGPT Subscription)" ✅
-- **Persistence**: `provider_id: "openai"` + `model_id: "gpt-5-codex"` ✅
-- **API Calls**: `"gpt-5-codex"` ✅
+- **UI Display**: "GPT 5 Codex Medium (OAuth)" ✅
+- **Persistence**: `provider_id: "openai"` + `model_id: "gpt-5-codex-medium"` ✅
+- **Plugin lookup**: `models["gpt-5-codex-medium"]` → used to build Codex request ✅
 
 ### TUI Persistence
 

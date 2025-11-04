@@ -7,3 +7,4 @@ dist/
 opencode.json
 .opencode/
 tmp
+.codex-cache

@@ -307,6 +307,9 @@ export async function transformRequestBody(
 	body.stream = true;
 	body.instructions = codexInstructions;
 
+    // Prompt caching relies on the host providing a stable prompt_cache_key
+    // (OpenCode passes its session identifier). We no longer synthesize one here.
+
 	// Filter and transform input
 	if (body.input && Array.isArray(body.input)) {
 		// Debug: Log original input message IDs before filtering

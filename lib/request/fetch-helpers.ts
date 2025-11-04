@@ -170,9 +170,10 @@ export async function transformRequestForCodex(
  * @returns Headers object with all required Codex headers
  */
 export function createCodexHeaders(
-	init: RequestInit | undefined,
-	accountId: string,
-	accessToken: string,
+    init: RequestInit | undefined,
+    accountId: string,
+    accessToken: string,
+    opts?: { model?: string; promptCacheKey?: string },
 ): Headers {
 	const headers = new Headers(init?.headers ?? {});
 	headers.delete("x-api-key"); // Remove any existing API key
@@ -180,8 +181,17 @@ export function createCodexHeaders(
 	headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
 	headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 	headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
-	headers.set(OPENAI_HEADERS.SESSION_ID, crypto.randomUUID());
-	return headers;
+
+    const cacheKey = opts?.promptCacheKey;
+    if (cacheKey) {
+        headers.set(OPENAI_HEADERS.CONVERSATION_ID, cacheKey);
+        headers.set(OPENAI_HEADERS.SESSION_ID, cacheKey);
+    } else {
+        headers.delete(OPENAI_HEADERS.CONVERSATION_ID);
+        headers.delete(OPENAI_HEADERS.SESSION_ID);
+    }
+    headers.set("accept", "text/event-stream");
+    return headers;
 }
 
 /**
@@ -190,20 +200,70 @@ export function createCodexHeaders(
  * @returns Response with error details
  */
 export async function handleErrorResponse(
-	response: Response,
+    response: Response,
 ): Promise<Response> {
-	const text = await response.text();
-	console.error(`[${PLUGIN_NAME}] ${response.status} error:`, text);
+	const raw = await response.text();
 
+	let enriched = raw;
+	try {
+		const parsed = JSON.parse(raw) as any;
+		const err = parsed?.error ?? {};
+
+		// Parse Codex rate-limit headers if present
+		const h = response.headers;
+		const primary = {
+			used_percent: toNumber(h.get("x-codex-primary-used-percent")),
+			window_minutes: toInt(h.get("x-codex-primary-window-minutes")),
+			resets_at: toInt(h.get("x-codex-primary-reset-at")),
+		};
+		const secondary = {
+			used_percent: toNumber(h.get("x-codex-secondary-used-percent")),
+			window_minutes: toInt(h.get("x-codex-secondary-window-minutes")),
+			resets_at: toInt(h.get("x-codex-secondary-reset-at")),
+		};
+		const rate_limits =
+			primary.used_percent !== undefined || secondary.used_percent !== undefined
+				? { primary, secondary }
+				: undefined;
+
+		// Friendly message for subscription/rate usage limits
+		const code = (err.code ?? err.type ?? "").toString();
+		const resetsAt = err.resets_at ?? primary.resets_at ?? secondary.resets_at;
+		const mins = resetsAt ? Math.max(0, Math.round((resetsAt * 1000 - Date.now()) / 60000)) : undefined;
+		let friendly_message: string | undefined;
+		if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
+			const plan = err.plan_type ? ` (${String(err.plan_type).toLowerCase()} plan)` : "";
+			const when = mins !== undefined ? ` Try again in ~${mins} min.` : "";
+			friendly_message = `You have hit your ChatGPT usage limit${plan}.${when}`.trim();
+		}
+
+		const enhanced = {
+			error: {
+				...err,
+				message: err.message ?? friendly_message ?? "Usage limit reached.",
+				friendly_message,
+				rate_limits,
+				status: response.status,
+			},
+		};
+		enriched = JSON.stringify(enhanced);
+	} catch {
+		// Raw body not JSON; leave unchanged
+		enriched = raw;
+	}
+
+    console.error(`[${PLUGIN_NAME}] ${response.status} error:`, enriched);
 	logRequest(LOG_STAGES.ERROR_RESPONSE, {
 		status: response.status,
-		error: text,
+		error: enriched,
 	});
 
-	return new Response(text, {
+	const headers = new Headers(response.headers);
+	headers.set("content-type", "application/json; charset=utf-8");
+	return new Response(enriched, {
 		status: response.status,
 		statusText: response.statusText,
-		headers: response.headers,
+		headers,
 	});
 }
 
@@ -215,10 +275,10 @@ export async function handleErrorResponse(
  * @returns Processed response (SSE→JSON for non-tool, stream for tool requests)
  */
 export async function handleSuccessResponse(
-	response: Response,
-	hasTools: boolean,
+    response: Response,
+    hasTools: boolean,
 ): Promise<Response> {
-	const responseHeaders = ensureContentType(response.headers);
+    const responseHeaders = ensureContentType(response.headers);
 
 	// For non-tool requests (compact/summarize), convert streaming SSE to JSON
 	// generateText() expects a non-streaming JSON response, not SSE
@@ -232,4 +292,15 @@ export async function handleSuccessResponse(
 		statusText: response.statusText,
 		headers: responseHeaders,
 	});
+}
+
+function toNumber(v: string | null): number | undefined {
+    if (v == null) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+function toInt(v: string | null): number | undefined {
+    if (v == null) return undefined;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : undefined;
 }

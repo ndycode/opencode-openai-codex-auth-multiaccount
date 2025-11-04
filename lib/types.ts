@@ -133,6 +133,8 @@ export interface RequestBody {
 		verbosity?: "low" | "medium" | "high";
 	};
 	include?: string[];
+	/** Stable key to enable prompt-token caching on Codex backend */
+	prompt_cache_key?: string;
 	max_output_tokens?: number;
 	max_completion_tokens?: number;
 	[key: string]: unknown;

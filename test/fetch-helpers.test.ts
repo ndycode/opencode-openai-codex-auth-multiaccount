@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-	shouldRefreshToken,
-	extractRequestUrl,
-	rewriteUrlForCodex,
-	createCodexHeaders,
+    shouldRefreshToken,
+    extractRequestUrl,
+    rewriteUrlForCodex,
+    createCodexHeaders,
+    handleErrorResponse,
 } from '../lib/request/fetch-helpers.js';
 import type { Auth } from '../lib/types.js';
 import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES } from '../lib/constants.js';
@@ -76,49 +77,71 @@ describe('Fetch Helpers Module', () => {
 		});
 	});
 
-	describe('createCodexHeaders', () => {
-		const accountId = 'test-account-123';
-		const accessToken = 'test-access-token';
+		describe('createCodexHeaders', () => {
+	const accountId = 'test-account-123';
+	const accessToken = 'test-access-token';
 
-		it('should create headers with all required fields', () => {
-			const headers = createCodexHeaders(undefined, accountId, accessToken);
+		it('should create headers with all required fields when cache key provided', () => {
+	    const headers = createCodexHeaders(undefined, accountId, accessToken, { model: 'gpt-5-codex', promptCacheKey: 'session-1' });
 
-			expect(headers.get('Authorization')).toBe(`Bearer ${accessToken}`);
-			expect(headers.get(OPENAI_HEADERS.ACCOUNT_ID)).toBe(accountId);
-			expect(headers.get(OPENAI_HEADERS.BETA)).toBe(OPENAI_HEADER_VALUES.BETA_RESPONSES);
-			expect(headers.get(OPENAI_HEADERS.ORIGINATOR)).toBe(OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
-			expect(headers.has(OPENAI_HEADERS.SESSION_ID)).toBe(true);
-		});
+	    expect(headers.get('Authorization')).toBe(`Bearer ${accessToken}`);
+	    expect(headers.get(OPENAI_HEADERS.ACCOUNT_ID)).toBe(accountId);
+	    expect(headers.get(OPENAI_HEADERS.BETA)).toBe(OPENAI_HEADER_VALUES.BETA_RESPONSES);
+	    expect(headers.get(OPENAI_HEADERS.ORIGINATOR)).toBe(OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
+	    expect(headers.get(OPENAI_HEADERS.SESSION_ID)).toBe('session-1');
+	    expect(headers.get(OPENAI_HEADERS.CONVERSATION_ID)).toBe('session-1');
+	    expect(headers.get('accept')).toBe('text/event-stream');
+    });
+
+    it('enriches usage limit errors with friendly message and rate limits', async () => {
+        const body = {
+            error: {
+                code: 'usage_limit_reached',
+                message: 'limit reached',
+                plan_type: 'pro',
+            },
+        };
+        const headers = new Headers({
+            'x-codex-primary-used-percent': '75',
+            'x-codex-primary-window-minutes': '300',
+            'x-codex-primary-reset-at': String(Math.floor(Date.now() / 1000) + 1800),
+        });
+        const resp = new Response(JSON.stringify(body), { status: 429, headers });
+        const enriched = await handleErrorResponse(resp);
+        expect(enriched.status).toBe(429);
+        const json = await enriched.json() as any;
+        expect(json.error).toBeTruthy();
+        expect(json.error.friendly_message).toMatch(/usage limit/i);
+        expect(json.error.rate_limits.primary.used_percent).toBe(75);
+        expect(json.error.rate_limits.primary.window_minutes).toBe(300);
+        expect(typeof json.error.rate_limits.primary.resets_at).toBe('number');
+    });
 
 		it('should remove x-api-key header', () => {
-			const init = { headers: { 'x-api-key': 'should-be-removed' } };
-			const headers = createCodexHeaders(init, accountId, accessToken);
+        const init = { headers: { 'x-api-key': 'should-be-removed' } } as any;
+        const headers = createCodexHeaders(init, accountId, accessToken, { model: 'gpt-5', promptCacheKey: 'session-2' });
 
 			expect(headers.has('x-api-key')).toBe(false);
 		});
 
 		it('should preserve other existing headers', () => {
-			const init = { headers: { 'Content-Type': 'application/json' } };
-			const headers = createCodexHeaders(init, accountId, accessToken);
+        const init = { headers: { 'Content-Type': 'application/json' } } as any;
+        const headers = createCodexHeaders(init, accountId, accessToken, { model: 'gpt-5', promptCacheKey: 'session-3' });
 
 			expect(headers.get('Content-Type')).toBe('application/json');
 		});
 
-		it('should generate unique session IDs', () => {
-			const headers1 = createCodexHeaders(undefined, accountId, accessToken);
-			const headers2 = createCodexHeaders(undefined, accountId, accessToken);
-
-			expect(headers1.get(OPENAI_HEADERS.SESSION_ID)).not.toBe(
-				headers2.get(OPENAI_HEADERS.SESSION_ID)
-			);
+		it('should use provided promptCacheKey for both conversation_id and session_id', () => {
+			const key = 'ses_abc123';
+			const headers = createCodexHeaders(undefined, accountId, accessToken, { promptCacheKey: key });
+			expect(headers.get(OPENAI_HEADERS.CONVERSATION_ID)).toBe(key);
+			expect(headers.get(OPENAI_HEADERS.SESSION_ID)).toBe(key);
 		});
 
-		it('should validate session ID format (UUID)', () => {
-			const headers = createCodexHeaders(undefined, accountId, accessToken);
-			const sessionId = headers.get(OPENAI_HEADERS.SESSION_ID);
-
-			// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-			expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+		it('does not set conversation/session headers when no promptCacheKey provided', () => {
+			const headers = createCodexHeaders(undefined, accountId, accessToken, { model: 'gpt-5' });
+			expect(headers.get(OPENAI_HEADERS.CONVERSATION_ID)).toBeNull();
+			expect(headers.get(OPENAI_HEADERS.SESSION_ID)).toBeNull();
 		});
-	});
+    });
 });

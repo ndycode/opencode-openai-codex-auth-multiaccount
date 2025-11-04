@@ -36,11 +36,13 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 - ✅ **9 pre-configured model variants** - Low/Medium/High reasoning for both gpt-5 and gpt-5-codex
 - ✅ **Zero external dependencies** - Lightweight with only @openauthjs/openauth
 - ✅ **Auto-refreshing tokens** - Handles token expiration automatically
+- ✅ **Prompt caching** - Reuses responses across turns via stable `prompt_cache_key`
 - ✅ **Smart auto-updating Codex instructions** - Tracks latest stable release with ETag caching
 - ✅ **Full tool support** - write, edit, bash, grep, glob, and more
 - ✅ **CODEX_MODE** - Codex-OpenCode bridge prompt with Task tool & MCP awareness (enabled by default)
 - ✅ **Automatic tool remapping** - Codex tools → opencode tools
 - ✅ **Configurable reasoning** - Control effort, summary verbosity, and text output
+- ✅ **Usage-aware errors** - Shows clear guidance when ChatGPT subscription limits are reached
 - ✅ **Type-safe & tested** - Strict TypeScript with 159 unit tests + 14 integration tests
 - ✅ **Modular architecture** - Easy to maintain and extend
 
@@ -75,6 +77,10 @@ For the complete experience with all reasoning variants matching the official Co
       "models": {
         "gpt-5-codex-low": {
           "name": "GPT 5 Codex Low (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
@@ -87,6 +93,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-codex-medium": {
           "name": "GPT 5 Codex Medium (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
@@ -99,6 +109,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-codex-high": {
           "name": "GPT 5 Codex High (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
@@ -111,6 +125,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-minimal": {
           "name": "GPT 5 Minimal (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
@@ -123,6 +141,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-low": {
           "name": "GPT 5 Low (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
@@ -135,6 +157,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-medium": {
           "name": "GPT 5 Medium (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
@@ -147,6 +173,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-high": {
           "name": "GPT 5 High (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "high",
             "reasoningSummary": "detailed",
@@ -159,6 +189,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-mini": {
           "name": "GPT 5 Mini (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
             "reasoningSummary": "auto",
@@ -171,6 +205,10 @@ For the complete experience with all reasoning variants matching the official Co
         },
         "gpt-5-nano": {
           "name": "GPT 5 Nano (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "minimal",
             "reasoningSummary": "auto",
@@ -196,6 +234,12 @@ For the complete experience with all reasoning variants matching the official Co
    - **gpt-5-mini** and **gpt-5-nano** - Lightweight variants
 
    All appear in the opencode model selector as "GPT 5 Codex Low (OAuth)", "GPT 5 High (OAuth)", etc.
+
+### Prompt caching & usage limits
+
+Codex backend caching is enabled automatically. When OpenCode supplies a `prompt_cache_key` (its session identifier), the plugin forwards it unchanged so Codex can reuse work between turns. The plugin no longer synthesizes its own cache IDs—if the host omits `prompt_cache_key`, Codex will treat the turn as uncached. The bundled CODEX_MODE bridge prompt is synchronized with the latest Codex CLI release, so opencode and Codex stay in lock-step on tool availability. When your ChatGPT subscription nears a limit, opencode surfaces the plugin's friendly error message with the 5-hour and weekly windows, mirroring the Codex CLI summary.
+
+> **Auto-compaction note:** OpenCode's context auto-compaction and usage sidebar only populate when the full configuration above is used (the minimal config lacks the per-model metadata OpenCode needs). Stick with `config/full-opencode.json` if you want live token counts and automatic history compaction inside the UI.
 
 #### Alternative: Minimal Configuration
 

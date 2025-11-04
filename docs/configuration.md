@@ -20,8 +20,14 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
       "models": {
         "gpt-5-codex-low": {
           "name": "GPT 5 Codex Low (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
           "options": {
             "reasoningEffort": "low",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
             "include": ["reasoning.encrypted_content"],
             "store": false
           }
@@ -342,6 +348,7 @@ Advanced plugin settings in `~/.opencode/openai-codex-auth-config.json`:
 **What it does:**
 - `true` (default): Uses Codex-OpenCode bridge prompt (Task tool & MCP aware)
 - `false`: Uses legacy tool remap message
+- Bridge prompt content is synced with the latest Codex CLI release (ETag-cached)
 
 **When to disable:**
 - Compatibility issues with OpenCode updates
@@ -354,6 +361,19 @@ CODEX_MODE=0 opencode run "task"  # Temporarily disable
 CODEX_MODE=1 opencode run "task"  # Temporarily enable
 ```
 
+### Prompt caching
+
+- When OpenCode provides a `prompt_cache_key` (its session identifier), the plugin forwards it directly to Codex.
+- The same value is sent via headers (`conversation_id`, `session_id`) and request body, reducing latency and token usage.
+- The plugin does not synthesize a fallback key; hosts that omit `prompt_cache_key` will see uncached behaviour until they provide one.
+- No configuration needed—cache headers are injected during request transformation.
+
+### Usage limit messaging
+
+- When the ChatGPT subscription hits a limit, the plugin returns a Codex CLI-style summary (5-hour + weekly windows).
+- Messages bubble up in OpenCode exactly where SDK errors normally surface.
+- Helpful when working inside the OpenCode UI or CLI—users immediately see reset timing.
+
 ---
 
 ## Configuration Files
@@ -361,6 +381,8 @@ CODEX_MODE=1 opencode run "task"  # Temporarily enable
 **Provided Examples:**
 - [config/full-opencode.json](../config/full-opencode.json) - Complete with 9 variants
 - [config/minimal-opencode.json](../config/minimal-opencode.json) - Minimal setup
+
+> **Why choose the full config?** OpenCode's auto-compaction and usage widgets rely on the per-model `limit` metadata present only in `full-opencode.json`. Use the minimal config only if you don't need those UI features.
 
 **Your Configs:**
 - `~/.config/opencode/opencode.json` - Global config

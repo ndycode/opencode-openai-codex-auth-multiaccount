@@ -24,33 +24,40 @@
 
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
-import { createAuthorizationFlow, exchangeAuthorizationCode, decodeJWT, REDIRECT_URI } from "./lib/auth/auth.js";
-import { getCodexInstructions } from "./lib/prompts/codex.js";
-import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { logRequest } from "./lib/logger.js";
-import { openBrowserUrl } from "./lib/auth/browser.js";
 import {
-	shouldRefreshToken,
-	refreshAndUpdateToken,
-	extractRequestUrl,
-	rewriteUrlForCodex,
-	transformRequestForCodex,
+	createAuthorizationFlow,
+	decodeJWT,
+	exchangeAuthorizationCode,
+	REDIRECT_URI,
+} from "./lib/auth/auth.js";
+import { openBrowserUrl } from "./lib/auth/browser.js";
+import { startLocalOAuthServer } from "./lib/auth/server.js";
+import { getCodexMode, loadPluginConfig } from "./lib/config.js";
+import {
+	AUTH_LABELS,
+	CODEX_BASE_URL,
+	DUMMY_API_KEY,
+	ERROR_MESSAGES,
+	JWT_CLAIM_PATH,
+	LOG_STAGES,
+	OPENAI_HEADER_VALUES,
+	OPENAI_HEADERS,
+	PLUGIN_NAME,
+	PROVIDER_ID,
+} from "./lib/constants.js";
+import { logRequest } from "./lib/logger.js";
+import { getCodexInstructions } from "./lib/prompts/codex.js";
+import {
 	createCodexHeaders,
+	extractRequestUrl,
 	handleErrorResponse,
 	handleSuccessResponse,
+	refreshAndUpdateToken,
+	rewriteUrlForCodex,
+	shouldRefreshToken,
+	transformRequestForCodex,
 } from "./lib/request/fetch-helpers.js";
-import { loadPluginConfig, getCodexMode } from "./lib/config.js";
 import type { UserConfig } from "./lib/types.js";
-import {
-	DUMMY_API_KEY,
-	CODEX_BASE_URL,
-	PROVIDER_ID,
-	JWT_CLAIM_PATH,
-	PLUGIN_NAME,
-	ERROR_MESSAGES,
-	LOG_STAGES,
-	AUTH_LABELS,
-} from "./lib/constants.js";
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -97,13 +104,14 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const decoded = decodeJWT(auth.access);
 				const accountId = decoded?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
 
-				if (!accountId) {
-					console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.NO_ACCOUNT_ID}`);
-					return {};
-				}
-
+                if (!accountId) {
+                    console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.NO_ACCOUNT_ID}`);
+                    return {};
+                }
 				// Extract user configuration (global + per-model options)
-				const providerConfig = provider as { options?: Record<string, unknown>; models?: UserConfig["models"] } | undefined;
+				const providerConfig = provider as
+					| { options?: Record<string, unknown>; models?: UserConfig["models"] }
+					| undefined;
 				const userConfig: UserConfig = {
 					global: providerConfig?.options || {},
 					models: providerConfig?.models || {},
@@ -136,11 +144,17 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					 * @param init - Request options
 					 * @returns Response from Codex API
 					 */
-					async fetch(input: Request | string | URL, init?: RequestInit): Promise<Response> {
+					async fetch(
+						input: Request | string | URL,
+						init?: RequestInit,
+					): Promise<Response> {
 						// Step 1: Check and refresh token if needed
 						const currentAuth = await getAuth();
 						if (shouldRefreshToken(currentAuth)) {
-							const refreshResult = await refreshAndUpdateToken(currentAuth, client);
+							const refreshResult = await refreshAndUpdateToken(
+								currentAuth,
+								client,
+							);
 							if (!refreshResult.success) {
 								return refreshResult.response;
 							}
@@ -151,13 +165,28 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const url = rewriteUrlForCodex(originalUrl);
 
 						// Step 3: Transform request body with Codex instructions
-						const transformation = await transformRequestForCodex(init, url, CODEX_INSTRUCTIONS, userConfig, codexMode);
+						const transformation = await transformRequestForCodex(
+							init,
+							url,
+							CODEX_INSTRUCTIONS,
+							userConfig,
+							codexMode,
+						);
 						const hasTools = transformation?.body.tools !== undefined;
 						const requestInit = transformation?.updatedInit ?? init;
 
 						// Step 4: Create headers with OAuth and ChatGPT account info
-						const accessToken = currentAuth.type === "oauth" ? currentAuth.access : "";
-						const headers = createCodexHeaders(requestInit, accountId, accessToken);
+						const accessToken =
+							currentAuth.type === "oauth" ? currentAuth.access : "";
+						const headers = createCodexHeaders(
+							requestInit,
+							accountId,
+							accessToken,
+							{
+								model: transformation?.body.model,
+								promptCacheKey: (transformation?.body as any)?.prompt_cache_key,
+							},
+						);
 
 						// Step 5: Make request to Codex API
 						const response = await fetch(url, {
