@@ -82,11 +82,11 @@ opencode run "write hello world to test.txt" --model=openai/gpt-5-codex
 ## Features
 
 ✅ **OAuth Authentication** - Secure ChatGPT Plus/Pro login
-✅ **Multiple Models** - gpt-5, gpt-5-codex, gpt-5-mini, gpt-5-nano
+✅ **Multiple Models** - gpt-5, gpt-5-codex, gpt-5-codex-mini, gpt-5-mini, gpt-5-nano
 ✅ **Per-Model Configuration** - Different reasoning effort, verbosity for each variant
 ✅ **Multi-Turn Conversations** - Full conversation history with stateless backend
 ✅ **Backwards Compatible** - Works with old and new config formats
-✅ **Comprehensive Testing** - 159 unit tests + 14 integration tests
+✅ **Comprehensive Testing** - 160+ unit tests + 14 integration tests
 
 ---
 

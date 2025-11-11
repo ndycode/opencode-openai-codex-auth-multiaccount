@@ -28,7 +28,7 @@ cp config/full-opencode.json ~/.config/opencode/opencode.json
 This demonstrates:
 - Global options for all models
 - Per-model configuration overrides
-- All supported model variants (gpt-5-codex, gpt-5, gpt-5-mini, gpt-5-nano)
+- All supported model variants (gpt-5-codex, gpt-5-codex-mini, gpt-5, gpt-5-mini, gpt-5-nano)
 
 ## Usage
 

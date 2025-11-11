@@ -4,7 +4,7 @@ This file provides coding guidance for AI agents (including Claude Code, Codex, 
 
 ## Overview
 
-This is an **opencode plugin** that enables OAuth authentication with OpenAI's ChatGPT Plus/Pro Codex backend. It allows users to access `gpt-5-codex` and `gpt-5` models through their ChatGPT subscription instead of using OpenAI Platform API credits.
+This is an **opencode plugin** that enables OAuth authentication with OpenAI's ChatGPT Plus/Pro Codex backend. It allows users to access `gpt-5-codex`, `gpt-5-codex-mini`, and `gpt-5` models through their ChatGPT subscription instead of using OpenAI Platform API credits.
 
 **Key architecture principle**: 7-step fetch flow that intercepts opencode's OpenAI SDK requests, transforms them for the ChatGPT backend API, and handles OAuth token management.
 
@@ -41,7 +41,7 @@ The main entry point orchestrates a **7-step fetch flow**:
 1. **Token Management**: Check token expiration, refresh if needed
 2. **URL Rewriting**: Transform OpenAI Platform API URLs → ChatGPT backend API (`https://chatgpt.com/backend-api/codex/responses`)
 3. **Request Transformation**:
-   - Normalize model names (all variants → `gpt-5` or `gpt-5-codex`)
+   - Normalize model names (all variants → `gpt-5`, `gpt-5-codex`, or `codex-mini-latest`)
    - Inject Codex system instructions from latest GitHub release
    - Apply reasoning configuration (effort, summary, verbosity)
    - Add CODEX_MODE bridge prompt (default) or tool remap message (legacy)
@@ -99,8 +99,9 @@ The main entry point orchestrates a **7-step fetch flow**:
 
 **4. Model Normalization**:
 - All `gpt-5-codex` variants → `gpt-5-codex`
+- All `gpt-5-codex-mini*` or `codex-mini-latest` variants → `codex-mini-latest`
 - All `gpt-5` variants → `gpt-5`
-- `minimal` effort auto-normalized to `low` for gpt-5-codex (API limitation)
+- `minimal` effort auto-normalized to `low` for gpt-5-codex (API limitation) and clamped to `medium` (or `high` when requested) for Codex Mini
 
 **5. Codex Instructions Caching**:
 - Fetches from latest release tag (not main branch)

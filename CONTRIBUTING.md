@@ -36,7 +36,7 @@ All contributions MUST:
 ## Code Standards
 
 - **TypeScript:** All code must be TypeScript with strict type checking
-- **Testing:** Include tests for new functionality (we maintain 159+ unit tests)
+- **Testing:** Include tests for new functionality (we maintain 160+ unit tests)
 - **Documentation:** Update README.md for user-facing changes
 - **Modular design:** Keep functions focused and under 40 lines
 - **No external dependencies:** Minimize dependencies (currently only @openauthjs/openauth)

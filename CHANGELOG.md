@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [3.1.0] - 2025-11-11
+### Added
+- Codex Mini support end-to-end: normalization to the `codex-mini-latest` slug, proper reasoning defaults, and two new presets (`gpt-5-codex-mini-medium` / `gpt-5-codex-mini-high`).
+- Documentation & configuration updates describing the Codex Mini tier (200k input / 100k output tokens) plus refreshed totals (11 presets, 160+ unit tests).
+
+### Fixed
+- Prevented Codex Mini from inheriting the lightweight (`minimal`) reasoning profile used by `gpt-5-mini`/`nano`, ensuring the API always receives supported effort levels.
+
 ## [3.0.0] - 2025-11-04
 ### Added
 - Codex-style usage-limit messaging that mirrors the 5-hour and weekly windows reported by the Codex CLI.

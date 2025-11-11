@@ -52,10 +52,10 @@ describe('Configuration Parsing', () => {
 		});
 	});
 
-	describe('getReasoningConfig', () => {
-		it('should use user settings from merged config for gpt-5-codex', () => {
-			const codexConfig = getModelConfig('gpt-5-codex', userConfig);
-			const reasoningConfig = getReasoningConfig('gpt-5-codex', codexConfig);
+		describe('getReasoningConfig', () => {
+			it('should use user settings from merged config for gpt-5-codex', () => {
+				const codexConfig = getModelConfig('gpt-5-codex', userConfig);
+				const reasoningConfig = getReasoningConfig('gpt-5-codex', codexConfig);
 
 			expect(reasoningConfig.effort).toBe('medium');
 			expect(reasoningConfig.summary).toBe('concise');
@@ -99,13 +99,37 @@ describe('Configuration Parsing', () => {
 			expect(highReasoning.summary).toBe('auto');
 		});
 
-		it('should respect custom summary setting', () => {
-			const detailedConfig = { reasoningSummary: 'detailed' as const };
-			const detailedReasoning = getReasoningConfig('gpt-5-codex', detailedConfig);
+			it('should respect custom summary setting', () => {
+				const detailedConfig = { reasoningSummary: 'detailed' as const };
+				const detailedReasoning = getReasoningConfig('gpt-5-codex', detailedConfig);
 
-			expect(detailedReasoning.summary).toBe('detailed');
+				expect(detailedReasoning.summary).toBe('detailed');
+			});
+
+			it('should default codex-mini to medium effort', () => {
+				const codexMiniReasoning = getReasoningConfig('gpt-5-codex-mini', {});
+				expect(codexMiniReasoning.effort).toBe('medium');
+			});
+
+			it('should clamp codex-mini minimal/low to medium', () => {
+				const minimal = getReasoningConfig('gpt-5-codex-mini', {
+					reasoningEffort: 'minimal',
+				});
+				const low = getReasoningConfig('gpt-5-codex-mini-high', {
+					reasoningEffort: 'low',
+				});
+
+				expect(minimal.effort).toBe('medium');
+				expect(low.effort).toBe('medium');
+			});
+
+			it('should keep codex-mini high effort when requested', () => {
+				const high = getReasoningConfig('codex-mini-latest', {
+					reasoningEffort: 'high',
+				});
+				expect(high.effort).toBe('high');
+			});
 		});
-	});
 
 	describe('Model-specific behavior', () => {
 		it('should detect lightweight models correctly', () => {

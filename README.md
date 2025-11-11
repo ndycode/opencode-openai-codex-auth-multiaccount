@@ -33,7 +33,7 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 ## Features
 
 - ✅ **ChatGPT Plus/Pro OAuth authentication** - Use your existing subscription
-- ✅ **9 pre-configured model variants** - Low/Medium/High reasoning for both gpt-5 and gpt-5-codex
+- ✅ **11 pre-configured model variants** - Includes Codex Mini (medium/high) alongside all gpt-5 and gpt-5-codex presets
 - ✅ **Zero external dependencies** - Lightweight with only @openauthjs/openauth
 - ✅ **Auto-refreshing tokens** - Handles token expiration automatically
 - ✅ **Prompt caching** - Reuses responses across turns via stable `prompt_cache_key`
@@ -43,7 +43,7 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 - ✅ **Automatic tool remapping** - Codex tools → opencode tools
 - ✅ **Configurable reasoning** - Control effort, summary verbosity, and text output
 - ✅ **Usage-aware errors** - Shows clear guidance when ChatGPT subscription limits are reached
-- ✅ **Type-safe & tested** - Strict TypeScript with 159 unit tests + 14 integration tests
+- ✅ **Type-safe & tested** - Strict TypeScript with 160+ unit tests + 14 integration tests
 - ✅ **Modular architecture** - Easy to maintain and extend
 
 ## Installation
@@ -112,6 +112,38 @@ For the complete experience with all reasoning variants matching the official Co
           "limit": {
             "context": 272000,
             "output": 128000
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5-codex-mini-medium": {
+          "name": "GPT 5 Codex Mini Medium (OAuth)",
+          "limit": {
+            "context": 200000,
+            "output": 100000
+          },
+          "options": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5-codex-mini-high": {
+          "name": "GPT 5 Codex Mini High (OAuth)",
+          "limit": {
+            "context": 200000,
+            "output": 100000
           },
           "options": {
             "reasoningEffort": "high",
@@ -228,8 +260,9 @@ For the complete experience with all reasoning variants matching the official Co
    **Global config**: `~/.config/opencode/opencode.json`
    **Project config**: `<project>/.opencode.json`
 
-   This gives you 9 model variants with different reasoning levels:
+   This gives you 11 model variants with different reasoning levels:
    - **gpt-5-codex** (low/medium/high) - Code-optimized reasoning
+   - **gpt-5-codex-mini** (medium/high) - Cheaper Codex tier with 200k/100k tokens
    - **gpt-5** (minimal/low/medium/high) - General-purpose reasoning
    - **gpt-5-mini** and **gpt-5-nano** - Lightweight variants
 
@@ -316,6 +349,8 @@ When using [`config/full-opencode.json`](./config/full-opencode.json), you get t
 | `gpt-5-codex-low` | GPT 5 Codex Low (OAuth) | Low | Fast code generation |
 | `gpt-5-codex-medium` | GPT 5 Codex Medium (OAuth) | Medium | Balanced code tasks |
 | `gpt-5-codex-high` | GPT 5 Codex High (OAuth) | High | Complex code & tools |
+| `gpt-5-codex-mini-medium` | GPT 5 Codex Mini Medium (OAuth) | Medium | Cheaper Codex tier (200k/100k) |
+| `gpt-5-codex-mini-high` | GPT 5 Codex Mini High (OAuth) | High | Codex Mini with maximum reasoning |
 | `gpt-5-minimal` | GPT 5 Minimal (OAuth) | Minimal | Quick answers, simple tasks |
 | `gpt-5-low` | GPT 5 Low (OAuth) | Low | Faster responses with light reasoning |
 | `gpt-5-medium` | GPT 5 Medium (OAuth) | Medium | Balanced general-purpose tasks |
@@ -325,6 +360,8 @@ When using [`config/full-opencode.json`](./config/full-opencode.json), you get t
 
 **Usage**: `--model=openai/<CLI Model ID>` (e.g., `--model=openai/gpt-5-codex-low`)
 **Display**: TUI shows the friendly name (e.g., "GPT 5 Codex Low (OAuth)")
+
+> **Note**: All `gpt-5-codex-mini*` presets normalize to the ChatGPT slug `codex-mini-latest` (200k input / 100k output tokens).
 
 All accessed via your ChatGPT Plus/Pro subscription.
 
@@ -365,7 +402,7 @@ These defaults match the official Codex CLI behavior and can be customized (see 
 ### Recommended: Use Pre-Configured File
 
 The easiest way to get started is to use [`config/full-opencode.json`](./config/full-opencode.json), which provides:
-- 9 pre-configured model variants matching Codex CLI presets
+- 11 pre-configured model variants matching Codex CLI presets
 - Optimal settings for each reasoning level
 - All variants visible in the opencode model selector
 
