@@ -28,7 +28,7 @@ OpenCode automatically installs plugins - no `npm install` needed!
 
 #### Option A: Full Configuration (Recommended)
 
-Get 9 pre-configured model variants with optimal settings.
+Get 11 pre-configured model variants with optimal settings (including Codex Mini).
 
 Add this to `~/.config/opencode/opencode.json`:
 
@@ -79,6 +79,34 @@ Add this to `~/.config/opencode/opencode.json`:
           "limit": {
             "context": 272000,
             "output": 128000
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
+          }
+        },
+        "gpt-5-codex-mini-medium": {
+          "name": "GPT 5 Codex Mini Medium (OAuth)",
+          "limit": {
+            "context": 200000,
+            "output": 100000
+          },
+          "options": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": ["reasoning.encrypted_content"],
+            "store": false
+          }
+        },
+        "gpt-5-codex-mini-high": {
+          "name": "GPT 5 Codex Mini High (OAuth)",
+          "limit": {
+            "context": 200000,
+            "output": 100000
           },
           "options": {
             "reasoningEffort": "high",
@@ -181,7 +209,9 @@ Add this to `~/.config/opencode/opencode.json`:
 **What you get:**
 - ✅ GPT-5 Codex (Low/Medium/High reasoning)
 - ✅ GPT-5 (Minimal/Low/Medium/High reasoning)
-- ✅ gpt-5-mini, gpt-5-nano (lightweight variants)
+- ✅ gpt-5-codex-mini (medium/high) plus gpt-5-mini & gpt-5-nano (lightweight variants)
+
+> Codex Mini presets normalize to the ChatGPT slug `codex-mini-latest` (200k input / 100k output tokens).
 - ✅ 272k context + 128k output window for every preset
 - ✅ All visible in OpenCode model selector
 - ✅ Optimal settings for each reasoning level
@@ -230,7 +260,7 @@ opencode run "write hello world to test.txt" --model=openai/gpt-5-codex
 opencode
 ```
 
-If using full config, you'll see all 9 variants in the model selector!
+If using full config, you'll see all 11 variants (including Codex Mini) in the model selector!
 
 ---
 

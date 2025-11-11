@@ -57,7 +57,9 @@ Controls computational effort for reasoning.
 - `medium` - Balanced (default)
 - `high` - Maximum code quality
 
-**Note**: `minimal` auto-converts to `low` for gpt-5-codex (API limitation)
+**Notes**:
+- `minimal` auto-converts to `low` for gpt-5-codex (API limitation)
+- `gpt-5-codex-mini*` only supports `medium` or `high`; lower settings are clamped to `medium`
 
 **Example:**
 ```json
@@ -379,7 +381,7 @@ CODEX_MODE=1 opencode run "task"  # Temporarily enable
 ## Configuration Files
 
 **Provided Examples:**
-- [config/full-opencode.json](../config/full-opencode.json) - Complete with 9 variants
+- [config/full-opencode.json](../config/full-opencode.json) - Complete with 11 variants (adds Codex Mini presets)
 - [config/minimal-opencode.json](../config/minimal-opencode.json) - Minimal setup
 
 > **Why choose the full config?** OpenCode's auto-compaction and usage widgets rely on the per-model `limit` metadata present only in `full-opencode.json`. Use the minimal config only if you don't need those UI features.

@@ -63,6 +63,18 @@ describe('Request Transformer Module', () => {
 				expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex');
 				expect(normalizeModel('my-gpt-5-codex-model')).toBe('gpt-5-codex');
 			});
+
+			it('should normalize codex mini presets to codex-mini-latest', async () => {
+				expect(normalizeModel('gpt-5-codex-mini')).toBe('codex-mini-latest');
+				expect(normalizeModel('gpt-5-codex-mini-medium')).toBe('codex-mini-latest');
+				expect(normalizeModel('gpt-5-codex-mini-high')).toBe('codex-mini-latest');
+				expect(normalizeModel('openai/gpt-5-codex-mini-high')).toBe('codex-mini-latest');
+			});
+
+			it('should normalize raw codex-mini-latest slug to codex-mini-latest', async () => {
+				expect(normalizeModel('codex-mini-latest')).toBe('codex-mini-latest');
+				expect(normalizeModel('openai/codex-mini-latest')).toBe('codex-mini-latest');
+			});
 		});
 
 		// NEW: Edge case tests
@@ -70,6 +82,7 @@ describe('Request Transformer Module', () => {
 			it('should handle uppercase model names', async () => {
 				expect(normalizeModel('GPT-5-CODEX')).toBe('gpt-5-codex');
 				expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5');
+				expect(normalizeModel('CODEx-MINI-LATEST')).toBe('codex-mini-latest');
 			});
 
 			it('should handle mixed case', async () => {

@@ -577,6 +577,8 @@ opencode
 normalizeModel("gpt-5-codex")          // → "gpt-5-codex" ✅
 normalizeModel("gpt-5-codex-low")      // → "gpt-5-codex" ✅
 normalizeModel("GPT-5-CODEX-HIGH")     // → "gpt-5-codex" ✅
+normalizeModel("gpt-5-codex-mini-high")// → "codex-mini-latest" ✅
+normalizeModel("codex-mini-latest")    // → "codex-mini-latest" ✅
 normalizeModel("my-codex-model")       // → "gpt-5-codex" ✅
 normalizeModel("gpt-5")                // → "gpt-5" ✅
 normalizeModel("gpt-5-mini")           // → "gpt-5" ✅
@@ -590,17 +592,25 @@ normalizeModel("random-model")         // → "gpt-5" ✅ (fallback)
 ```typescript
 export function normalizeModel(model: string | undefined): string {
   if (!model) return "gpt-5";
-  if (model.includes("codex")) return "gpt-5-codex";  // Check codex first
-  if (model.includes("gpt-5")) return "gpt-5";        // Then gpt-5
-  return "gpt-5";  // Safe fallback
+  const normalized = model.toLowerCase();
+  if (normalized.includes("codex-mini") || normalized.includes("codex-mini-latest")) {
+    return "codex-mini-latest";
+  }
+  if (normalized.includes("codex")) {
+    return "gpt-5-codex";
+  }
+  if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
+    return "gpt-5";
+  }
+  return "gpt-5";
 }
 ```
 
 **Why this works:**
-- ✅ Case-insensitive (`.includes()` works with any case)
+- ✅ Case-insensitive (`.toLowerCase()` + `.includes()`)
 - ✅ Pattern-based (works with any naming)
 - ✅ Safe fallback (unknown models → `gpt-5`)
-- ✅ Codex priority (checks "codex" before "gpt-5")
+- ✅ Codex priority with explicit Codex Mini support (`codex-mini*` → `codex-mini-latest`)
 
 ---
 
@@ -657,12 +667,14 @@ describe('normalizeModel', () => {
   test('handles all default models', () => {
     expect(normalizeModel('gpt-5')).toBe('gpt-5')
     expect(normalizeModel('gpt-5-codex')).toBe('gpt-5-codex')
+    expect(normalizeModel('gpt-5-codex-mini')).toBe('codex-mini-latest')
     expect(normalizeModel('gpt-5-mini')).toBe('gpt-5')
     expect(normalizeModel('gpt-5-nano')).toBe('gpt-5')
   })
 
   test('handles custom preset names', () => {
     expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex')
+    expect(normalizeModel('openai/gpt-5-codex-mini-high')).toBe('codex-mini-latest')
     expect(normalizeModel('gpt-5-high')).toBe('gpt-5')
   })
 
@@ -672,6 +684,7 @@ describe('normalizeModel', () => {
 
   test('handles edge cases', () => {
     expect(normalizeModel(undefined)).toBe('gpt-5')
+    expect(normalizeModel('codex-mini-latest')).toBe('codex-mini-latest')
     expect(normalizeModel('random')).toBe('gpt-5')
   })
 })
