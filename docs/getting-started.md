@@ -26,9 +26,15 @@ OpenCode automatically installs plugins - no `npm install` needed!
 
 **Choose your configuration style:**
 
-#### Option A: Full Configuration (Recommended)
+#### ⚠️ REQUIRED: Full Configuration (Only Supported Setup)
 
-Get 11 pre-configured model variants with optimal settings (including Codex Mini).
+**IMPORTANT**: You MUST use the full configuration. This is the ONLY officially supported setup for GPT 5.1 models.
+
+**Why the full config is required:**
+- GPT 5 models can be temperamental and need proper configuration
+- Minimal configs are NOT supported and will fail unpredictably
+- OpenCode features require proper model metadata
+- This configuration has been tested and verified to work
 
 Add this to `~/.config/opencode/opencode.json`:
 
@@ -46,8 +52,8 @@ Add this to `~/.config/opencode/opencode.json`:
         "store": false
       },
       "models": {
-        "gpt-5-codex-low": {
-          "name": "GPT 5 Codex Low (OAuth)",
+        "gpt-5.1-codex-low": {
+          "name": "GPT 5.1 Codex Low (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -60,8 +66,8 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-codex-medium": {
-          "name": "GPT 5 Codex Medium (OAuth)",
+        "gpt-5.1-codex-medium": {
+          "name": "GPT 5.1 Codex Medium (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -74,8 +80,8 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-codex-high": {
-          "name": "GPT 5 Codex High (OAuth)",
+        "gpt-5.1-codex-high": {
+          "name": "GPT 5.1 Codex High (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -88,11 +94,11 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-codex-mini-medium": {
-          "name": "GPT 5 Codex Mini Medium (OAuth)",
+        "gpt-5.1-codex-mini-medium": {
+          "name": "GPT 5.1 Codex Mini Medium (OAuth)",
           "limit": {
-            "context": 200000,
-            "output": 100000
+            "context": 272000,
+            "output": 128000
           },
           "options": {
             "reasoningEffort": "medium",
@@ -102,11 +108,11 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-codex-mini-high": {
-          "name": "GPT 5 Codex Mini High (OAuth)",
+        "gpt-5.1-codex-mini-high": {
+          "name": "GPT 5.1 Codex Mini High (OAuth)",
           "limit": {
-            "context": 200000,
-            "output": 100000
+            "context": 272000,
+            "output": 128000
           },
           "options": {
             "reasoningEffort": "high",
@@ -116,22 +122,8 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-minimal": {
-          "name": "GPT 5 Minimal (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "minimal",
-            "reasoningSummary": "auto",
-            "textVerbosity": "low",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5-low": {
-          "name": "GPT 5 Low (OAuth)",
+        "gpt-5.1-low": {
+          "name": "GPT 5.1 Low (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -144,8 +136,8 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-medium": {
-          "name": "GPT 5 Medium (OAuth)",
+        "gpt-5.1-medium": {
+          "name": "GPT 5.1 Medium (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -158,8 +150,8 @@ Add this to `~/.config/opencode/opencode.json`:
             "store": false
           }
         },
-        "gpt-5-high": {
-          "name": "GPT 5 High (OAuth)",
+        "gpt-5.1-high": {
+          "name": "GPT 5.1 High (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -171,34 +163,6 @@ Add this to `~/.config/opencode/opencode.json`:
             "include": ["reasoning.encrypted_content"],
             "store": false
           }
-        },
-        "gpt-5-mini": {
-          "name": "GPT 5 Mini (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "low",
-            "reasoningSummary": "auto",
-            "textVerbosity": "low",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5-nano": {
-          "name": "GPT 5 Nano (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "minimal",
-            "reasoningSummary": "auto",
-            "textVerbosity": "low",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
         }
       }
     }
@@ -206,25 +170,26 @@ Add this to `~/.config/opencode/opencode.json`:
 }
 ```
 
-**What you get:**
-- ✅ GPT-5 Codex (Low/Medium/High reasoning)
-- ✅ GPT-5 (Minimal/Low/Medium/High reasoning)
-- ✅ gpt-5-codex-mini (medium/high) plus gpt-5-mini & gpt-5-nano (lightweight variants)
+  **What you get:**
+  - ✅ GPT 5.1 Codex (Low/Medium/High reasoning)
+  - ✅ GPT 5.1 Codex Mini (Medium/High reasoning)
+  - ✅ GPT 5.1 (Low/Medium/High reasoning)
+  - ✅ 272k context + 128k output window for every preset
+  - ✅ All visible in OpenCode model selector
+  - ✅ Optimal settings for each reasoning level
 
-> Codex Mini presets normalize to the ChatGPT slug `codex-mini-latest` (200k input / 100k output tokens).
-- ✅ 272k context + 128k output window for every preset
-- ✅ All visible in OpenCode model selector
-- ✅ Optimal settings for each reasoning level
+> **Note**: All `gpt-5.1-codex-mini*` presets use 272k context / 128k output limits.
 
-Prompt caching is enabled out of the box: when OpenCode sends its session identifier as `prompt_cache_key`, the plugin forwards it untouched so multi-turn runs reuse prior work. The plugin no longer synthesizes cache IDs; if the host omits that field, Codex treats the run as uncached. The CODEX_MODE bridge prompt bundled with the plugin is kept in sync with the latest Codex CLI release, so the OpenCode UI and Codex share the same tool contract. If you hit your ChatGPT subscription limits, the plugin returns a friendly Codex-style message with the 5-hour and weekly usage windows so you know when capacity resets.
+Prompt caching is enabled out of the box: when OpenCode sends its session identifier as `prompt_cache_key`, the plugin forwards it untouched so multi-turn runs reuse prior work. The CODEX_MODE bridge prompt bundled with the plugin is kept in sync with the latest Codex CLI release, so the OpenCode UI and Codex share the same tool contract. If you hit your ChatGPT subscription limits, the plugin returns a friendly Codex-style message with the 5-hour and weekly usage windows so you know when capacity resets.
 
-> **Heads up:** OpenCode's context auto-compaction and usage sidebar only work when this full configuration is installed. The minimal configuration skips the per-model limits, so OpenCode cannot display token usage or compact history automatically.
+> **⚠️ CRITICAL:** This full configuration is REQUIRED. OpenCode's context auto-compaction and usage sidebar only work with this full configuration. GPT 5 models are temperamental and need proper setup - minimal configurations are NOT supported.
 
-#### Option B: Minimal Configuration
+#### ❌ Minimal Configuration (NOT SUPPORTED - DO NOT USE)
 
-Just want to get started quickly?
+**DO NOT use minimal configurations** - they will NOT work reliably with GPT 5:
 
 ```json
+// ❌ DO NOT USE THIS
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": ["opencode-openai-codex-auth"],
@@ -232,9 +197,10 @@ Just want to get started quickly?
 }
 ```
 
-Save to `~/.config/opencode/opencode.json`
-
-**Trade-off**: Uses default settings (medium reasoning), no model variants in selector.
+**Why this doesn't work:**
+- GPT 5 models need proper configuration to work reliably
+- Missing model metadata breaks OpenCode features
+- Cannot guarantee stable operation
 
 ### Step 2: Authenticate
 
@@ -254,13 +220,13 @@ opencode auth login
 
 ```bash
 # Quick test
-opencode run "write hello world to test.txt" --model=openai/gpt-5-codex
+opencode run "write hello world to test.txt" --model=openai/gpt-5.1-codex-medium
 
 # Or start interactive session
 opencode
 ```
 
-If using full config, you'll see all 11 variants (including Codex Mini) in the model selector!
+You'll see all 8 GPT 5.1 variants (5.1, 5.1 Codex, and 5.1 Codex Mini presets) in the model selector!
 
 ---
 

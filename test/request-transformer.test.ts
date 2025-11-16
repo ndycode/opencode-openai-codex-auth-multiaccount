@@ -69,11 +69,22 @@ describe('Request Transformer Module', () => {
 				expect(normalizeModel('gpt-5-codex-mini-medium')).toBe('codex-mini-latest');
 				expect(normalizeModel('gpt-5-codex-mini-high')).toBe('codex-mini-latest');
 				expect(normalizeModel('openai/gpt-5-codex-mini-high')).toBe('codex-mini-latest');
-			});
-
-			it('should normalize raw codex-mini-latest slug to codex-mini-latest', async () => {
 				expect(normalizeModel('codex-mini-latest')).toBe('codex-mini-latest');
 				expect(normalizeModel('openai/codex-mini-latest')).toBe('codex-mini-latest');
+			});
+
+			it('should normalize gpt-5.1 codex and mini slugs', async () => {
+				expect(normalizeModel('gpt-5.1-codex')).toBe('gpt-5.1-codex');
+				expect(normalizeModel('openai/gpt-5.1-codex')).toBe('gpt-5.1-codex');
+				expect(normalizeModel('gpt-5.1-codex-mini')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('gpt-5.1-codex-mini-high')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('openai/gpt-5.1-codex-mini-medium')).toBe('gpt-5.1-codex-mini');
+			});
+
+			it('should normalize gpt-5.1 general-purpose slugs', async () => {
+				expect(normalizeModel('gpt-5.1')).toBe('gpt-5.1');
+				expect(normalizeModel('openai/gpt-5.1')).toBe('gpt-5.1');
+				expect(normalizeModel('GPT 5.1 High')).toBe('gpt-5.1');
 			});
 		});
 

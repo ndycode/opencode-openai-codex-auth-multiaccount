@@ -579,6 +579,9 @@ normalizeModel("gpt-5-codex-low")      // → "gpt-5-codex" ✅
 normalizeModel("GPT-5-CODEX-HIGH")     // → "gpt-5-codex" ✅
 normalizeModel("gpt-5-codex-mini-high")// → "codex-mini-latest" ✅
 normalizeModel("codex-mini-latest")    // → "codex-mini-latest" ✅
+normalizeModel("gpt-5.1-codex-mini")   // → "gpt-5.1-codex-mini" ✅
+normalizeModel("gpt-5.1-codex")        // → "gpt-5.1-codex" ✅
+normalizeModel("gpt-5.1")              // → "gpt-5.1" ✅
 normalizeModel("my-codex-model")       // → "gpt-5-codex" ✅
 normalizeModel("gpt-5")                // → "gpt-5" ✅
 normalizeModel("gpt-5-mini")           // → "gpt-5" ✅
@@ -593,8 +596,22 @@ normalizeModel("random-model")         // → "gpt-5" ✅ (fallback)
 export function normalizeModel(model: string | undefined): string {
   if (!model) return "gpt-5";
   const normalized = model.toLowerCase();
-  if (normalized.includes("codex-mini") || normalized.includes("codex-mini-latest")) {
+
+  if (normalized.includes("gpt-5.1-codex-mini") || normalized.includes("gpt 5.1 codex mini")) {
+    return "gpt-5.1-codex-mini";
+  }
+  if (
+    normalized.includes("codex-mini-latest") ||
+    normalized.includes("gpt-5-codex-mini") ||
+    normalized.includes("gpt 5 codex mini")
+  ) {
     return "codex-mini-latest";
+  }
+  if (normalized.includes("gpt-5.1-codex") || normalized.includes("gpt 5.1 codex")) {
+    return "gpt-5.1-codex";
+  }
+  if (normalized.includes("gpt-5.1") || normalized.includes("gpt 5.1")) {
+    return "gpt-5.1";
   }
   if (normalized.includes("codex")) {
     return "gpt-5-codex";

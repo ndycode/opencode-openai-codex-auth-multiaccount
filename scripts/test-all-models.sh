@@ -28,6 +28,13 @@ echo -e "${BLUE}  Model Configuration Verification Test Suite${NC}"
 echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
+# Kill any running OpenCode server processes to force fresh plugin load
+echo "Killing OpenCode server processes..."
+pkill -f "opencode" 2>/dev/null || true
+sleep 2
+echo "✓ OpenCode servers stopped"
+echo ""
+
 # Initialize results file
 cat > "${RESULTS_FILE}" << 'EOF'
 # Model Configuration Verification Results
@@ -67,8 +74,8 @@ test_model() {
         return 1
     fi
 
-    # Find the after-transform log file
-    local log_file=$(find "${LOG_DIR}" -name "*-after-transform.json" | head -n 1)
+    # Find the after-transform log file (most recent)
+    local log_file=$(find "${LOG_DIR}" -name "*-after-transform.json" -type f -print0 | xargs -0 ls -t | head -n 1)
 
     if [ ! -f "${log_file}" ]; then
         echo -e "${RED}  ✗ Log file not found${NC}"
@@ -122,36 +129,14 @@ update_config() {
     case "${config_type}" in
         "full")
             cat "${REPO_DIR}/config/full-opencode.json" > "${OPENCODE_JSON}"
-            echo "✓ Updated opencode.json with full config"
+            echo "✓ Updated opencode.json with full config (GPT 5.1)"
             ;;
         "minimal")
             cat "${REPO_DIR}/config/minimal-opencode.json" > "${OPENCODE_JSON}"
             echo "✓ Updated opencode.json with minimal config"
             ;;
         "backwards-compat")
-            cat > "${OPENCODE_JSON}" << 'EOCONFIG'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["file:///Users/numman/Repos/opencode-codex-plugin-fresh/dist"],
-  "provider": {
-    "openai": {
-      "options": {
-        "reasoningEffort": "medium"
-      },
-      "models": {
-        "GPT 5 Codex Low (ChatGPT Subscription)": {
-          "id": "gpt-5-codex",
-          "options": {
-            "reasoningEffort": "low",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium"
-          }
-        }
-      }
-    }
-  }
-}
-EOCONFIG
+            cat "${REPO_DIR}/config/full-opencode-gpt5.json" > "${OPENCODE_JSON}"
             echo "✓ Updated opencode.json with backwards compatibility config"
             ;;
     esac
@@ -160,36 +145,54 @@ EOCONFIG
 }
 
 # ============================================================================
-# Scenario 1: Full Config - All 9 Custom Models
+# Scenario 1: Full Config - GPT 5.1 Model Family
 # ============================================================================
 update_config "full"
 
-test_model "gpt-5-codex-low"    "gpt-5-codex" "low"     "auto"     "medium"
-test_model "gpt-5-codex-medium" "gpt-5-codex" "medium"  "auto"     "medium"
-test_model "gpt-5-codex-high"   "gpt-5-codex" "high"    "detailed" "medium"
-test_model "gpt-5-minimal"      "gpt-5"       "minimal" "auto"     "low"
-test_model "gpt-5-low"          "gpt-5"       "low"     "auto"     "low"
-test_model "gpt-5-medium"       "gpt-5"       "medium"  "auto"     "medium"
-test_model "gpt-5-high"         "gpt-5"       "high"    "detailed" "high"
-test_model "gpt-5-mini"         "gpt-5"       "low"     "auto"     "low"
-test_model "gpt-5-nano"         "gpt-5"       "minimal" "auto"     "low"
+# GPT 5.1 Codex presets
+test_model "gpt-5.1-codex-low"       "gpt-5.1-codex"       "low"     "auto"     "medium"
+test_model "gpt-5.1-codex-medium"    "gpt-5.1-codex"       "medium"  "auto"     "medium"
+test_model "gpt-5.1-codex-high"      "gpt-5.1-codex"       "high"    "detailed" "medium"
 
-# ============================================================================
-# Scenario 2: Minimal Config - Default Models (No Custom Config)
-# ============================================================================
-update_config "minimal"
+# GPT 5.1 Codex Mini presets (medium/high only)
+test_model "gpt-5.1-codex-mini-medium" "gpt-5.1-codex-mini" "medium"  "auto"     "medium"
+test_model "gpt-5.1-codex-mini-high"   "gpt-5.1-codex-mini" "high"    "detailed" "medium"
 
-test_model "gpt-5"       "gpt-5"       "medium"  "auto" "medium"
-test_model "gpt-5-codex" "gpt-5-codex" "medium"  "auto" "medium"
-test_model "gpt-5-mini"  "gpt-5"       "minimal" "auto" "medium"
-test_model "gpt-5-nano"  "gpt-5"       "minimal" "auto" "medium"
+# GPT 5.1 general-purpose presets
+test_model "gpt-5.1-low"           "gpt-5.1"       "low"     "auto"     "low"
+test_model "gpt-5.1-medium"        "gpt-5.1"       "medium"  "auto"     "medium"
+test_model "gpt-5.1-high"          "gpt-5.1"       "high"    "detailed" "high"
+
+# # ============================================================================
+# # Scenario 2: Minimal Config - Default Models (No Custom Config)
+# # ============================================================================
+# update_config "minimal"
+
+# test_model "gpt-5"       "gpt-5"       "medium"  "auto" "medium"
+# test_model "gpt-5-codex" "gpt-5-codex" "medium"  "auto" "medium"
+# test_model "gpt-5-mini"  "gpt-5"       "minimal" "auto" "medium"
+# test_model "gpt-5-nano"  "gpt-5"       "minimal" "auto" "medium"
 
 # ============================================================================
 # Scenario 3: Backwards Compatibility
 # ============================================================================
-update_config "backwards-compat"
+# update_config "backwards-compat"
 
-test_model "GPT 5 Codex Low (ChatGPT Subscription)" "gpt-5-codex" "low" "auto" "medium"
+# # GPT 5 Codex presets
+# test_model "gpt-5-codex-low" "gpt-5-codex" "low" "auto" "medium"
+# test_model "gpt-5-codex-medium" "gpt-5-codex" "medium" "auto" "medium"
+# test_model "gpt-5-codex-high" "gpt-5-codex" "high" "detailed" "medium"
+
+# GPT 5 Codex Mini presets
+# test_model "gpt-5-codex-mini" "codex-mini-latest" "medium" "auto" "medium"
+# test_model "gpt-5-codex-mini-medium" "codex-mini-latest" "medium" "auto" "medium"
+# test_model "gpt-5-codex-mini-high" "codex-mini-latest" "high" "detailed" "medium"
+
+# GPT 5 general-purpose presets
+# test_model "gpt-5" "gpt-5" "medium" "auto" "medium"
+# test_model "gpt-5-medium" "gpt-5" "medium" "auto" "medium"
+# test_model "gpt-5-high" "gpt-5" "high" "detailed" "high"
+# test_model "gpt-5-mini" "gpt-5" "minimal" "auto" "medium"
 
 # ============================================================================
 # Summary

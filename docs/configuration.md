@@ -18,8 +18,8 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
         "store": false
       },
       "models": {
-        "gpt-5-codex-low": {
-          "name": "GPT 5 Codex Low (OAuth)",
+        "gpt-5.1-codex-low": {
+          "name": "GPT 5.1 Codex Low (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -59,7 +59,7 @@ Controls computational effort for reasoning.
 
 **Notes**:
 - `minimal` auto-converts to `low` for gpt-5-codex (API limitation)
-- `gpt-5-codex-mini*` only supports `medium` or `high`; lower settings are clamped to `medium`
+- `gpt-5-codex-mini*` and `gpt-5.1-codex-mini*` only support `medium` or `high`; lower settings are clamped to `medium`
 
 **Example:**
 ```json
@@ -240,6 +240,8 @@ opencode run "task" --model=openai/my-custom-id
 # TUI shows: "My Display Name"
 ```
 
+> **⚠️ Recommendation:** Stick to the official presets in `full-opencode.json` rather than creating custom model variants. GPT 5 models need specific configurations to work reliably.
+
 See [development/CONFIG_FIELDS.md](development/CONFIG_FIELDS.md) for complete explanation.
 
 ---
@@ -287,11 +289,11 @@ Different agents use different models:
 {
   "agent": {
     "commit": {
-      "model": "openai/codex-quick",
+      "model": "openai/gpt-5.1-codex-low",
       "prompt": "Generate concise commit messages"
     },
     "review": {
-      "model": "openai/codex-quality",
+      "model": "openai/gpt-5.1-codex-high",
       "prompt": "Thorough code review"
     }
   }
@@ -381,10 +383,9 @@ CODEX_MODE=1 opencode run "task"  # Temporarily enable
 ## Configuration Files
 
 **Provided Examples:**
-- [config/full-opencode.json](../config/full-opencode.json) - Complete with 11 variants (adds Codex Mini presets)
-- [config/minimal-opencode.json](../config/minimal-opencode.json) - Minimal setup
+- [config/full-opencode.json](../config/full-opencode.json) - Complete with 8 GPT 5.1 variants
 
-> **Why choose the full config?** OpenCode's auto-compaction and usage widgets rely on the per-model `limit` metadata present only in `full-opencode.json`. Use the minimal config only if you don't need those UI features.
+> **⚠️ REQUIRED:** You MUST use `full-opencode.json` - this is the ONLY officially supported configuration. Minimal configs are NOT supported for GPT 5 models and will fail unpredictably. OpenCode's auto-compaction and usage widgets also require the full config's per-model `limit` metadata.
 
 **Your Configs:**
 - `~/.config/opencode/opencode.json` - Global config
@@ -436,26 +437,38 @@ cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasonin
 
 Old verbose names still work:
 
+**⚠️ IMPORTANT:** Old configs with GPT 5.0 models are deprecated. You MUST migrate to the new `full-opencode.json` with GPT 5.1 models.
+
+**Old config (deprecated):**
 ```json
 {
   "models": {
-    "GPT 5 Codex Low (ChatGPT Subscription)": {
-      "id": "gpt-5-codex",
+    "gpt-5-codex-low": {
+      "name": "GPT 5 Codex Low (OAuth)",
       "options": { "reasoningEffort": "low" }
     }
   }
 }
 ```
 
-**Recommended update** (cleaner CLI usage):
+**New config (required):**
+
+Use the official [`config/full-opencode.json`](../config/full-opencode.json) file which includes:
 
 ```json
 {
   "models": {
-    "gpt-5-codex-low": {
-      "name": "GPT 5 Codex Low (OAuth)",
+    "gpt-5.1-codex-low": {
+      "name": "GPT 5.1 Codex Low (OAuth)",
+      "limit": {
+        "context": 272000,
+        "output": 128000
+      },
       "options": {
         "reasoningEffort": "low",
+        "reasoningSummary": "auto",
+        "textVerbosity": "medium",
+        "include": ["reasoning.encrypted_content"],
         "store": false
       }
     }
@@ -464,9 +477,9 @@ Old verbose names still work:
 ```
 
 **Benefits:**
-- Cleaner: `--model=openai/gpt-5-codex-low`
-- Matches Codex CLI preset names
-- No redundant `id` field
+- GPT 5.1 support (5.0 is deprecated)
+- Proper limit metadata for OpenCode features
+- Verified configuration that works reliably
 
 ---
 
@@ -563,13 +576,15 @@ Look for `hasModelSpecificConfig: true` in debug output.
 
 **Example Problem:**
 ```json
-{ "models": { "gpt-5-codex": { "options": { ... } } } }
+{ "models": { "gpt-5.1-codex": { "options": { ... } } } }
 ```
 ```bash
---model=openai/gpt-5-codex-low  # Normalizes to "gpt-5-codex" before lookup
+--model=openai/gpt-5.1-codex-low  # Normalizes to "gpt-5.1-codex" before lookup
 ```
 
 **Fix**: Use exact name you specify in CLI as config key.
+
+> **⚠️ Best Practice:** Use the official `full-opencode.json` configuration instead of creating custom configs. This ensures proper model normalization and compatibility with GPT 5 models.
 
 ---
 

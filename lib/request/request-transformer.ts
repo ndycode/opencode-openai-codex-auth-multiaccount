@@ -2,6 +2,7 @@ import { logDebug, logWarn } from "../logger.js";
 import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
 import { CODEX_OPENCODE_BRIDGE } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
+import { getNormalizedModel } from "./helpers/model-map.js";
 import type {
 	ConfigOptions,
 	InputItem,
@@ -12,28 +13,73 @@ import type {
 
 /**
  * Normalize model name to Codex-supported variants
- * @param model - Original model name
- * @returns Normalized model name
+ *
+ * Uses explicit model map for known models, with fallback pattern matching
+ * for unknown/custom model names.
+ *
+ * @param model - Original model name (e.g., "gpt-5.1-codex-low", "openai/gpt-5-codex")
+ * @returns Normalized model name (e.g., "gpt-5.1-codex", "gpt-5-codex")
  */
 export function normalizeModel(model: string | undefined): string {
 	if (!model) return "gpt-5";
 
-	const normalized = model.toLowerCase();
+	// Strip provider prefix if present (e.g., "openai/gpt-5-codex" → "gpt-5-codex")
+	const modelId = model.includes("/") ? model.split("/").pop()! : model;
 
-	if (normalized.includes("codex-mini")) {
+	// Try explicit model map first (handles all known model variants)
+	const mappedModel = getNormalizedModel(modelId);
+	if (mappedModel) {
+		return mappedModel;
+	}
+
+	// Fallback: Pattern-based matching for unknown/custom model names
+	// This preserves backwards compatibility with old verbose names
+	// like "GPT 5 Codex Low (ChatGPT Subscription)"
+	const normalized = modelId.toLowerCase();
+
+	// Priority order for pattern matching (most specific first):
+	// 1. GPT-5.1 Codex Mini
+	if (
+		normalized.includes("gpt-5.1-codex-mini") ||
+		normalized.includes("gpt 5.1 codex mini")
+	) {
+		return "gpt-5.1-codex-mini";
+	}
+
+	// 2. Legacy Codex Mini
+	if (
+		normalized.includes("codex-mini-latest") ||
+		normalized.includes("gpt-5-codex-mini") ||
+		normalized.includes("gpt 5 codex mini")
+	) {
 		return "codex-mini-latest";
 	}
 
-	// Case-insensitive check for "codex" anywhere in the model name
+	// 3. GPT-5.1 Codex
+	if (
+		normalized.includes("gpt-5.1-codex") ||
+		normalized.includes("gpt 5.1 codex")
+	) {
+		return "gpt-5.1-codex";
+	}
+
+	// 4. GPT-5.1 (general-purpose)
+	if (normalized.includes("gpt-5.1") || normalized.includes("gpt 5.1")) {
+		return "gpt-5.1";
+	}
+
+	// 5. GPT-5 Codex family (any variant with "codex")
 	if (normalized.includes("codex")) {
 		return "gpt-5-codex";
 	}
-	// Case-insensitive check for "gpt-5" or "gpt 5" (with space)
+
+	// 6. GPT-5 family (any variant)
 	if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
 		return "gpt-5";
 	}
 
-	return "gpt-5"; // Default fallback
+	// Default fallback
+	return "gpt-5";
 }
 
 /**

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [3.2.0] - 2025-11-14
+### Added
+- GPT 5.1 model family support: normalization for `gpt-5.1`, `gpt-5.1-codex`, and `gpt-5.1-codex-mini` plus new GPT 5.1-only presets in the canonical `config/full-opencode.json`.
+- Documentation updates (README, docs, AGENTS) describing the 5.1 families, their reasoning defaults, and how they map to ChatGPT slugs and token limits.
+
+### Changed
+- Model normalization docs and tests now explicitly cover both 5.0 and 5.1 Codex/general families and the two Codex Mini tiers.
+- The legacy GPT 5.0 full configuration is now published as `config/full-opencode-gpt5.json`; new installs should prefer the 5.1 presets.
+
 ## [3.1.0] - 2025-11-11
 ### Added
 - Codex Mini support end-to-end: normalization to the `codex-mini-latest` slug, proper reasoning defaults, and two new presets (`gpt-5-codex-mini-medium` / `gpt-5-codex-mini-high`).

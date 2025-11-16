@@ -1,44 +1,59 @@
-# Configuration Examples
+# Configuration
 
-This directory contains example opencode configuration files for the OpenAI Codex OAuth plugin.
+This directory contains the official opencode configuration for the OpenAI Codex OAuth plugin.
 
-## Files
+## ⚠️ REQUIRED Configuration File
 
-### minimal-opencode.json
-The simplest possible configuration using plugin defaults.
+### full-opencode.json (REQUIRED - USE THIS ONLY)
 
-```bash
-cp config/minimal-opencode.json ~/.config/opencode/opencode.json
-```
-
-This uses default settings:
-- `reasoningEffort`: "medium"
-- `reasoningSummary`: "auto"
-- `textVerbosity`: "medium"
-- `include`: ["reasoning.encrypted_content"]
-- `store`: false (required for AI SDK 2.0.50+ compatibility)
-
-### full-opencode.json
-Complete configuration example showing all model variants with custom settings.
+**YOU MUST use this configuration file** - it is the ONLY officially supported setup:
 
 ```bash
 cp config/full-opencode.json ~/.config/opencode/opencode.json
 ```
 
-This demonstrates:
-- Global options for all models
-- Per-model configuration overrides
-- All supported model variants (gpt-5-codex, gpt-5-codex-mini, gpt-5, gpt-5-mini, gpt-5-nano)
+**Why this is required:**
+- GPT 5 models can be temperamental and need proper configuration
+- Contains 8 verified GPT 5.1 model variants (Codex, Codex Mini, and general GPT 5.1)
+- Includes all required metadata for OpenCode features
+- Guaranteed to work reliably
+- Global options for all models + per-model configuration overrides
+
+**What's included:**
+- All supported GPT 5.1 variants: gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-mini
+- Proper reasoning effort settings for each variant
+- Context limits (272k context / 128k output)
+- Required options: `store: false`, `include: ["reasoning.encrypted_content"]`
+
+### ❌ Other Configurations (NOT SUPPORTED)
+
+**DO NOT use:**
+- `minimal-opencode.json` - NOT supported, will fail unpredictably
+- `full-opencode-gpt5.json` - DEPRECATED, GPT 5.0 models are being phased out by OpenAI
+- Custom configurations - NOT recommended, may not work reliably
+
+**Why other configs don't work:**
+- GPT 5 models need specific configurations
+- Missing metadata breaks OpenCode features
+- No support for usage limits or context compaction
+- Cannot guarantee stable operation
 
 ## Usage
 
-1. Choose a configuration file based on your needs
-2. Copy it to your opencode config directory:
+**ONLY ONE OPTION** - use the full configuration:
+
+1. Copy `full-opencode.json` to your opencode config directory:
    - Global: `~/.config/opencode/opencode.json`
    - Project: `<project>/.opencode.json`
-3. Modify settings as needed
-4. Run opencode: `opencode run "your prompt"`
+
+2. **DO NOT modify** the configuration unless you know exactly what you're doing. The provided settings have been tested and verified to work.
+
+3. Run opencode: `opencode run "your prompt" --model=openai/gpt-5.1-codex-medium`
+
+> **⚠️ Critical**: GPT 5 models require this exact configuration. Do not use minimal configs or create custom variants - they are not supported and will fail unpredictably.
 
 ## Configuration Options
 
 See the main [README.md](../README.md#configuration) for detailed documentation of all configuration options.
+
+**Remember**: Use `full-opencode.json` as-is for guaranteed compatibility. Custom configurations are not officially supported.
