@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [3.3.0] - 2025-11-19
+### Added
+- GPT 5.1 Codex Max support: normalization, per-model defaults, and new presets (`gpt-5.1-codex-max`, `gpt-5.1-codex-max-xhigh`) with expanded output window and `xhigh` reasoning.
+- Typing and config support for new reasoning options (`none`/`xhigh`, summary `off`/`on`) plus updated test matrix entries.
+
+### Changed
+- Codex Mini clamping now downgrades unsupported `xhigh` to `high` and guards against `none`/`minimal` inputs.
+- Documentation, config guides, and validation scripts now reflect 10 verified GPT 5.1 variants including Codex Max.
+
 ## [3.2.0] - 2025-11-14
 ### Added
 - GPT 5.1 model family support: normalization for `gpt-5.1`, `gpt-5.1-codex`, and `gpt-5.1-codex-mini` plus new GPT 5.1-only presets in the canonical `config/full-opencode.json`.
