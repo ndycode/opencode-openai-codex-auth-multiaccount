@@ -9,7 +9,7 @@ All notable changes to this project are documented here. Dates use the ISO forma
 
 ### Changed
 - Codex Mini clamping now downgrades unsupported `xhigh` to `high` and guards against `none`/`minimal` inputs.
-- Documentation, config guides, and validation scripts now reflect 10 verified GPT 5.1 variants including Codex Max.
+- Documentation, config guides, and validation scripts now reflect 13 verified GPT 5.1 variants (3 codex, 5 codex-max, 2 codex-mini, 3 general), including Codex Max. See README for details on pre-configured variants.
 
 ## [3.2.0] - 2025-11-14
 ### Added
