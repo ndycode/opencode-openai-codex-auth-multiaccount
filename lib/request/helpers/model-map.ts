@@ -45,24 +45,24 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.1-high": "gpt-5.1",
 
 	// ============================================================================
-	// GPT-5 Codex Models (LEGACY - for backwards compatibility)
+	// GPT-5 Codex Models (LEGACY - maps to gpt-5.1-codex as gpt-5 is being phased out)
 	// ============================================================================
-	"gpt-5-codex": "gpt-5-codex",
+	"gpt-5-codex": "gpt-5.1-codex",
 
 	// ============================================================================
-	// GPT-5 Codex Mini Models (LEGACY - for backwards compatibility)
+	// GPT-5 Codex Mini Models (LEGACY - maps to gpt-5.1-codex-mini)
 	// ============================================================================
-	"codex-mini-latest": "codex-mini-latest",
-	"gpt-5-codex-mini": "codex-mini-latest",
-	"gpt-5-codex-mini-medium": "codex-mini-latest",
-	"gpt-5-codex-mini-high": "codex-mini-latest",
+	"codex-mini-latest": "gpt-5.1-codex-mini",
+	"gpt-5-codex-mini": "gpt-5.1-codex-mini",
+	"gpt-5-codex-mini-medium": "gpt-5.1-codex-mini",
+	"gpt-5-codex-mini-high": "gpt-5.1-codex-mini",
 
 	// ============================================================================
-	// GPT-5 General Purpose Models (LEGACY - for backwards compatibility)
+	// GPT-5 General Purpose Models (LEGACY - maps to gpt-5.1 as gpt-5 is being phased out)
 	// ============================================================================
-	"gpt-5": "gpt-5",
-	"gpt-5-mini": "gpt-5",
-	"gpt-5-nano": "gpt-5",
+	"gpt-5": "gpt-5.1",
+	"gpt-5-mini": "gpt-5.1",
+	"gpt-5-nano": "gpt-5.1",
 };
 
 /**

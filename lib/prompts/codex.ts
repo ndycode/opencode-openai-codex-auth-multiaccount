@@ -1,17 +1,60 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import type { GitHubRelease, CacheMetadata } from "../types.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { CacheMetadata, GitHubRelease } from "../types.js";
 
 // Codex instructions constants
-const GITHUB_API_RELEASES = "https://api.github.com/repos/openai/codex/releases/latest";
+const GITHUB_API_RELEASES =
+	"https://api.github.com/repos/openai/codex/releases/latest";
 const CACHE_DIR = join(homedir(), ".opencode", "cache");
-const CACHE_FILE = join(CACHE_DIR, "codex-instructions.md");
-const CACHE_METADATA_FILE = join(CACHE_DIR, "codex-instructions-meta.json");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Model family type for prompt selection
+ * Maps to different system prompts in the Codex CLI
+ */
+export type ModelFamily = "codex-max" | "codex" | "gpt-5.1";
+
+/**
+ * Prompt file mapping for each model family
+ * Based on codex-rs/core/src/model_family.rs logic
+ */
+const PROMPT_FILES: Record<ModelFamily, string> = {
+	"codex-max": "gpt-5.1-codex-max_prompt.md",
+	codex: "gpt_5_codex_prompt.md",
+	"gpt-5.1": "gpt_5_1_prompt.md",
+};
+
+/**
+ * Cache file mapping for each model family
+ */
+const CACHE_FILES: Record<ModelFamily, string> = {
+	"codex-max": "codex-max-instructions.md",
+	codex: "codex-instructions.md",
+	"gpt-5.1": "gpt-5.1-instructions.md",
+};
+
+/**
+ * Determine the model family based on the normalized model name
+ * @param normalizedModel - The normalized model name (e.g., "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1")
+ * @returns The model family for prompt selection
+ */
+export function getModelFamily(normalizedModel: string): ModelFamily {
+	// Order matters - check more specific patterns first
+	if (normalizedModel.includes("codex-max")) {
+		return "codex-max";
+	}
+	if (
+		normalizedModel.includes("codex") ||
+		normalizedModel.startsWith("codex-")
+	) {
+		return "codex";
+	}
+	return "gpt-5.1";
+}
 
 /**
  * Get the latest release tag from GitHub
@@ -19,7 +62,8 @@ const __dirname = dirname(__filename);
  */
 async function getLatestReleaseTag(): Promise<string> {
 	const response = await fetch(GITHUB_API_RELEASES);
-	if (!response.ok) throw new Error(`Failed to fetch latest release: ${response.status}`);
+	if (!response.ok)
+		throw new Error(`Failed to fetch latest release: ${response.status}`);
 	const data = (await response.json()) as GitHubRelease;
 	return data.tag_name;
 }
@@ -30,17 +74,31 @@ async function getLatestReleaseTag(): Promise<string> {
  * Always fetches from the latest release tag, not main branch
  *
  * Rate limit protection: Only checks GitHub if cache is older than 15 minutes
- * @returns Codex instructions
+ *
+ * @param normalizedModel - The normalized model name (optional, defaults to "gpt-5.1-codex" for backwards compatibility)
+ * @returns Codex instructions for the specified model family
  */
-export async function getCodexInstructions(): Promise<string> {
+export async function getCodexInstructions(
+	normalizedModel = "gpt-5.1-codex",
+): Promise<string> {
+	const modelFamily = getModelFamily(normalizedModel);
+	const promptFile = PROMPT_FILES[modelFamily];
+	const cacheFile = join(CACHE_DIR, CACHE_FILES[modelFamily]);
+	const cacheMetaFile = join(
+		CACHE_DIR,
+		`${CACHE_FILES[modelFamily].replace(".md", "-meta.json")}`,
+	);
+
 	try {
 		// Load cached metadata (includes ETag, tag, and lastChecked timestamp)
 		let cachedETag: string | null = null;
 		let cachedTag: string | null = null;
 		let cachedTimestamp: number | null = null;
 
-		if (existsSync(CACHE_METADATA_FILE)) {
-			const metadata = JSON.parse(readFileSync(CACHE_METADATA_FILE, "utf8")) as CacheMetadata;
+		if (existsSync(cacheMetaFile)) {
+			const metadata = JSON.parse(
+				readFileSync(cacheMetaFile, "utf8"),
+			) as CacheMetadata;
 			cachedETag = metadata.etag;
 			cachedTag = metadata.tag;
 			cachedTimestamp = metadata.lastChecked;
@@ -48,13 +106,17 @@ export async function getCodexInstructions(): Promise<string> {
 
 		// Rate limit protection: If cache is less than 15 minutes old, use it
 		const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
-		if (cachedTimestamp && (Date.now() - cachedTimestamp) < CACHE_TTL_MS && existsSync(CACHE_FILE)) {
-			return readFileSync(CACHE_FILE, "utf8");
+		if (
+			cachedTimestamp &&
+			Date.now() - cachedTimestamp < CACHE_TTL_MS &&
+			existsSync(cacheFile)
+		) {
+			return readFileSync(cacheFile, "utf8");
 		}
 
 		// Get the latest release tag (only if cache is stale or missing)
 		const latestTag = await getLatestReleaseTag();
-		const CODEX_INSTRUCTIONS_URL = `https://raw.githubusercontent.com/openai/codex/${latestTag}/codex-rs/core/gpt_5_codex_prompt.md`;
+		const CODEX_INSTRUCTIONS_URL = `https://raw.githubusercontent.com/openai/codex/${latestTag}/codex-rs/core/${promptFile}`;
 
 		// If tag changed, we need to fetch new instructions
 		if (cachedTag !== latestTag) {
@@ -71,8 +133,8 @@ export async function getCodexInstructions(): Promise<string> {
 
 		// 304 Not Modified - our cached version is still current
 		if (response.status === 304) {
-			if (existsSync(CACHE_FILE)) {
-				return readFileSync(CACHE_FILE, "utf8");
+			if (existsSync(cacheFile)) {
+				return readFileSync(cacheFile, "utf8");
 			}
 			// Cache file missing but GitHub says not modified - fall through to re-fetch
 		}
@@ -88,9 +150,9 @@ export async function getCodexInstructions(): Promise<string> {
 			}
 
 			// Cache the instructions with ETag and tag (verbatim from GitHub)
-			writeFileSync(CACHE_FILE, instructions, "utf8");
+			writeFileSync(cacheFile, instructions, "utf8");
 			writeFileSync(
-				CACHE_METADATA_FILE,
+				cacheMetaFile,
 				JSON.stringify({
 					etag: newETag,
 					tag: latestTag,
@@ -107,18 +169,22 @@ export async function getCodexInstructions(): Promise<string> {
 	} catch (error) {
 		const err = error as Error;
 		console.error(
-			"[openai-codex-plugin] Failed to fetch instructions from GitHub:",
+			`[openai-codex-plugin] Failed to fetch ${modelFamily} instructions from GitHub:`,
 			err.message,
 		);
 
 		// Try to use cached version even if stale
-		if (existsSync(CACHE_FILE)) {
-			console.error("[openai-codex-plugin] Using cached instructions");
-			return readFileSync(CACHE_FILE, "utf8");
+		if (existsSync(cacheFile)) {
+			console.error(
+				`[openai-codex-plugin] Using cached ${modelFamily} instructions`,
+			);
+			return readFileSync(cacheFile, "utf8");
 		}
 
-		// Fall back to bundled version
-		console.error("[openai-codex-plugin] Falling back to bundled instructions");
+		// Fall back to bundled version (use codex-instructions.md as default)
+		console.error(
+			`[openai-codex-plugin] Falling back to bundled instructions for ${modelFamily}`,
+		);
 		return readFileSync(join(__dirname, "codex-instructions.md"), "utf8");
 	}
 }

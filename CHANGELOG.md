@@ -2,6 +2,43 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [4.0.0] - 2025-11-25
+
+**Major release**: Complete prompt engineering overhaul matching official Codex CLI behavior.
+
+### Added
+- **Model-specific system prompts**: Plugin now fetches the correct Codex prompt based on model family, matching Codex CLI's `model_family.rs` logic:
+  - `gpt-5.1-codex-max*` → `gpt-5.1-codex-max_prompt.md` (117 lines, includes frontend design guidelines)
+  - `gpt-5.1-codex*`, `gpt-5.1-codex-mini*` → `gpt_5_codex_prompt.md` (105 lines, focused coding prompt)
+  - `gpt-5.1*` → `gpt_5_1_prompt.md` (368 lines, full behavioral guidance)
+- New `ModelFamily` type (`"codex-max" | "codex" | "gpt-5.1"`) for prompt selection.
+- New `getModelFamily()` function to determine prompt selection based on normalized model name.
+- Model family now logged in request logs for debugging (`modelFamily` field in after-transform logs).
+- 16 new unit tests for model family detection (now **191 total unit tests**).
+- Integration tests now verify correct model family selection (13 integration tests with family verification).
+
+### Changed
+- **Legacy GPT-5.0 models now map to GPT-5.1**: All legacy `gpt-5` model variants automatically normalize to their `gpt-5.1` equivalents as GPT-5.0 is being phased out by OpenAI:
+  - `gpt-5-codex` → `gpt-5.1-codex`
+  - `gpt-5` → `gpt-5.1`
+  - `gpt-5-mini`, `gpt-5-nano` → `gpt-5.1`
+  - `codex-mini-latest` → `gpt-5.1-codex-mini`
+- **Lazy instruction loading**: Instructions are now fetched per-request based on model family (not pre-loaded at initialization).
+- **Separate caching per model family**: Each model family has its own cached prompt file:
+  - `codex-max-instructions.md` + `codex-max-instructions-meta.json`
+  - `codex-instructions.md` + `codex-instructions-meta.json`
+  - `gpt-5.1-instructions.md` + `gpt-5.1-instructions-meta.json`
+
+### Fixed
+- Fixed OpenCode prompt cache URL to fetch from `dev` branch instead of non-existent `main` branch.
+- Fixed model configuration test script to correctly identify model logs in multi-model sessions (opencode uses a small model like `gpt-5-nano` for title generation alongside the user's selected model).
+
+### Technical Details
+This release brings full parity with Codex CLI's prompt engineering:
+- **Codex family** (105 lines): Concise, tool-focused prompt for coding tasks
+- **Codex Max family** (117 lines): Adds frontend design guidelines for UI work
+- **GPT-5.1 general** (368 lines): Comprehensive behavioral guidance, personality, planning
+
 ## [3.3.0] - 2025-11-19
 ### Added
 - GPT 5.1 Codex Max support: normalization, per-model defaults, and new presets (`gpt-5.1-codex-max`, `gpt-5.1-codex-max-xhigh`) with extended reasoning options (including `none`/`xhigh`) while keeping the 272k context / 128k output limits.

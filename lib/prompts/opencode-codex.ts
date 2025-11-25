@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 const OPENCODE_CODEX_URL =
-	"https://raw.githubusercontent.com/sst/opencode/main/packages/opencode/src/session/prompt/codex.txt";
+	"https://raw.githubusercontent.com/sst/opencode/dev/packages/opencode/src/session/prompt/codex.txt";
 const CACHE_DIR = join(homedir(), ".opencode", "cache");
 const CACHE_FILE = join(CACHE_DIR, "opencode-codex.txt");
 const CACHE_META_FILE = join(CACHE_DIR, "opencode-codex-meta.json");

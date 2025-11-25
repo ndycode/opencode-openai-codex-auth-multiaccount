@@ -21,7 +21,7 @@ import type {
  * @returns Normalized model name (e.g., "gpt-5.1-codex", "gpt-5-codex")
  */
 export function normalizeModel(model: string | undefined): string {
-	if (!model) return "gpt-5";
+	if (!model) return "gpt-5.1";
 
 	// Strip provider prefix if present (e.g., "openai/gpt-5-codex" → "gpt-5-codex")
 	const modelId = model.includes("/") ? model.split("/").pop()! : model;
@@ -78,16 +78,16 @@ export function normalizeModel(model: string | undefined): string {
 
 	// 6. GPT-5 Codex family (any variant with "codex")
 	if (normalized.includes("codex")) {
-		return "gpt-5-codex";
+		return "gpt-5.1-codex";
 	}
 
-	// 7. GPT-5 family (any variant)
+	// 7. GPT-5 family (any variant) - default to 5.1 as 5 is being phased out
 	if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
-		return "gpt-5";
+		return "gpt-5.1";
 	}
 
-	// Default fallback
-	return "gpt-5";
+	// Default fallback - use gpt-5.1 as gpt-5 is being phased out
+	return "gpt-5.1";
 }
 
 /**

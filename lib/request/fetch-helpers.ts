@@ -7,7 +7,8 @@ import type { Auth } from "@opencode-ai/sdk";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { refreshAccessToken } from "../auth/auth.js";
 import { logRequest } from "../logger.js";
-import { transformRequestBody } from "./request-transformer.js";
+import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
+import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { UserConfig, RequestBody } from "../types.js";
 import {
@@ -98,9 +99,10 @@ export function rewriteUrlForCodex(url: string): string {
 
 /**
  * Transforms request body and logs the transformation
+ * Fetches model-specific Codex instructions based on the request model
+ *
  * @param init - Request init options
  * @param url - Request URL
- * @param codexInstructions - Codex system instructions
  * @param userConfig - User configuration
  * @param codexMode - Enable CODEX_MODE (bridge prompt instead of tool remap)
  * @returns Transformed body and updated init, or undefined if no body
@@ -108,7 +110,6 @@ export function rewriteUrlForCodex(url: string): string {
 export async function transformRequestForCodex(
 	init: RequestInit | undefined,
 	url: string,
-	codexInstructions: string,
 	userConfig: UserConfig,
 	codexMode = true,
 ): Promise<{ body: RequestBody; updatedInit: RequestInit } | undefined> {
@@ -117,6 +118,11 @@ export async function transformRequestForCodex(
 	try {
 		const body = JSON.parse(init.body as string) as RequestBody;
 		const originalModel = body.model;
+
+		// Normalize model first to determine which instructions to fetch
+		// This ensures we get the correct model-specific prompt
+		const normalizedModel = normalizeModel(originalModel);
+		const modelFamily = getModelFamily(normalizedModel);
 
 		// Log original request
 		logRequest(LOG_STAGES.BEFORE_TRANSFORM, {
@@ -129,6 +135,9 @@ export async function transformRequestForCodex(
 			codexMode,
 			body: body as unknown as Record<string, unknown>,
 		});
+
+		// Fetch model-specific Codex instructions (cached per model family)
+		const codexInstructions = await getCodexInstructions(normalizedModel);
 
 		// Transform request body
 		const transformedBody = await transformRequestBody(
@@ -143,6 +152,7 @@ export async function transformRequestForCodex(
 			url,
 			originalModel,
 			normalizedModel: transformedBody.model,
+			modelFamily,
 			hasTools: !!transformedBody.tools,
 			hasInput: !!transformedBody.input,
 			inputLength: transformedBody.input?.length,

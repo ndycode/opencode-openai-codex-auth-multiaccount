@@ -46,7 +46,6 @@ import {
 	PROVIDER_ID,
 } from "./lib/constants.js";
 import { logRequest } from "./lib/logger.js";
-import { getCodexInstructions } from "./lib/prompts/codex.js";
 import {
 	createCodexHeaders,
 	extractRequestUrl,
@@ -122,9 +121,6 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const pluginConfig = loadPluginConfig();
 				const codexMode = getCodexMode(pluginConfig);
 
-				// Fetch Codex system instructions (cached with ETag for efficiency)
-				const CODEX_INSTRUCTIONS = await getCodexInstructions();
-
 				// Return SDK configuration
 				return {
 					apiKey: DUMMY_API_KEY,
@@ -164,11 +160,11 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const originalUrl = extractRequestUrl(input);
 						const url = rewriteUrlForCodex(originalUrl);
 
-						// Step 3: Transform request body with Codex instructions
+						// Step 3: Transform request body with model-specific Codex instructions
+						// Instructions are fetched per model family (codex-max, codex, gpt-5.1)
 						const transformation = await transformRequestForCodex(
 							init,
 							url,
-							CODEX_INSTRUCTIONS,
 							userConfig,
 							codexMode,
 						);

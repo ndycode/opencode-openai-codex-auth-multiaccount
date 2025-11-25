@@ -44,17 +44,18 @@ cat > "${RESULTS_FILE}" << 'EOF'
 
 ## Results Summary
 
-| Model | Normalized | Effort | Summary | Verbosity | Include | Status |
-|-------|------------|--------|---------|-----------|---------|--------|
+| Model | Normalized | Family | Effort | Summary | Verbosity | Include | Status |
+|-------|------------|--------|--------|---------|-----------|---------|--------|
 EOF
 
 # Function: Run a test for a specific model
 test_model() {
     local model_name="$1"
     local expected_normalized="$2"
-    local expected_effort="$3"
-    local expected_summary="$4"
-    local expected_verbosity="$5"
+    local expected_family="$3"
+    local expected_effort="$4"
+    local expected_summary="$5"
+    local expected_verbosity="$6"
 
     ((TOTAL_TESTS++))
 
@@ -74,11 +75,19 @@ test_model() {
         return 1
     fi
 
-    # Find the after-transform log file (most recent)
-    local log_file=$(find "${LOG_DIR}" -name "*-after-transform.json" -type f -print0 | xargs -0 ls -t | head -n 1)
+    # Find the after-transform log file that matches the expected model
+    # (opencode may use multiple models per session - e.g., nano for titles)
+    local log_file=""
+    for f in $(find "${LOG_DIR}" -name "*-after-transform.json" -type f -print0 | xargs -0 ls -t); do
+        local orig_model=$(jq -r '.originalModel // ""' "$f" 2>/dev/null)
+        if [ "${orig_model}" = "${model_name}" ]; then
+            log_file="$f"
+            break
+        fi
+    done
 
-    if [ ! -f "${log_file}" ]; then
-        echo -e "${RED}  ✗ Log file not found${NC}"
+    if [ -z "${log_file}" ] || [ ! -f "${log_file}" ]; then
+        echo -e "${RED}  ✗ Log file not found for model ${model_name}${NC}"
         echo "| ${model_name} | N/A | N/A | N/A | N/A | N/A | ❌ NO LOG |" >> "${RESULTS_FILE}"
         ((FAILED_TESTS++))
         return 1
@@ -86,17 +95,19 @@ test_model() {
 
     # Parse log file with jq
     local actual_normalized=$(jq -r '.normalizedModel // "N/A"' "${log_file}")
+    local actual_family=$(jq -r '.modelFamily // "N/A"' "${log_file}")
     local actual_effort=$(jq -r '.reasoning.effort // "N/A"' "${log_file}")
     local actual_summary=$(jq -r '.reasoning.summary // "N/A"' "${log_file}")
     local actual_verbosity=$(jq -r '.body.text.verbosity // "N/A"' "${log_file}")
     local actual_include=$(jq -r '.include[0] // "N/A"' "${log_file}")
 
-    echo "  Actual: model=${actual_normalized}, effort=${actual_effort}, summary=${actual_summary}, verbosity=${actual_verbosity}"
-    echo "  Expected: model=${expected_normalized}, effort=${expected_effort}, summary=${expected_summary}, verbosity=${expected_verbosity}"
+    echo "  Actual: model=${actual_normalized}, family=${actual_family}, effort=${actual_effort}, summary=${actual_summary}, verbosity=${actual_verbosity}"
+    echo "  Expected: model=${expected_normalized}, family=${expected_family}, effort=${expected_effort}, summary=${expected_summary}, verbosity=${expected_verbosity}"
 
     # Verify values
     local status="✅ PASS"
     if [ "${actual_normalized}" != "${expected_normalized}" ] || \
+       [ "${actual_family}" != "${expected_family}" ] || \
        [ "${actual_effort}" != "${expected_effort}" ] || \
        [ "${actual_summary}" != "${expected_summary}" ] || \
        [ "${actual_verbosity}" != "${expected_verbosity}" ]; then
@@ -109,7 +120,7 @@ test_model() {
     fi
 
     # Add to results
-    echo "| ${model_name} | ${actual_normalized} | ${actual_effort} | ${actual_summary} | ${actual_verbosity} | ${actual_include} | ${status} |" >> "${RESULTS_FILE}"
+    echo "| ${model_name} | ${actual_normalized} | ${actual_family} | ${actual_effort} | ${actual_summary} | ${actual_verbosity} | ${actual_include} | ${status} |" >> "${RESULTS_FILE}"
 
     # Cleanup
     rm -f "${REPO_DIR}/test-${TOTAL_TESTS}.txt"
@@ -150,22 +161,22 @@ update_config() {
 update_config "full"
 
 # GPT 5.1 Codex presets
-test_model "gpt-5.1-codex-low"        "gpt-5.1-codex"       "low"     "auto"     "medium"
-test_model "gpt-5.1-codex-medium"     "gpt-5.1-codex"       "medium"  "auto"     "medium"
-test_model "gpt-5.1-codex-high"       "gpt-5.1-codex"       "high"    "detailed" "medium"
-test_model "gpt-5.1-codex-max-low"    "gpt-5.1-codex-max"   "low"     "detailed" "medium"
-test_model "gpt-5.1-codex-max-medium" "gpt-5.1-codex-max"   "medium"  "detailed" "medium"
-test_model "gpt-5.1-codex-max-high"   "gpt-5.1-codex-max"   "high"    "detailed" "medium"
-test_model "gpt-5.1-codex-max-xhigh"  "gpt-5.1-codex-max"   "xhigh"   "detailed" "medium"
+test_model "gpt-5.1-codex-low"        "gpt-5.1-codex"       "codex"      "low"     "auto"     "medium"
+test_model "gpt-5.1-codex-medium"     "gpt-5.1-codex"       "codex"      "medium"  "auto"     "medium"
+test_model "gpt-5.1-codex-high"       "gpt-5.1-codex"       "codex"      "high"    "detailed" "medium"
+test_model "gpt-5.1-codex-max-low"    "gpt-5.1-codex-max"   "codex-max"  "low"     "detailed" "medium"
+test_model "gpt-5.1-codex-max-medium" "gpt-5.1-codex-max"   "codex-max"  "medium"  "detailed" "medium"
+test_model "gpt-5.1-codex-max-high"   "gpt-5.1-codex-max"   "codex-max"  "high"    "detailed" "medium"
+test_model "gpt-5.1-codex-max-xhigh"  "gpt-5.1-codex-max"   "codex-max"  "xhigh"   "detailed" "medium"
 
 # GPT 5.1 Codex Mini presets (medium/high only)
-test_model "gpt-5.1-codex-mini-medium" "gpt-5.1-codex-mini" "medium"  "auto"     "medium"
-test_model "gpt-5.1-codex-mini-high"   "gpt-5.1-codex-mini" "high"    "detailed" "medium"
+test_model "gpt-5.1-codex-mini-medium" "gpt-5.1-codex-mini" "codex"      "medium"  "auto"     "medium"
+test_model "gpt-5.1-codex-mini-high"   "gpt-5.1-codex-mini" "codex"      "high"    "detailed" "medium"
 
 # GPT 5.1 general-purpose presets
-test_model "gpt-5.1-low"           "gpt-5.1"       "low"     "auto"     "low"
-test_model "gpt-5.1-medium"        "gpt-5.1"       "medium"  "auto"     "medium"
-test_model "gpt-5.1-high"          "gpt-5.1"       "high"    "detailed" "high"
+test_model "gpt-5.1-low"           "gpt-5.1"       "gpt-5.1"    "low"     "auto"     "low"
+test_model "gpt-5.1-medium"        "gpt-5.1"       "gpt-5.1"    "medium"  "auto"     "medium"
+test_model "gpt-5.1-high"          "gpt-5.1"       "gpt-5.1"    "high"    "detailed" "high"
 
 # # ============================================================================
 # # Scenario 2: Minimal Config - Default Models (No Custom Config)

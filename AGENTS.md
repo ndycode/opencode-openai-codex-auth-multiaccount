@@ -4,7 +4,7 @@ This file provides coding guidance for AI agents (including Claude Code, Codex, 
 
 ## Overview
 
-This is an **opencode plugin** that enables OAuth authentication with OpenAI's ChatGPT Plus/Pro Codex backend. It allows users to access `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5-codex`, `gpt-5-codex-mini`, `gpt-5.1`, and `gpt-5` models through their ChatGPT subscription instead of using OpenAI Platform API credits.
+This is an **opencode plugin** that enables OAuth authentication with OpenAI's ChatGPT Plus/Pro Codex backend. It allows users to access `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, and `gpt-5.1` models through their ChatGPT subscription instead of using OpenAI Platform API credits. Legacy GPT-5.0 models are automatically normalized to their GPT-5.1 equivalents.
 
 **Key architecture principle**: 7-step fetch flow that intercepts opencode's OpenAI SDK requests, transforms them for the ChatGPT backend API, and handles OAuth token management.
 
@@ -97,19 +97,28 @@ The main entry point orchestrates a **7-step fetch flow**:
 - Model-specific options override global
 - Plugin defaults: `reasoningEffort: "medium"`, `reasoningSummary: "auto"`, `textVerbosity: "medium"`
 
-**4. Model Normalization**:
+**4. Model Normalization** (GPT-5.0 → GPT-5.1 migration):
 - All `gpt-5.1-codex-max*` variants → `gpt-5.1-codex-max`
 - All `gpt-5.1-codex*` variants → `gpt-5.1-codex`
 - All `gpt-5.1-codex-mini*` variants → `gpt-5.1-codex-mini`
-- All `gpt-5-codex` variants → `gpt-5-codex`
-- All `gpt-5-codex-mini*` or `codex-mini-latest` variants → `codex-mini-latest`
 - All `gpt-5.1` variants → `gpt-5.1`
-- All `gpt-5` variants → `gpt-5`
+- **Legacy mappings** (GPT-5.0 being phased out):
+  - `gpt-5-codex*` variants → `gpt-5.1-codex`
+  - `gpt-5-codex-mini*` or `codex-mini-latest` → `gpt-5.1-codex-mini`
+  - `gpt-5*` variants (including `gpt-5-mini`, `gpt-5-nano`) → `gpt-5.1`
 - `minimal` effort auto-normalized to `low` for Codex families and clamped to `medium` (or `high` when requested) for Codex Mini
 
-**5. Codex Instructions Caching**:
+**5. Model-Specific Prompt Selection**:
+- Different prompts for different model families (matching Codex CLI):
+  - `gpt-5.1-codex-max*` → `gpt-5.1-codex-max_prompt.md` (117 lines, frontend design guidelines)
+  - `gpt-5.1-codex*`, `codex-*` → `gpt_5_codex_prompt.md` (105 lines, coding focus)
+  - `gpt-5.1*` → `gpt_5_1_prompt.md` (368 lines, full behavioral guidance)
+- `getModelFamily()` determines prompt selection based on normalized model
+
+**6. Codex Instructions Caching**:
 - Fetches from latest release tag (not main branch)
-- ETag-based HTTP conditional requests
+- ETag-based HTTP conditional requests per model family
+- Separate cache files per family: `codex-max-instructions.md`, `codex-instructions.md`, `gpt-5.1-instructions.md`
 - Cache invalidation when release tag changes
 - Falls back to bundled version if GitHub unavailable
 
@@ -140,7 +149,7 @@ OAuth implementation follows OpenAI Codex CLI patterns:
 
 ### Testing Strategy
 
-- **123 comprehensive tests** covering all modules
+- **191 comprehensive tests** covering all modules
 - Test files mirror source structure (`test/auth.test.ts` ↔ `lib/auth/auth.ts`)
 - Mock-heavy testing (no actual network calls or file I/O in tests)
 - Focus on edge cases: token expiration, model normalization, input filtering, CODEX_MODE toggling

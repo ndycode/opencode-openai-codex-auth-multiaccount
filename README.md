@@ -44,7 +44,7 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 - ✅ **Automatic tool remapping** - Codex tools → opencode tools
 - ✅ **Configurable reasoning** - Control effort, summary verbosity, and text output
 - ✅ **Usage-aware errors** - Shows clear guidance when ChatGPT subscription limits are reached
-- ✅ **Type-safe & tested** - Strict TypeScript with 160+ unit tests + 14 integration tests
+- ✅ **Type-safe & tested** - Strict TypeScript with 191 unit tests + 13 integration tests
 - ✅ **Modular architecture** - Easy to maintain and extend
 
 ## Installation
