@@ -53,6 +53,46 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 
 **No npm install needed!** opencode automatically installs plugins when you add them to your config.
 
+### Plugin Versioning & Updates
+
+**⚠️ Important**: OpenCode does NOT auto-update plugins. You must pin versions for reliable updates.
+
+#### Recommended: Pin the Version
+
+```json
+"plugin": ["opencode-openai-codex-auth@4.0.0"]
+```
+
+**Why pin versions?** OpenCode uses Bun's lockfile which pins resolved versions. If you use `"opencode-openai-codex-auth"` without a version, it resolves to "latest" once and **never updates** even when new versions are published.
+
+#### Upgrading to a New Version
+
+Simply change the version in your config and restart OpenCode:
+
+```json
+// Change from:
+"plugin": ["opencode-openai-codex-auth@3.3.0"]
+
+// To:
+"plugin": ["opencode-openai-codex-auth@4.0.0"]
+```
+
+OpenCode will detect the version mismatch and install the new version automatically.
+
+#### If You're Stuck on an Old Version
+
+If you previously used an unpinned version, clear the cache:
+
+```bash
+rm -rf ~/.cache/opencode/node_modules ~/.cache/opencode/bun.lock
+```
+
+Then restart OpenCode with a pinned version in your config.
+
+Check [releases](https://github.com/numman-ali/opencode-openai-codex-auth/releases) for version history.
+
+---
+
 #### ⚠️ REQUIRED: Full Configuration (Only Supported Setup)
 
 **IMPORTANT**: You MUST use the full configuration from [`config/full-opencode.json`](./config/full-opencode.json). Other configurations are not officially supported and may not work reliably.
@@ -68,7 +108,7 @@ Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates an
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "opencode-openai-codex-auth"
+    "opencode-openai-codex-auth@4.0.0"
   ],
   "provider": {
     "openai": {
@@ -329,6 +369,7 @@ Codex backend caching is enabled automatically. When OpenCode supplies a `prompt
 ```
 
 **Why this doesn't work:**
+- Unpinned plugin version won't receive updates (see [Plugin Versioning](#plugin-versioning--updates))
 - GPT 5 models are temperamental and need proper configuration
 - Missing model metadata breaks OpenCode features
 - No support for usage limits or context compaction
@@ -349,22 +390,6 @@ Select "OpenAI" → "ChatGPT Plus/Pro (Codex Subscription)"
 > **⚠️ First-time setup**: Stop Codex CLI if running (both use port 1455)
 
 ---
-
-## Updating the Plugin
-
-**⚠️ Important**: OpenCode does NOT auto-update plugins.
-
-To install the latest version:
-
-```bash
-# Clear plugin cache
-(cd ~ && sed -i.bak '/"opencode-openai-codex-auth"/d' .cache/opencode/package.json && rm -rf .cache/opencode/node_modules/opencode-openai-codex-auth)
-
-# Restart OpenCode - it will reinstall latest version
-opencode
-```
-
-Check [releases](https://github.com/numman-ali/opencode-openai-codex-auth/releases) for version history.
 
 ## Usage
 
@@ -492,7 +517,7 @@ Apply settings to all models:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth@4.0.0"],
   "model": "openai/gpt-5-codex",
   "provider": {
     "openai": {
@@ -512,7 +537,7 @@ Create your own named variants in the model selector:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth@4.0.0"],
   "provider": {
     "openai": {
       "models": {
