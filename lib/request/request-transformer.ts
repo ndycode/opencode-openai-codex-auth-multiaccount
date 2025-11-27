@@ -440,6 +440,14 @@ export async function transformRequestBody(
 			// DEFAULT MODE: Keep original behavior with tool remap message
 			body.input = addToolRemapMessage(body.input, !!body.tools);
 		}
+
+		if (!body.tools && body.input) {
+			body.input = body.input.filter(
+				(item) =>
+					item.type !== "function_call" &&
+					item.type !== "function_call_output",
+			);
+		}
 	}
 
 	// Configure reasoning (use normalized model family + model-specific config)

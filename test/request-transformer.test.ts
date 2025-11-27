@@ -847,6 +847,24 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.effort).toBe('medium');
 		});
 
+		it('should drop function_call items when no tools present', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5-codex',
+				input: [
+					{ type: 'message', role: 'user', content: 'hello' },
+					{ type: 'function_call', role: 'assistant', name: 'write', arguments: '{}' } as any,
+					{ type: 'function_call_output', role: 'assistant', call_id: 'call_1', output: '{}' } as any,
+				],
+			};
+
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.tools).toBeUndefined();
+			expect(result.input).toHaveLength(1);
+			expect(result.input![0].type).toBe('message');
+			expect(result.input![0].role).toBe('user');
+		});
+
 		describe('CODEX_MODE parameter', () => {
 			it('should use bridge message when codexMode=true and tools present (default)', async () => {
 				const body: RequestBody = {
