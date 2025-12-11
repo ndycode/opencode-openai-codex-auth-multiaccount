@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [4.1.0] - 2025-12-11
+
+**Feature release**: GPT 5.2 model support and image input capabilities.
+
+### Added
+- **GPT 5.2 model family support**: Full support for OpenAI's latest GPT 5.2 model with 4 reasoning level presets:
+  - `gpt-5.2-low` - Fast responses with light reasoning
+  - `gpt-5.2-medium` - Balanced reasoning for general tasks
+  - `gpt-5.2-high` - Complex reasoning and analysis
+  - `gpt-5.2-xhigh` - Deep multi-hour analysis (same as Codex Max)
+- **Full image input support**: All 16 model variants now include `modalities.input: ["text", "image"]` enabling full multimodal capabilities - read screenshots, diagrams, UI mockups, and any image directly in OpenCode.
+- **GPT 5.2 model family** added to `codex.ts` with dedicated prompt handling.
+- **Test coverage**: Updated integration tests to verify all 16 models (was 13), now 193 unit tests + 16 integration tests.
+
+### Changed
+- **Model ordering**: Config now ordered by model family priority: GPT 5.2 → Codex Max → Codex → Codex Mini → GPT 5.1.
+- **Removed default presets**: Removed `gpt-5.1-codex-max` and `gpt-5.2` (without reasoning suffix) to enforce explicit reasoning level selection.
+- **Test script**: `scripts/test-all-models.sh` now uses local dist for testing and includes GPT 5.2 tests.
+- **Documentation**: Updated README with GPT 5.2 models, image support, and condensed config example.
+
+### Technical Details
+- GPT 5.2 maps to `gpt-5.2` API model with same reasoning options as Codex Max (`low/medium/high/xhigh`).
+- `getModelFamily()` now returns `"gpt-5.2"` for GPT 5.2 models, using Codex Max prompts.
+- `getReasoningConfig()` treats GPT 5.2 like Codex Max for `xhigh` reasoning support.
+- Model normalization pattern matching updated to recognize GPT 5.2 before other patterns.
+
 ## [4.0.2] - 2025-11-27
 
 **Bugfix release**: Fixes compaction context loss, agent creation, and SSE/JSON response handling.

@@ -30,6 +30,15 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.1-codex-max-xhigh": "gpt-5.1-codex-max",
 
 	// ============================================================================
+	// GPT-5.2 Models (same reasoning support as Codex Max: low/medium/high/xhigh)
+	// ============================================================================
+	"gpt-5.2": "gpt-5.2",
+	"gpt-5.2-low": "gpt-5.2",
+	"gpt-5.2-medium": "gpt-5.2",
+	"gpt-5.2-high": "gpt-5.2",
+	"gpt-5.2-xhigh": "gpt-5.2",
+
+	// ============================================================================
 	// GPT-5.1 Codex Mini Models
 	// ============================================================================
 	"gpt-5.1-codex-mini": "gpt-5.1-codex-mini",

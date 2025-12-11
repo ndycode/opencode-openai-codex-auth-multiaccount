@@ -1,6 +1,6 @@
 {
   "name": "opencode-openai-codex-auth",
-  "version": "4.0.2",
+  "version": "4.1.0",
   "description": "OpenAI ChatGPT (Codex backend) OAuth auth plugin for opencode - use your ChatGPT Plus/Pro subscription instead of API credits",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -44,11 +44,11 @@
     "node": ">=20.0.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "^0.13.7"
+    "@opencode-ai/plugin": "^1.0.150"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^0.13.7",
-    "@opencode-ai/sdk": "^0.13.9",
+    "@opencode-ai/plugin": "^1.0.150",
+    "@opencode-ai/sdk": "^1.0.150",
     "@types/node": "^24.6.2",
     "@vitest/ui": "^3.2.4",
     "typescript": "^5.9.3",

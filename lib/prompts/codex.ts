@@ -17,7 +17,7 @@ const __dirname = dirname(__filename);
  * Model family type for prompt selection
  * Maps to different system prompts in the Codex CLI
  */
-export type ModelFamily = "codex-max" | "codex" | "gpt-5.1";
+export type ModelFamily = "codex-max" | "codex" | "gpt-5.2" | "gpt-5.1";
 
 /**
  * Prompt file mapping for each model family
@@ -26,6 +26,7 @@ export type ModelFamily = "codex-max" | "codex" | "gpt-5.1";
 const PROMPT_FILES: Record<ModelFamily, string> = {
 	"codex-max": "gpt-5.1-codex-max_prompt.md",
 	codex: "gpt_5_codex_prompt.md",
+	"gpt-5.2": "gpt-5.1-codex-max_prompt.md", // GPT 5.2 uses same prompts as codex-max
 	"gpt-5.1": "gpt_5_1_prompt.md",
 };
 
@@ -35,6 +36,7 @@ const PROMPT_FILES: Record<ModelFamily, string> = {
 const CACHE_FILES: Record<ModelFamily, string> = {
 	"codex-max": "codex-max-instructions.md",
 	codex: "codex-instructions.md",
+	"gpt-5.2": "gpt-5.2-instructions.md",
 	"gpt-5.1": "gpt-5.1-instructions.md",
 };
 
@@ -53,6 +55,9 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 		normalizedModel.startsWith("codex-")
 	) {
 		return "codex";
+	}
+	if (normalizedModel.includes("gpt-5.2")) {
+		return "gpt-5.2";
 	}
 	return "gpt-5.1";
 }

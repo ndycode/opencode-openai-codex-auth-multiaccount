@@ -152,6 +152,11 @@ update_config() {
             ;;
     esac
 
+    # Replace npm package with local dist for testing
+    sed -i.bak 's|"opencode-openai-codex-auth@[^"]*"|"file://'"${REPO_DIR}"'/dist"|' "${OPENCODE_JSON}"
+    rm -f "${OPENCODE_JSON}.bak"
+    echo "✓ Using local dist for plugin"
+
     echo ""
 }
 
@@ -168,6 +173,12 @@ test_model "gpt-5.1-codex-max-low"    "gpt-5.1-codex-max"   "codex-max"  "low"  
 test_model "gpt-5.1-codex-max-medium" "gpt-5.1-codex-max"   "codex-max"  "medium"  "detailed" "medium"
 test_model "gpt-5.1-codex-max-high"   "gpt-5.1-codex-max"   "codex-max"  "high"    "detailed" "medium"
 test_model "gpt-5.1-codex-max-xhigh"  "gpt-5.1-codex-max"   "codex-max"  "xhigh"   "detailed" "medium"
+
+# GPT 5.2 presets (same reasoning support as Codex Max: low/medium/high/xhigh)
+test_model "gpt-5.2-low"    "gpt-5.2"   "gpt-5.2"  "low"     "auto"     "medium"
+test_model "gpt-5.2-medium" "gpt-5.2"   "gpt-5.2"  "medium"  "auto"     "medium"
+test_model "gpt-5.2-high"   "gpt-5.2"   "gpt-5.2"  "high"    "detailed" "medium"
+test_model "gpt-5.2-xhigh"  "gpt-5.2"   "gpt-5.2"  "xhigh"   "detailed" "medium"
 
 # GPT 5.1 Codex Mini presets (medium/high only)
 test_model "gpt-5.1-codex-mini-medium" "gpt-5.1-codex-mini" "codex"      "medium"  "auto"     "medium"

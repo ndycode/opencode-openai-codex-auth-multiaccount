@@ -38,7 +38,12 @@ export function normalizeModel(model: string | undefined): string {
 	const normalized = modelId.toLowerCase();
 
 	// Priority order for pattern matching (most specific first):
-	// 1. GPT-5.1 Codex Max
+	// 1. GPT-5.2 (supports same reasoning as Codex Max)
+	if (normalized.includes("gpt-5.2") || normalized.includes("gpt 5.2")) {
+		return "gpt-5.2";
+	}
+
+	// 2. GPT-5.1 Codex Max
 	if (
 		normalized.includes("gpt-5.1-codex-max") ||
 		normalized.includes("gpt 5.1 codex max")
@@ -46,7 +51,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex-max";
 	}
 
-	// 2. GPT-5.1 Codex Mini
+	// 4. GPT-5.1 Codex Mini
 	if (
 		normalized.includes("gpt-5.1-codex-mini") ||
 		normalized.includes("gpt 5.1 codex mini")
@@ -54,7 +59,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex-mini";
 	}
 
-	// 3. Legacy Codex Mini
+	// 5. Legacy Codex Mini
 	if (
 		normalized.includes("codex-mini-latest") ||
 		normalized.includes("gpt-5-codex-mini") ||
@@ -63,7 +68,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "codex-mini-latest";
 	}
 
-	// 4. GPT-5.1 Codex
+	// 6. GPT-5.1 Codex
 	if (
 		normalized.includes("gpt-5.1-codex") ||
 		normalized.includes("gpt 5.1 codex")
@@ -71,17 +76,17 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex";
 	}
 
-	// 5. GPT-5.1 (general-purpose)
+	// 7. GPT-5.1 (general-purpose)
 	if (normalized.includes("gpt-5.1") || normalized.includes("gpt 5.1")) {
 		return "gpt-5.1";
 	}
 
-	// 6. GPT-5 Codex family (any variant with "codex")
+	// 8. GPT-5 Codex family (any variant with "codex")
 	if (normalized.includes("codex")) {
 		return "gpt-5.1-codex";
 	}
 
-	// 7. GPT-5 family (any variant) - default to 5.1 as 5 is being phased out
+	// 9. GPT-5 family (any variant) - default to 5.1 as 5 is being phased out
 	if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
 		return "gpt-5.1";
 	}
@@ -125,6 +130,8 @@ export function getReasoningConfig(
 	userConfig: ConfigOptions = {},
 ): ReasoningConfig {
 	const normalizedName = modelName?.toLowerCase() ?? "";
+	const isGpt52 =
+		normalizedName.includes("gpt-5.2") || normalizedName.includes("gpt 5.2");
 	const isCodexMax =
 		normalizedName.includes("codex-max") ||
 		normalizedName.includes("codex max");
@@ -139,10 +146,13 @@ export function getReasoningConfig(
 		(normalizedName.includes("nano") ||
 			normalizedName.includes("mini"));
 
+	// GPT 5.2 and Codex Max support xhigh reasoning
+	const supportsXhigh = isGpt52 || isCodexMax;
+
 	// Default based on model type (Codex CLI defaults)
 	const defaultEffort: ReasoningConfig["effort"] = isCodexMini
 		? "medium"
-		: isCodexMax
+		: supportsXhigh
 			? "high"
 			: isLightweight
 				? "minimal"
@@ -163,8 +173,8 @@ export function getReasoningConfig(
 		}
 	}
 
-	// For all non-Codex-Max models, downgrade unsupported xhigh to high
-	if (!isCodexMax && effort === "xhigh") {
+	// For models that don't support xhigh, downgrade to high
+	if (!supportsXhigh && effort === "xhigh") {
 		effort = "high";
 	}
 
