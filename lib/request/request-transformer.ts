@@ -146,10 +146,26 @@ export function getReasoningConfig(
 		(normalizedName.includes("nano") ||
 			normalizedName.includes("mini"));
 
+	// GPT-5.1 general purpose (not codex variants) - supports "none" per OpenAI API docs
+	const isGpt51General =
+		(normalizedName.includes("gpt-5.1") || normalizedName.includes("gpt 5.1")) &&
+		!isCodex &&
+		!isCodexMax &&
+		!isCodexMini;
+
 	// GPT 5.2 and Codex Max support xhigh reasoning
 	const supportsXhigh = isGpt52 || isCodexMax;
 
+	// GPT 5.1 and GPT 5.2 support "none" reasoning per:
+	// - OpenAI API docs: "gpt-5.1 defaults to none, supports: none, low, medium, high"
+	// - Codex CLI: ReasoningEffort enum includes None variant (codex-rs/protocol/src/openai_models.rs)
+	// - Codex CLI: docs/config.md lists "none" as valid for model_reasoning_effort
+	// - gpt-5.2 (being newer) also supports: none, low, medium, high, xhigh
+	const supportsNone = isGpt52 || isGpt51General;
+
 	// Default based on model type (Codex CLI defaults)
+	// Note: OpenAI docs say gpt-5.1 defaults to "none", but we default to "medium"
+	// for better coding assistance unless user explicitly requests "none"
 	const defaultEffort: ReasoningConfig["effort"] = isCodexMini
 		? "medium"
 		: supportsXhigh
@@ -176,6 +192,12 @@ export function getReasoningConfig(
 	// For models that don't support xhigh, downgrade to high
 	if (!supportsXhigh && effort === "xhigh") {
 		effort = "high";
+	}
+
+	// For models that don't support "none", upgrade to "low"
+	// (Codex models don't support "none" - only GPT-5.1 and GPT-5.2 general purpose do)
+	if (!supportsNone && effort === "none") {
+		effort = "low";
 	}
 
 	// Normalize "minimal" to "low" for Codex families
@@ -452,21 +474,36 @@ export async function transformRequestBody(
 			body.input = addToolRemapMessage(body.input, !!body.tools);
 		}
 
-		// Filter orphaned function_call_output items (where function_call was an item_reference that got filtered)
-		// Keep matched pairs for compaction context
-		if (!body.tools && body.input) {
-			// Collect all call_ids from function_call items
+		// Handle orphaned function_call_output items (where function_call was an item_reference that got filtered)
+		// Instead of removing orphans (which causes infinite loops as LLM loses tool results),
+		// convert them to messages to preserve context while avoiding API errors
+		if (body.input) {
 			const functionCallIds = new Set(
 				body.input
 					.filter((item) => item.type === "function_call" && item.call_id)
 					.map((item) => item.call_id),
 			);
-			// Only filter function_call_output items that don't have a matching function_call
-			body.input = body.input.filter((item) => {
-				if (item.type === "function_call_output") {
-					return functionCallIds.has(item.call_id);
+			body.input = body.input.map((item) => {
+				if (item.type === "function_call_output" && !functionCallIds.has(item.call_id)) {
+					const toolName = typeof (item as any).name === "string" ? (item as any).name : "tool";
+					const callId = (item as any).call_id ?? "";
+					let text: string;
+					try {
+						const out = (item as any).output;
+						text = typeof out === "string" ? out : JSON.stringify(out);
+					} catch {
+						text = String((item as any).output ?? "");
+					}
+					if (text.length > 16000) {
+						text = text.slice(0, 16000) + "\n...[truncated]";
+					}
+					return {
+						type: "message",
+						role: "assistant",
+						content: `[Previous ${toolName} result; call_id=${callId}]: ${text}`,
+					} as InputItem;
 				}
-				return true;
+				return item;
 			});
 		}
 	}
