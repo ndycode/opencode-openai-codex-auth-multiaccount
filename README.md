@@ -95,6 +95,35 @@ Check [releases](https://github.com/numman-ali/opencode-openai-codex-auth/releas
 
 ---
 
+### Agent Instructions (Install / Update)
+
+If you’re using an AI agent (Codex/Claude/etc.) to install or update this plugin on a machine, use these steps:
+
+1. **Use the official repo**: https://github.com/numman-ali/opencode-openai-codex-auth
+2. **Pin the plugin version** in the user’s OpenCode config (`~/.config/opencode/opencode.json` or project `.opencode.json`).
+3. **Replace the config** with the latest `config/full-opencode.json` from the repo.
+4. **Refresh the plugin cache** so OpenCode reinstalls the updated version.
+5. **Restart OpenCode**.
+
+```bash
+# 1) Update plugin version (replace <latest> with newest release tag)
+# Example: opencode-openai-codex-auth@4.2.0
+
+# 2) Copy full config
+cp <repo>/config/full-opencode.json ~/.config/opencode/opencode.json
+
+# 3) Refresh OpenCode plugin cache
+rm -rf ~/.cache/opencode/node_modules ~/.cache/opencode/bun.lock
+
+# 4) Optional sanity check for GPT-5.2-Codex presets
+jq '.provider.openai.models | keys | map(select(startswith("gpt-5.2-codex")))' \
+  ~/.config/opencode/opencode.json
+```
+
+> **Note**: If using a project-local config, replace the target path with `<project>/.opencode.json`.
+
+---
+
 #### ⚠️ REQUIRED: Full Configuration (Only Supported Setup)
 
 **IMPORTANT**: You MUST use the full configuration from [`config/full-opencode.json`](./config/full-opencode.json). Other configurations are not officially supported and may not work reliably.
