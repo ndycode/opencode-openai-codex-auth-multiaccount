@@ -6,7 +6,7 @@
 [![Tests](https://github.com/numman-ali/opencode-openai-codex-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/numman-ali/opencode-openai-codex-auth/actions)
 
 > **Found this useful?**
-> Follow me on [X @nummanthinks](https://x.com/nummanthinks) for future updates and more projects!
+> Follow me on [X @nummanali](https://x.com/nummanali) for future updates and more projects!
 
 ## ⚠️ Usage Notice
 
