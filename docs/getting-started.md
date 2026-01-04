@@ -295,6 +295,8 @@ opencode auth login
 
 **⚠️ Important**: If you have the official Codex CLI running, stop it first (both use port 1455 for OAuth callback).
 
+**Manual fallback**: On SSH/WSL/remote environments, pick **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL after login.
+
 ### Step 3: Test It
 
 ```bash

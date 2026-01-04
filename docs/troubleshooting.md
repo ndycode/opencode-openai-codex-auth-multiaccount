@@ -52,6 +52,11 @@ date +%s000  # Current timestamp in milliseconds
 # The auth URL is shown in console - copy and paste to browser manually
 ```
 
+**1a. Manual URL Paste login:**
+- Re-run `opencode auth login`
+- Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
+- Paste the full redirect URL after login
+
 **2. Check port 1455 availability:**
 ```bash
 # See if something is using the OAuth callback port

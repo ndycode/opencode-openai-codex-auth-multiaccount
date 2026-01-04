@@ -51,6 +51,8 @@ opencode
 opencode auth login
 ```
 
+If the browser callback fails (SSH/WSL/remote), choose **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL.
+
 ### Updating
 
 **⚠️ OpenCode does NOT auto-update plugins**

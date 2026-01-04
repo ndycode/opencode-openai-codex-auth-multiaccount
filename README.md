@@ -236,7 +236,8 @@ Codex backend caching is enabled automatically. When OpenCode supplies a `prompt
 opencode auth login
 ```
 
-Select "OpenAI" → "ChatGPT Plus/Pro (Codex Subscription)"
+Select "OpenAI" → "ChatGPT Plus/Pro (Codex Subscription)"  
+If you're on SSH/WSL/remote and the browser callback fails, choose **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL.
 
 > **⚠️ First-time setup**: Stop Codex CLI if running (both use port 1455)
 

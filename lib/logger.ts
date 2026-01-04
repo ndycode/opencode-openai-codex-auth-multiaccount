@@ -1,6 +1,7 @@
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { PLUGIN_NAME } from "./constants.js";
 
 // Logging configuration
 export const LOGGING_ENABLED = process.env.ENABLE_PLUGIN_REQUEST_LOGGING === "1";
@@ -9,10 +10,10 @@ const LOG_DIR = join(homedir(), ".opencode", "logs", "codex-plugin");
 
 // Log startup message about logging state
 if (LOGGING_ENABLED) {
-	console.log("[openai-codex-plugin] Request logging ENABLED - logs will be saved to:", LOG_DIR);
+	console.log(`[${PLUGIN_NAME}] Request logging ENABLED - logs will be saved to:`, LOG_DIR);
 }
 if (DEBUG_ENABLED && !LOGGING_ENABLED) {
-	console.log("[openai-codex-plugin] Debug logging ENABLED");
+	console.log(`[${PLUGIN_NAME}] Debug logging ENABLED`);
 }
 
 let requestCounter = 0;
@@ -50,10 +51,10 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 			),
 			"utf8",
 		);
-		console.log(`[openai-codex-plugin] Logged ${stage} to ${filename}`);
+		console.log(`[${PLUGIN_NAME}] Logged ${stage} to ${filename}`);
 	} catch (e) {
 		const error = e as Error;
-		console.error("[openai-codex-plugin] Failed to write log:", error.message);
+		console.error(`[${PLUGIN_NAME}] Failed to write log:`, error.message);
 	}
 }
 
@@ -66,9 +67,9 @@ export function logDebug(message: string, data?: unknown): void {
 	if (!DEBUG_ENABLED) return;
 
 	if (data !== undefined) {
-		console.log(`[openai-codex-plugin] ${message}`, data);
+		console.log(`[${PLUGIN_NAME}] ${message}`, data);
 	} else {
-		console.log(`[openai-codex-plugin] ${message}`);
+		console.log(`[${PLUGIN_NAME}] ${message}`);
 	}
 }
 
@@ -78,9 +79,10 @@ export function logDebug(message: string, data?: unknown): void {
  * @param data - Optional data to log
  */
 export function logWarn(message: string, data?: unknown): void {
+	if (!DEBUG_ENABLED && !LOGGING_ENABLED) return;
 	if (data !== undefined) {
-		console.warn(`[openai-codex-plugin] ${message}`, data);
+		console.warn(`[${PLUGIN_NAME}] ${message}`, data);
 	} else {
-		console.warn(`[openai-codex-plugin] ${message}`);
+		console.warn(`[${PLUGIN_NAME}] ${message}`);
 	}
 }

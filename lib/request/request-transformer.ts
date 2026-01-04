@@ -3,6 +3,10 @@ import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
 import { CODEX_OPENCODE_BRIDGE } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
 import { getNormalizedModel } from "./helpers/model-map.js";
+import {
+	filterOpenCodeSystemPromptsWithCachedPrompt,
+	normalizeOrphanedToolOutputs,
+} from "./helpers/input-utils.js";
 import type {
 	ConfigOptions,
 	InputItem,
@@ -10,6 +14,11 @@ import type {
 	RequestBody,
 	UserConfig,
 } from "../types.js";
+
+export {
+	isOpenCodeSystemPrompt,
+	filterOpenCodeSystemPromptsWithCachedPrompt,
+} from "./helpers/input-utils.js";
 
 /**
  * Normalize model name to Codex-supported variants
@@ -275,56 +284,6 @@ export function filterInput(
 }
 
 /**
- * Check if an input item is the OpenCode system prompt
- * Uses cached OpenCode codex.txt for verification with fallback to text matching
- * @param item - Input item to check
- * @param cachedPrompt - Cached OpenCode codex.txt content
- * @returns True if this is the OpenCode system prompt
- */
-export function isOpenCodeSystemPrompt(
-	item: InputItem,
-	cachedPrompt: string | null,
-): boolean {
-	const isSystemRole = item.role === "developer" || item.role === "system";
-	if (!isSystemRole) return false;
-
-	const getContentText = (item: InputItem): string => {
-		if (typeof item.content === "string") {
-			return item.content;
-		}
-		if (Array.isArray(item.content)) {
-			return item.content
-				.filter((c) => c.type === "input_text" && c.text)
-				.map((c) => c.text)
-				.join("\n");
-		}
-		return "";
-	};
-
-	const contentText = getContentText(item);
-	if (!contentText) return false;
-
-	// Primary check: Compare against cached OpenCode prompt
-	if (cachedPrompt) {
-		// Exact match (trim whitespace for comparison)
-		if (contentText.trim() === cachedPrompt.trim()) {
-			return true;
-		}
-
-		// Partial match: Check if first 200 chars match (handles minor variations)
-		const contentPrefix = contentText.trim().substring(0, 200);
-		const cachedPrefix = cachedPrompt.trim().substring(0, 200);
-		if (contentPrefix === cachedPrefix) {
-			return true;
-		}
-	}
-
-	// Fallback check: Known OpenCode prompt signature (for safety)
-	// This catches the prompt even if cache fails
-	return contentText.startsWith("You are a coding agent running in");
-}
-
-/**
  * Filter out OpenCode system prompts from input
  * Used in CODEX_MODE to replace OpenCode prompts with Codex-OpenCode bridge
  * @param input - Input array
@@ -344,12 +303,7 @@ export async function filterOpenCodeSystemPrompts(
 		// This is safe because we still have the "starts with" check
 	}
 
-	return input.filter((item) => {
-		// Keep user messages
-		if (item.role === "user") return true;
-		// Filter out OpenCode system prompts
-		return !isOpenCodeSystemPrompt(item, cachedPrompt);
-	});
+	return filterOpenCodeSystemPromptsWithCachedPrompt(input, cachedPrompt);
 }
 
 /**
@@ -495,33 +449,7 @@ export async function transformRequestBody(
 		// Instead of removing orphans (which causes infinite loops as LLM loses tool results),
 		// convert them to messages to preserve context while avoiding API errors
 		if (body.input) {
-			const functionCallIds = new Set(
-				body.input
-					.filter((item) => item.type === "function_call" && item.call_id)
-					.map((item) => item.call_id),
-			);
-			body.input = body.input.map((item) => {
-				if (item.type === "function_call_output" && !functionCallIds.has(item.call_id)) {
-					const toolName = typeof (item as any).name === "string" ? (item as any).name : "tool";
-					const callId = (item as any).call_id ?? "";
-					let text: string;
-					try {
-						const out = (item as any).output;
-						text = typeof out === "string" ? out : JSON.stringify(out);
-					} catch {
-						text = String((item as any).output ?? "");
-					}
-					if (text.length > 16000) {
-						text = text.slice(0, 16000) + "\n...[truncated]";
-					}
-					return {
-						type: "message",
-						role: "assistant",
-						content: `[Previous ${toolName} result; call_id=${callId}]: ${text}`,
-					} as InputItem;
-				}
-				return item;
-			});
+			body.input = normalizeOrphanedToolOutputs(body.input);
 		}
 	}
 

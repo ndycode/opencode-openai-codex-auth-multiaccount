@@ -28,6 +28,7 @@ import {
 	createAuthorizationFlow,
 	decodeJWT,
 	exchangeAuthorizationCode,
+	parseAuthorizationInput,
 	REDIRECT_URI,
 } from "./lib/auth/auth.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
@@ -45,7 +46,7 @@ import {
 	PLUGIN_NAME,
 	PROVIDER_ID,
 } from "./lib/constants.js";
-import { logRequest } from "./lib/logger.js";
+import { logRequest, logDebug } from "./lib/logger.js";
 import {
 	createCodexHeaders,
 	extractRequestUrl,
@@ -103,10 +104,12 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const decoded = decodeJWT(auth.access);
 				const accountId = decoded?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
 
-                if (!accountId) {
-                    console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.NO_ACCOUNT_ID}`);
-                    return {};
-                }
+				if (!accountId) {
+					logDebug(
+						`[${PLUGIN_NAME}] ${ERROR_MESSAGES.NO_ACCOUNT_ID} (skipping plugin)`,
+					);
+					return {};
+				}
 				// Extract user configuration (global + per-model options)
 				const providerConfig = provider as
 					| { options?: Record<string, unknown>; models?: UserConfig["models"] }
@@ -211,10 +214,10 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					},
 				};
 			},
-			methods: [
-				{
-					label: AUTH_LABELS.OAUTH,
-					type: "oauth" as const,
+				methods: [
+					{
+						label: AUTH_LABELS.OAUTH,
+						type: "oauth" as const,
 					/**
 					 * OAuth authorization flow
 					 *
@@ -258,11 +261,37 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							},
 						};
 					},
-				},
-				{
-					label: AUTH_LABELS.API_KEY,
-					type: "api" as const,
-				},
+					},
+					{
+						label: AUTH_LABELS.OAUTH_MANUAL,
+						type: "oauth" as const,
+						authorize: async () => {
+							const { pkce, state, url } = await createAuthorizationFlow();
+							return {
+								url,
+								method: "code" as const,
+								instructions: AUTH_LABELS.INSTRUCTIONS_MANUAL,
+								callback: async (input: string) => {
+									const parsed = parseAuthorizationInput(input);
+									if (!parsed.code) {
+										return { type: "failed" as const };
+									}
+									const tokens = await exchangeAuthorizationCode(
+										parsed.code,
+										pkce.verifier,
+										REDIRECT_URI,
+									);
+									return tokens?.type === "success"
+										? tokens
+										: { type: "failed" as const };
+								},
+							};
+						},
+					},
+					{
+						label: AUTH_LABELS.API_KEY,
+						type: "api" as const,
+					},
 			],
 		},
 	};
