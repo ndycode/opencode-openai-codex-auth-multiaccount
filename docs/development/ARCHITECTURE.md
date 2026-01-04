@@ -277,19 +277,25 @@ let include: Vec<String> = if reasoning.is_some() {
 
 5. System Prompt Handling (CODEX_MODE)
    ├─ Filter out OpenCode system prompts
+   ├─ Preserve OpenCode env + AGENTS instructions when concatenated
    └─ Add Codex-OpenCode bridge prompt
 
-6. Reasoning Configuration
+6. Orphan Tool Output Handling
+   ├─ Match function_call_output to function_call OR local_shell_call
+   ├─ Match custom_tool_call_output to custom_tool_call
+   └─ Convert unmatched outputs to assistant messages (preserve context)
+
+7. Reasoning Configuration
    ├─ Set reasoningEffort (minimal/low/medium/high)
    ├─ Set reasoningSummary (auto/detailed)
    └─ Based on model variant
 
-7. Prompt Caching & Session Headers
+8. Prompt Caching & Session Headers
    ├─ Preserve host-supplied prompt_cache_key (OpenCode session id)
    ├─ Add conversation + account headers for Codex debugging when cache key exists
    └─ Leave headers unset if host does not provide a cache key
 
-8. Final Body
+9. Final Body
    ├─ store: false
    ├─ stream: true
    ├─ instructions: Codex system prompt
@@ -323,7 +329,8 @@ let include: Vec<String> = if reasoning.is_some() {
 | Feature | Codex CLI | This Plugin | Why? |
 |---------|-----------|-------------|------|
 | **Codex-OpenCode Bridge** | N/A (native) | ✅ Custom prompt | OpenCode → Codex translation |
-| **OpenCode Prompt Filtering** | N/A | ✅ Filter & replace | Remove OpenCode-specific prompts |
+| **OpenCode Prompt Filtering** | N/A | ✅ Filter & replace | Remove OpenCode prompts, keep env/AGENTS |
+| **Orphan Tool Output Handling** | ✅ Drop orphans | ✅ Convert to messages | Preserve context + avoid 400s |
 | **Usage-limit messaging** | CLI prints status | ✅ Friendly error summary | Surface 5h/weekly windows in OpenCode |
 | **Per-Model Options** | CLI flags | ✅ Config file | Better UX in OpenCode |
 | **Custom Model Names** | No | ✅ Display names | UI convenience |
@@ -396,7 +403,7 @@ let include: Vec<String> = if reasoning.is_some() {
 - ✅ Descriptive names ("Fast", "Balanced", "Max Quality")
 - ✅ Persistent across sessions
 
-**Source**: `config/full-opencode.json`
+**Source**: `config/opencode-legacy.json` (legacy) or `config/opencode-modern.json` (variants)
 
 ---
 

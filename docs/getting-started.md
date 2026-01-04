@@ -20,6 +20,24 @@ For production applications, use the [OpenAI Platform API](https://platform.open
 
 ## Installation
 
+### One-Command Install/Update (Recommended)
+
+Works on **Windows, macOS, and Linux**:
+
+```bash
+npx -y opencode-openai-codex-auth@latest
+```
+
+This writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
+
+Need legacy config (OpenCode v1.0.209 and below)?
+
+```bash
+npx -y opencode-openai-codex-auth@latest --legacy
+```
+
+---
+
 ### Step 1: Add Plugin to Config
 
 OpenCode automatically installs plugins - no `npm install` needed!
@@ -38,7 +56,7 @@ OpenCode automatically installs plugins - no `npm install` needed!
 
 Add this to `~/.config/opencode/opencode.json`:
 
-**Tip**: The snippet below is a truncated excerpt. For the complete list (including GPT 5.2 and GPT 5.2 Codex presets), copy `config/full-opencode.json` directly.
+**Tip**: The snippet below is a truncated excerpt. For the complete legacy list, copy `config/opencode-legacy.json`. For the modern variants config (OpenCode v1.0.210+), use `config/opencode-modern.json`.
 
 ```json
 {
@@ -295,6 +313,8 @@ opencode auth login
 
 **⚠️ Important**: If you have the official Codex CLI running, stop it first (both use port 1455 for OAuth callback).
 
+**Manual fallback**: On SSH/WSL/remote environments, pick **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL after login.
+
 ### Step 3: Test It
 
 ```bash
@@ -323,16 +343,16 @@ OpenCode checks multiple config files in order:
 
 ## ⚠️ Updating the Plugin (Important!)
 
-**OpenCode does NOT automatically update plugins.**
-
-When a new version is released, you must manually update:
+OpenCode caches plugins. To install the latest version, just re-run the installer:
 
 ```bash
-# Step 1: Clear plugin cache
-(cd ~ && sed -i.bak '/"opencode-openai-codex-auth"/d' .cache/opencode/package.json && rm -rf .cache/opencode/node_modules/opencode-openai-codex-auth)
+npx -y opencode-openai-codex-auth@latest
+```
 
-# Step 2: Restart OpenCode - it will reinstall the latest version
-opencode
+Legacy OpenCode (v1.0.209 and below):
+
+```bash
+npx -y opencode-openai-codex-auth@latest --legacy
 ```
 
 **When to update:**

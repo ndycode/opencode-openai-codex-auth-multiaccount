@@ -6,6 +6,7 @@ import {
     addToolRemapMessage,
     isOpenCodeSystemPrompt,
     filterOpenCodeSystemPrompts,
+    filterOpenCodeSystemPromptsWithCachedPrompt,
     addCodexBridgeMessage,
     transformRequestBody,
 } from '../lib/request/request-transformer.js';
@@ -378,7 +379,7 @@ describe('Request Transformer Module', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
-				content: 'You are a coding agent running in OpenCode',
+				content: 'You are a coding agent running in the opencode, a terminal-based coding assistant.',
 			};
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(true);
 		});
@@ -390,7 +391,7 @@ describe('Request Transformer Module', () => {
 				content: [
 					{
 						type: 'input_text',
-						text: 'You are a coding agent running in OpenCode',
+						text: 'You are a coding agent running in the opencode, a terminal-based coding assistant.',
 					},
 				],
 			};
@@ -401,7 +402,7 @@ describe('Request Transformer Module', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'system',
-				content: 'You are a coding agent running in OpenCode',
+				content: 'You are a coding agent running in the opencode, a terminal-based coding assistant.',
 			};
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(true);
 		});
@@ -410,7 +411,7 @@ describe('Request Transformer Module', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'user',
-				content: 'You are a coding agent running in OpenCode',
+				content: 'You are a coding agent running in the opencode, a terminal-based coding assistant.',
 			};
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(false);
 		});
@@ -443,25 +444,34 @@ describe('Request Transformer Module', () => {
 		});
 
 		it('should NOT detect content with codex signature in the middle', async () => {
-			const cachedPrompt = 'You are a coding agent running in OpenCode.';
+			const cachedPrompt = 'You are a coding agent running in the opencode.';
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
 				// Has codex.txt content but with environment prepended (like OpenCode does)
-				content: 'Environment info here\n\nYou are a coding agent running in OpenCode.',
+				content: 'Environment info here\n\nYou are a coding agent running in the opencode.',
 			};
 			// First 200 chars won't match because of prepended content
 			expect(isOpenCodeSystemPrompt(item, cachedPrompt)).toBe(false);
 		});
 
 		it('should detect with cached prompt exact match', async () => {
-			const cachedPrompt = 'You are a coding agent running in OpenCode';
+			const cachedPrompt = 'You are a coding agent running in the opencode';
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
-				content: 'You are a coding agent running in OpenCode',
+				content: 'You are a coding agent running in the opencode',
 			};
 			expect(isOpenCodeSystemPrompt(item, cachedPrompt)).toBe(true);
+		});
+
+		it('should detect alternative OpenCode prompt signatures', async () => {
+			const item: InputItem = {
+				type: 'message',
+				role: 'developer',
+				content: "You are opencode, an agent - please keep going until the user's query is completely resolved.",
+			};
+			expect(isOpenCodeSystemPrompt(item, null)).toBe(true);
 		});
 	});
 
@@ -471,11 +481,11 @@ describe('Request Transformer Module', () => {
 				{
 					type: 'message',
 					role: 'developer',
-					content: 'You are a coding agent running in OpenCode',
+					content: 'You are a coding agent running in the opencode',
 				},
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
-			const result = await filterOpenCodeSystemPrompts(input);
+			const result = filterOpenCodeSystemPromptsWithCachedPrompt(input, null);
 			expect(result).toHaveLength(1);
 			expect(result![0].role).toBe('user');
 		});
@@ -485,7 +495,7 @@ describe('Request Transformer Module', () => {
 				{ type: 'message', role: 'user', content: 'message 1' },
 				{ type: 'message', role: 'user', content: 'message 2' },
 			];
-			const result = await filterOpenCodeSystemPrompts(input);
+			const result = filterOpenCodeSystemPromptsWithCachedPrompt(input, null);
 			expect(result).toHaveLength(2);
 		});
 
@@ -494,7 +504,7 @@ describe('Request Transformer Module', () => {
 				{ type: 'message', role: 'developer', content: 'Custom instruction' },
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
-			const result = await filterOpenCodeSystemPrompts(input);
+			const result = filterOpenCodeSystemPromptsWithCachedPrompt(input, null);
 			expect(result).toHaveLength(2);
 		});
 
@@ -503,7 +513,7 @@ describe('Request Transformer Module', () => {
 				{
 					type: 'message',
 					role: 'developer',
-					content: 'You are a coding agent running in OpenCode', // This is codex.txt
+					content: 'You are a coding agent running in the opencode', // This is codex.txt
 				},
 				{
 					type: 'message',
@@ -512,11 +522,36 @@ describe('Request Transformer Module', () => {
 				},
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
-			const result = await filterOpenCodeSystemPrompts(input);
+			const result = filterOpenCodeSystemPromptsWithCachedPrompt(input, null);
 			// Should filter codex.txt but keep AGENTS.md
 			expect(result).toHaveLength(2);
 			expect(result![0].content).toContain('AGENTS.md');
 			expect(result![1].role).toBe('user');
+		});
+
+		it('should strip OpenCode prompt but keep concatenated env/instructions', async () => {
+			const input: InputItem[] = [
+				{
+					type: 'message',
+					role: 'developer',
+					content: [
+						'You are a coding agent running in the opencode, a terminal-based coding assistant.',
+						'Here is some useful information about the environment you are running in:',
+						'<env>',
+						'  Working directory: /path/to/project',
+						'</env>',
+						'Instructions from: /path/to/AGENTS.md',
+						'# Project Guidelines',
+					].join('\n'),
+				},
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = filterOpenCodeSystemPromptsWithCachedPrompt(input, null);
+			expect(result).toHaveLength(2);
+			const preserved = String(result![0].content);
+			expect(preserved).toContain('Here is some useful information about the environment');
+			expect(preserved).toContain('Instructions from: /path/to/AGENTS.md');
+			expect(preserved).not.toContain('You are a coding agent running in the opencode');
 		});
 
 		it('should keep environment+AGENTS.md concatenated message', async () => {
@@ -524,7 +559,7 @@ describe('Request Transformer Module', () => {
 				{
 					type: 'message',
 					role: 'developer',
-					content: 'You are a coding agent running in OpenCode', // codex.txt alone
+					content: 'You are a coding agent running in the opencode', // codex.txt alone
 				},
 				{
 					type: 'message',
@@ -534,7 +569,7 @@ describe('Request Transformer Module', () => {
 				},
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
-			const result = await filterOpenCodeSystemPrompts(input);
+			const result = filterOpenCodeSystemPromptsWithCachedPrompt(input, null);
 			// Should filter first message (codex.txt) but keep second (env+AGENTS.md)
 			expect(result).toHaveLength(2);
 			expect(result![0].content).toContain('AGENTS.md');
@@ -646,6 +681,42 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.summary).toBe('detailed');
 		});
 
+		it('should respect reasoning config already set in body', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				reasoning: {
+					effort: 'low',
+					summary: 'auto',
+				},
+			};
+			const userConfig: UserConfig = {
+				global: { reasoningEffort: 'high', reasoningSummary: 'detailed' },
+				models: {},
+			};
+			const result = await transformRequestBody(body, codexInstructions, userConfig);
+
+			expect(result.reasoning?.effort).toBe('low');
+			expect(result.reasoning?.summary).toBe('auto');
+		});
+
+		it('should use reasoning config from providerOptions when present', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				providerOptions: {
+					openai: {
+						reasoningEffort: 'high',
+						reasoningSummary: 'detailed',
+					},
+				},
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.reasoning?.effort).toBe('high');
+			expect(result.reasoning?.summary).toBe('detailed');
+		});
+
 		it('should apply default text verbosity', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',
@@ -668,6 +739,35 @@ describe('Request Transformer Module', () => {
 			expect(result.text?.verbosity).toBe('low');
 		});
 
+		it('should use text verbosity from providerOptions when present', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				providerOptions: {
+					openai: {
+						textVerbosity: 'low',
+					},
+				},
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+			expect(result.text?.verbosity).toBe('low');
+		});
+
+		it('should prefer body text verbosity over providerOptions', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				text: { verbosity: 'high' },
+				providerOptions: {
+					openai: {
+						textVerbosity: 'low',
+					},
+				},
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+			expect(result.text?.verbosity).toBe('high');
+		});
+
 		it('should set default include for encrypted reasoning', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',
@@ -687,6 +787,16 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
+			expect(result.include).toEqual(['custom_field', 'reasoning.encrypted_content']);
+		});
+
+		it('should always include reasoning.encrypted_content when include provided', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				include: ['custom_field'],
+			};
+			const result = await transformRequestBody(body, codexInstructions);
 			expect(result.include).toEqual(['custom_field', 'reasoning.encrypted_content']);
 		});
 
@@ -1006,6 +1116,65 @@ describe('Request Transformer Module', () => {
 			expect(result.input![2].type).toBe('function_call_output');
 		});
 
+		it('should treat local_shell_call as a match for function_call_output', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5-codex',
+				input: [
+					{ type: 'message', role: 'user', content: 'hello' },
+					{
+						type: 'local_shell_call',
+						call_id: 'shell_call',
+						action: { type: 'exec', command: ['ls'] },
+					} as any,
+					{ type: 'function_call_output', call_id: 'shell_call', output: 'ok' } as any,
+				],
+			};
+
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.input).toHaveLength(3);
+			expect(result.input![1].type).toBe('local_shell_call');
+			expect(result.input![2].type).toBe('function_call_output');
+		});
+
+		it('should keep matching custom_tool_call_output items', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5-codex',
+				input: [
+					{ type: 'message', role: 'user', content: 'hello' },
+					{
+						type: 'custom_tool_call',
+						call_id: 'custom_call',
+						name: 'mcp_tool',
+						input: '{}',
+					} as any,
+					{ type: 'custom_tool_call_output', call_id: 'custom_call', output: 'done' } as any,
+				],
+			};
+
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.input).toHaveLength(3);
+			expect(result.input![1].type).toBe('custom_tool_call');
+			expect(result.input![2].type).toBe('custom_tool_call_output');
+		});
+
+		it('should convert orphaned custom_tool_call_output to message', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5-codex',
+				input: [
+					{ type: 'message', role: 'user', content: 'hello' },
+					{ type: 'custom_tool_call_output', call_id: 'orphan_custom', output: 'oops' } as any,
+				],
+			};
+
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.input).toHaveLength(2);
+			expect(result.input![1].type).toBe('message');
+			expect(result.input![1].content).toContain('[Previous tool result; call_id=orphan_custom]');
+		});
+
 		describe('CODEX_MODE parameter', () => {
 			it('should use bridge message when codexMode=true and tools present (default)', async () => {
 				const body: RequestBody = {
@@ -1027,7 +1196,7 @@ describe('Request Transformer Module', () => {
 						{
 							type: 'message',
 							role: 'developer',
-							content: 'You are a coding agent running in OpenCode',
+							content: 'You are a coding agent running in the opencode',
 						},
 						{ type: 'message', role: 'user', content: 'hello' },
 					],
@@ -1073,7 +1242,7 @@ describe('Request Transformer Module', () => {
 						{
 							type: 'message',
 							role: 'developer',
-							content: 'You are a coding agent running in OpenCode',
+							content: 'You are a coding agent running in the opencode',
 						},
 						{ type: 'message', role: 'user', content: 'hello' },
 					],

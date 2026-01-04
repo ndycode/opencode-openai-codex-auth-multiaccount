@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import * as authModule from '../lib/auth/auth.js';
 import {
     shouldRefreshToken,
+    refreshAndUpdateToken,
     extractRequestUrl,
     rewriteUrlForCodex,
     createCodexHeaders,
@@ -10,6 +12,10 @@ import type { Auth } from '../lib/types.js';
 import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES } from '../lib/constants.js';
 
 describe('Fetch Helpers Module', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	describe('shouldRefreshToken', () => {
 		it('should return true for non-oauth auth', () => {
 			const auth: Auth = { type: 'api', key: 'test-key' };
@@ -39,6 +45,42 @@ describe('Fetch Helpers Module', () => {
 				expires: Date.now() + 10000 // valid for 10 seconds
 			};
 			expect(shouldRefreshToken(auth)).toBe(false);
+		});
+	});
+
+	describe('refreshAndUpdateToken', () => {
+		it('throws when refresh fails', async () => {
+			const auth: Auth = { type: 'oauth', access: 'old', refresh: 'bad', expires: 0 };
+			const client = { auth: { set: vi.fn() } } as any;
+			vi.spyOn(authModule, 'refreshAccessToken').mockResolvedValue({ type: 'failed' } as any);
+
+			await expect(refreshAndUpdateToken(auth, client)).rejects.toThrow();
+		});
+
+		it('updates stored auth on success', async () => {
+			const auth: Auth = { type: 'oauth', access: 'old', refresh: 'oldr', expires: 0 };
+			const client = { auth: { set: vi.fn() } } as any;
+			vi.spyOn(authModule, 'refreshAccessToken').mockResolvedValue({
+				type: 'success',
+				access: 'new',
+				refresh: 'newr',
+				expires: 123,
+			} as any);
+
+			const updated = await refreshAndUpdateToken(auth, client);
+
+			expect(client.auth.set).toHaveBeenCalledWith({
+				path: { id: 'openai' },
+				body: {
+					type: 'oauth',
+					access: 'new',
+					refresh: 'newr',
+					expires: 123,
+				},
+			});
+			expect(updated.access).toBe('new');
+			expect(updated.refresh).toBe('newr');
+			expect(updated.expires).toBe(123);
 		});
 	});
 
@@ -93,29 +135,28 @@ describe('Fetch Helpers Module', () => {
 	    expect(headers.get('accept')).toBe('text/event-stream');
     });
 
-    it('enriches usage limit errors with friendly message and rate limits', async () => {
-        const body = {
-            error: {
-                code: 'usage_limit_reached',
-                message: 'limit reached',
-                plan_type: 'pro',
-            },
-        };
-        const headers = new Headers({
-            'x-codex-primary-used-percent': '75',
-            'x-codex-primary-window-minutes': '300',
-            'x-codex-primary-reset-at': String(Math.floor(Date.now() / 1000) + 1800),
-        });
-        const resp = new Response(JSON.stringify(body), { status: 429, headers });
-        const enriched = await handleErrorResponse(resp);
-        expect(enriched.status).toBe(429);
-        const json = await enriched.json() as any;
-        expect(json.error).toBeTruthy();
-        expect(json.error.friendly_message).toMatch(/usage limit/i);
-        expect(json.error.rate_limits.primary.used_percent).toBe(75);
-        expect(json.error.rate_limits.primary.window_minutes).toBe(300);
-        expect(typeof json.error.rate_limits.primary.resets_at).toBe('number');
-    });
+		it('maps usage-limit 404 errors to 429', async () => {
+			const body = {
+				error: {
+					code: 'usage_limit_reached',
+					message: 'limit reached',
+				},
+			};
+			const resp = new Response(JSON.stringify(body), { status: 404 });
+			const mapped = await handleErrorResponse(resp);
+			expect(mapped.status).toBe(429);
+			const json = await mapped.json() as any;
+			expect(json.error.code).toBe('usage_limit_reached');
+		});
+
+		it('leaves non-usage 404 errors unchanged', async () => {
+			const body = { error: { code: 'not_found', message: 'nope' } };
+			const resp = new Response(JSON.stringify(body), { status: 404 });
+			const result = await handleErrorResponse(resp);
+			expect(result.status).toBe(404);
+			const json = await result.json() as any;
+			expect(json.error.code).toBe('not_found');
+		});
 
 		it('should remove x-api-key header', () => {
         const init = { headers: { 'x-api-key': 'should-be-removed' } } as any;

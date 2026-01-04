@@ -19,6 +19,8 @@ export const PROVIDER_ID = "openai";
 export const HTTP_STATUS = {
 	OK: 200,
 	UNAUTHORIZED: 401,
+	NOT_FOUND: 404,
+	TOO_MANY_REQUESTS: 429,
 } as const;
 
 /** OpenAI-specific headers */
@@ -70,6 +72,10 @@ export const PLATFORM_OPENERS = {
 /** OAuth authorization labels */
 export const AUTH_LABELS = {
 	OAUTH: "ChatGPT Plus/Pro (Codex Subscription)",
+	OAUTH_MANUAL: "ChatGPT Plus/Pro (Manual URL Paste)",
 	API_KEY: "Manually enter API Key",
-	INSTRUCTIONS: "A browser window should open. Complete login to finish.",
+	INSTRUCTIONS:
+		"A browser window should open. If it doesn't, copy the URL and open it manually.",
+	INSTRUCTIONS_MANUAL:
+		"After logging in, copy the full redirect URL and paste it here.",
 } as const;

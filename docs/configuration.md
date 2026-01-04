@@ -264,7 +264,7 @@ opencode run "task" --model=openai/my-custom-id
 # TUI shows: "My Display Name"
 ```
 
-> **⚠️ Recommendation:** Stick to the official presets in `full-opencode.json` rather than creating custom model variants. GPT 5 models need specific configurations to work reliably.
+> **⚠️ Recommendation:** Stick to the official presets in `opencode-modern.json` (v1.0.210+) or `opencode-legacy.json` rather than creating custom model variants. GPT 5 models need specific configurations to work reliably.
 
 See [development/CONFIG_FIELDS.md](development/CONFIG_FIELDS.md) for complete explanation.
 
@@ -407,9 +407,10 @@ CODEX_MODE=1 opencode run "task"  # Temporarily enable
 ## Configuration Files
 
 **Provided Examples:**
-- [config/full-opencode.json](../config/full-opencode.json) - Complete with 22 GPT 5.x variants (GPT 5.2, GPT 5.2 Codex, GPT 5.1)
+- [config/opencode-modern.json](../config/opencode-modern.json) - Variants-based config for OpenCode v1.0.210+
+- [config/opencode-legacy.json](../config/opencode-legacy.json) - Legacy full list for v1.0.209 and below
 
-> **⚠️ REQUIRED:** You MUST use `full-opencode.json` - this is the ONLY officially supported configuration. Minimal configs are NOT supported for GPT 5 models and will fail unpredictably. OpenCode's auto-compaction and usage widgets also require the full config's per-model `limit` metadata.
+> **⚠️ REQUIRED:** You MUST use the config that matches your OpenCode version (`opencode-modern.json` or `opencode-legacy.json`). Minimal configs are NOT supported for GPT 5 models and will fail unpredictably. OpenCode's auto-compaction and usage widgets also require the full config's per-model `limit` metadata.
 
 **Your Configs:**
 - `~/.config/opencode/opencode.json` - Global config
@@ -461,7 +462,7 @@ cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasonin
 
 Old verbose names still work:
 
-**⚠️ IMPORTANT:** Old configs with GPT 5.0 models are deprecated. You MUST migrate to the new `full-opencode.json` with GPT 5.x models.
+**⚠️ IMPORTANT:** Old configs with GPT 5.0 models are deprecated. You MUST migrate to the new GPT 5.x configs (`opencode-modern.json` or `opencode-legacy.json`).
 
 **Old config (deprecated):**
 ```json
@@ -477,7 +478,7 @@ Old verbose names still work:
 
 **New config (required):**
 
-Use the official [`config/full-opencode.json`](../config/full-opencode.json) file which includes:
+Use the official config file (`opencode-modern.json` for v1.0.210+, `opencode-legacy.json` for older) which includes:
 
 ```json
 {
@@ -608,7 +609,7 @@ Look for `hasModelSpecificConfig: true` in debug output.
 
 **Fix**: Use exact name you specify in CLI as config key.
 
-> **⚠️ Best Practice:** Use the official `full-opencode.json` configuration instead of creating custom configs. This ensures proper model normalization and compatibility with GPT 5 models.
+> **⚠️ Best Practice:** Use the official `opencode-modern.json` or `opencode-legacy.json` configuration instead of creating custom configs. This ensures proper model normalization and compatibility with GPT 5 models.
 
 ---
 

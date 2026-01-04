@@ -34,26 +34,17 @@ export function shouldRefreshToken(auth: Auth): boolean {
  * Refreshes the OAuth token and updates stored credentials
  * @param currentAuth - Current auth state
  * @param client - Opencode client for updating stored credentials
- * @returns Updated auth or error response
+ * @returns Updated auth (throws on failure)
  */
 export async function refreshAndUpdateToken(
 	currentAuth: Auth,
 	client: OpencodeClient,
-): Promise<
-	{ success: true; auth: Auth } | { success: false; response: Response }
-> {
+): Promise<Auth> {
 	const refreshToken = currentAuth.type === "oauth" ? currentAuth.refresh : "";
 	const refreshResult = await refreshAccessToken(refreshToken);
 
 	if (refreshResult.type === "failed") {
-		console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.TOKEN_REFRESH_FAILED}`);
-		return {
-			success: false,
-			response: new Response(
-				JSON.stringify({ error: "Token refresh failed" }),
-				{ status: HTTP_STATUS.UNAUTHORIZED },
-			),
-		};
+		throw new Error(ERROR_MESSAGES.TOKEN_REFRESH_FAILED);
 	}
 
 	// Update stored credentials
@@ -74,7 +65,7 @@ export async function refreshAndUpdateToken(
 		currentAuth.expires = refreshResult.expires;
 	}
 
-	return { success: true, auth: currentAuth };
+	return currentAuth;
 }
 
 /**
@@ -207,74 +198,20 @@ export function createCodexHeaders(
 /**
  * Handles error responses from the Codex API
  * @param response - Error response from API
- * @returns Response with error details
+ * @returns Original response or mapped retryable response
  */
 export async function handleErrorResponse(
     response: Response,
 ): Promise<Response> {
-	const raw = await response.text();
+	const mapped = await mapUsageLimit404(response);
+	const finalResponse = mapped ?? response;
 
-	let enriched = raw;
-	try {
-		const parsed = JSON.parse(raw) as any;
-		const err = parsed?.error ?? {};
-
-		// Parse Codex rate-limit headers if present
-		const h = response.headers;
-		const primary = {
-			used_percent: toNumber(h.get("x-codex-primary-used-percent")),
-			window_minutes: toInt(h.get("x-codex-primary-window-minutes")),
-			resets_at: toInt(h.get("x-codex-primary-reset-at")),
-		};
-		const secondary = {
-			used_percent: toNumber(h.get("x-codex-secondary-used-percent")),
-			window_minutes: toInt(h.get("x-codex-secondary-window-minutes")),
-			resets_at: toInt(h.get("x-codex-secondary-reset-at")),
-		};
-		const rate_limits =
-			primary.used_percent !== undefined || secondary.used_percent !== undefined
-				? { primary, secondary }
-				: undefined;
-
-		// Friendly message for subscription/rate usage limits
-		const code = (err.code ?? err.type ?? "").toString();
-		const resetsAt = err.resets_at ?? primary.resets_at ?? secondary.resets_at;
-		const mins = resetsAt ? Math.max(0, Math.round((resetsAt * 1000 - Date.now()) / 60000)) : undefined;
-		let friendly_message: string | undefined;
-		if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
-			const plan = err.plan_type ? ` (${String(err.plan_type).toLowerCase()} plan)` : "";
-			const when = mins !== undefined ? ` Try again in ~${mins} min.` : "";
-			friendly_message = `You have hit your ChatGPT usage limit${plan}.${when}`.trim();
-		}
-
-		const enhanced = {
-			error: {
-				...err,
-				message: err.message ?? friendly_message ?? "Usage limit reached.",
-				friendly_message,
-				rate_limits,
-				status: response.status,
-			},
-		};
-		enriched = JSON.stringify(enhanced);
-	} catch {
-		// Raw body not JSON; leave unchanged
-		enriched = raw;
-	}
-
-    console.error(`[${PLUGIN_NAME}] ${response.status} error:`, enriched);
 	logRequest(LOG_STAGES.ERROR_RESPONSE, {
-		status: response.status,
-		error: enriched,
+		status: finalResponse.status,
+		statusText: finalResponse.statusText,
 	});
 
-	const headers = new Headers(response.headers);
-	headers.set("content-type", "application/json; charset=utf-8");
-	return new Response(enriched, {
-		status: response.status,
-		statusText: response.statusText,
-		headers,
-	});
+	return finalResponse;
 }
 
 /**
@@ -304,13 +241,35 @@ export async function handleSuccessResponse(
 	});
 }
 
-function toNumber(v: string | null): number | undefined {
-    if (v == null) return undefined;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
-}
-function toInt(v: string | null): number | undefined {
-    if (v == null) return undefined;
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : undefined;
+async function mapUsageLimit404(response: Response): Promise<Response | null> {
+	if (response.status !== HTTP_STATUS.NOT_FOUND) return null;
+
+	const clone = response.clone();
+	let text = "";
+	try {
+		text = await clone.text();
+	} catch {
+		text = "";
+	}
+	if (!text) return null;
+
+	let code = "";
+	try {
+		const parsed = JSON.parse(text) as any;
+		code = (parsed?.error?.code ?? parsed?.error?.type ?? "").toString();
+	} catch {
+		code = "";
+	}
+
+	const haystack = `${code} ${text}`.toLowerCase();
+	if (!/usage_limit_reached|usage_not_included|rate_limit_exceeded|usage limit/i.test(haystack)) {
+		return null;
+	}
+
+	const headers = new Headers(response.headers);
+	return new Response(response.body, {
+		status: HTTP_STATUS.TOO_MANY_REQUESTS,
+		statusText: "Too Many Requests",
+		headers,
+	});
 }

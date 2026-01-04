@@ -40,7 +40,19 @@ Explore the engineering depth behind this plugin:
 
 ### Installation
 
-Add to your config, run OpenCode, authenticate:
+One-command install/update (global config):
+
+```bash
+npx -y opencode-openai-codex-auth@latest
+```
+
+Legacy OpenCode (v1.0.209 and below):
+
+```bash
+npx -y opencode-openai-codex-auth@latest --legacy
+```
+
+Then run OpenCode and authenticate:
 
 ```bash
 # 1. Add plugin to ~/.config/opencode/opencode.json
@@ -51,14 +63,14 @@ opencode
 opencode auth login
 ```
 
+If the browser callback fails (SSH/WSL/remote), choose **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL.
+
 ### Updating
 
-**⚠️ OpenCode does NOT auto-update plugins**
+Re-run the installer to update:
 
-To get the latest version:
 ```bash
-(cd ~ && sed -i.bak '/"opencode-openai-codex-auth"/d' .cache/opencode/package.json && rm -rf .cache/opencode/node_modules/opencode-openai-codex-auth)
-opencode  # Reinstalls latest
+npx -y opencode-openai-codex-auth@latest
 ```
 
 ### Minimal Configuration
@@ -83,12 +95,13 @@ opencode run "write hello world to test.txt" --model=openai/gpt-5-codex
 
 ✅ **OAuth Authentication** - Secure ChatGPT Plus/Pro login
 ✅ **GPT 5.2 + GPT 5.2 Codex + GPT 5.1 Models** - 22 pre-configured variants across GPT 5.2, GPT 5.2 Codex, GPT 5.1, Codex, Codex Max, Codex Mini
+✅ **Variant system support** - Works with OpenCode v1.0.210+ model variants and legacy presets
 ✅ **Per-Model Configuration** - Different reasoning effort, including `xhigh` for GPT 5.2, GPT 5.2 Codex, and Codex Max
 ✅ **Multi-Turn Conversations** - Full conversation history with stateless backend
-✅ **Verified Configuration** - Use `config/full-opencode.json` for guaranteed compatibility
+✅ **Verified Configuration** - Use `config/opencode-modern.json` (v1.0.210+) or `config/opencode-legacy.json` (older)
 ✅ **Comprehensive Testing** - 200+ unit tests + integration tests
 
-> **⚠️ Important**: GPT 5 models can be temperamental. Use the official `config/full-opencode.json` configuration - it's the ONLY supported setup. Older GPT 5.0 models are deprecated.
+> **⚠️ Important**: GPT 5 models can be temperamental. Use the official config for your OpenCode version (`opencode-modern.json` or `opencode-legacy.json`). Older GPT 5.0 models are deprecated.
 
 ---
 

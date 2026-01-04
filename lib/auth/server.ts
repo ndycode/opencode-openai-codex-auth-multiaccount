@@ -48,6 +48,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			.listen(1455, "127.0.0.1", () => {
 				resolve({
 					port: 1455,
+					ready: true,
 					close: () => server.close(),
 					waitForCode: async () => {
 						const poll = () => new Promise<void>((r) => setTimeout(r, 100));
@@ -68,6 +69,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 				);
 				resolve({
 					port: 1455,
+					ready: false,
 					close: () => {
 						try {
 							server.close();

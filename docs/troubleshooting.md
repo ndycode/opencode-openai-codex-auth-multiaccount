@@ -52,6 +52,11 @@ date +%s000  # Current timestamp in milliseconds
 # The auth URL is shown in console - copy and paste to browser manually
 ```
 
+**1a. Manual URL Paste login:**
+- Re-run `opencode auth login`
+- Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
+- Paste the full redirect URL after login
+
 **2. Check port 1455 availability:**
 ```bash
 # See if something is using the OAuth callback port
@@ -61,6 +66,16 @@ lsof -i :1455
 **3. Official Codex CLI conflict:**
 - Stop Codex CLI if running
 - Both use port 1455 for OAuth
+
+### "Invalid Session" or "Authorization session expired"
+
+**Symptoms:**
+- Browser shows: `Your authorization session was not initialized or has expired`
+
+**Solutions:**
+- Re-run `opencode auth login` to generate a fresh URL
+- Open the **"Go to"** URL directly in your browser (don’t use a stale link)
+- If you’re on SSH/WSL/remote, choose **"ChatGPT Plus/Pro (Manual URL Paste)"**
 
 ### "403 Forbidden" Error
 
@@ -148,7 +163,7 @@ Items are not persisted when `store` is set to false.
 **Solution:**
 ```bash
 # Update plugin
-(cd ~ && sed -i.bak '/"opencode-openai-codex-auth"/d' .cache/opencode/package.json && rm -rf .cache/opencode/node_modules/opencode-openai-codex-auth)
+npx -y opencode-openai-codex-auth@latest
 
 # Restart OpenCode
 opencode

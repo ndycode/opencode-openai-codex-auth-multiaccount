@@ -138,22 +138,18 @@ update_config() {
     echo ""
 
     case "${config_type}" in
-        "full")
-            cat "${REPO_DIR}/config/full-opencode.json" > "${OPENCODE_JSON}"
-            echo "✓ Updated opencode.json with full config (GPT 5.x)"
+        "legacy")
+            cat "${REPO_DIR}/config/opencode-legacy.json" > "${OPENCODE_JSON}"
+            echo "✓ Updated opencode.json with legacy config (GPT 5.x)"
             ;;
         "minimal")
             cat "${REPO_DIR}/config/minimal-opencode.json" > "${OPENCODE_JSON}"
             echo "✓ Updated opencode.json with minimal config"
             ;;
-        "backwards-compat")
-            cat "${REPO_DIR}/config/full-opencode-gpt5.json" > "${OPENCODE_JSON}"
-            echo "✓ Updated opencode.json with backwards compatibility config"
-            ;;
     esac
 
     # Replace npm package with local dist for testing
-    sed -i.bak 's|"opencode-openai-codex-auth@[^"]*"|"file://'"${REPO_DIR}"'/dist"|' "${OPENCODE_JSON}"
+    sed -i.bak -E 's|"opencode-openai-codex-auth(@[^"]*)?"|"file://'"${REPO_DIR}"'/dist"|' "${OPENCODE_JSON}"
     rm -f "${OPENCODE_JSON}.bak"
     echo "✓ Using local dist for plugin"
 
@@ -161,9 +157,9 @@ update_config() {
 }
 
 # ============================================================================
-# Scenario 1: Full Config - GPT 5.x Model Family
+# Scenario 1: Legacy Config - GPT 5.x Model Family
 # ============================================================================
-update_config "full"
+update_config "legacy"
 
 # GPT 5.1 Codex presets
 test_model "gpt-5.1-codex-low"        "gpt-5.1-codex"       "codex"      "low"     "auto"     "medium"
@@ -247,9 +243,9 @@ echo -e "Results saved to: ${RESULTS_FILE} (will be removed)"
 echo ""
 
 # Restore original config
-if [ -f "${REPO_DIR}/config/full-opencode.json" ]; then
-    cat "${REPO_DIR}/config/full-opencode.json" > "${OPENCODE_JSON}"
-    echo "✓ Restored original full config to opencode.json"
+if [ -f "${REPO_DIR}/config/opencode-legacy.json" ]; then
+    cat "${REPO_DIR}/config/opencode-legacy.json" > "${OPENCODE_JSON}"
+    echo "✓ Restored original legacy config to opencode.json"
 fi
 
 # Cleanup results file to avoid polluting the repo

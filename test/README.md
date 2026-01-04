@@ -102,4 +102,5 @@ When adding new functionality:
 
 See the `config/` directory for working configuration examples:
 - `minimal-opencode.json`: Simplest setup with defaults
-- `full-opencode.json`: Complete example with all model variants
+- `opencode-legacy.json`: Legacy complete example with all model variants
+- `opencode-modern.json`: Variant-based example for OpenCode v1.0.210+

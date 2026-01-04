@@ -34,6 +34,7 @@ Follow me on [X @nummanali](https://x.com/nummanali) for future updates and more
 
 - ✅ **ChatGPT Plus/Pro OAuth authentication** - Use your existing subscription
 - ✅ **22 pre-configured model variants** - GPT 5.2, GPT 5.2 Codex, GPT 5.1, GPT 5.1 Codex, GPT 5.1 Codex Max, and GPT 5.1 Codex Mini presets for all reasoning levels
+- ✅ **OpenCode variants system support** - Works with v1.0.210+ variant cycling (Ctrl+T) and legacy per-model presets
 - ✅ **GPT 5.2 + GPT 5.2 Codex support** - Latest models with `low/medium/high/xhigh` reasoning levels (Codex excludes `none`)
 - ✅ **Full image input support** - All models configured with multimodal capabilities for reading screenshots, diagrams, and images
 - ⚠️ **GPT 5.1+ only** - Older GPT 5.0 models are deprecated and may not work reliably
@@ -51,45 +52,57 @@ Follow me on [X @nummanali](https://x.com/nummanali) for future updates and more
 
 ## Installation
 
-### Quick Start
+### One-Command Install/Update (Recommended)
+
+Works on **Windows, macOS, and Linux** with a single command:
+
+```bash
+npx -y opencode-openai-codex-auth@latest
+```
+
+What it does:
+- Writes the **global** config at `~/.config/opencode/opencode.json`
+- Uses the **modern** variants config by default
+- Ensures the plugin is **unversioned** (uses `latest`)
+- **Backs up** your existing config before changes
+- Clears OpenCode’s plugin cache so the latest version is installed
+
+Need legacy config (OpenCode v1.0.209 and below)?
+```bash
+npx -y opencode-openai-codex-auth@latest --legacy
+```
+
+---
+
+### Manual Install (Advanced)
 
 **No npm install needed!** opencode automatically installs plugins when you add them to your config.
 
-### Plugin Versioning & Updates
-
-**⚠️ Important**: OpenCode does NOT auto-update plugins. You must pin versions for reliable updates.
-
-#### Recommended: Pin the Version
-
 ```json
-"plugin": ["opencode-openai-codex-auth@4.2.0"]
+"plugin": ["opencode-openai-codex-auth"]
 ```
 
-**Why pin versions?** OpenCode uses Bun's lockfile which pins resolved versions. If you use `"opencode-openai-codex-auth"` without a version, it resolves to "latest" once and **never updates** even when new versions are published.
+Copy the config that matches your OpenCode version:
 
-#### Upgrading to a New Version
+```bash
+# Modern (v1.0.210+):
+cp <repo>/config/opencode-modern.json ~/.config/opencode/opencode.json
 
-Simply change the version in your config and restart OpenCode:
-
-```json
-// Change from:
-"plugin": ["opencode-openai-codex-auth@3.3.0"]
-
-// To:
-"plugin": ["opencode-openai-codex-auth@4.2.0"]
+# Legacy (v1.0.209 and below):
+cp <repo>/config/opencode-legacy.json ~/.config/opencode/opencode.json
 ```
 
-OpenCode will detect the version mismatch and install the new version automatically.
-
-#### If You're Stuck on an Old Version
-
-If you previously used an unpinned version, clear the cache:
+Refresh the plugin cache to force a reinstall:
 
 ```bash
 rm -rf ~/.cache/opencode/node_modules ~/.cache/opencode/bun.lock
 ```
 
-Then restart OpenCode with a pinned version in your config.
+**Optional: pin a version** for reproducibility:
+
+```json
+"plugin": ["opencode-openai-codex-auth@4.2.0"]
+```
 
 Check [releases](https://github.com/numman-ali/opencode-openai-codex-auth/releases) for version history.
 
@@ -97,51 +110,38 @@ Check [releases](https://github.com/numman-ali/opencode-openai-codex-auth/releas
 
 ### Agent Instructions (Install / Update)
 
-If you’re using an AI agent (Codex/Claude/etc.) to install or update this plugin on a machine, use these steps:
-
-1. **Use the official repo**: https://github.com/numman-ali/opencode-openai-codex-auth
-2. **Pin the plugin version** in the user’s OpenCode config (`~/.config/opencode/opencode.json` or project `.opencode.json`).
-3. **Replace the config** with the latest `config/full-opencode.json` from the repo.
-4. **Refresh the plugin cache** so OpenCode reinstalls the updated version.
-5. **Restart OpenCode**.
+If you’re using an AI agent (Codex/Claude/etc.), **run the one-command installer**:
 
 ```bash
-# 1) Update plugin version (replace <latest> with newest release tag)
-# Example: opencode-openai-codex-auth@4.2.0
-
-# 2) Copy full config
-cp <repo>/config/full-opencode.json ~/.config/opencode/opencode.json
-
-# 3) Refresh OpenCode plugin cache
-rm -rf ~/.cache/opencode/node_modules ~/.cache/opencode/bun.lock
-
-# 4) Optional sanity check for GPT-5.2-Codex presets
-jq '.provider.openai.models | keys | map(select(startswith("gpt-5.2-codex")))' \
-  ~/.config/opencode/opencode.json
+npx -y opencode-openai-codex-auth@latest
 ```
 
-> **Note**: If using a project-local config, replace the target path with `<project>/.opencode.json`.
+Legacy OpenCode (v1.0.209 and below):
+
+```bash
+npx -y opencode-openai-codex-auth@latest --legacy
+```
+
+This updates the **global** config only and clears the plugin cache so OpenCode reinstalls the latest version.
 
 ---
 
-#### ⚠️ REQUIRED: Full Configuration (Only Supported Setup)
+#### ⚠️ REQUIRED: Use the Supported Configuration
 
-**IMPORTANT**: You MUST use the full configuration from [`config/full-opencode.json`](./config/full-opencode.json). Other configurations are not officially supported and may not work reliably.
+**Pick the config file that matches your OpenCode version:**
+- **OpenCode v1.0.210+** → `config/opencode-modern.json` (variants system)
+- **OpenCode v1.0.209 and below** → `config/opencode-legacy.json` (legacy per-variant model list)
 
-**Why the full config is required:**
-- GPT 5 models can be temperamental - some work, some don't, some may error
-- The full config has been tested and verified to work
-- Minimal configs lack proper model metadata for OpenCode features
+**Why this is required:**
+- GPT 5 models can be temperamental and need proper configuration
+- Full model metadata is required for OpenCode features (limits, usage widgets, compaction)
 - Older GPT 5.0 models are deprecated and being phased out by OpenAI
 
-1. **Copy the full configuration** from [`config/full-opencode.json`](./config/full-opencode.json) to your opencode config file.
-
-   The config includes 22 models with image input support. Here's a condensed example showing the structure:
-
+**Modern config (variants) example:**
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth@4.2.0"],
+  "plugin": ["opencode-openai-codex-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -152,52 +152,44 @@ jq '.provider.openai.models | keys | map(select(startswith("gpt-5.2-codex")))' \
         "store": false
       },
       "models": {
-        "gpt-5.2-high": {
-          "name": "GPT 5.2 High (OAuth)",
+        "gpt-5.2": {
+          "name": "GPT 5.2 (OAuth)",
           "limit": { "context": 272000, "output": 128000 },
           "modalities": { "input": ["text", "image"], "output": ["text"] },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-max-high": {
-          "name": "GPT 5.1 Codex Max High (OAuth)",
-          "limit": { "context": 272000, "output": 128000 },
-          "modalities": { "input": ["text", "image"], "output": ["text"] },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
+          "variants": {
+            "low": { "reasoningEffort": "low", "reasoningSummary": "auto", "textVerbosity": "medium" },
+            "high": { "reasoningEffort": "high", "reasoningSummary": "detailed", "textVerbosity": "medium" }
           }
         }
-        // ... 20 more models - see config/full-opencode.json for complete list
       }
     }
   }
 }
 ```
 
-   **⚠️ Copy the complete file** from [`config/full-opencode.json`](./config/full-opencode.json) - don't use this truncated example.
+**Usage (modern config):**
+```bash
+opencode run "task" --model=openai/gpt-5.2 --variant=medium
+opencode run "task" --model=openai/gpt-5.2 --variant=high
+```
 
-   **Global config**: `~/.config/opencode/opencode.json`
-   **Project config**: `<project>/.opencode.json`
+**Usage (legacy config):**
+```bash
+opencode run "task" --model=openai/gpt-5.2-medium
+opencode run "task" --model=openai/gpt-5.2-high
+```
 
-   This gives you 22 model variants with different reasoning levels:
-   - **gpt-5.2** (none/low/medium/high/xhigh) - Latest GPT 5.2 model with full reasoning support
-   - **gpt-5.2-codex** (low/medium/high/xhigh) - GPT 5.2 Codex presets
-   - **gpt-5.1-codex-max** (low/medium/high/xhigh) - Codex Max presets
-   - **gpt-5.1-codex** (low/medium/high) - Codex model presets
-   - **gpt-5.1-codex-mini** (medium/high) - Codex mini tier presets
-   - **gpt-5.1** (none/low/medium/high) - General-purpose reasoning presets
+This gives you 22 model variants with different reasoning levels:
+- **gpt-5.2** (none/low/medium/high/xhigh) - Latest GPT 5.2 model with full reasoning support
+- **gpt-5.2-codex** (low/medium/high/xhigh) - GPT 5.2 Codex presets
+- **gpt-5.1-codex-max** (low/medium/high/xhigh) - Codex Max presets
+- **gpt-5.1-codex** (low/medium/high) - Codex model presets
+- **gpt-5.1-codex-mini** (medium/high) - Codex mini tier presets
+- **gpt-5.1** (none/low/medium/high) - General-purpose reasoning presets
 
-   All appear in the opencode model selector as "GPT 5.1 Codex Low (OAuth)", "GPT 5.1 High (OAuth)", etc.
+All appear in the opencode model selector as "GPT 5.1 Codex Low (OAuth)", "GPT 5.1 High (OAuth)", etc.
 
+> **⚠️ IMPORTANT:** Use the config file above. Minimal configs are NOT supported and may fail unpredictably.
 ### Prompt caching & usage limits
 
 Codex backend caching is enabled automatically. When OpenCode supplies a `prompt_cache_key` (its session identifier), the plugin forwards it unchanged so Codex can reuse work between turns. The plugin no longer synthesizes its own cache IDs—if the host omits `prompt_cache_key`, Codex will treat the turn as uncached. The bundled CODEX_MODE bridge prompt is synchronized with the latest Codex CLI release, so opencode and Codex stay in lock-step on tool availability. When your ChatGPT subscription nears a limit, opencode surfaces the plugin's friendly error message with the 5-hour and weekly windows, mirroring the Codex CLI summary.
@@ -236,7 +228,8 @@ Codex backend caching is enabled automatically. When OpenCode supplies a `prompt
 opencode auth login
 ```
 
-Select "OpenAI" → "ChatGPT Plus/Pro (Codex Subscription)"
+Select "OpenAI" → "ChatGPT Plus/Pro (Codex Subscription)"  
+If you're on SSH/WSL/remote and the browser callback fails, choose **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL.
 
 > **⚠️ First-time setup**: Stop Codex CLI if running (both use port 1455)
 
@@ -244,27 +237,25 @@ Select "OpenAI" → "ChatGPT Plus/Pro (Codex Subscription)"
 
 ## Usage
 
-If using the full configuration, select from the model picker in opencode, or specify via command line:
+If using the supported configuration, select from the model picker in opencode, or specify via command line.
 
 ```bash
-# Use different reasoning levels for gpt-5.1-codex
-opencode run "simple task" --model=openai/gpt-5.1-codex-low
-opencode run "complex task" --model=openai/gpt-5.1-codex-high
-opencode run "large refactor" --model=openai/gpt-5.1-codex-max-high
-opencode run "research-grade analysis" --model=openai/gpt-5.1-codex-max-xhigh
+# Modern config (v1.0.210+): use --variant
+opencode run "simple task" --model=openai/gpt-5.1-codex --variant=low
+opencode run "complex task" --model=openai/gpt-5.1-codex --variant=high
+opencode run "large refactor" --model=openai/gpt-5.1-codex-max --variant=high
+opencode run "research-grade analysis" --model=openai/gpt-5.1-codex-max --variant=xhigh
 
-# Use different reasoning levels for gpt-5.1
+# Legacy config: use model names
 opencode run "quick question" --model=openai/gpt-5.1-low
 opencode run "deep analysis" --model=openai/gpt-5.1-high
-
-# Use Codex Mini variants
-opencode run "balanced task" --model=openai/gpt-5.1-codex-mini-medium
-opencode run "complex code" --model=openai/gpt-5.1-codex-mini-high
 ```
 
-### Available Model Variants (Full Config)
+### Available Model Variants (Legacy Config)
 
-When using [`config/full-opencode.json`](./config/full-opencode.json), you get these pre-configured variants:
+When using [`config/opencode-legacy.json`](./config/opencode-legacy.json), you get these pre-configured variants:
+
+For the modern config (`opencode-modern.json`), use the same variant names via `--variant` or `Ctrl+T` in the TUI (e.g., `--model=openai/gpt-5.2 --variant=high`).
 
 | CLI Model ID | TUI Display Name | Reasoning Effort | Best For |
 |--------------|------------------|-----------------|----------|
@@ -298,7 +289,7 @@ When using [`config/full-opencode.json`](./config/full-opencode.json), you get t
 >
 > **Note**: GPT 5.2, GPT 5.2 Codex, and Codex Max all support `xhigh` reasoning. Use explicit reasoning levels (e.g., `gpt-5.2-high`, `gpt-5.2-codex-xhigh`, `gpt-5.1-codex-max-xhigh`) for precise control.
 
-> **⚠️ Important**: GPT 5 models can be temperamental - some variants may work better than others, some may give errors, and behavior may vary. Stick to the presets above configured in `full-opencode.json` for best results.
+> **⚠️ Important**: GPT 5 models can be temperamental - some variants may work better than others, some may give errors, and behavior may vary. Stick to the presets above configured in `opencode-legacy.json` or the variants in `opencode-modern.json` for best results.
 
 All accessed via your ChatGPT Plus/Pro subscription.
 
@@ -338,19 +329,21 @@ These defaults are tuned for Codex CLI-style usage and can be customized (see Co
 
 ## Configuration
 
-### ⚠️ REQUIRED: Use Pre-Configured File
+### ⚠️ REQUIRED: Use a Supported Config File
 
-**YOU MUST use [`config/full-opencode.json`](./config/full-opencode.json)** - this is the only officially supported configuration:
-- 22 pre-configured model variants (GPT 5.2, GPT 5.2 Codex, GPT 5.1, Codex, Codex Max, Codex Mini)
+Choose the config file that matches your OpenCode version:
+
+- **OpenCode v1.0.210+** → [`config/opencode-modern.json`](./config/opencode-modern.json)
+- **OpenCode v1.0.209 and below** → [`config/opencode-legacy.json`](./config/opencode-legacy.json)
+
+Both provide:
+- 22 reasoning variants across GPT 5.2, GPT 5.2 Codex, GPT 5.1, Codex, Codex Max, Codex Mini
 - Image input support enabled for all models
-- Optimal configuration for each reasoning level
-- All variants visible in the opencode model selector
-- Required metadata for OpenCode features to work properly
+- Required metadata for OpenCode features (limits, usage widgets, compaction)
 
-**Do NOT use other configurations** - they are not supported and may fail unpredictably with GPT 5 models.
+**Do NOT use other configurations** — minimal configs are not supported and may fail unpredictably with GPT‑5 models.
 
 See [Installation](#installation) for setup instructions.
-
 ### Custom Configuration
 
 If you want to customize settings yourself, you can configure options at provider or model level.
@@ -381,7 +374,7 @@ Apply settings to all models:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth@4.2.0"],
+  "plugin": ["opencode-openai-codex-auth"],
   "model": "openai/gpt-5-codex",
   "provider": {
     "openai": {
@@ -401,7 +394,7 @@ Create your own named variants in the model selector:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth@4.2.0"],
+  "plugin": ["opencode-openai-codex-auth"],
   "provider": {
     "openai": {
       "models": {
