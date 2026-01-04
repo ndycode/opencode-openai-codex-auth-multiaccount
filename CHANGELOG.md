@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [4.3.0] - 2026-01-04
+
+**Feature + reliability release**: variants support, one-command installer, and auth/error handling fixes.
+
+### Added
+- **One-command installer/update**: `npx -y opencode-openai-codex-auth@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.
+- **Modern variants config**: `config/opencode-modern.json` for OpenCode v1.0.210+; legacy presets remain in `config/opencode-legacy.json`.
+- **Installer CLI** bundled as package bin for cross-platform use (Windows/macOS/Linux).
+
+### Changed
+- **Variants-aware request config**: respects host-supplied `body.reasoning` / `providerOptions.openai` before falling back to defaults.
+- **OpenCode prompt source**: updates to the current upstream repository (`anomalyco/opencode`).
+- **Docs/README**: install-first layout with leaner guidance and explicit legacy path.
+
+### Fixed
+- **Headless login fallback**: missing `xdg-open` no longer fails the OAuth flow; manual URL paste stays available.
+- **Error handling alignment**: refresh failures throw; usage-limit 404s map to retryable 429s where appropriate.
+- **AGENTS.md preservation**: protected instruction markers stop accidental filtering of user instructions.
+- **Tool-call integrity**: orphan outputs now match `local_shell_call` and `custom_tool_call` (Codex CLI parity); unmatched outputs preserved as assistant messages.
+- **Logging noise**: debug logging gated behind flags to prevent stdout bleed.
+
 ## [4.2.0] - 2025-12-19
 
 **Feature release**: GPT 5.2 Codex support and prompt alignment with latest Codex CLI.
