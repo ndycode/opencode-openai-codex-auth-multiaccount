@@ -403,7 +403,7 @@ let include: Vec<String> = if reasoning.is_some() {
 - ✅ Descriptive names ("Fast", "Balanced", "Max Quality")
 - ✅ Persistent across sessions
 
-**Source**: `config/full-opencode.json`
+**Source**: `config/opencode-legacy.json` (legacy) or `config/opencode-modern.json` (variants)
 
 ---
 

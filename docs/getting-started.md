@@ -38,7 +38,7 @@ OpenCode automatically installs plugins - no `npm install` needed!
 
 Add this to `~/.config/opencode/opencode.json`:
 
-**Tip**: The snippet below is a truncated excerpt. For the complete list (including GPT 5.2 and GPT 5.2 Codex presets), copy `config/full-opencode.json` directly.
+**Tip**: The snippet below is a truncated excerpt. For the complete legacy list, copy `config/opencode-legacy.json`. For the modern variants config (OpenCode v1.0.210+), use `config/opencode-modern.json`.
 
 ```json
 {

@@ -681,6 +681,42 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.summary).toBe('detailed');
 		});
 
+		it('should respect reasoning config already set in body', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				reasoning: {
+					effort: 'low',
+					summary: 'auto',
+				},
+			};
+			const userConfig: UserConfig = {
+				global: { reasoningEffort: 'high', reasoningSummary: 'detailed' },
+				models: {},
+			};
+			const result = await transformRequestBody(body, codexInstructions, userConfig);
+
+			expect(result.reasoning?.effort).toBe('low');
+			expect(result.reasoning?.summary).toBe('auto');
+		});
+
+		it('should use reasoning config from providerOptions when present', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				providerOptions: {
+					openai: {
+						reasoningEffort: 'high',
+						reasoningSummary: 'detailed',
+					},
+				},
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.reasoning?.effort).toBe('high');
+			expect(result.reasoning?.summary).toBe('detailed');
+		});
+
 		it('should apply default text verbosity', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',
@@ -703,6 +739,35 @@ describe('Request Transformer Module', () => {
 			expect(result.text?.verbosity).toBe('low');
 		});
 
+		it('should use text verbosity from providerOptions when present', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				providerOptions: {
+					openai: {
+						textVerbosity: 'low',
+					},
+				},
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+			expect(result.text?.verbosity).toBe('low');
+		});
+
+		it('should prefer body text verbosity over providerOptions', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				text: { verbosity: 'high' },
+				providerOptions: {
+					openai: {
+						textVerbosity: 'low',
+					},
+				},
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+			expect(result.text?.verbosity).toBe('high');
+		});
+
 		it('should set default include for encrypted reasoning', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',
@@ -722,6 +787,16 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
+			expect(result.include).toEqual(['custom_field', 'reasoning.encrypted_content']);
+		});
+
+		it('should always include reasoning.encrypted_content when include provided', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				include: ['custom_field'],
+			};
+			const result = await transformRequestBody(body, codexInstructions);
 			expect(result.include).toEqual(['custom_field', 'reasoning.encrypted_content']);
 		});
 

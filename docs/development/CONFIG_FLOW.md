@@ -86,7 +86,7 @@ Plugins can inject options via the `loader()` function.
 
 ### Display Names vs Internal IDs
 
-**Your Config** (`config/full-opencode.json`):
+**Your Config** (`config/opencode-legacy.json`):
 ```json
 {
   "provider": {

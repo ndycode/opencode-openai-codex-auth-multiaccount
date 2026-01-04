@@ -19,7 +19,8 @@ This document explains the organization of documentation in this repository.
 │       └── TESTING.md             # Test procedures
 ├── config/
 │   ├── README.md                  # Example configs guide
-│   ├── full-opencode.json         # Full config example
+│   ├── opencode-legacy.json       # Legacy full config example (v1.0.209 and below)
+│   ├── opencode-modern.json       # Variant config example (v1.0.210+)
 │   └── minimal-opencode.json      # Minimal config example
 └── tmp/release-notes/             # Detailed release artifacts
     ├── CHANGES.md                 # Detailed v2.1.2 changes

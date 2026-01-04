@@ -18,7 +18,7 @@ All notable changes to this project are documented here. Dates use the ISO forma
 ### Changed
 - **Prompt selection alignment**: GPT 5.2 general now uses `gpt_5_2_prompt.md` (Codex CLI parity).
 - **Reasoning configuration**: GPT 5.2 Codex supports `xhigh` but does **not** support `"none"`; `"none"` auto-upgrades to `"low"` and `"minimal"` normalizes to `"low"`.
-- **Config presets**: `config/full-opencode.json` now includes 22 pre-configured variants (adds GPT 5.2 Codex).
+- **Config presets**: `config/opencode-legacy.json` includes the 22 pre-configured presets (adds GPT 5.2 Codex); `config/opencode-modern.json` provides the variant-based setup.
 - **Docs**: Updated README/AGENTS/config docs to include GPT 5.2 Codex and new model family behavior.
 
 ## [4.1.1] - 2025-12-17
@@ -161,12 +161,12 @@ This release brings full parity with Codex CLI's prompt engineering:
 
 ## [3.2.0] - 2025-11-14
 ### Added
-- GPT 5.1 model family support: normalization for `gpt-5.1`, `gpt-5.1-codex`, and `gpt-5.1-codex-mini` plus new GPT 5.1-only presets in the canonical `config/full-opencode.json`.
+- GPT 5.1 model family support: normalization for `gpt-5.1`, `gpt-5.1-codex`, and `gpt-5.1-codex-mini` plus new GPT 5.1-only presets in the canonical `config/opencode-legacy.json`.
 - Documentation updates (README, docs, AGENTS) describing the 5.1 families, their reasoning defaults, and how they map to ChatGPT slugs and token limits.
 
 ### Changed
 - Model normalization docs and tests now explicitly cover both 5.0 and 5.1 Codex/general families and the two Codex Mini tiers.
-- The legacy GPT 5.0 full configuration is now published as `config/full-opencode-gpt5.json`; new installs should prefer the 5.1 presets.
+- The legacy GPT 5.0 full configuration is now published separately; new installs should prefer the 5.1 presets in `config/opencode-legacy.json`.
 
 ## [3.1.0] - 2025-11-11
 ### Added
@@ -179,7 +179,7 @@ This release brings full parity with Codex CLI's prompt engineering:
 ## [3.0.0] - 2025-11-04
 ### Added
 - Codex-style usage-limit messaging that mirrors the 5-hour and weekly windows reported by the Codex CLI.
-- Documentation guidance noting that OpenCode's context auto-compaction and usage sidebar require the canonical `config/full-opencode.json`.
+- Documentation guidance noting that OpenCode's context auto-compaction and usage sidebar require the canonical `config/opencode-legacy.json`.
 
 ### Changed
 - Prompt caching now relies solely on the host-supplied `prompt_cache_key`; conversation/session headers are forwarded only when OpenCode provides one.

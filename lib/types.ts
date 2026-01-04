@@ -19,6 +19,8 @@ export interface UserConfig {
 	models: {
 		[modelName: string]: {
 			options?: ConfigOptions;
+			variants?: Record<string, (ConfigOptions & { disabled?: boolean }) | undefined>;
+			[key: string]: unknown;
 		};
 	};
 }
@@ -134,6 +136,10 @@ export interface RequestBody {
 		verbosity?: "low" | "medium" | "high";
 	};
 	include?: string[];
+	providerOptions?: {
+		openai?: Partial<ConfigOptions> & { store?: boolean; include?: string[] };
+		[key: string]: unknown;
+	};
 	/** Stable key to enable prompt-token caching on Codex backend */
 	prompt_cache_key?: string;
 	max_output_tokens?: number;

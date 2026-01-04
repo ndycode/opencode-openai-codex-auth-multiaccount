@@ -130,6 +130,53 @@ export function getModelConfig(
 	return { ...globalOptions, ...modelOptions };
 }
 
+function resolveReasoningConfig(
+	modelName: string,
+	modelConfig: ConfigOptions,
+	body: RequestBody,
+): ReasoningConfig {
+	const providerOpenAI = body.providerOptions?.openai;
+	const existingEffort =
+		body.reasoning?.effort ?? providerOpenAI?.reasoningEffort;
+	const existingSummary =
+		body.reasoning?.summary ?? providerOpenAI?.reasoningSummary;
+
+	const mergedConfig: ConfigOptions = {
+		...modelConfig,
+		...(existingEffort ? { reasoningEffort: existingEffort } : {}),
+		...(existingSummary ? { reasoningSummary: existingSummary } : {}),
+	};
+
+	return getReasoningConfig(modelName, mergedConfig);
+}
+
+function resolveTextVerbosity(
+	modelConfig: ConfigOptions,
+	body: RequestBody,
+): "low" | "medium" | "high" {
+	const providerOpenAI = body.providerOptions?.openai;
+	return (
+		body.text?.verbosity ??
+		providerOpenAI?.textVerbosity ??
+		modelConfig.textVerbosity ??
+		"medium"
+	);
+}
+
+function resolveInclude(modelConfig: ConfigOptions, body: RequestBody): string[] {
+	const providerOpenAI = body.providerOptions?.openai;
+	const base =
+		body.include ??
+		providerOpenAI?.include ??
+		modelConfig.include ??
+		["reasoning.encrypted_content"];
+	const include = Array.from(new Set(base.filter(Boolean)));
+	if (!include.includes("reasoning.encrypted_content")) {
+		include.push("reasoning.encrypted_content");
+	}
+	return include;
+}
+
 /**
  * Configure reasoning parameters based on model variant and user config
  *
@@ -453,8 +500,12 @@ export async function transformRequestBody(
 		}
 	}
 
-	// Configure reasoning (use normalized model family + model-specific config)
-	const reasoningConfig = getReasoningConfig(normalizedModel, modelConfig);
+	// Configure reasoning (prefer existing body/provider options, then config defaults)
+	const reasoningConfig = resolveReasoningConfig(
+		normalizedModel,
+		modelConfig,
+		body,
+	);
 	body.reasoning = {
 		...body.reasoning,
 		...reasoningConfig,
@@ -464,13 +515,13 @@ export async function transformRequestBody(
 	// Default: "medium" (matches Codex CLI default for all GPT-5 models)
 	body.text = {
 		...body.text,
-		verbosity: modelConfig.textVerbosity || "medium",
+		verbosity: resolveTextVerbosity(modelConfig, body),
 	};
 
 	// Add include for encrypted reasoning content
 	// Default: ["reasoning.encrypted_content"] (required for stateless operation with store=false)
 	// This allows reasoning context to persist across turns without server-side storage
-	body.include = modelConfig.include || ["reasoning.encrypted_content"];
+	body.include = resolveInclude(modelConfig, body);
 
 	// Remove unsupported parameters
 	body.max_output_tokens = undefined;
