@@ -19,7 +19,8 @@
  *
  * @license MIT with Usage Disclaimer (see LICENSE file)
  * @author numman-ali
- * @repository https://github.com/numman-ali/opencode-openai-codex-auth
+ * @repository https://github.com/ndycode/opencode-openai-codex-auth-multiaccount
+
  */
 
 import { tool, type Plugin, type PluginInput } from "@opencode-ai/plugin";
@@ -76,7 +77,8 @@ const AUTH_FAILURE_COOLDOWN_MS = 30_000;
  * @example
  * ```json
  * {
- *   "plugin": ["opencode-openai-codex-auth"],
+ *   "plugin": ["opencode-openai-codex-auth-multiaccount"],
+
  *   "model": "openai/gpt-5-codex"
  * }
  * ```

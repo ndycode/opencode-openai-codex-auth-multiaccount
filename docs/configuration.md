@@ -7,7 +7,7 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth-multiaccount"],
   "provider": {
     "openai": {
       "options": {
@@ -183,7 +183,7 @@ Apply same settings to all models:
 
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth-multiaccount"],
   "provider": {
     "openai": {
       "options": {
@@ -204,7 +204,7 @@ Different settings for different models:
 
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth-multiaccount"],
   "provider": {
     "openai": {
       "options": {
@@ -331,7 +331,7 @@ Global config has defaults, project overrides for specific work:
 **~/.config/opencode/opencode.json** (global):
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth-multiaccount"],
   "provider": {
     "openai": {
       "options": {
@@ -410,7 +410,8 @@ CODEX_MODE=1 opencode run "task"  # Temporarily enable
 - [config/opencode-modern.json](../config/opencode-modern.json) - Variants-based config for OpenCode v1.0.210+
 - [config/opencode-legacy.json](../config/opencode-legacy.json) - Legacy full list for v1.0.209 and below
 
-> **⚠️ REQUIRED:** You MUST use the config that matches your OpenCode version (`opencode-modern.json` or `opencode-legacy.json`). Minimal configs are NOT supported for GPT 5 models and will fail unpredictably. OpenCode's auto-compaction and usage widgets also require the full config's per-model `limit` metadata.
+> **Recommended:** Use the config that matches your OpenCode version (`opencode-modern.json` or `opencode-legacy.json`). Minimal configs are intended for debugging only and may not include the per-model `limit` metadata needed for the full OpenCode UI/UX.
+
 
 **Your Configs:**
 - `~/.config/opencode/opencode.json` - Global config

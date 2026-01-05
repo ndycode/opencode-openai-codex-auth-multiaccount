@@ -32,4 +32,5 @@ This plugin bridges two different systems with careful engineering:
 
 ---
 
-**Quick Links**: [GitHub](https://github.com/your-username/opencode-codex-plugin) • [npm](https://www.npmjs.com/package/opencode-openai-codex-auth) • [Issues](https://github.com/your-username/opencode-codex-plugin/issues)
+**Quick Links**: [GitHub](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount) • [npm](https://www.npmjs.com/package/opencode-openai-codex-auth-multiaccount) • [Issues](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues)
+

@@ -25,7 +25,7 @@ For production applications, use the [OpenAI Platform API](https://platform.open
 Works on **Windows, macOS, and Linux**:
 
 ```bash
-npx -y opencode-openai-codex-auth@latest
+npx -y opencode-openai-codex-auth-multiaccount@latest
 ```
 
 This writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
@@ -33,7 +33,7 @@ This writes the **global** config at `~/.config/opencode/opencode.json`, backs i
 Need legacy config (OpenCode v1.0.209 and below)?
 
 ```bash
-npx -y opencode-openai-codex-auth@latest --legacy
+npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 ```
 
 ---
@@ -44,15 +44,16 @@ OpenCode automatically installs plugins - no `npm install` needed!
 
 **Choose your configuration style:**
 
-#### ⚠️ REQUIRED: Full Configuration (Only Supported Setup)
+#### ✅ Recommended: Full Configuration
 
-**IMPORTANT**: You MUST use the full configuration. This is the ONLY officially supported setup for GPT 5.x models.
+**Recommended**: Use the full configuration for the best UX and stable behavior with GPT 5.x/Codex models.
 
-**Why the full config is required:**
+**Why the full config is recommended:**
 - GPT 5 models can be temperamental and need proper configuration
-- Minimal configs are NOT supported and will fail unpredictably
+- Minimal configs are intended for debugging only and may miss required model metadata
 - OpenCode features require proper model metadata
 - This configuration has been tested and verified to work
+
 
 Add this to `~/.config/opencode/opencode.json`:
 
@@ -61,7 +62,7 @@ Add this to `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth-multiaccount"],
   "provider": {
     "openai": {
       "options": {
@@ -279,25 +280,25 @@ Add this to `~/.config/opencode/opencode.json`:
 
 Prompt caching is enabled out of the box: when OpenCode sends its session identifier as `prompt_cache_key`, the plugin forwards it untouched so multi-turn runs reuse prior work. The CODEX_MODE bridge prompt bundled with the plugin is kept in sync with the latest Codex CLI release, so the OpenCode UI and Codex share the same tool contract. If you hit your ChatGPT subscription limits, the plugin returns a friendly Codex-style message with the 5-hour and weekly usage windows so you know when capacity resets.
 
-> **⚠️ CRITICAL:** This full configuration is REQUIRED. OpenCode's context auto-compaction and usage sidebar only work with this full configuration. GPT 5 models are temperamental and need proper setup - minimal configurations are NOT supported.
+> **Tip**: The full configuration is strongly recommended for the best OpenCode UX (model metadata, variants/presets, and predictable behavior). Minimal configs are intended for debugging only.
 
-#### ❌ Minimal Configuration (NOT SUPPORTED - DO NOT USE)
+#### ⚠️ Minimal Configuration (Advanced/Debugging Only)
 
-**DO NOT use minimal configurations** - they will NOT work reliably with GPT 5:
+Minimal configs can be useful for debugging, but they do not include the full model metadata/presets. Expect fewer OpenCode UI features.
 
 ```json
-// ❌ DO NOT USE THIS
+// ⚠️ Debugging only
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth"],
+  "plugin": ["opencode-openai-codex-auth-multiaccount"],
   "model": "openai/gpt-5-codex"
 }
 ```
 
-**Why this doesn't work:**
-- GPT 5 models need proper configuration to work reliably
-- Missing model metadata breaks OpenCode features
-- Cannot guarantee stable operation
+**Limitations:**
+- Missing model metadata can reduce OpenCode UI features (picker labels, limits, etc.)
+- You won’t get the full preset/variant matrix from `config/opencode-*.json`
+
 
 ### Step 2: Authenticate
 
@@ -346,13 +347,13 @@ OpenCode checks multiple config files in order:
 OpenCode caches plugins. To install the latest version, just re-run the installer:
 
 ```bash
-npx -y opencode-openai-codex-auth@latest
+npx -y opencode-openai-codex-auth-multiaccount@latest
 ```
 
 Legacy OpenCode (v1.0.209 and below):
 
 ```bash
-npx -y opencode-openai-codex-auth@latest --legacy
+npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 ```
 
 **When to update:**
@@ -360,7 +361,7 @@ npx -y opencode-openai-codex-auth@latest --legacy
 - Bug fixes available
 - Security updates
 
-**Check for updates**: [Releases Page](https://github.com/numman-ali/opencode-openai-codex-auth/releases)
+**Check for updates**: [Releases Page](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/releases)
 
 **Pro tip**: Subscribe to release notifications on GitHub to get notified of updates.
 
@@ -372,7 +373,7 @@ For plugin development or testing unreleased changes:
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth/dist"]
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
 }
 ```
 
@@ -380,7 +381,7 @@ For plugin development or testing unreleased changes:
 
 **Build the plugin:**
 ```bash
-cd opencode-openai-codex-auth
+cd opencode-openai-codex-auth-multiaccount
 npm install
 npm run build
 ```

@@ -1,7 +1,8 @@
 {
-  "name": "opencode-openai-codex-auth",
-  "version": "4.3.0",
-  "description": "OpenAI ChatGPT (Codex backend) OAuth auth plugin for opencode - use your ChatGPT Plus/Pro subscription instead of API credits",
+  "name": "opencode-openai-codex-auth-multiaccount",
+  "version": "4.3.0-multiaccount.0",
+  "description": "Fork of opencode-openai-codex-auth with multi-account rotation (ChatGPT OAuth / Codex backend)",
+
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
@@ -9,8 +10,9 @@
   "author": "Numman Ali",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/numman-ali/opencode-openai-codex-auth.git"
+    "url": "git+https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git"
   },
+
   "keywords": [
     "opencode",
     "openai",
@@ -23,10 +25,11 @@
     "chatgpt-plus",
     "chatgpt-pro"
   ],
-  "homepage": "https://github.com/numman-ali/opencode-openai-codex-auth#readme",
+  "homepage": "https://github.com/ndycode/opencode-openai-codex-auth-multiaccount#readme",
   "bugs": {
-    "url": "https://github.com/numman-ali/opencode-openai-codex-auth/issues"
+    "url": "https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues"
   },
+
   "scripts": {
     "build": "tsc && node scripts/copy-oauth-success.js",
     "typecheck": "tsc --noEmit",
@@ -36,8 +39,9 @@
     "test:coverage": "vitest run --coverage"
   },
   "bin": {
-    "opencode-openai-codex-auth": "./scripts/install-opencode-codex-auth.js"
+    "opencode-openai-codex-auth-multiaccount": "./scripts/install-opencode-codex-auth.js"
   },
+
   "files": [
     "dist/",
     "assets/",

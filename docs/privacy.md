@@ -171,7 +171,8 @@ However, data sent to OpenAI is subject to OpenAI's privacy practices.
 
 ### Open Source
 The entire plugin source code is available at:
-- **GitHub:** [https://github.com/numman-ali/opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth)
+- **GitHub:** [https://github.com/ndycode/opencode-openai-codex-auth-multiaccount](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount)
+
 
 You can:
 - Review all code
@@ -190,7 +191,8 @@ You can:
 ## Questions?
 
 For privacy-related questions:
-- **Plugin-specific:** [GitHub Issues](https://github.com/numman-ali/opencode-openai-codex-auth/issues)
+- **Plugin-specific:** [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues)
+
 - **OpenAI data handling:** [OpenAI Support](https://help.openai.com/)
 - **Security concerns:** See [SECURITY.md](../SECURITY.md)
 

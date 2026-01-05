@@ -149,7 +149,8 @@ update_config() {
     esac
 
     # Replace npm package with local dist for testing
-    sed -i.bak -E 's|"opencode-openai-codex-auth(@[^"]*)?"|"file://'"${REPO_DIR}"'/dist"|' "${OPENCODE_JSON}"
+    sed -i.bak -E 's|"opencode-openai-codex-auth-multiaccount(@[^"]*)?"|"file://'"${REPO_DIR}"'/dist"|' "${OPENCODE_JSON}"
+
     rm -f "${OPENCODE_JSON}.bak"
     echo "✓ Using local dist for plugin"
 

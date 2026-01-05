@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
-const PLUGIN_NAME = "opencode-openai-codex-auth";
+const PLUGIN_NAME = "opencode-openai-codex-auth-multiaccount";
+
 const args = new Set(process.argv.slice(2));
 
 if (args.has("--help") || args.has("-h")) {
