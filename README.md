@@ -25,19 +25,42 @@ OpenCode should feel effortless. This plugin keeps the setup minimal while givin
 ```
 ---
 ## 🚀 Quick Start
+
+### Install from source (recommended for now)
+
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
+git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
+cd opencode-openai-codex-auth-multiaccount
+npm ci
+npm run build
 ```
+
+Point OpenCode at the local build output (replace with your absolute path):
+
+```json
+{
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+}
+```
+
 Then:
 ```bash
 opencode auth login
 opencode run "write hello world to test.txt" --model=openai/gpt-5.2 --variant=medium
 ```
+
+### Install from npm (once published)
+
+```bash
+npx -y opencode-openai-codex-auth-multiaccount@latest
+```
+
 Legacy OpenCode (v1.0.209 and below):
 ```bash
 npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 opencode run "write hello world to test.txt" --model=openai/gpt-5.2-medium
 ```
+
 ---
 ## 📦 Models
 - **gpt-5.2** (none/low/medium/high/xhigh)
