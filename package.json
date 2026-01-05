@@ -1,5 +1,5 @@
 {
-  "name": "opencode-openai-codex-auth-multiaccount",
+  "name": "opencode-openai-codex-auth-multi",
   "version": "4.3.0-multiaccount.0",
   "description": "Fork of opencode-openai-codex-auth with multi-account rotation (ChatGPT OAuth / Codex backend)",
 
@@ -10,7 +10,7 @@
   "author": "Numman Ali",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git"
+    "url": "git+https://github.com/ndycode/opencode-openai-codex-auth-multi.git"
   },
 
   "keywords": [
@@ -25,9 +25,9 @@
     "chatgpt-plus",
     "chatgpt-pro"
   ],
-  "homepage": "https://github.com/ndycode/opencode-openai-codex-auth-multiaccount#readme",
+  "homepage": "https://github.com/ndycode/opencode-openai-codex-auth-multi#readme",
   "bugs": {
-    "url": "https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues"
+    "url": "https://github.com/ndycode/opencode-openai-codex-auth-multi/issues"
   },
 
   "scripts": {
@@ -39,7 +39,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "bin": {
-    "opencode-openai-codex-auth-multiaccount": "scripts/install-opencode-codex-auth.js"
+    "opencode-openai-codex-auth-multi": "scripts/install-opencode-codex-auth.js"
   },
 
 

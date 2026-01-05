@@ -2,8 +2,8 @@
 
 > Access GPT-5 Codex through your ChatGPT Plus/Pro subscription in OpenCode
 
-[![npm version](https://badge.fury.io/js/opencode-openai-codex-auth-multiaccount.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multiaccount)
-[![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/actions)
+[![npm version](https://badge.fury.io/js/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
+[![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions)
 
 > Fork of [numman-ali/opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) with multi-account rotation.
 > Maintained by [ndycode](https://github.com/ndycode).
@@ -26,7 +26,7 @@ Users are responsible for compliance with [OpenAI's Terms of Use](https://openai
 - [Configuration Guide](configuration.md) - Advanced config options and patterns
 - [Troubleshooting](troubleshooting.md) - Debug techniques and common issues
 - [Privacy & Data Handling](privacy.md) - How your data is handled and protected
-- [Release Notes](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/releases) - Version history and updates
+- [Release Notes](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases) - Version history and updates
 
 ### For Developers
 Explore the engineering depth behind this plugin:
@@ -44,20 +44,20 @@ Explore the engineering depth behind this plugin:
 Install/update from npm (recommended):
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
+npx -y opencode-openai-codex-auth-multi@latest
 ```
 
 Legacy OpenCode (v1.0.209 and below):
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
+npx -y opencode-openai-codex-auth-multi@latest --legacy
 ```
 
 Install from source (optional):
 
 ```bash
-git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
-cd opencode-openai-codex-auth-multiaccount
+git clone https://github.com/ndycode/opencode-openai-codex-auth-multi.git
+cd opencode-openai-codex-auth-multi
 npm ci
 npm run build
 ```
@@ -66,7 +66,7 @@ Point OpenCode at the local build output (replace with your absolute path):
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multi/dist"]
 }
 ```
 
@@ -88,7 +88,7 @@ If the browser callback fails (SSH/WSL/remote), choose **"ChatGPT Plus/Pro (Manu
 If you installed from source, pull + rebuild:
 
 ```bash
-cd opencode-openai-codex-auth-multiaccount
+cd opencode-openai-codex-auth-multi
 git pull
 npm ci
 npm run build
@@ -97,7 +97,7 @@ npm run build
 If you installed from npm, re-run the installer:
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
+npx -y opencode-openai-codex-auth-multi@latest
 ```
 
 ### Quick Test
@@ -165,9 +165,9 @@ This plugin represents significant engineering effort to bridge OpenCode and the
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues)
-- **Releases**: [Release Notes](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/releases)
-- **Main Repo**: [GitHub](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount)
+- **Issues**: [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multi/issues)
+- **Releases**: [Release Notes](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases)
+- **Main Repo**: [GitHub](https://github.com/ndycode/opencode-openai-codex-auth-multi)
 
 ---
 

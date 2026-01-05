@@ -1,13 +1,13 @@
-![Image 1: opencode-openai-codex-auth-multiaccount](assets/readme-hero.svg)
+![Image 1: opencode-openai-codex-auth-multi](assets/readme-hero.svg)
   
   
 **Forked from [numman-ali/opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) (by [Numman Ali](https://x.com/nummanali))**
 **Maintained by [ndycode](https://github.com/ndycode)**
 
 [![Twitter Follow](https://img.shields.io/twitter/follow/nummanali?style=social)](https://x.com/nummanali)
-[![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth-multiaccount.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multiaccount)
-[![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/actions)
-[![npm downloads](https://img.shields.io/npm/dm/opencode-openai-codex-auth-multiaccount.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multiaccount)
+[![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
+[![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
 **One install. Every Codex model.**
 [Install](#-quick-start) · [Models](#-models) · [Configuration](#-configuration) · [Docs](#-docs)
 
@@ -29,13 +29,13 @@ OpenCode should feel effortless. This plugin keeps the setup minimal while givin
 ### Install from npm (recommended)
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
+npx -y opencode-openai-codex-auth-multi@latest
 ```
 
 Legacy OpenCode (v1.0.209 and below):
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
+npx -y opencode-openai-codex-auth-multi@latest --legacy
 ```
 
 Then:
@@ -52,8 +52,8 @@ opencode run "write hello world to test.txt" --model=openai/gpt-5.2-medium
 ### Install from source (optional)
 
 ```bash
-git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
-cd opencode-openai-codex-auth-multiaccount
+git clone https://github.com/ndycode/opencode-openai-codex-auth-multi.git
+cd opencode-openai-codex-auth-multi
 npm ci
 npm run build
 ```
@@ -62,7 +62,7 @@ Point OpenCode at the local build output (replace with your absolute path):
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multi/dist"]
 }
 ```
 

@@ -78,7 +78,7 @@ Both configs provide:
 
 > **⚠️ Important**: Use the config file appropriate for your OpenCode version. Using the modern config with an older OpenCode version (v1.0.209 or below) will not work correctly.
 
-> **Note**: The config templates use an **unversioned** plugin entry (`opencode-openai-codex-auth-multiaccount`) so the installer can always pull the latest release. If you need reproducibility, pin a specific version manually.
+> **Note**: The config templates use an **unversioned** plugin entry (`opencode-openai-codex-auth-multi`) so the installer can always pull the latest release. If you need reproducibility, pin a specific version manually.
 
 ### Minimal config (advanced)
 

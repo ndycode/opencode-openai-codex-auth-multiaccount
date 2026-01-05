@@ -163,7 +163,7 @@ Items are not persisted when `store` is set to false.
 **Solution:**
 ```bash
 # Update plugin
-npx -y opencode-openai-codex-auth-multiaccount@latest
+npx -y opencode-openai-codex-auth-multi@latest
 
 # Restart OpenCode
 opencode
@@ -386,7 +386,7 @@ cat ~/.opencode/logs/codex-plugin/request-*-stream-full.json | grep -o '"total_t
    - Config file (redact sensitive info)
 
 3. **Check existing issues:**
-   - [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues)
+   - [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multi/issues)
 
 ### Reporting Bugs
 

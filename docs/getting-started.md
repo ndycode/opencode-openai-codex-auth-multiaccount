@@ -25,7 +25,7 @@ For production applications, use the [OpenAI Platform API](https://platform.open
 Works on **Windows, macOS, and Linux**:
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
+npx -y opencode-openai-codex-auth-multi@latest
 ```
 
 This writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
@@ -33,14 +33,14 @@ This writes the **global** config at `~/.config/opencode/opencode.json`, backs i
 Need legacy config (OpenCode v1.0.209 and below)?
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
+npx -y opencode-openai-codex-auth-multi@latest --legacy
 ```
 
 ### Install from source (optional)
 
 ```bash
-git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
-cd opencode-openai-codex-auth-multiaccount
+git clone https://github.com/ndycode/opencode-openai-codex-auth-multi.git
+cd opencode-openai-codex-auth-multi
 npm ci
 npm run build
 ```
@@ -49,7 +49,7 @@ Point OpenCode at the local build output (replace with your absolute path):
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multi/dist"]
 }
 ```
 
@@ -81,7 +81,7 @@ Add this to `~/.config/opencode/opencode.json` (if you installed from source, re
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multiaccount"],
+  "plugin": ["opencode-openai-codex-auth-multi"],
   "provider": {
     "openai": {
       "options": {
@@ -309,7 +309,7 @@ Minimal configs can be useful for debugging, but they do not include the full mo
 // ⚠️ Debugging only
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multiaccount"],
+  "plugin": ["opencode-openai-codex-auth-multi"],
   "model": "openai/gpt-5-codex"
 }
 ```
@@ -366,7 +366,7 @@ OpenCode checks multiple config files in order:
 ### If you installed from source
 
 ```bash
-cd opencode-openai-codex-auth-multiaccount
+cd opencode-openai-codex-auth-multi
 git pull
 npm ci
 npm run build
@@ -377,13 +377,13 @@ npm run build
 OpenCode caches plugins. To install the latest version, re-run the installer:
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
+npx -y opencode-openai-codex-auth-multi@latest
 ```
 
 Legacy OpenCode (v1.0.209 and below):
 
 ```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
+npx -y opencode-openai-codex-auth-multi@latest --legacy
 ```
 
 **When to update:**
@@ -391,7 +391,7 @@ npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 - Bug fixes available
 - Security updates
 
-**Check for updates**: [Releases Page](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/releases)
+**Check for updates**: [Releases Page](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases)
 
 **Pro tip**: Subscribe to release notifications on GitHub to get notified of updates.
 
@@ -403,7 +403,7 @@ For plugin development or testing unreleased changes:
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multi/dist"]
 }
 ```
 
@@ -411,7 +411,7 @@ For plugin development or testing unreleased changes:
 
 **Build the plugin:**
 ```bash
-cd opencode-openai-codex-auth-multiaccount
+cd opencode-openai-codex-auth-multi
 npm ci
 npm run build
 ```

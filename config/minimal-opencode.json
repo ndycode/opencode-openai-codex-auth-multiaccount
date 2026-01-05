@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multiaccount"],
+  "plugin": ["opencode-openai-codex-auth-multi"],
 
   "provider": {
     "openai": {

@@ -171,7 +171,7 @@ However, data sent to OpenAI is subject to OpenAI's privacy practices.
 
 ### Open Source
 The entire plugin source code is available at:
-- **GitHub:** [https://github.com/ndycode/opencode-openai-codex-auth-multiaccount](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount)
+- **GitHub:** [https://github.com/ndycode/opencode-openai-codex-auth-multi](https://github.com/ndycode/opencode-openai-codex-auth-multi)
 
 
 You can:
@@ -191,7 +191,7 @@ You can:
 ## Questions?
 
 For privacy-related questions:
-- **Plugin-specific:** [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multiaccount/issues)
+- **Plugin-specific:** [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multi/issues)
 
 - **OpenAI data handling:** [OpenAI Support](https://help.openai.com/)
 - **Security concerns:** See [SECURITY.md](../SECURITY.md)
