@@ -265,7 +265,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
         const showToast = async (
                 message: string,
-                variant: "success" | "warning" = "success",
+                variant: "info" | "success" | "warning" | "error" = "success",
         ): Promise<void> => {
                 try {
                         await client.tui.showToast({
@@ -447,6 +447,25 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 continue;
                                                         }
                                                         account.accountId = accountId;
+
+                                                        if (
+                                                                accountCount > 1 &&
+                                                                accountManager.shouldShowAccountToast(
+                                                                        account.index,
+                                                                )
+                                                        ) {
+                                                                const accountLabel = formatAccountLabel(
+                                                                        account.accountId,
+                                                                        account.index,
+                                                                );
+                                                                await showToast(
+                                                                        `Using ${accountLabel} (${account.index + 1}/${accountCount})`,
+                                                                        "info",
+                                                                );
+                                                                accountManager.markToastShown(
+                                                                        account.index,
+                                                                );
+                                                        }
 
                                                         const headers = createCodexHeaders(
                                                                 requestInit,
