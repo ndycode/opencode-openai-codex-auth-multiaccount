@@ -20,7 +20,23 @@ For production applications, use the [OpenAI Platform API](https://platform.open
 
 ## Installation
 
-### Install from source (recommended for now)
+### Install/update from npm (recommended)
+
+Works on **Windows, macOS, and Linux**:
+
+```bash
+npx -y opencode-openai-codex-auth-multiaccount@latest
+```
+
+This writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
+
+Need legacy config (OpenCode v1.0.209 and below)?
+
+```bash
+npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
+```
+
+### Install from source (optional)
 
 ```bash
 git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
@@ -35,22 +51,6 @@ Point OpenCode at the local build output (replace with your absolute path):
 {
   "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
 }
-```
-
-### Install/update from npm (once published)
-
-Works on **Windows, macOS, and Linux**:
-
-```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
-```
-
-Once published, this writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
-
-Need legacy config (OpenCode v1.0.209 and below)?
-
-```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 ```
 
 ---

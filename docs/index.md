@@ -41,7 +41,19 @@ Explore the engineering depth behind this plugin:
 
 ### Installation
 
-Install from source (recommended for now):
+Install/update from npm (recommended):
+
+```bash
+npx -y opencode-openai-codex-auth-multiaccount@latest
+```
+
+Legacy OpenCode (v1.0.209 and below):
+
+```bash
+npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
+```
+
+Install from source (optional):
 
 ```bash
 git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
@@ -56,18 +68,6 @@ Point OpenCode at the local build output (replace with your absolute path):
 {
   "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
 }
-```
-
-Install/update from npm (once published):
-
-```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest
-```
-
-Legacy OpenCode (v1.0.209 and below):
-
-```bash
-npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 ```
 
 Then run OpenCode and authenticate:
@@ -94,7 +94,7 @@ npm ci
 npm run build
 ```
 
-If you installed from npm (once published), re-run the installer:
+If you installed from npm, re-run the installer:
 
 ```bash
 npx -y opencode-openai-codex-auth-multiaccount@latest

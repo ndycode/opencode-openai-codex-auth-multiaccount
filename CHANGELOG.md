@@ -7,7 +7,7 @@ All notable changes to this project are documented here. Dates use the ISO forma
 **Feature + reliability release**: variants support, one-command installer, and auth/error handling fixes.
 
 ### Added
-- **One-command installer/update (once published)**: `npx -y opencode-openai-codex-auth-multiaccount@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.
+- **One-command installer/update**: `npx -y opencode-openai-codex-auth-multiaccount@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.
 - **Modern variants config**: `config/opencode-modern.json` for OpenCode v1.0.210+; legacy presets remain in `config/opencode-legacy.json`.
 - **Installer CLI** bundled as package bin for cross-platform use (Windows/macOS/Linux).
 
