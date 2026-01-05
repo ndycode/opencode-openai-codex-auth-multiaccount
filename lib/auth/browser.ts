@@ -59,17 +59,18 @@ function commandExists(command: string): boolean {
  */
 export function openBrowserUrl(url: string): boolean {
 	try {
-		// Windows: `start` needs an empty title and proper quoting or the URL gets truncated (causing invalid session).
+		// Windows: use PowerShell Start-Process to avoid cmd/start quirks with URLs containing '&' or ':'
 		if (process.platform === "win32") {
-			const quotedUrl = `"${url.replace(/"/g, "\"")}"`;
+			const psUrl = url.replace(/`/g, "``").replace(/"/g, '""');
 			const child = spawn(
-				"cmd.exe",
-				["/c", "start", "", quotedUrl],
+				"powershell.exe",
+				["-NoLogo", "-NoProfile", "-Command", `Start-Process "${psUrl}"`],
 				{ stdio: "ignore" },
 			);
 			child.on("error", () => {});
 			return true;
 		}
+
 
 		const opener = getBrowserOpener();
 		if (!commandExists(opener)) {
