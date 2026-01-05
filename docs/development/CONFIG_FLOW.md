@@ -194,7 +194,7 @@ For a given model, options are merged:
 ### Example 1: Global Options Only
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multiaccount"],
+  "plugin": ["opencode-openai-codex-auth-multi"],
   "provider": {
     "openai": {
       "options": {
@@ -212,7 +212,7 @@ For a given model, options are merged:
 ### Example 2: Per-Model Override
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multiaccount"],
+  "plugin": ["opencode-openai-codex-auth-multi"],
   "provider": {
     "openai": {
       "options": {
@@ -248,7 +248,7 @@ For a given model, options are merged:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multiaccount"],
+  "plugin": ["opencode-openai-codex-auth-multi"],
   "model": "openai/gpt-5-codex-medium",
   "provider": {
     "openai": {

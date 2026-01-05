@@ -1,6 +1,6 @@
 # Contributing Guidelines
 
-Thank you for your interest in contributing to opencode-openai-codex-auth-multiaccount!
+Thank you for your interest in contributing to opencode-openai-codex-auth-multi!
 
 Before submitting contributions, please review these guidelines to ensure all changes maintain compliance with OpenAI's Terms of Service and the project's goals.
 
