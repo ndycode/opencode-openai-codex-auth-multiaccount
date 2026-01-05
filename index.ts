@@ -30,11 +30,20 @@ import {
         exchangeAuthorizationCode,
         parseAuthorizationInput,
         REDIRECT_URI,
+        refreshAccessToken,
 } from "./lib/auth/auth.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
-import { getCodexMode, loadPluginConfig } from "./lib/config.js";
+import {
+	getCodexMode,
+	getRateLimitToastDebounceMs,
+	getRetryAllAccountsMaxRetries,
+	getRetryAllAccountsMaxWaitMs,
+	getRetryAllAccountsRateLimited,
+	getTokenRefreshSkewMs,
+	loadPluginConfig,
+} from "./lib/config.js";
 import {
         AUTH_LABELS,
         CODEX_BASE_URL,
@@ -42,6 +51,7 @@ import {
         LOG_STAGES,
         PLUGIN_NAME,
         PROVIDER_ID,
+        ACCOUNT_LIMITS,
 } from "./lib/constants.js";
 import { logRequest, logDebug } from "./lib/logger.js";
 import {
@@ -53,7 +63,7 @@ import {
         formatWaitTime,
         sanitizeEmail,
 } from "./lib/accounts.js";
-import { getStoragePath, loadAccounts, saveAccounts } from "./lib/storage.js";
+import { getStoragePath, loadAccounts, saveAccounts, type AccountStorageV3 } from "./lib/storage.js";
 import {
         createCodexHeaders,
         extractRequestUrl,
@@ -64,10 +74,13 @@ import {
         shouldRefreshToken,
         transformRequestForCodex,
 } from "./lib/request/fetch-helpers.js";
+import {
+	getRateLimitBackoff,
+	RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
+	resetRateLimitBackoff,
+} from "./lib/request/rate-limit-backoff.js";
+import { getModelFamily, MODEL_FAMILIES, type ModelFamily } from "./lib/prompts/codex.js";
 import type { OAuthAuthDetails, TokenResult, UserConfig } from "./lib/types.js";
-
-const MAX_OAUTH_ACCOUNTS = 10;
-const AUTH_FAILURE_COOLDOWN_MS = 30_000;
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -130,7 +143,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
         const runManualOAuthFlow = async (
                 pkce: { verifier: string },
-                url: string,
+                _url: string,
         ): Promise<TokenResult> => {
                 console.log("1. Open the URL above in your browser and sign in.");
                 console.log("2. After approving, copy the full redirect URL.");
@@ -196,28 +209,36 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 const stored = replaceAll ? null : await loadAccounts();
                 const accounts = stored?.accounts ? [...stored.accounts] : [];
 
-                const indexByRefreshToken = new Map<string, number>();
-                const indexByAccountId = new Map<string, number>();
-                for (let i = 0; i < accounts.length; i += 1) {
+				const indexByRefreshToken = new Map<string, number>();
+				const indexByAccountId = new Map<string, number>();
+				const indexByEmail = new Map<string, number>();
+				for (let i = 0; i < accounts.length; i += 1) {
                         const account = accounts[i];
                         if (!account) continue;
                         if (account.refreshToken) {
                                 indexByRefreshToken.set(account.refreshToken, i);
                         }
-                        if (account.accountId) {
-                                indexByAccountId.set(account.accountId, i);
-                        }
-                }
+						if (account.accountId) {
+							indexByAccountId.set(account.accountId, i);
+						}
+						if (account.email) {
+							indexByEmail.set(account.email, i);
+						}
+					}
 
-                for (const result of results) {
-                        const accountId = extractAccountId(result.access);
-                        const accountEmail = sanitizeEmail(extractAccountEmail(result.access));
-                        const existingById =
-                                accountId && indexByAccountId.has(accountId)
-                                        ? indexByAccountId.get(accountId)
-                                        : undefined;
-                        const existingByToken = indexByRefreshToken.get(result.refresh);
-                        const existingIndex = existingById ?? existingByToken;
+				for (const result of results) {
+						const accountId = extractAccountId(result.access);
+						const accountEmail = sanitizeEmail(extractAccountEmail(result.access));
+						const existingByEmail =
+								accountEmail && indexByEmail.has(accountEmail)
+										? indexByEmail.get(accountEmail)
+										: undefined;
+						const existingById =
+								accountId && indexByAccountId.has(accountId)
+										? indexByAccountId.get(accountId)
+										: undefined;
+						const existingByToken = indexByRefreshToken.get(result.refresh);
+						const existingIndex = existingById ?? existingByEmail ?? existingByToken;
 
                         if (existingIndex === undefined) {
                                 const newIndex = accounts.length;
@@ -228,31 +249,42 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         addedAt: now,
                                         lastUsed: now,
                                 });
-                                indexByRefreshToken.set(result.refresh, newIndex);
-                                if (accountId) {
-                                        indexByAccountId.set(accountId, newIndex);
-                                }
-                                continue;
+								indexByRefreshToken.set(result.refresh, newIndex);
+								if (accountId) {
+									indexByAccountId.set(accountId, newIndex);
+								}
+								if (accountEmail) {
+									indexByEmail.set(accountEmail, newIndex);
+								}
+								continue;
                         }
 
                         const existing = accounts[existingIndex];
                         if (!existing) continue;
 
-                        const oldToken = existing.refreshToken;
-                        accounts[existingIndex] = {
-                                ...existing,
-                                accountId: accountId ?? existing.accountId,
-                                email: accountEmail ?? existing.email,
-                                refreshToken: result.refresh,
-                                lastUsed: now,
-                        };
-                        if (oldToken !== result.refresh) {
-                                indexByRefreshToken.delete(oldToken);
-                                indexByRefreshToken.set(result.refresh, existingIndex);
-                        }
-                        if (accountId) {
-                                indexByAccountId.set(accountId, existingIndex);
-                        }
+						const oldToken = existing.refreshToken;
+						const oldEmail = existing.email;
+						const nextEmail = accountEmail ?? existing.email;
+						accounts[existingIndex] = {
+								...existing,
+								accountId: accountId ?? existing.accountId,
+								email: nextEmail,
+								refreshToken: result.refresh,
+								lastUsed: now,
+						};
+						if (oldToken !== result.refresh) {
+								indexByRefreshToken.delete(oldToken);
+								indexByRefreshToken.set(result.refresh, existingIndex);
+						}
+						if (accountId) {
+								indexByAccountId.set(accountId, existingIndex);
+						}
+						if (oldEmail && oldEmail !== nextEmail) {
+								indexByEmail.delete(oldEmail);
+						}
+						if (nextEmail) {
+								indexByEmail.set(nextEmail, existingIndex);
+						}
                 }
 
                 if (accounts.length === 0) return;
@@ -263,11 +295,27 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 ? stored.activeIndex
                                 : 0;
 
-                await saveAccounts({
-                        version: 1,
-                        accounts,
-                        activeIndex: Math.max(0, Math.min(activeIndex, accounts.length - 1)),
-                });
+				const clampedActiveIndex = Math.max(0, Math.min(activeIndex, accounts.length - 1));
+				const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
+				for (const family of MODEL_FAMILIES) {
+						const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
+						const rawFamilyIndex = replaceAll
+								? 0
+								: typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex)
+										? storedFamilyIndex
+										: clampedActiveIndex;
+						activeIndexByFamily[family] = Math.max(
+								0,
+								Math.min(Math.floor(rawFamilyIndex), accounts.length - 1),
+						);
+				}
+
+				await saveAccounts({
+						version: 3,
+						accounts,
+						activeIndex: clampedActiveIndex,
+						activeIndexByFamily,
+				});
         };
 
         const showToast = async (
@@ -286,22 +334,95 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 }
         };
 
-        const resolveActiveIndex = (storage: { activeIndex: number; accounts: unknown[] }): number => {
-                const total = storage.accounts.length;
-                if (total === 0) return 0;
-                const raw = Number.isFinite(storage.activeIndex) ? storage.activeIndex : 0;
-                return Math.max(0, Math.min(raw, total - 1));
+		const resolveActiveIndex = (
+				storage: {
+						activeIndex: number;
+						activeIndexByFamily?: Partial<Record<ModelFamily, number>>;
+						accounts: unknown[];
+				},
+				family: ModelFamily = "codex",
+		): number => {
+				const total = storage.accounts.length;
+				if (total === 0) return 0;
+				const rawCandidate = storage.activeIndexByFamily?.[family] ?? storage.activeIndex;
+				const raw = Number.isFinite(rawCandidate) ? rawCandidate : 0;
+				return Math.max(0, Math.min(raw, total - 1));
+		};
+
+		const hydrateEmails = async (
+				storage: AccountStorageV3 | null,
+		): Promise<AccountStorageV3 | null> => {
+                if (!storage) return storage;
+                const skipHydrate =
+                        process.env.VITEST_WORKER_ID !== undefined ||
+                        process.env.NODE_ENV === "test" ||
+                        process.env.OPENCODE_SKIP_EMAIL_HYDRATE === "1";
+                if (skipHydrate) return storage;
+
+                let changed = false;
+                for (const account of storage.accounts) {
+                        if (!account || account.email) continue;
+                        try {
+                                const refreshed = await refreshAccessToken(account.refreshToken);
+                                if (refreshed.type !== "success") continue;
+                                const id = extractAccountId(refreshed.access);
+                                const email = sanitizeEmail(extractAccountEmail(refreshed.access));
+                                if (id && id !== account.accountId) {
+                                        account.accountId = id;
+                                        changed = true;
+                                }
+                                if (email && email !== account.email) {
+                                        account.email = email;
+                                        changed = true;
+                                }
+                                if (refreshed.refresh && refreshed.refresh !== account.refreshToken) {
+                                        account.refreshToken = refreshed.refresh;
+                                        changed = true;
+                                }
+                        } catch {
+                                // ignore hydration failures
+                        }
+                }
+
+                if (changed) {
+                        await saveAccounts(storage);
+                }
+                return storage;
         };
 
-        const formatRateLimitEntry = (
-                account: { rateLimitResetTime?: number },
-                now: number,
-        ): string | null => {
-                if (typeof account.rateLimitResetTime !== "number") return null;
-                const remaining = account.rateLimitResetTime - now;
-                if (remaining <= 0) return null;
-                return `resets in ${formatWaitTime(remaining)}`;
-        };
+		const getRateLimitResetTimeForFamily = (
+				account: { rateLimitResetTimes?: Record<string, number | undefined> },
+				now: number,
+				family: ModelFamily,
+		): number | null => {
+				const times = account.rateLimitResetTimes;
+				if (!times) return null;
+
+				let minReset: number | null = null;
+				const prefix = `${family}:`;
+				for (const [key, value] of Object.entries(times)) {
+						if (typeof value !== "number") continue;
+						if (value <= now) continue;
+						if (key !== family && !key.startsWith(prefix)) continue;
+						if (minReset === null || value < minReset) {
+								minReset = value;
+						}
+				}
+
+				return minReset;
+		};
+
+		const formatRateLimitEntry = (
+				account: { rateLimitResetTimes?: Record<string, number | undefined> },
+				now: number,
+				family: ModelFamily = "codex",
+		): string | null => {
+				const resetAt = getRateLimitResetTimeForFamily(account, now, family);
+				if (typeof resetAt !== "number") return null;
+				const remaining = resetAt - now;
+				if (remaining <= 0) return null;
+				return `resets in ${formatWaitTime(remaining)}`;
+		};
 
         return {
                 auth: {
@@ -367,6 +488,12 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				// Priority: CODEX_MODE env var > config file > default (true)
 				const pluginConfig = loadPluginConfig();
 				const codexMode = getCodexMode(pluginConfig);
+				const tokenRefreshSkewMs = getTokenRefreshSkewMs(pluginConfig);
+				const rateLimitToastDebounceMs = getRateLimitToastDebounceMs(pluginConfig);
+				const retryAllAccountsRateLimited = getRetryAllAccountsRateLimited(pluginConfig);
+				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
+				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
+
 
 				// Return SDK configuration
 				return {
@@ -408,148 +535,223 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							userConfig,
 							codexMode,
 						);
-                                                const requestInit = transformation?.updatedInit ?? init;
-                                                const promptCacheKey = (transformation?.body as any)?.prompt_cache_key;
-                                                const model = transformation?.body.model;
+									const requestInit = transformation?.updatedInit ?? init;
+									const promptCacheKey = transformation?.body?.prompt_cache_key;
+																				const model = transformation?.body.model;
+																				const modelFamily = model ? getModelFamily(model) : "gpt-5.1";
+																				const quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
 
-                                                const accountCount = accountManager.getAccountCount();
-                                                const attempted = new Set<number>();
+																				const abortSignal = requestInit?.signal ?? init?.signal ?? null;
+									const sleep = (ms: number): Promise<void> =>
+										new Promise((resolve, reject) => {
+											if (abortSignal?.aborted) {
+												reject(new Error("Aborted"));
+												return;
+											}
 
-                                                while (attempted.size < Math.max(1, accountCount)) {
-                                                        const account = accountManager.getCurrentOrNext();
-                                                        if (!account || attempted.has(account.index)) {
-                                                                break;
-                                                        }
-                                                        attempted.add(account.index);
+											const timeout = setTimeout(() => {
+												cleanup();
+												resolve();
+											}, ms);
 
-                                                        let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
-                                                        try {
-                                                                if (shouldRefreshToken(accountAuth)) {
-                                                                        accountAuth = (await refreshAndUpdateToken(
-                                                                                accountAuth,
-                                                                                client,
-                                                                        )) as OAuthAuthDetails;
-                                                                        accountManager.updateFromAuth(account, accountAuth);
-                                                                        await accountManager.saveToDisk();
-                                                                }
-                                                        } catch (error) {
-                                                                accountManager.markAccountCoolingDown(
-                                                                        account,
-                                                                        AUTH_FAILURE_COOLDOWN_MS,
-                                                                        "auth-failure",
-                                                                );
-                                                                await accountManager.saveToDisk();
-                                                                continue;
-                                                        }
+											const onAbort = () => {
+												cleanup();
+												reject(new Error("Aborted"));
+											};
 
-                                                        const accountId =
-                                                                account.accountId ?? extractAccountId(accountAuth.access);
-                                                        if (!accountId) {
-                                                                accountManager.markAccountCoolingDown(
-                                                                        account,
-                                                                        AUTH_FAILURE_COOLDOWN_MS,
-                                                                        "auth-failure",
-                                                                );
-                                                                await accountManager.saveToDisk();
-                                                                continue;
-                                                        }
-                                                        account.accountId = accountId;
-                                                        account.email =
-                                                                extractAccountEmail(accountAuth.access) ?? account.email;
+											const cleanup = () => {
+												clearTimeout(timeout);
+												abortSignal?.removeEventListener("abort", onAbort);
+											};
 
-                                                        if (
-                                                                accountCount > 1 &&
-                                                                accountManager.shouldShowAccountToast(
-                                                                        account.index,
-                                                                )
-                                                        ) {
-                                                                const accountLabel = formatAccountLabel(
-                                                                        account,
-                                                                        account.index,
-                                                                );
-                                                                await showToast(
-                                                                        `Using ${accountLabel} (${account.index + 1}/${accountCount})`,
-                                                                        "info",
-                                                                );
-                                                                accountManager.markToastShown(
-                                                                        account.index,
-                                                                );
-                                                        }
+											abortSignal?.addEventListener("abort", onAbort, { once: true });
+										});
 
-                                                        const headers = createCodexHeaders(
-                                                                requestInit,
-                                                                accountId,
-                                                                accountAuth.access,
-                                                                {
-                                                                        model,
-                                                                        promptCacheKey,
-                                                                },
-                                                        );
+									let allRateLimitedRetries = 0;
 
-                                                        const response = await fetch(url, {
-                                                                ...requestInit,
-                                                                headers,
-                                                        });
+									while (true) {
+										const accountCount = accountManager.getAccountCount();
+										const attempted = new Set<number>();
 
-                                                        logRequest(LOG_STAGES.RESPONSE, {
-                                                                status: response.status,
-                                                                ok: response.ok,
-                                                                statusText: response.statusText,
-                                                                headers: Object.fromEntries(response.headers.entries()),
-                                                        });
+										while (attempted.size < Math.max(1, accountCount)) {
+											const account = accountManager.getCurrentOrNextForFamily(modelFamily, model);
+											if (!account || attempted.has(account.index)) {
+												break;
+											}
+											attempted.add(account.index);
 
-                                                        if (!response.ok) {
-                                                                const { response: errorResponse, rateLimit } =
-                                                                        await handleErrorResponse(response);
-                                                                if (rateLimit) {
-                                                                        accountManager.markRateLimited(
-                                                                                account,
-                                                                                rateLimit.retryAfterMs,
-                                                                        );
-                                                                        accountManager.markSwitched(
-                                                                                account,
-                                                                                "rate-limit",
-                                                                        );
-                                                                        await accountManager.saveToDisk();
-                                                                        if (
-                                                                                accountManager.getAccountCount() > 1 &&
-                                                                                accountManager.shouldShowAccountToast(
-                                                                                        account.index,
-                                                                                )
-                                                                        ) {
-                                                                                await showToast(
-                                                                                        "Rate limit reached. Switching accounts.",
-                                                                                        "warning",
-                                                                                );
-                                                                                accountManager.markToastShown(
-                                                                                        account.index,
-                                                                                );
-                                                                        }
-                                                                        continue;
-                                                                }
-                                                                return errorResponse;
-                                                        }
+											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
+											try {
+												if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
+													accountAuth = (await refreshAndUpdateToken(
+														accountAuth,
+														client,
+													)) as OAuthAuthDetails;
+													accountManager.updateFromAuth(account, accountAuth);
+													await accountManager.saveToDisk();
+												}
+											} catch {
+												accountManager.markAccountCoolingDown(
+													account,
+													ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+													"auth-failure",
+												);
+												await accountManager.saveToDisk();
+												continue;
+											}
 
-                                                        return await handleSuccessResponse(response, isStreaming);
-                                                }
+											const accountId =
+												account.accountId ?? extractAccountId(accountAuth.access);
+											if (!accountId) {
+												accountManager.markAccountCoolingDown(
+													account,
+													ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+													"auth-failure",
+												);
+												await accountManager.saveToDisk();
+												continue;
+											}
+											account.accountId = accountId;
+											account.email =
+												extractAccountEmail(accountAuth.access) ?? account.email;
 
-                                                const waitMs = accountManager.getMinWaitTime();
-                                                const count = accountManager.getAccountCount();
-                                                const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
-                                                const message =
-                                                        count === 0
-                                                                ? "No OpenAI accounts configured. Run `opencode auth login`."
-                                                                : `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`;
-                                                return new Response(
-                                                        JSON.stringify({ error: { message } }),
-                                                        {
-                                                                status: 429,
-                                                                headers: {
-                                                                        "content-type": "application/json; charset=utf-8",
-                                                                },
-                                                        },
-                                                );
-                                        },
+											if (
+												accountCount > 1 &&
+												accountManager.shouldShowAccountToast(
+													account.index,
+													rateLimitToastDebounceMs,
+												)
+											) {
+												const accountLabel = formatAccountLabel(account, account.index);
+												await showToast(
+													`Using ${accountLabel} (${account.index + 1}/${accountCount})`,
+													"info",
+												);
+												accountManager.markToastShown(account.index);
+											}
+
+											const headers = createCodexHeaders(
+												requestInit,
+												accountId,
+												accountAuth.access,
+												{
+													model,
+													promptCacheKey,
+												},
+											);
+
+																								while (true) {
+																											const response = await fetch(url, {
+																												...requestInit,
+																												headers,
+																											});
+
+																											logRequest(LOG_STAGES.RESPONSE, {
+																											status: response.status,
+																											ok: response.ok,
+																											statusText: response.statusText,
+																											headers: Object.fromEntries(response.headers.entries()),
+																										});
+
+																											if (!response.ok) {
+																												const { response: errorResponse, rateLimit } =
+																													await handleErrorResponse(response);
+																												if (rateLimit) {
+																														const { attempt, delayMs } = getRateLimitBackoff(
+																															account.index,
+																															quotaKey,
+																															rateLimit.retryAfterMs,
+																														);
+																														const waitLabel = formatWaitTime(delayMs);
+
+																														if (delayMs <= RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS) {
+																																if (
+																																	accountManager.shouldShowAccountToast(
+																																		account.index,
+																																		rateLimitToastDebounceMs,
+																																		)
+																																) {
+																																			await showToast(
+																																				`Rate limited. Retrying in ${waitLabel} (attempt ${attempt})...`,
+																																				"warning",
+																																			);
+																																			accountManager.markToastShown(account.index);
+																																		}
+
+																																	await sleep(delayMs);
+																																	continue;
+																																}
+
+																														accountManager.markRateLimited(
+																															account,
+																															delayMs,
+																															modelFamily,
+																															model,
+																														);
+																														accountManager.markSwitched(
+																															account,
+																															"rate-limit",
+																															modelFamily,
+																														);
+																														await accountManager.saveToDisk();
+
+																														if (
+																															accountManager.getAccountCount() > 1 &&
+																															accountManager.shouldShowAccountToast(
+																																account.index,
+																																rateLimitToastDebounceMs,
+																																)
+																														) {
+																																await showToast(
+																																	`Rate limited. Switching accounts (retry in ${waitLabel}).`,
+																																	"warning",
+																																	);
+																																	accountManager.markToastShown(account.index);
+																																}
+																														break;
+																													}
+																													return errorResponse;
+																											}
+
+																						resetRateLimitBackoff(account.index, quotaKey);
+																								return await handleSuccessResponse(response, isStreaming);
+																								}
+										}
+
+										const waitMs = accountManager.getMinWaitTimeForFamily(modelFamily, model);
+										const count = accountManager.getAccountCount();
+
+										if (
+											retryAllAccountsRateLimited &&
+											count > 0 &&
+											waitMs > 0 &&
+											(retryAllAccountsMaxWaitMs === 0 ||
+												waitMs <= retryAllAccountsMaxWaitMs) &&
+											allRateLimitedRetries < retryAllAccountsMaxRetries
+										) {
+											const waitLabel = formatWaitTime(waitMs);
+											await showToast(
+												`All ${count} account(s) are rate-limited. Waiting ${waitLabel}...`,
+												"warning",
+											);
+											allRateLimitedRetries++;
+											await sleep(waitMs);
+											continue;
+										}
+
+										const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
+										const message =
+											count === 0
+												? "No OpenAI accounts configured. Run `opencode auth login`."
+												: `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`;
+										return new Response(JSON.stringify({ error: { message } }), {
+											status: 429,
+											headers: {
+												"content-type": "application/json; charset=utf-8",
+											},
+										});
+									}
+										},
                                 };
                         },
 				methods: [
@@ -577,18 +779,18 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                         const useManualMode = noBrowser;
 
                                                         let startFresh = true;
-                                                        const existingStorage = await loadAccounts();
+                                                        const existingStorage = await hydrateEmails(await loadAccounts());
                                                         if (existingStorage && existingStorage.accounts.length > 0) {
-                                                                 const existingAccounts = existingStorage.accounts.map(
-                                                                         (account, index) => ({
-                                                                                 accountId: account.accountId,
-                                                                                 email: account.email,
-                                                                                 index,
-                                                                         }),
-                                                                 );
-
+                                                                const existingAccounts = existingStorage.accounts.map(
+                                                                        (account, index) => ({
+                                                                                accountId: account.accountId,
+                                                                                email: account.email,
+                                                                                index,
+                                                                        }),
+                                                                );
                                                                 const loginMode = await promptLoginMode(existingAccounts);
                                                                 startFresh = loginMode === "fresh";
+
                                                                 if (startFresh) {
                                                                         console.log(
                                                                                 "\nStarting fresh - existing accounts will be replaced.\n",
@@ -598,7 +800,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 }
                                                         }
 
-                                                        while (accounts.length < MAX_OAUTH_ACCOUNTS) {
+                                                        while (accounts.length < ACCOUNT_LIMITS.MAX_ACCOUNTS) {
                                                                 console.log(
                                                                         `\n=== OpenAI OAuth (Account ${
                                                                                 accounts.length + 1
@@ -639,7 +841,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                         // Ignore storage failures
                                                                 }
 
-                                                                if (accounts.length >= MAX_OAUTH_ACCOUNTS) {
+                                                                if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
                                                                         break;
                                                                 }
 
@@ -774,9 +976,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 ].join("\n");
                                         }
 
-                                        const now = Date.now();
-                                        const activeIndex = resolveActiveIndex(storage);
-                                        const lines: string[] = [
+										const now = Date.now();
+										const activeIndex = resolveActiveIndex(storage, "codex");
+										const lines: string[] = [
                                                 `OpenAI Accounts (${storage.accounts.length}):`,
                                                 "",
                                                 " #  Label                                     Status",
@@ -844,8 +1046,12 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 account.lastSwitchReason = "rotation";
                                         }
 
-                                        storage.activeIndex = targetIndex;
-                                        await saveAccounts(storage);
+										storage.activeIndex = targetIndex;
+										storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
+										for (const family of MODEL_FAMILIES) {
+												storage.activeIndexByFamily[family] = targetIndex;
+										}
+										await saveAccounts(storage);
 
                                         if (cachedAccountManager) {
                                                 cachedAccountManager.setActiveIndex(targetIndex);
@@ -867,35 +1073,33 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 return "No OpenAI accounts configured. Run: opencode auth login";
                                         }
 
-                                        const now = Date.now();
-                                        const activeIndex = resolveActiveIndex(storage);
+										const now = Date.now();
+										const activeIndex = resolveActiveIndex(storage, "codex");
 
-                                        if (json) {
+										if (json) {
                                                 return JSON.stringify(
                                                         {
-                                                                total: storage.accounts.length,
-                                                                activeIndex,
-                                                                storagePath: getStoragePath(),
-                                                                accounts: storage.accounts.map((account, index) => ({
-                                                                        index,
-                                                                        active: index === activeIndex,
-                                                                        label: formatAccountLabel(account, index),
-                                                                        accountId: account.accountId ?? null,
-                                                                        email: (account as any).email ?? null,
-                                                                        rateLimitResetTime:
-                                                                                typeof account.rateLimitResetTime === "number"
-                                                                                        ? account.rateLimitResetTime
-                                                                                        : null,
-                                                                        coolingDownUntil:
-                                                                                typeof account.coolingDownUntil === "number"
-                                                                                        ? account.coolingDownUntil
-                                                                                        : null,
-                                                                        cooldownReason: (account as any).cooldownReason ?? null,
-                                                                        lastUsed:
-                                                                                typeof account.lastUsed === "number"
-                                                                                        ? account.lastUsed
-                                                                                        : null,
-                                                                })),
+																total: storage.accounts.length,
+																activeIndex,
+																activeIndexByFamily: storage.activeIndexByFamily ?? null,
+																storagePath: getStoragePath(),
+																accounts: storage.accounts.map((account, index) => ({
+																		index,
+																		active: index === activeIndex,
+																		label: formatAccountLabel(account, index),
+																		accountId: account.accountId ?? null,
+																		email: account.email ?? null,
+																		rateLimitResetTimes: account.rateLimitResetTimes ?? null,
+																		coolingDownUntil:
+																				typeof account.coolingDownUntil === "number"
+																						? account.coolingDownUntil
+																						: null,
+																		cooldownReason: account.cooldownReason ?? null,
+																		lastUsed:
+																				typeof account.lastUsed === "number"
+																						? account.lastUsed
+																						: null,
+																		})),
                                                         },
                                                         null,
                                                         2,
@@ -909,23 +1113,87 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 "----------------------------------------------- ------ ---------------- ---------------- ----------------",
                                         ];
 
-                                        storage.accounts.forEach((account, index) => {
-                                                const label = formatAccountLabel(account, index).padEnd(42);
-                                                const active = index === activeIndex ? "Yes" : "No";
-                                                const rateLimit = formatRateLimitEntry(account, now) ?? "None";
-                                                const cooldown = formatCooldown(account as any, now) ?? "No";
-                                                const lastUsed =
-                                                        typeof account.lastUsed === "number" && account.lastUsed > 0
-                                                                ? `${formatWaitTime(now - account.lastUsed)} ago`
-                                                                : "-";
+										storage.accounts.forEach((account, index) => {
+												const label = formatAccountLabel(account, index).padEnd(42);
+												const active = index === activeIndex ? "Yes" : "No";
+												const rateLimit = formatRateLimitEntry(account, now) ?? "None";
+												const cooldown = formatCooldown(account, now) ?? "No";
+												const lastUsed =
+														typeof account.lastUsed === "number" && account.lastUsed > 0
+																? `${formatWaitTime(now - account.lastUsed)} ago`
+																: "-";
 
-                                                const row = `${String(index + 1).padEnd(3)} ${label} ${active.padEnd(
-                                                        6,
-                                                )} ${rateLimit.padEnd(16)} ${cooldown.padEnd(16)} ${lastUsed}`;
-                                                lines.push(row);
-                                        });
+												const row = `${String(index + 1).padEnd(3)} ${label} ${active.padEnd(
+														6,
+												)} ${rateLimit.padEnd(16)} ${cooldown.padEnd(16)} ${lastUsed}`;
+												lines.push(row);
+										});
 
-                                        return lines.join("\n");
+										lines.push("");
+										lines.push("Active index by model family:");
+										for (const family of MODEL_FAMILIES) {
+												const idx = storage.activeIndexByFamily?.[family];
+												const familyIndexLabel =
+													typeof idx === "number" && Number.isFinite(idx) ? String(idx + 1) : "-";
+												lines.push(`  ${family}: ${familyIndexLabel}`);
+										}
+
+										lines.push("");
+										lines.push("Rate limits by model family (per account):");
+										storage.accounts.forEach((account, index) => {
+												const statuses = MODEL_FAMILIES.map((family) => {
+														const resetAt = getRateLimitResetTimeForFamily(account, now, family);
+														if (typeof resetAt !== "number") return `${family}=ok`;
+														return `${family}=${formatWaitTime(resetAt - now)}`;
+												});
+												lines.push(`  Account ${index + 1}: ${statuses.join(" | ")}`);
+										});
+
+										return lines.join("\n");
+                                },
+                        }),
+                        "openai-accounts-health": tool({
+                                description: "Check health of all OpenAI accounts by validating refresh tokens.",
+                                args: {},
+                                async execute() {
+                                        const storage = await loadAccounts();
+                                        if (!storage || storage.accounts.length === 0) {
+                                                return "No OpenAI accounts configured. Run: opencode auth login";
+                                        }
+
+                                        const results: string[] = [
+                                                `Health Check (${storage.accounts.length} accounts):`,
+                                                "",
+                                        ];
+
+                                        let healthyCount = 0;
+                                        let unhealthyCount = 0;
+
+                                        for (let i = 0; i < storage.accounts.length; i++) {
+                                                const account = storage.accounts[i];
+                                                if (!account) continue;
+
+                                                const label = formatAccountLabel(account, i);
+                                                try {
+                                                        const refreshResult = await refreshAccessToken(account.refreshToken);
+                                                        if (refreshResult.type === "success") {
+                                                                results.push(`  ✓ ${label}: Healthy`);
+                                                                healthyCount++;
+                                                        } else {
+                                                                results.push(`  ✗ ${label}: Token refresh failed`);
+                                                                unhealthyCount++;
+                                                        }
+                                                } catch (error) {
+                                                        const errorMsg = error instanceof Error ? error.message : String(error);
+                                                        results.push(`  ✗ ${label}: Error - ${errorMsg.slice(0, 50)}`);
+                                                        unhealthyCount++;
+                                                }
+                                        }
+
+                                        results.push("");
+                                        results.push(`Summary: ${healthyCount} healthy, ${unhealthyCount} unhealthy`);
+
+                                        return results.join("\n");
                                 },
                         }),
 

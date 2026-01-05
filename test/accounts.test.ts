@@ -23,14 +23,14 @@ describe("AccountManager", () => {
   it("rotates when the active account is rate-limited", () => {
     const now = Date.now();
     const stored = {
-      version: 1,
+      version: 3,
       activeIndex: 0,
       accounts: [
         {
           refreshToken: "token-1",
           addedAt: now,
           lastUsed: now,
-          rateLimitResetTime: now + 60_000,
+          rateLimitResetTimes: { codex: now + 60_000 },
         },
         {
           refreshToken: "token-2",
@@ -49,7 +49,7 @@ describe("AccountManager", () => {
   it("skips accounts that are cooling down", () => {
     const now = Date.now();
     const stored = {
-      version: 1,
+      version: 3,
       activeIndex: 0,
       accounts: [
         {
@@ -76,7 +76,7 @@ describe("AccountManager", () => {
   it("returns min wait time when all accounts are blocked", () => {
     const now = Date.now();
     const stored = {
-      version: 1,
+      version: 3,
       activeIndex: 0,
       accounts: [
         {
@@ -90,7 +90,7 @@ describe("AccountManager", () => {
           refreshToken: "token-2",
           addedAt: now,
           lastUsed: now,
-          rateLimitResetTime: now + 120_000,
+          rateLimitResetTimes: { codex: now + 120_000 },
         },
       ],
     };
@@ -104,7 +104,7 @@ describe("AccountManager", () => {
   it("debounces account toasts for the same account index", () => {
     const now = Date.now();
     const stored = {
-      version: 1,
+      version: 3,
       activeIndex: 0,
       accounts: [
         {

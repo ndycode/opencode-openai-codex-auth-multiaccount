@@ -4,6 +4,7 @@ import {
 	parseAuthorizationInput,
 	decodeJWT,
 	createAuthorizationFlow,
+	refreshAccessToken,
 	CLIENT_ID,
 	AUTHORIZE_URL,
 	REDIRECT_URI,
@@ -84,6 +85,17 @@ describe('Auth Module', () => {
 			expect(decoded?.['https://api.openai.com/auth']?.chatgpt_account_id).toBe('account-123');
 		});
 
+		it('should decode base64url JWT payloads', () => {
+			const payload = Buffer.from(
+				JSON.stringify({ sub: '1234567890', name: 'Test User' }),
+				'utf8',
+			).toString('base64url');
+			const token = `header.${payload}.signature`;
+
+			const decoded = decodeJWT(token);
+			expect(decoded).toEqual({ sub: '1234567890', name: 'Test User' });
+		});
+
 		it('should return null for invalid JWT', () => {
 			const result = decodeJWT('invalid-token');
 			expect(result).toBeNull();
@@ -138,6 +150,31 @@ describe('Auth Module', () => {
 			expect(flow1.state).not.toBe(flow2.state);
 			expect(flow1.pkce.verifier).not.toBe(flow2.pkce.verifier);
 			expect(flow1.url).not.toBe(flow2.url);
+		});
+	});
+
+	describe('refreshAccessToken', () => {
+		it('keeps existing refresh token when missing in response', async () => {
+			vi.spyOn(Date, 'now').mockReturnValue(1_000);
+			const originalFetch = globalThis.fetch;
+			globalThis.fetch = vi.fn(async () =>
+				new Response(JSON.stringify({ access_token: 'new-access', expires_in: 60 }), {
+					status: 200,
+				}),
+			) as any;
+
+			try {
+				const result = await refreshAccessToken('existing-refresh');
+				expect(result).toEqual({
+					type: 'success',
+					access: 'new-access',
+					refresh: 'existing-refresh',
+					expires: 61_000,
+				});
+			} finally {
+				globalThis.fetch = originalFetch;
+				vi.restoreAllMocks();
+			}
 		});
 	});
 });

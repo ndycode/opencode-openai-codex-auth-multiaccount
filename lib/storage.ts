@@ -2,10 +2,15 @@ import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "./logger.js";
+import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 
 const log = createLogger("storage");
 
 export type CooldownReason = "auth-failure" | "network-error";
+
+export interface RateLimitStateV3 {
+  [key: string]: number | undefined;
+}
 
 export interface AccountMetadataV1 {
   accountId?: string;
@@ -25,20 +30,55 @@ export interface AccountStorageV1 {
   activeIndex: number;
 }
 
-type AnyAccountStorage = AccountStorageV1;
+export interface AccountMetadataV3 {
+  accountId?: string;
+  email?: string;
+  refreshToken: string;
+  addedAt: number;
+  lastUsed: number;
+  lastSwitchReason?: "rate-limit" | "initial" | "rotation";
+  rateLimitResetTimes?: RateLimitStateV3;
+  coolingDownUntil?: number;
+  cooldownReason?: CooldownReason;
+}
+
+export interface AccountStorageV3 {
+  version: 3;
+  accounts: AccountMetadataV3[];
+  activeIndex: number;
+  activeIndexByFamily?: Partial<Record<ModelFamily, number>>;
+}
+
+type AnyAccountStorage = AccountStorageV1 | AccountStorageV3;
+
+type AccountLike = {
+  accountId?: string;
+  email?: string;
+  refreshToken: string;
+  addedAt?: number;
+  lastUsed?: number;
+};
 
 function getConfigDir(): string {
   return join(homedir(), ".opencode");
 }
 
+/**
+ * Returns the file path for the account storage JSON file.
+ * @returns Absolute path to ~/.opencode/openai-codex-accounts.json
+ */
 export function getStoragePath(): string {
   return join(getConfigDir(), "openai-codex-accounts.json");
 }
 
-function selectNewestAccount(
-  current: AccountMetadataV1 | undefined,
-  candidate: AccountMetadataV1,
-): AccountMetadataV1 {
+function nowMs(): number {
+  return Date.now();
+}
+
+function selectNewestAccount<T extends AccountLike>(
+  current: T | undefined,
+  candidate: T,
+): T {
   if (!current) return candidate;
   const currentLastUsed = current.lastUsed || 0;
   const candidateLastUsed = candidate.lastUsed || 0;
@@ -49,9 +89,7 @@ function selectNewestAccount(
   return candidateAddedAt >= currentAddedAt ? candidate : current;
 }
 
-export function deduplicateAccounts(
-  accounts: AccountMetadataV1[],
-): AccountMetadataV1[] {
+function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
   const keyToIndex = new Map<string, number>();
   const indicesToKeep = new Set<number>();
 
@@ -76,7 +114,81 @@ export function deduplicateAccounts(
     indicesToKeep.add(idx);
   }
 
-  const result: AccountMetadataV1[] = [];
+  const result: T[] = [];
+  for (let i = 0; i < accounts.length; i += 1) {
+    if (indicesToKeep.has(i)) {
+      const account = accounts[i];
+      if (account) result.push(account);
+    }
+  }
+  return result;
+}
+
+/**
+ * Removes duplicate accounts, keeping the most recently used entry for each unique key.
+ * Deduplication is based on accountId or refreshToken.
+ * @param accounts - Array of accounts to deduplicate
+ * @returns New array with duplicates removed
+ */
+export function deduplicateAccounts<T extends { accountId?: string; refreshToken: string; lastUsed?: number; addedAt?: number }>(
+  accounts: T[],
+): T[] {
+  return deduplicateAccountsByKey(accounts);
+}
+
+/**
+ * Removes duplicate accounts by email, keeping the most recently used entry.
+ * Accounts without email are always preserved.
+ * @param accounts - Array of accounts to deduplicate
+ * @returns New array with email duplicates removed
+ */
+export function deduplicateAccountsByEmail<T extends { email?: string; lastUsed?: number; addedAt?: number }>(
+  accounts: T[],
+): T[] {
+  const emailToNewestIndex = new Map<string, number>();
+  const indicesToKeep = new Set<number>();
+
+  for (let i = 0; i < accounts.length; i += 1) {
+    const account = accounts[i];
+    if (!account) continue;
+
+    const email = account.email?.trim();
+    if (!email) {
+      indicesToKeep.add(i);
+      continue;
+    }
+
+    const existingIndex = emailToNewestIndex.get(email);
+    if (existingIndex === undefined) {
+      emailToNewestIndex.set(email, i);
+      continue;
+    }
+
+    const existing = accounts[existingIndex];
+    if (!existing) {
+      emailToNewestIndex.set(email, i);
+      continue;
+    }
+
+    const existingLastUsed = existing.lastUsed || 0;
+    const candidateLastUsed = account.lastUsed || 0;
+    const existingAddedAt = existing.addedAt || 0;
+    const candidateAddedAt = account.addedAt || 0;
+
+    const isNewer =
+      candidateLastUsed > existingLastUsed ||
+      (candidateLastUsed === existingLastUsed && candidateAddedAt > existingAddedAt);
+
+    if (isNewer) {
+      emailToNewestIndex.set(email, i);
+    }
+  }
+
+  for (const idx of emailToNewestIndex.values()) {
+    indicesToKeep.add(idx);
+  }
+
+  const result: T[] = [];
   for (let i = 0; i < accounts.length; i += 1) {
     if (indicesToKeep.has(i)) {
       const account = accounts[i];
@@ -95,9 +207,7 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(index, length - 1));
 }
 
-function toAccountKey(
-  account: Pick<AccountMetadataV1, "accountId" | "refreshToken">,
-): string {
+function toAccountKey(account: Pick<AccountMetadataV3, "accountId" | "refreshToken">): string {
   return account.accountId || account.refreshToken;
 }
 
@@ -117,13 +227,53 @@ function extractActiveKey(accounts: unknown[], activeIndex: number): string | un
   return accountId || refreshToken;
 }
 
-export function normalizeAccountStorage(data: unknown): AccountStorageV1 | null {
+function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
+  const now = nowMs();
+  return {
+    version: 3,
+    accounts: v1.accounts.map((account) => {
+      const rateLimitResetTimes: RateLimitStateV3 = {};
+      if (typeof account.rateLimitResetTime === "number" && account.rateLimitResetTime > now) {
+        for (const family of MODEL_FAMILIES) {
+          rateLimitResetTimes[family] = account.rateLimitResetTime;
+        }
+      }
+      return {
+        accountId: account.accountId,
+        email: account.email,
+        refreshToken: account.refreshToken,
+        addedAt: account.addedAt,
+        lastUsed: account.lastUsed,
+        lastSwitchReason: account.lastSwitchReason,
+        rateLimitResetTimes: Object.keys(rateLimitResetTimes).length > 0 ? rateLimitResetTimes : undefined,
+        coolingDownUntil: account.coolingDownUntil,
+        cooldownReason: account.cooldownReason,
+      };
+    }),
+    activeIndex: v1.activeIndex,
+    activeIndexByFamily: {
+      "gpt-5.2-codex": v1.activeIndex,
+      "codex-max": v1.activeIndex,
+      codex: v1.activeIndex,
+      "gpt-5.2": v1.activeIndex,
+      "gpt-5.1": v1.activeIndex,
+    },
+  };
+}
+
+/**
+ * Normalizes and validates account storage data, migrating from v1 to v3 if needed.
+ * Handles deduplication, index clamping, and per-family active index mapping.
+ * @param data - Raw storage data (unknown format)
+ * @returns Normalized AccountStorageV3 or null if invalid
+ */
+export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null {
   if (!isRecord(data)) {
     log.warn("Invalid storage format, ignoring");
     return null;
   }
 
-  if (data.version !== 1) {
+  if (data.version !== 1 && data.version !== 3) {
     log.warn("Unknown storage version, ignoring", {
       version: (data as { version?: unknown }).version,
     });
@@ -144,12 +294,20 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV1 | null 
   const rawActiveIndex = clampIndex(activeIndexValue, rawAccounts.length);
   const activeKey = extractActiveKey(rawAccounts, rawActiveIndex);
 
+  const fromVersion = data.version as AnyAccountStorage["version"];
+  const baseStorage: AccountStorageV3 =
+    fromVersion === 1
+      ? migrateV1ToV3(data as unknown as AccountStorageV1)
+      : (data as unknown as AccountStorageV3);
+
   const validAccounts = rawAccounts.filter(
-    (account): account is AccountMetadataV1 =>
-      isRecord(account) && typeof account.refreshToken === "string",
+    (account): account is AccountMetadataV3 =>
+      isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
   );
 
-  const deduplicatedAccounts = deduplicateAccounts(validAccounts);
+  const deduplicatedAccounts = deduplicateAccountsByEmail(
+    deduplicateAccountsByKey(validAccounts),
+  );
 
   const activeIndex = (() => {
     if (deduplicatedAccounts.length === 0) return 0;
@@ -164,20 +322,66 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV1 | null 
     return clampIndex(rawActiveIndex, deduplicatedAccounts.length);
   })();
 
+  const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
+  const rawFamilyIndices = isRecord(baseStorage.activeIndexByFamily)
+    ? (baseStorage.activeIndexByFamily as Record<string, unknown>)
+    : {};
+
+  for (const family of MODEL_FAMILIES) {
+    const rawIndexValue = rawFamilyIndices[family];
+    const rawIndex =
+      typeof rawIndexValue === "number" && Number.isFinite(rawIndexValue)
+        ? rawIndexValue
+        : rawActiveIndex;
+
+    const clampedRawIndex = clampIndex(rawIndex, rawAccounts.length);
+    const familyKey = extractActiveKey(rawAccounts, clampedRawIndex);
+
+    let mappedIndex = clampIndex(rawIndex, deduplicatedAccounts.length);
+    if (familyKey && deduplicatedAccounts.length > 0) {
+      const idx = deduplicatedAccounts.findIndex(
+        (account) => toAccountKey(account) === familyKey,
+      );
+      if (idx >= 0) {
+        mappedIndex = idx;
+      }
+    }
+
+    activeIndexByFamily[family] = mappedIndex;
+  }
+
   return {
-    version: 1,
+    version: 3,
     accounts: deduplicatedAccounts,
     activeIndex,
+    activeIndexByFamily,
   };
 }
 
-export async function loadAccounts(): Promise<AccountStorageV1 | null> {
+/**
+ * Loads OAuth accounts from disk storage.
+ * Automatically migrates v1 storage to v3 format if needed.
+ * @returns AccountStorageV3 if file exists and is valid, null otherwise
+ */
+export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();
     const content = await fs.readFile(path, "utf-8");
     const data = JSON.parse(content) as unknown;
 
-    return normalizeAccountStorage(data);
+    const normalized = normalizeAccountStorage(data);
+
+    const storedVersion = isRecord(data) ? (data as { version?: unknown }).version : undefined;
+    if (normalized && storedVersion !== normalized.version) {
+      log.info("Migrating account storage to v3", { from: storedVersion, to: normalized.version });
+      try {
+        await saveAccounts(normalized);
+      } catch (saveError) {
+        log.warn("Failed to persist migrated storage", { error: String(saveError) });
+      }
+    }
+
+    return normalized;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -188,13 +392,22 @@ export async function loadAccounts(): Promise<AccountStorageV1 | null> {
   }
 }
 
-export async function saveAccounts(storage: AccountStorageV1): Promise<void> {
+/**
+ * Persists account storage to disk.
+ * Creates the .opencode directory if it doesn't exist.
+ * @param storage - Account storage data to save
+ */
+export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   const path = getStoragePath();
   await fs.mkdir(dirname(path), { recursive: true });
   const content = JSON.stringify(storage, null, 2);
   await fs.writeFile(path, content, "utf-8");
 }
 
+/**
+ * Deletes the account storage file from disk.
+ * Silently ignores if file doesn't exist.
+ */
 export async function clearAccounts(): Promise<void> {
   try {
     const path = getStoragePath();

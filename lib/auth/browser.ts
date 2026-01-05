@@ -82,7 +82,7 @@ export function openBrowserUrl(url: string): boolean {
 		});
 		child.on("error", () => {});
 		return true;
-	} catch (error) {
+	} catch {
 		// Silently fail - user can manually open the URL from instructions
 		return false;
 	}

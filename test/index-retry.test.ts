@@ -1,0 +1,163 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("@opencode-ai/plugin", () => {
+	const makeSchema = () => ({
+		optional: () => makeSchema(),
+		describe: () => makeSchema(),
+	});
+
+	const tool = (definition: any) => definition;
+	(tool as any).schema = {
+		number: () => makeSchema(),
+		boolean: () => makeSchema(),
+	};
+
+	return { tool };
+});
+
+vi.mock("../lib/request/fetch-helpers.js", () => ({
+	extractRequestUrl: (input: any) => (typeof input === "string" ? input : String(input)),
+	rewriteUrlForCodex: (url: string) => url,
+	transformRequestForCodex: async (init: any) => ({ updatedInit: init, body: { model: "gpt-5.1" } }),
+	shouldRefreshToken: () => false,
+	refreshAndUpdateToken: async (auth: any) => auth,
+	createCodexHeaders: () => new Headers(),
+	handleErrorResponse: async (response: Response) => ({ response }),
+	handleSuccessResponse: async (response: Response) => response,
+}));
+
+vi.mock("../lib/accounts.js", () => {
+	class AccountManager {
+		private calls = 0;
+
+		static async loadFromDisk() {
+			return new AccountManager();
+		}
+
+		getAccountCount() {
+			return 1;
+		}
+
+		getCurrentOrNextForFamily() {
+			this.calls += 1;
+			if (this.calls === 1) return null;
+			return { index: 0, accountId: "account-1", email: "user@example.com" };
+		}
+
+		toAuthDetails() {
+			return {
+				type: "oauth",
+				access: "access-token",
+				refresh: "refresh-token",
+				expires: Date.now() + 60_000,
+			};
+		}
+
+		updateFromAuth() {}
+
+		async saveToDisk() {}
+
+		markAccountCoolingDown() {}
+
+		markRateLimited() {}
+
+		markSwitched() {}
+
+		getMinWaitTimeForFamily() {
+			return 1000;
+		}
+
+		shouldShowAccountToast() {
+			return false;
+		}
+
+		markToastShown() {}
+	}
+
+	return {
+		AccountManager,
+		extractAccountEmail: () => "user@example.com",
+		extractAccountId: () => "account-1",
+		formatAccountLabel: (_account: any, index: number) => `Account ${index + 1}`,
+		formatCooldown: (ms: number) => `${ms}ms`,
+		formatWaitTime: (ms: number) => `${ms}ms`,
+		sanitizeEmail: (email: string) => email,
+	};
+});
+
+vi.mock("../lib/storage.js", () => ({
+	getStoragePath: () => "",
+	loadAccounts: async () => null,
+	saveAccounts: async () => {},
+}));
+
+describe("OpenAIAuthPlugin rate-limit retry", () => {
+	const envKeys = [
+		"CODEX_AUTH_RETRY_ALL_RATE_LIMITED",
+		"CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS",
+		"CODEX_AUTH_RETRY_ALL_MAX_RETRIES",
+		"CODEX_AUTH_TOKEN_REFRESH_SKEW_MS",
+		"CODEX_AUTH_RATE_LIMIT_TOAST_DEBOUNCE_MS",
+	] as const;
+
+	const originalEnv: Record<string, string | undefined> = {};
+	let originalFetch: any;
+
+	beforeEach(() => {
+		for (const key of envKeys) originalEnv[key] = process.env[key];
+
+		process.env.CODEX_AUTH_RETRY_ALL_RATE_LIMITED = "1";
+		process.env.CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS = "5000";
+		process.env.CODEX_AUTH_RETRY_ALL_MAX_RETRIES = "1";
+		process.env.CODEX_AUTH_TOKEN_REFRESH_SKEW_MS = "0";
+		process.env.CODEX_AUTH_RATE_LIMIT_TOAST_DEBOUNCE_MS = "0";
+
+		vi.useFakeTimers();
+		originalFetch = globalThis.fetch;
+		globalThis.fetch = vi.fn(async () => new Response("ok", { status: 200 })) as any;
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		globalThis.fetch = originalFetch;
+
+		for (const key of envKeys) {
+			const value = originalEnv[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+
+		vi.restoreAllMocks();
+	});
+
+	it("waits and retries when all accounts are rate-limited", async () => {
+		const { OpenAIAuthPlugin } = await import("../index.js");
+		const client = {
+			tui: { showToast: vi.fn() },
+			auth: { set: vi.fn() },
+		} as any;
+
+		const plugin = await OpenAIAuthPlugin({ client });
+
+		const getAuth = async () => ({
+			type: "oauth",
+			access: "a",
+			refresh: "r",
+			expires: Date.now() + 60_000,
+		});
+
+		const sdk = (await plugin.auth.loader(getAuth, { options: {}, models: {} })) as any;
+
+		const fetchPromise = sdk.fetch("https://example.com", {});
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1000);
+
+		const response = await fetchPromise;
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(response.status).toBe(200);
+	});
+});

@@ -22,7 +22,7 @@ function parseSseStream(sseText: string): unknown | null {
 				if (data.type === 'response.done' || data.type === 'response.completed') {
 					return data.response;
 				}
-			} catch (e) {
+			} catch {
 				// Skip malformed JSON
 			}
 		}

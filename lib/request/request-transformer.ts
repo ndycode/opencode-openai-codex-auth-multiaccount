@@ -33,7 +33,7 @@ export function normalizeModel(model: string | undefined): string {
 	if (!model) return "gpt-5.1";
 
 	// Strip provider prefix if present (e.g., "openai/gpt-5-codex" → "gpt-5-codex")
-	const modelId = model.includes("/") ? model.split("/").pop()! : model;
+	const modelId = model.includes("/") ? model.split("/").pop() ?? model : model;
 
 	// Try explicit model map first (handles all known model variants)
 	const mappedModel = getNormalizedModel(modelId);
@@ -323,7 +323,8 @@ export function filterInput(
 		.map((item) => {
 			// Strip IDs from all items (Codex API stateless mode)
 			if (item.id) {
-				const { id, ...itemWithoutId } = item;
+				const { id: _omit, ...itemWithoutId } = item;
+				void _omit;
 				return itemWithoutId as InputItem;
 			}
 			return item;
