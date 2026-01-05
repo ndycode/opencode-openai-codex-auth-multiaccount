@@ -2,9 +2,19 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [Unreleased]
+
+### Added
+- `openai-accounts-status --json` for scriptable status output with email/ID labels.
+
+### Changed
+- Account labels now prefer email and show ID suffix when available; list/status outputs are columnized for readability.
+- Stored account emails are trimmed/lowercased when present.
+
 ## [4.3.0] - 2026-01-04
 
 **Feature + reliability release**: variants support, one-command installer, and auth/error handling fixes.
+
 
 ### Added
 - **One-command installer/update**: `npx -y opencode-openai-codex-auth-multi@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.

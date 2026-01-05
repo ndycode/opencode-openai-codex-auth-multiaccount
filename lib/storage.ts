@@ -9,6 +9,7 @@ export type CooldownReason = "auth-failure" | "network-error";
 
 export interface AccountMetadataV1 {
   accountId?: string;
+  email?: string;
   refreshToken: string;
   addedAt: number;
   lastUsed: number;

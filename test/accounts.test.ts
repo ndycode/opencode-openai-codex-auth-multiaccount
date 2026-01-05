@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { AccountManager } from "../lib/accounts.js";
+import {
+  AccountManager,
+  extractAccountEmail,
+  formatAccountLabel,
+} from "../lib/accounts.js";
 import type { OAuthAuthDetails } from "../lib/types.js";
 
 describe("AccountManager", () => {
@@ -121,5 +125,22 @@ describe("AccountManager", () => {
     manager.markToastShown(0);
     expect(manager.shouldShowAccountToast(0, 60_000)).toBe(false);
     expect(manager.shouldShowAccountToast(1, 60_000)).toBe(true);
+  });
+
+  it("extracts email from jwt when present", () => {
+    const payload = Buffer.from(JSON.stringify({ email: "user@example.com" })).toString(
+      "base64",
+    );
+    const token = `header.${payload}.signature`;
+    expect(extractAccountEmail(token)).toBe("user@example.com");
+  });
+
+  it("formats account label preferring email and id suffix", () => {
+    expect(formatAccountLabel({ email: "user@example.com", accountId: "abcdef123456" }, 0)).toBe(
+      "Account 1 (user@example.com, id:123456)",
+    );
+    expect(formatAccountLabel({ email: "user@example.com" }, 1)).toBe("Account 2 (user@example.com)");
+    expect(formatAccountLabel({ accountId: "abcdef123456" }, 2)).toBe("Account 3 (123456)");
+    expect(formatAccountLabel(undefined as any, 3)).toBe("Account 4");
   });
 });

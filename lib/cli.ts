@@ -20,13 +20,19 @@ export type LoginMode = "add" | "fresh";
 
 export interface ExistingAccountInfo {
   accountId?: string;
+  email?: string;
   index: number;
 }
 
-function formatAccountLabel(accountId: string | undefined, index: number): string {
-  if (!accountId) return `Account ${index + 1}`;
-  const suffix = accountId.length > 6 ? accountId.slice(-6) : accountId;
-  return `Account ${index + 1} (${suffix})`;
+function formatAccountLabel(account: ExistingAccountInfo, index: number): string {
+  if (account.email?.trim()) {
+    return `Account ${index + 1} (${account.email})`;
+  }
+  if (account.accountId?.trim()) {
+    const suffix = account.accountId.length > 6 ? account.accountId.slice(-6) : account.accountId;
+    return `Account ${index + 1} (${suffix})`;
+  }
+  return `Account ${index + 1}`;
 }
 
 export async function promptLoginMode(
@@ -36,7 +42,7 @@ export async function promptLoginMode(
   try {
     console.log(`\n${existingAccounts.length} account(s) saved:`);
     for (const account of existingAccounts) {
-      console.log(`  ${formatAccountLabel(account.accountId, account.index)}`);
+      console.log(`  ${formatAccountLabel(account, account.index)}`);
     }
     console.log("");
 

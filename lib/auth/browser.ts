@@ -59,13 +59,26 @@ function commandExists(command: string): boolean {
  */
 export function openBrowserUrl(url: string): boolean {
 	try {
+		// Windows: use PowerShell Start-Process to avoid cmd/start quirks with URLs containing '&' or ':'
+		if (process.platform === "win32") {
+			const psUrl = url.replace(/`/g, "``").replace(/"/g, '""');
+			const child = spawn(
+				"powershell.exe",
+				["-NoLogo", "-NoProfile", "-Command", `Start-Process "${psUrl}"`],
+				{ stdio: "ignore" },
+			);
+			child.on("error", () => {});
+			return true;
+		}
+
+
 		const opener = getBrowserOpener();
 		if (!commandExists(opener)) {
 			return false;
 		}
 		const child = spawn(opener, [url], {
 			stdio: "ignore",
-			shell: process.platform === "win32",
+			shell: false,
 		});
 		child.on("error", () => {});
 		return true;
@@ -74,3 +87,4 @@ export function openBrowserUrl(url: string): boolean {
 		return false;
 	}
 }
+

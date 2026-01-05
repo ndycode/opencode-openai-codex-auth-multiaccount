@@ -106,9 +106,14 @@ export interface ParsedAuthInput {
 export interface JWTPayload {
 	"https://api.openai.com/auth"?: {
 		chatgpt_account_id?: string;
+		email?: string;
+		chatgpt_user_email?: string;
 	};
+	email?: string;
+	preferred_username?: string;
 	[key: string]: unknown;
 }
+
 
 /**
  * Message input item

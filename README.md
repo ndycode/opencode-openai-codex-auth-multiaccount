@@ -4,10 +4,11 @@
 **Forked from [numman-ali/opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) (by [Numman Ali](https://x.com/nummanali))**
 **Maintained by [ndycode](https://github.com/ndycode)**
 
-[![Twitter Follow](https://img.shields.io/twitter/follow/nummanali?style=social)](https://x.com/nummanali)
+[![Twitter Follow](https://img.shields.io/twitter/follow/ndycode?style=social)](https://x.com/ndycode)
 [![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
 [![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions)
 [![npm downloads](https://img.shields.io/npm/dm/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
+
 **One install. Every Codex model.**
 [Install](#-quick-start) · [Models](#-models) · [Configuration](#-configuration) · [Docs](#-docs)
 
