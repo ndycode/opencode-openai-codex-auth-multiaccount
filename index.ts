@@ -53,7 +53,8 @@ import {
         formatWaitTime,
         sanitizeEmail,
 } from "./lib/accounts.js";
-import { getStoragePath, loadAccounts, saveAccounts } from "./lib/storage.js";
+import { refreshAccessToken } from "./lib/auth/auth.js";
+import { getStoragePath, loadAccounts, saveAccounts, type AccountStorageV1 } from "./lib/storage.js";
 import {
         createCodexHeaders,
         extractRequestUrl,
@@ -291,6 +292,47 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 if (total === 0) return 0;
                 const raw = Number.isFinite(storage.activeIndex) ? storage.activeIndex : 0;
                 return Math.max(0, Math.min(raw, total - 1));
+        };
+
+        const hydrateEmails = async (
+                storage: AccountStorageV1 | null,
+        ): Promise<AccountStorageV1 | null> => {
+                if (!storage) return storage;
+                const skipHydrate =
+                        process.env.VITEST_WORKER_ID !== undefined ||
+                        process.env.NODE_ENV === "test" ||
+                        process.env.OPENCODE_SKIP_EMAIL_HYDRATE === "1";
+                if (skipHydrate) return storage;
+
+                let changed = false;
+                for (const account of storage.accounts) {
+                        if (!account || account.email) continue;
+                        try {
+                                const refreshed = await refreshAccessToken(account.refreshToken);
+                                if (refreshed.type !== "success") continue;
+                                const id = extractAccountId(refreshed.access);
+                                const email = sanitizeEmail(extractAccountEmail(refreshed.access));
+                                if (id && id !== account.accountId) {
+                                        account.accountId = id;
+                                        changed = true;
+                                }
+                                if (email && email !== account.email) {
+                                        account.email = email;
+                                        changed = true;
+                                }
+                                if (refreshed.refresh && refreshed.refresh !== account.refreshToken) {
+                                        account.refreshToken = refreshed.refresh;
+                                        changed = true;
+                                }
+                        } catch {
+                                // ignore hydration failures
+                        }
+                }
+
+                if (changed) {
+                        await saveAccounts(storage);
+                }
+                return storage;
         };
 
         const formatRateLimitEntry = (
@@ -577,18 +619,18 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                         const useManualMode = noBrowser;
 
                                                         let startFresh = true;
-                                                        const existingStorage = await loadAccounts();
+                                                        const existingStorage = await hydrateEmails(await loadAccounts());
                                                         if (existingStorage && existingStorage.accounts.length > 0) {
-                                                                 const existingAccounts = existingStorage.accounts.map(
-                                                                         (account, index) => ({
-                                                                                 accountId: account.accountId,
-                                                                                 email: account.email,
-                                                                                 index,
-                                                                         }),
-                                                                 );
-
+                                                                const existingAccounts = existingStorage.accounts.map(
+                                                                        (account, index) => ({
+                                                                                accountId: account.accountId,
+                                                                                email: account.email,
+                                                                                index,
+                                                                        }),
+                                                                );
                                                                 const loginMode = await promptLoginMode(existingAccounts);
                                                                 startFresh = loginMode === "fresh";
+
                                                                 if (startFresh) {
                                                                         console.log(
                                                                                 "\nStarting fresh - existing accounts will be replaced.\n",
