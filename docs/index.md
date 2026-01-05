@@ -41,7 +41,24 @@ Explore the engineering depth behind this plugin:
 
 ### Installation
 
-One-command install/update (global config):
+Install from source (recommended for now):
+
+```bash
+git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
+cd opencode-openai-codex-auth-multiaccount
+npm ci
+npm run build
+```
+
+Point OpenCode at the local build output (replace with your absolute path):
+
+```json
+{
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+}
+```
+
+Install/update from npm (once published):
 
 ```bash
 npx -y opencode-openai-codex-auth-multiaccount@latest
@@ -68,7 +85,16 @@ If the browser callback fails (SSH/WSL/remote), choose **"ChatGPT Plus/Pro (Manu
 
 ### Updating
 
-Re-run the installer to update:
+If you installed from source, pull + rebuild:
+
+```bash
+cd opencode-openai-codex-auth-multiaccount
+git pull
+npm ci
+npm run build
+```
+
+If you installed from npm (once published), re-run the installer:
 
 ```bash
 npx -y opencode-openai-codex-auth-multiaccount@latest

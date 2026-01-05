@@ -20,7 +20,24 @@ For production applications, use the [OpenAI Platform API](https://platform.open
 
 ## Installation
 
-### One-Command Install/Update (Recommended)
+### Install from source (recommended for now)
+
+```bash
+git clone https://github.com/ndycode/opencode-openai-codex-auth-multiaccount.git
+cd opencode-openai-codex-auth-multiaccount
+npm ci
+npm run build
+```
+
+Point OpenCode at the local build output (replace with your absolute path):
+
+```json
+{
+  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multiaccount/dist"]
+}
+```
+
+### Install/update from npm (once published)
 
 Works on **Windows, macOS, and Linux**:
 
@@ -28,7 +45,7 @@ Works on **Windows, macOS, and Linux**:
 npx -y opencode-openai-codex-auth-multiaccount@latest
 ```
 
-This writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
+Once published, this writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
 
 Need legacy config (OpenCode v1.0.209 and below)?
 
@@ -40,7 +57,9 @@ npx -y opencode-openai-codex-auth-multiaccount@latest --legacy
 
 ### Step 1: Add Plugin to Config
 
-OpenCode automatically installs plugins - no `npm install` needed!
+OpenCode can load plugins from npm (by name) or from a local build (`file://` URL).
+
+If you installed from source, set `"plugin"` to your local `dist/` folder (see the example above).
 
 **Choose your configuration style:**
 
@@ -55,7 +74,7 @@ OpenCode automatically installs plugins - no `npm install` needed!
 - This configuration has been tested and verified to work
 
 
-Add this to `~/.config/opencode/opencode.json`:
+Add this to `~/.config/opencode/opencode.json` (if you installed from source, replace `"plugin"` with your local `file:///.../dist` path):
 
 **Tip**: The snippet below is a truncated excerpt. For the complete legacy list, copy `config/opencode-legacy.json`. For the modern variants config (OpenCode v1.0.210+), use `config/opencode-modern.json`.
 
@@ -344,7 +363,18 @@ OpenCode checks multiple config files in order:
 
 ## ⚠️ Updating the Plugin (Important!)
 
-OpenCode caches plugins. To install the latest version, just re-run the installer:
+### If you installed from source
+
+```bash
+cd opencode-openai-codex-auth-multiaccount
+git pull
+npm ci
+npm run build
+```
+
+### If you installed from npm (once published)
+
+OpenCode caches plugins. To install the latest version, re-run the installer:
 
 ```bash
 npx -y opencode-openai-codex-auth-multiaccount@latest
@@ -382,7 +412,7 @@ For plugin development or testing unreleased changes:
 **Build the plugin:**
 ```bash
 cd opencode-openai-codex-auth-multiaccount
-npm install
+npm ci
 npm run build
 ```
 
