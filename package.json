@@ -30,10 +30,13 @@
   "scripts": {
     "build": "tsc && node scripts/copy-oauth-success.js",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepare": "husky"
   },
   "bin": {
     "opencode-openai-codex-auth-multi": "scripts/install-opencode-codex-auth.js"
@@ -46,17 +49,28 @@
     "README.md",
     "LICENSE"
   ],
+  "lint-staged": {
+    "*.ts": [
+      "eslint --max-warnings=0 --fix --no-warn-ignored"
+    ]
+  },
   "engines": {
     "node": ">=20.0.0"
   },
   "peerDependencies": {
+
     "@opencode-ai/plugin": "^1.0.150"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.0.150",
     "@opencode-ai/sdk": "^1.0.150",
     "@types/node": "^24.6.2",
+    "@typescript-eslint/eslint-plugin": "^8.52.0",
+    "@typescript-eslint/parser": "^8.52.0",
     "@vitest/ui": "^3.2.4",
+    "eslint": "^9.39.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

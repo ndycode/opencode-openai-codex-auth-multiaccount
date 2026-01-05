@@ -25,6 +25,18 @@ export type ModelFamily =
 	| "gpt-5.1";
 
 /**
+ * All supported model families
+ * Used for per-family account rotation and rate limit tracking
+ */
+export const MODEL_FAMILIES: readonly ModelFamily[] = [
+	"gpt-5.2-codex",
+	"codex-max",
+	"codex",
+	"gpt-5.2",
+	"gpt-5.1",
+] as const;
+
+/**
  * Prompt file mapping for each model family
  * Based on codex-rs/core/src/model_family.rs logic
  */

@@ -106,8 +106,13 @@ export function decodeJWT(token: string): JWTPayload | null {
 	try {
 		const parts = token.split(".");
 		if (parts.length !== 3) return null;
-		const payload = parts[1];
-		const decoded = Buffer.from(payload, "base64").toString("utf-8");
+		const payload = parts[1] ?? "";
+		const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+		const padded = normalized.padEnd(
+			normalized.length + ((4 - (normalized.length % 4)) % 4),
+			"=",
+		);
+		const decoded = Buffer.from(padded, "base64").toString("utf-8");
 		return JSON.parse(decoded) as JWTPayload;
 	} catch {
 		return null;
@@ -146,11 +151,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 			refresh_token?: string;
 			expires_in?: number;
 		};
-		if (
-			!json?.access_token ||
-			!json?.refresh_token ||
-			typeof json?.expires_in !== "number"
-		) {
+		if (!json?.access_token || typeof json?.expires_in !== "number") {
 			console.error(
 				"[openai-codex-plugin] Token refresh response missing fields:",
 				json,
@@ -158,10 +159,16 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 			return { type: "failed" };
 		}
 
+		const nextRefresh = json.refresh_token ?? refreshToken;
+		if (!nextRefresh) {
+			console.error("[openai-codex-plugin] Token refresh missing refresh token");
+			return { type: "failed" };
+		}
+
 		return {
 			type: "success",
 			access: json.access_token,
-			refresh: json.refresh_token,
+			refresh: nextRefresh,
 			expires: Date.now() + json.expires_in * 1000,
 		};
 	} catch (error) {

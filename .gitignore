@@ -8,3 +8,4 @@ opencode.json
 .opencode/
 tmp
 .codex-cache
+.sisyphus/

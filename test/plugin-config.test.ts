@@ -39,7 +39,14 @@ describe('Plugin Configuration', () => {
 
 			const config = loadPluginConfig();
 
-			expect(config).toEqual({ codexMode: true });
+			expect(config).toEqual({
+				codexMode: true,
+				retryAllAccountsRateLimited: false,
+				retryAllAccountsMaxWaitMs: 30_000,
+				retryAllAccountsMaxRetries: 1,
+				tokenRefreshSkewMs: 60_000,
+				rateLimitToastDebounceMs: 60_000,
+			});
 			expect(mockExistsSync).toHaveBeenCalledWith(
 				path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json')
 			);
@@ -51,7 +58,14 @@ describe('Plugin Configuration', () => {
 
 			const config = loadPluginConfig();
 
-			expect(config).toEqual({ codexMode: false });
+			expect(config).toEqual({
+				codexMode: false,
+				retryAllAccountsRateLimited: false,
+				retryAllAccountsMaxWaitMs: 30_000,
+				retryAllAccountsMaxRetries: 1,
+				tokenRefreshSkewMs: 60_000,
+				rateLimitToastDebounceMs: 60_000,
+			});
 		});
 
 		it('should merge user config with defaults', () => {
@@ -60,7 +74,14 @@ describe('Plugin Configuration', () => {
 
 			const config = loadPluginConfig();
 
-			expect(config).toEqual({ codexMode: true });
+			expect(config).toEqual({
+				codexMode: true,
+				retryAllAccountsRateLimited: false,
+				retryAllAccountsMaxWaitMs: 30_000,
+				retryAllAccountsMaxRetries: 1,
+				tokenRefreshSkewMs: 60_000,
+				rateLimitToastDebounceMs: 60_000,
+			});
 		});
 
 		it('should handle invalid JSON gracefully', () => {
@@ -70,7 +91,14 @@ describe('Plugin Configuration', () => {
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 			const config = loadPluginConfig();
 
-			expect(config).toEqual({ codexMode: true });
+			expect(config).toEqual({
+				codexMode: true,
+				retryAllAccountsRateLimited: false,
+				retryAllAccountsMaxWaitMs: 30_000,
+				retryAllAccountsMaxRetries: 1,
+				tokenRefreshSkewMs: 60_000,
+				rateLimitToastDebounceMs: 60_000,
+			});
 			expect(consoleSpy).toHaveBeenCalled();
 			consoleSpy.mockRestore();
 		});
@@ -84,7 +112,14 @@ describe('Plugin Configuration', () => {
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 			const config = loadPluginConfig();
 
-			expect(config).toEqual({ codexMode: true });
+			expect(config).toEqual({
+				codexMode: true,
+				retryAllAccountsRateLimited: false,
+				retryAllAccountsMaxWaitMs: 30_000,
+				retryAllAccountsMaxRetries: 1,
+				tokenRefreshSkewMs: 60_000,
+				rateLimitToastDebounceMs: 60_000,
+			});
 			expect(consoleSpy).toHaveBeenCalled();
 			consoleSpy.mockRestore();
 		});

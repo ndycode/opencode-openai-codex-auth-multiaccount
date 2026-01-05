@@ -46,6 +46,19 @@ describe('Fetch Helpers Module', () => {
 			};
 			expect(shouldRefreshToken(auth)).toBe(false);
 		});
+
+		it('should refresh token early when within skew window', () => {
+			vi.spyOn(Date, 'now').mockReturnValue(1_000);
+			const auth: Auth = {
+				type: 'oauth',
+				access: 'access-token',
+				refresh: 'refresh-token',
+				expires: 1_500,
+			};
+			expect(shouldRefreshToken(auth, 500)).toBe(true);
+			expect(shouldRefreshToken(auth, 400)).toBe(false);
+			expect(shouldRefreshToken(auth, -1)).toBe(false);
+		});
 	});
 
 	describe('refreshAndUpdateToken', () => {

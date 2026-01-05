@@ -3,8 +3,7 @@
  * These functions break down the complex fetch logic into manageable, testable units
  */
 
-import type { Auth } from "@opencode-ai/sdk";
-import type { OpencodeClient } from "@opencode-ai/sdk";
+import type { Auth, OpencodeClient } from "@opencode-ai/sdk";
 import { refreshAccessToken } from "../auth/auth.js";
 import { logRequest } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
@@ -36,8 +35,12 @@ export interface ErrorHandlingResult {
  * @param auth - Current authentication state
  * @returns True if token is expired or invalid
  */
-export function shouldRefreshToken(auth: Auth): boolean {
-	return auth.type !== "oauth" || !auth.access || auth.expires < Date.now();
+export function shouldRefreshToken(auth: Auth, skewMs = 0): boolean {
+	if (auth.type !== "oauth") return true;
+	if (!auth.access) return true;
+
+	const safeSkewMs = Math.max(0, Math.floor(skewMs));
+	return auth.expires <= Date.now() + safeSkewMs;
 }
 
 /**
@@ -266,7 +269,7 @@ async function mapUsageLimit404(response: Response): Promise<Response | null> {
 
 	let code = "";
 	try {
-		const parsed = JSON.parse(text) as any;
+		const parsed = JSON.parse(text) as { error?: { code?: string | number; type?: string } };
 		code = (parsed?.error?.code ?? parsed?.error?.type ?? "").toString();
 	} catch {
 		code = "";
@@ -315,20 +318,31 @@ async function safeReadBody(response: Response): Promise<string> {
         }
 }
 
+interface RateLimitErrorBody {
+	error?: {
+		code?: string | number;
+		type?: string;
+		resets_at?: number;
+		reset_at?: number;
+		retry_after_ms?: number;
+		retry_after?: number;
+	};
+}
+
 function parseRateLimitBody(
-        body: string,
+	body: string,
 ): { code?: string; resetsAt?: number; retryAfterMs?: number } | undefined {
-        if (!body) return undefined;
-        try {
-                const parsed = JSON.parse(body) as any;
-                const error = parsed?.error ?? {};
-                const code = (error.code ?? error.type ?? "").toString();
-                const resetsAt = toNumber(error.resets_at ?? error.reset_at);
-                const retryAfterMs = toNumber(error.retry_after_ms ?? error.retry_after);
-                return { code, resetsAt, retryAfterMs };
-        } catch {
-                return undefined;
-        }
+	if (!body) return undefined;
+	try {
+		const parsed = JSON.parse(body) as RateLimitErrorBody;
+		const error = parsed?.error ?? {};
+		const code = (error.code ?? error.type ?? "").toString();
+		const resetsAt = toNumber(error.resets_at ?? error.reset_at);
+		const retryAfterMs = toNumber(error.retry_after_ms ?? error.retry_after);
+		return { code, resetsAt, retryAfterMs };
+	} catch {
+		return undefined;
+	}
 }
 
 function parseRetryAfterMs(

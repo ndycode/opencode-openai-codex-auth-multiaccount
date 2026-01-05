@@ -4,26 +4,15 @@ import { JWT_CLAIM_PATH } from "./constants.js";
 import {
   loadAccounts,
   saveAccounts,
-  type AccountStorageV1,
-  type AccountMetadataV1,
+  type AccountStorageV3,
   type CooldownReason,
+  type RateLimitStateV3,
 } from "./storage.js";
 import type { OAuthAuthDetails } from "./types.js";
+import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 
-export interface ManagedAccount {
-  index: number;
-  accountId?: string;
-  email?: string;
-  refreshToken: string;
-  access?: string;
-  expires?: number;
-  addedAt: number;
-  lastUsed: number;
-  lastSwitchReason?: "rate-limit" | "initial" | "rotation";
-  rateLimitResetTime?: number;
-  coolingDownUntil?: number;
-  cooldownReason?: CooldownReason;
-}
+export type BaseQuotaKey = ModelFamily;
+export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
 
 function nowMs(): number {
   return Date.now();
@@ -36,6 +25,18 @@ function clampNonNegativeInt(value: unknown, fallback: number): number {
   return value < 0 ? 0 : Math.floor(value);
 }
 
+function getQuotaKey(family: ModelFamily, model?: string | null): QuotaKey {
+  if (model) {
+    return `${family}:${model}`;
+  }
+  return family;
+}
+
+/**
+ * Extracts the ChatGPT account ID from a JWT access token.
+ * @param accessToken - JWT access token from OAuth flow
+ * @returns Account ID string or undefined if not found
+ */
 export function extractAccountId(accessToken?: string): string | undefined {
   if (!accessToken) return undefined;
   const decoded = decodeJWT(accessToken);
@@ -43,6 +44,12 @@ export function extractAccountId(accessToken?: string): string | undefined {
   return typeof accountId === "string" && accountId.trim() ? accountId : undefined;
 }
 
+/**
+ * Extracts the email address from a JWT access token.
+ * Checks multiple claim paths for compatibility.
+ * @param accessToken - JWT access token from OAuth flow
+ * @returns Email string or undefined if not found
+ */
 export function extractAccountEmail(accessToken?: string): string | undefined {
   if (!accessToken) return undefined;
   const decoded = decodeJWT(accessToken);
@@ -58,6 +65,11 @@ export function extractAccountEmail(accessToken?: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Sanitizes an email address by trimming whitespace and lowercasing.
+ * @param email - Email string to sanitize
+ * @returns Sanitized email or undefined if invalid
+ */
 export function sanitizeEmail(email: string | undefined): string | undefined {
   if (!email) return undefined;
   const trimmed = email.trim();
@@ -65,33 +77,82 @@ export function sanitizeEmail(email: string | undefined): string | undefined {
   return trimmed.toLowerCase();
 }
 
-function isRateLimited(account: ManagedAccount): boolean {
-  if (typeof account.rateLimitResetTime !== "number") return false;
-  return nowMs() < account.rateLimitResetTime;
+/**
+ * Represents a managed OAuth account with rate limiting and cooldown state.
+ */
+export interface ManagedAccount {
+  index: number;
+  accountId?: string;
+  email?: string;
+  refreshToken: string;
+  access?: string;
+  expires?: number;
+  addedAt: number;
+  lastUsed: number;
+  lastSwitchReason?: "rate-limit" | "initial" | "rotation";
+  rateLimitResetTimes: RateLimitStateV3;
+  coolingDownUntil?: number;
+  cooldownReason?: CooldownReason;
 }
 
-function clearExpiredRateLimit(account: ManagedAccount): void {
-  if (typeof account.rateLimitResetTime !== "number") return;
-  if (nowMs() >= account.rateLimitResetTime) {
-    delete account.rateLimitResetTime;
+function clearExpiredRateLimits(account: ManagedAccount): void {
+  const now = nowMs();
+  const keys = Object.keys(account.rateLimitResetTimes);
+  for (const key of keys) {
+    const resetTime = account.rateLimitResetTimes[key];
+    if (resetTime !== undefined && now >= resetTime) {
+      delete account.rateLimitResetTimes[key];
+    }
   }
 }
 
+function isRateLimitedForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean {
+  const resetTime = account.rateLimitResetTimes[key];
+  return resetTime !== undefined && nowMs() < resetTime;
+}
+
+function isRateLimitedForFamily(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
+  clearExpiredRateLimits(account);
+
+  if (model) {
+    const modelKey = getQuotaKey(family, model);
+    if (isRateLimitedForQuotaKey(account, modelKey)) {
+      return true;
+    }
+  }
+
+  const baseKey = getQuotaKey(family);
+  return isRateLimitedForQuotaKey(account, baseKey);
+}
+
+/**
+ * Manages multiple OAuth accounts with automatic rotation on rate limits.
+ * Tracks per-family active indices, rate limit reset times, and cooldowns.
+ */
 export class AccountManager {
   private accounts: ManagedAccount[] = [];
   private cursor = 0;
-  private activeIndex = -1;
+  private currentAccountIndexByFamily: Record<ModelFamily, number> = {
+    "gpt-5.2-codex": -1,
+    "codex-max": -1,
+    codex: -1,
+    "gpt-5.2": -1,
+    "gpt-5.1": -1,
+  };
   private lastToastAccountIndex = -1;
   private lastToastTime = 0;
 
-  static async loadFromDisk(
-    authFallback?: OAuthAuthDetails,
-  ): Promise<AccountManager> {
+  /**
+   * Loads account manager from disk storage with optional auth fallback.
+   * @param authFallback - Current OAuth auth to use if storage is empty
+   * @returns New AccountManager instance
+   */
+  static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
     return new AccountManager(authFallback, stored);
   }
 
-  constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV1 | null) {
+  constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
     const fallbackAccountId = extractAccountId(authFallback?.access);
     const fallbackAccountEmail = extractAccountEmail(authFallback?.access);
 
@@ -102,28 +163,27 @@ export class AccountManager {
           if (!account.refreshToken || typeof account.refreshToken !== "string") {
             return null;
           }
+
           const matchesFallback =
             !!authFallback &&
             ((fallbackAccountId && account.accountId === fallbackAccountId) ||
               account.refreshToken === authFallback.refresh);
 
-          const refreshToken = matchesFallback
-            ? authFallback.refresh
-            : account.refreshToken;
-
-          return {
-            index,
-            accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
-            email: matchesFallback
-              ? sanitizeEmail(fallbackAccountEmail) ?? sanitizeEmail(account.email)
-              : sanitizeEmail(account.email),
-            refreshToken,
-            access: matchesFallback ? authFallback.access : undefined,
-            expires: matchesFallback ? authFallback.expires : undefined,
-            addedAt: clampNonNegativeInt(account.addedAt, baseNow),
-            lastUsed: clampNonNegativeInt(account.lastUsed, 0),
+          const refreshToken = matchesFallback && authFallback ? authFallback.refresh : account.refreshToken;
+ 
+           return {
+             index,
+             accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
+             email: matchesFallback
+               ? sanitizeEmail(fallbackAccountEmail) ?? sanitizeEmail(account.email)
+               : sanitizeEmail(account.email),
+             refreshToken,
+             access: matchesFallback && authFallback ? authFallback.access : undefined,
+             expires: matchesFallback && authFallback ? authFallback.expires : undefined,
+             addedAt: clampNonNegativeInt(account.addedAt, baseNow),
+             lastUsed: clampNonNegativeInt(account.lastUsed, 0),
             lastSwitchReason: account.lastSwitchReason,
-            rateLimitResetTime: account.rateLimitResetTime,
+            rateLimitResetTimes: account.rateLimitResetTimes ?? {},
             coolingDownUntil: account.coolingDownUntil,
             cooldownReason: account.cooldownReason,
           };
@@ -140,24 +200,29 @@ export class AccountManager {
 
       if (authFallback && !hasMatchingFallback) {
         const now = nowMs();
-          this.accounts.push({
-            index: this.accounts.length,
-            accountId: fallbackAccountId,
-            email: sanitizeEmail(fallbackAccountEmail),
-            refreshToken: authFallback.refresh,
-            access: authFallback.access,
-            expires: authFallback.expires,
-            addedAt: now,
-            lastUsed: now,
-            lastSwitchReason: "initial",
-          });
-
+        this.accounts.push({
+          index: this.accounts.length,
+          accountId: fallbackAccountId,
+          email: sanitizeEmail(fallbackAccountEmail),
+          refreshToken: authFallback.refresh,
+          access: authFallback.access,
+          expires: authFallback.expires,
+          addedAt: now,
+          lastUsed: now,
+          lastSwitchReason: "initial",
+          rateLimitResetTimes: {},
+        });
       }
 
       if (this.accounts.length > 0) {
-        const nextIndex = clampNonNegativeInt(stored.activeIndex, 0);
-        this.activeIndex = nextIndex % this.accounts.length;
-        this.cursor = this.activeIndex;
+        const defaultIndex = clampNonNegativeInt(stored.activeIndex, 0) % this.accounts.length;
+        this.cursor = defaultIndex;
+
+        for (const family of MODEL_FAMILIES) {
+          const rawIndex = stored.activeIndexByFamily?.[family];
+          const nextIndex = clampNonNegativeInt(rawIndex, defaultIndex) % this.accounts.length;
+          this.currentAccountIndexByFamily[family] = nextIndex;
+        }
       }
       return;
     }
@@ -175,10 +240,13 @@ export class AccountManager {
           addedAt: now,
           lastUsed: 0,
           lastSwitchReason: "initial",
+          rateLimitResetTimes: {},
         },
       ];
-      this.activeIndex = 0;
       this.cursor = 0;
+      for (const family of MODEL_FAMILIES) {
+        this.currentAccountIndexByFamily[family] = 0;
+      }
     }
   }
 
@@ -187,11 +255,22 @@ export class AccountManager {
   }
 
   getActiveIndex(): number {
-    return this.activeIndex;
+    return this.getActiveIndexForFamily("codex");
+  }
+
+  getActiveIndexForFamily(family: ModelFamily): number {
+    const index = this.currentAccountIndexByFamily[family];
+    if (index < 0 || index >= this.accounts.length) {
+      return this.accounts.length > 0 ? 0 : -1;
+    }
+    return index;
   }
 
   getAccountsSnapshot(): ManagedAccount[] {
-    return this.accounts.map((account) => ({ ...account }));
+    return this.accounts.map((account) => ({
+      ...account,
+      rateLimitResetTimes: { ...account.rateLimitResetTimes },
+    }));
   }
 
   setActiveIndex(index: number): ManagedAccount | null {
@@ -199,69 +278,89 @@ export class AccountManager {
     if (index < 0 || index >= this.accounts.length) return null;
     const account = this.accounts[index];
     if (!account) return null;
-    this.activeIndex = index;
+
+    for (const family of MODEL_FAMILIES) {
+      this.currentAccountIndexByFamily[family] = index;
+    }
+    this.cursor = index;
+
     account.lastUsed = nowMs();
     account.lastSwitchReason = "rotation";
     return account;
   }
 
   getCurrentAccount(): ManagedAccount | null {
-    if (this.activeIndex < 0 || this.activeIndex >= this.accounts.length) {
+    return this.getCurrentAccountForFamily("codex");
+  }
+
+  getCurrentAccountForFamily(family: ModelFamily): ManagedAccount | null {
+    const index = this.currentAccountIndexByFamily[family];
+    if (index < 0 || index >= this.accounts.length) {
       return null;
     }
-    return this.accounts[this.activeIndex] ?? null;
+    return this.accounts[index] ?? null;
   }
 
   getCurrentOrNext(): ManagedAccount | null {
-    const current = this.getCurrentAccount();
+    return this.getCurrentOrNextForFamily("codex");
+  }
+
+  getCurrentOrNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
+    const current = this.getCurrentAccountForFamily(family);
     if (current) {
-      clearExpiredRateLimit(current);
-      if (!isRateLimited(current) && !this.isAccountCoolingDown(current)) {
+      clearExpiredRateLimits(current);
+      if (!isRateLimitedForFamily(current, family, model) && !this.isAccountCoolingDown(current)) {
         current.lastUsed = nowMs();
         return current;
       }
     }
 
-    const next = this.getNextAvailable();
+    const next = this.getNextForFamily(family, model);
     if (next) {
-      this.activeIndex = next.index;
+      this.currentAccountIndexByFamily[family] = next.index;
     }
     return next;
   }
 
-  getNextAvailable(): ManagedAccount | null {
+  getNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
     const available = this.accounts.filter((account) => {
-      clearExpiredRateLimit(account);
-      return !isRateLimited(account) && !this.isAccountCoolingDown(account);
+      clearExpiredRateLimits(account);
+      return !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
     });
+
     if (available.length === 0) {
       return null;
     }
+
     const account = available[this.cursor % available.length];
-    if (!account) return null;
+    if (!account) {
+      return null;
+    }
+
     this.cursor += 1;
     account.lastUsed = nowMs();
     return account;
   }
 
-  markSwitched(
-    account: ManagedAccount,
-    reason: "rate-limit" | "initial" | "rotation",
-  ): void {
+  markSwitched(account: ManagedAccount, reason: "rate-limit" | "initial" | "rotation", family: ModelFamily): void {
     account.lastSwitchReason = reason;
-    this.activeIndex = account.index;
+    this.currentAccountIndexByFamily[family] = account.index;
   }
 
-  markRateLimited(account: ManagedAccount, retryAfterMs: number): void {
+  markRateLimited(account: ManagedAccount, retryAfterMs: number, family: ModelFamily, model?: string | null): void {
     const retryMs = Math.max(0, Math.floor(retryAfterMs));
-    account.rateLimitResetTime = nowMs() + retryMs;
+    const resetAt = nowMs() + retryMs;
+
+    const baseKey = getQuotaKey(family);
+    account.rateLimitResetTimes[baseKey] = resetAt;
+
+    if (model) {
+      const modelKey = getQuotaKey(family, model);
+      account.rateLimitResetTimes[modelKey] = resetAt;
+    }
   }
 
-  markAccountCoolingDown(
-    account: ManagedAccount,
-    cooldownMs: number,
-    reason: CooldownReason,
-  ): void {
+  markAccountCoolingDown(account: ManagedAccount, cooldownMs: number, reason: CooldownReason): void {
     const ms = Math.max(0, Math.floor(cooldownMs));
     account.coolingDownUntil = nowMs() + ms;
     account.cooldownReason = reason;
@@ -312,28 +411,89 @@ export class AccountManager {
   }
 
   getMinWaitTime(): number {
+    return this.getMinWaitTimeForFamily("codex");
+  }
+
+  getMinWaitTimeForFamily(family: ModelFamily, model?: string | null): number {
     const now = nowMs();
     const available = this.accounts.filter((account) => {
-      clearExpiredRateLimit(account);
-      return !isRateLimited(account) && !this.isAccountCoolingDown(account);
+      clearExpiredRateLimits(account);
+      return !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
     });
     if (available.length > 0) return 0;
 
     const waitTimes: number[] = [];
+    const baseKey = getQuotaKey(family);
+    const modelKey = model ? getQuotaKey(family, model) : null;
+
     for (const account of this.accounts) {
-      if (typeof account.rateLimitResetTime === "number") {
-        waitTimes.push(Math.max(0, account.rateLimitResetTime - now));
+      const baseResetAt = account.rateLimitResetTimes[baseKey];
+      if (typeof baseResetAt === "number") {
+        waitTimes.push(Math.max(0, baseResetAt - now));
       }
+
+      if (modelKey) {
+        const modelResetAt = account.rateLimitResetTimes[modelKey];
+        if (typeof modelResetAt === "number") {
+          waitTimes.push(Math.max(0, modelResetAt - now));
+        }
+      }
+
       if (typeof account.coolingDownUntil === "number") {
         waitTimes.push(Math.max(0, account.coolingDownUntil - now));
       }
     }
+
     return waitTimes.length > 0 ? Math.min(...waitTimes) : 0;
   }
 
+  removeAccount(account: ManagedAccount): boolean {
+    const idx = this.accounts.indexOf(account);
+    if (idx < 0) {
+      return false;
+    }
+
+    this.accounts.splice(idx, 1);
+    this.accounts.forEach((acc, index) => {
+      acc.index = index;
+    });
+
+    if (this.accounts.length === 0) {
+      this.cursor = 0;
+      for (const family of MODEL_FAMILIES) {
+        this.currentAccountIndexByFamily[family] = -1;
+      }
+      return true;
+    }
+
+    if (this.cursor > idx) {
+      this.cursor -= 1;
+    }
+    this.cursor = this.cursor % this.accounts.length;
+
+    for (const family of MODEL_FAMILIES) {
+      if (this.currentAccountIndexByFamily[family] > idx) {
+        this.currentAccountIndexByFamily[family] -= 1;
+      }
+      if (this.currentAccountIndexByFamily[family] >= this.accounts.length) {
+        this.currentAccountIndexByFamily[family] = -1;
+      }
+    }
+
+    return true;
+  }
+
   async saveToDisk(): Promise<void> {
-    const storage: AccountStorageV1 = {
-      version: 1,
+    const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
+    for (const family of MODEL_FAMILIES) {
+      const raw = this.currentAccountIndexByFamily[family];
+      activeIndexByFamily[family] = clampNonNegativeInt(raw, 0);
+    }
+
+    const activeIndex = clampNonNegativeInt(activeIndexByFamily.codex, 0);
+
+    const storage: AccountStorageV3 = {
+      version: 3,
       accounts: this.accounts.map((account) => ({
         accountId: account.accountId,
         email: account.email,
@@ -341,16 +501,25 @@ export class AccountManager {
         addedAt: account.addedAt,
         lastUsed: account.lastUsed,
         lastSwitchReason: account.lastSwitchReason,
-        rateLimitResetTime: account.rateLimitResetTime,
+        rateLimitResetTimes:
+          Object.keys(account.rateLimitResetTimes).length > 0 ? account.rateLimitResetTimes : undefined,
         coolingDownUntil: account.coolingDownUntil,
         cooldownReason: account.cooldownReason,
       })),
-      activeIndex: Math.max(0, this.activeIndex),
+      activeIndex,
+      activeIndexByFamily,
     };
+
     await saveAccounts(storage);
   }
 }
 
+/**
+ * Formats a human-readable label for an account (e.g., "Account 1 (user@email.com)").
+ * @param account - Account with optional email and accountId
+ * @param index - Zero-based account index
+ * @returns Formatted label string
+ */
 export function formatAccountLabel(
   account: { email?: string; accountId?: string } | undefined,
   index: number,
@@ -365,6 +534,11 @@ export function formatAccountLabel(
   return `Account ${index + 1}`;
 }
 
+/**
+ * Formats milliseconds as a human-readable wait time (e.g., "2m 30s").
+ * @param ms - Duration in milliseconds
+ * @returns Formatted string like "2m 30s" or "45s"
+ */
 export function formatWaitTime(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -373,7 +547,16 @@ export function formatWaitTime(ms: number): string {
   return `${seconds}s`;
 }
 
-export function formatCooldown(account: ManagedAccount, now = nowMs()): string | null {
+/**
+ * Formats cooldown status for an account if currently cooling down.
+ * @param account - Account with optional cooldown state
+ * @param now - Current timestamp (defaults to Date.now())
+ * @returns Formatted cooldown string or null if not cooling down
+ */
+export function formatCooldown(
+  account: { coolingDownUntil?: number; cooldownReason?: string },
+  now = nowMs(),
+): string | null {
   if (typeof account.coolingDownUntil !== "number") return null;
   const remaining = account.coolingDownUntil - now;
   if (remaining <= 0) return null;
