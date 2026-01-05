@@ -46,10 +46,12 @@ import {
 import { logRequest, logDebug } from "./lib/logger.js";
 import {
         AccountManager,
+        extractAccountEmail,
         extractAccountId,
         formatAccountLabel,
         formatCooldown,
         formatWaitTime,
+        sanitizeEmail,
 } from "./lib/accounts.js";
 import { getStoragePath, loadAccounts, saveAccounts } from "./lib/storage.js";
 import {
@@ -209,6 +211,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
                 for (const result of results) {
                         const accountId = extractAccountId(result.access);
+                        const accountEmail = sanitizeEmail(extractAccountEmail(result.access));
                         const existingById =
                                 accountId && indexByAccountId.has(accountId)
                                         ? indexByAccountId.get(accountId)
@@ -220,6 +223,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 const newIndex = accounts.length;
                                 accounts.push({
                                         accountId,
+                                        email: accountEmail,
                                         refreshToken: result.refresh,
                                         addedAt: now,
                                         lastUsed: now,
@@ -238,6 +242,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         accounts[existingIndex] = {
                                 ...existing,
                                 accountId: accountId ?? existing.accountId,
+                                email: accountEmail ?? existing.email,
                                 refreshToken: result.refresh,
                                 lastUsed: now,
                         };
@@ -449,6 +454,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 continue;
                                                         }
                                                         account.accountId = accountId;
+                                                        account.email =
+                                                                extractAccountEmail(accountAuth.access) ?? account.email;
 
                                                         if (
                                                                 accountCount > 1 &&
@@ -457,7 +464,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 )
                                                         ) {
                                                                 const accountLabel = formatAccountLabel(
-                                                                        account.accountId,
+                                                                        account,
                                                                         account.index,
                                                                 );
                                                                 await showToast(
@@ -572,12 +579,14 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                         let startFresh = true;
                                                         const existingStorage = await loadAccounts();
                                                         if (existingStorage && existingStorage.accounts.length > 0) {
-                                                                const existingAccounts = existingStorage.accounts.map(
-                                                                        (account, index) => ({
-                                                                                accountId: account.accountId,
-                                                                                index,
-                                                                        }),
-                                                                );
+                                                                 const existingAccounts = existingStorage.accounts.map(
+                                                                         (account, index) => ({
+                                                                                 accountId: account.accountId,
+                                                                                 email: account.email,
+                                                                                 index,
+                                                                         }),
+                                                                 );
+
                                                                 const loginMode = await promptLoginMode(existingAccounts);
                                                                 startFresh = loginMode === "fresh";
                                                                 if (startFresh) {
@@ -770,13 +779,12 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         const lines: string[] = [
                                                 `OpenAI Accounts (${storage.accounts.length}):`,
                                                 "",
+                                                " #  Label                                     Status",
+                                                "----------------------------------------------- ---------------------",
                                         ];
 
                                         storage.accounts.forEach((account, index) => {
-                                                const label = formatAccountLabel(
-                                                        account.accountId,
-                                                        index,
-                                                );
+                                                const label = formatAccountLabel(account, index);
                                                 const statuses: string[] = [];
                                                 const rateLimit = formatRateLimitEntry(
                                                         account,
@@ -791,11 +799,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 ) {
                                                         statuses.push("cooldown");
                                                 }
-                                                const suffix =
-                                                        statuses.length > 0
-                                                                ? ` (${statuses.join(", ")})`
-                                                                : "";
-                                                lines.push(`  ${index + 1}. ${label}${suffix}`);
+                                                const statusText = statuses.length > 0 ? statuses.join(", ") : "ok";
+                                                const row = `${String(index + 1).padEnd(3)} ${label.padEnd(40)} ${statusText}`;
+                                                lines.push(row);
                                         });
 
                                         lines.push("");
@@ -846,14 +852,16 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 await cachedAccountManager.saveToDisk();
                                         }
 
-                                        const label = formatAccountLabel(account?.accountId, targetIndex);
+                                        const label = formatAccountLabel(account, targetIndex);
                                         return `Switched to account: ${label}`;
                                 },
                         }),
                         "openai-accounts-status": tool({
                                 description: "Show detailed status of OpenAI accounts and rate limits.",
-                                args: {},
-                                async execute() {
+                                args: {
+                                        json: tool.schema.boolean().optional().describe("Return JSON instead of text"),
+                                },
+                                async execute({ json }) {
                                         const storage = await loadAccounts();
                                         if (!storage || storage.accounts.length === 0) {
                                                 return "No OpenAI accounts configured. Run: opencode auth login";
@@ -861,53 +869,66 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
                                         const now = Date.now();
                                         const activeIndex = resolveActiveIndex(storage);
+
+                                        if (json) {
+                                                return JSON.stringify(
+                                                        {
+                                                                total: storage.accounts.length,
+                                                                activeIndex,
+                                                                storagePath: getStoragePath(),
+                                                                accounts: storage.accounts.map((account, index) => ({
+                                                                        index,
+                                                                        active: index === activeIndex,
+                                                                        label: formatAccountLabel(account, index),
+                                                                        accountId: account.accountId ?? null,
+                                                                        email: (account as any).email ?? null,
+                                                                        rateLimitResetTime:
+                                                                                typeof account.rateLimitResetTime === "number"
+                                                                                        ? account.rateLimitResetTime
+                                                                                        : null,
+                                                                        coolingDownUntil:
+                                                                                typeof account.coolingDownUntil === "number"
+                                                                                        ? account.coolingDownUntil
+                                                                                        : null,
+                                                                        cooldownReason: (account as any).cooldownReason ?? null,
+                                                                        lastUsed:
+                                                                                typeof account.lastUsed === "number"
+                                                                                        ? account.lastUsed
+                                                                                        : null,
+                                                                })),
+                                                        },
+                                                        null,
+                                                        2,
+                                                );
+                                        }
+
                                         const lines: string[] = [
                                                 `Account Status (${storage.accounts.length} total):`,
                                                 "",
+                                                " #  Label                                     Active  Rate Limit       Cooldown        Last Used",
+                                                "----------------------------------------------- ------ ---------------- ---------------- ----------------",
                                         ];
 
                                         storage.accounts.forEach((account, index) => {
-                                                const label = formatAccountLabel(
-                                                        account.accountId,
-                                                        index,
-                                                );
-                                                lines.push(`${index + 1}. ${label}`);
-                                                lines.push(
-                                                        `   Active: ${index === activeIndex ? "Yes" : "No"}`,
-                                                );
+                                                const label = formatAccountLabel(account, index).padEnd(42);
+                                                const active = index === activeIndex ? "Yes" : "No";
+                                                const rateLimit = formatRateLimitEntry(account, now) ?? "None";
+                                                const cooldown = formatCooldown(account as any, now) ?? "No";
+                                                const lastUsed =
+                                                        typeof account.lastUsed === "number" && account.lastUsed > 0
+                                                                ? `${formatWaitTime(now - account.lastUsed)} ago`
+                                                                : "-";
 
-                                                const rateLimit = formatRateLimitEntry(account, now);
-                                                lines.push(
-                                                        `   Rate Limit: ${rateLimit ?? "None"}`,
-                                                );
-
-                                                const cooldown = formatCooldown(
-                                                        account as any,
-                                                        now,
-                                                );
-                                                if (cooldown) {
-                                                        lines.push(`   Cooldown: Yes (${cooldown})`);
-                                                } else {
-                                                        lines.push("   Cooldown: No");
-                                                }
-
-                                                if (
-                                                        typeof account.lastUsed === "number" &&
-                                                        account.lastUsed > 0
-                                                ) {
-                                                        lines.push(
-                                                                `   Last Used: ${formatWaitTime(
-                                                                        now - account.lastUsed,
-                                                                )} ago`,
-                                                        );
-                                                }
-
-                                                lines.push("");
+                                                const row = `${String(index + 1).padEnd(3)} ${label} ${active.padEnd(
+                                                        6,
+                                                )} ${rateLimit.padEnd(16)} ${cooldown.padEnd(16)} ${lastUsed}`;
+                                                lines.push(row);
                                         });
 
                                         return lines.join("\n");
                                 },
                         }),
+
                 },
         };
 };

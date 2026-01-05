@@ -13,6 +13,7 @@ import type { OAuthAuthDetails } from "./types.js";
 export interface ManagedAccount {
   index: number;
   accountId?: string;
+  email?: string;
   refreshToken: string;
   access?: string;
   expires?: number;
@@ -40,6 +41,28 @@ export function extractAccountId(accessToken?: string): string | undefined {
   const decoded = decodeJWT(accessToken);
   const accountId = decoded?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
   return typeof accountId === "string" && accountId.trim() ? accountId : undefined;
+}
+
+export function extractAccountEmail(accessToken?: string): string | undefined {
+  if (!accessToken) return undefined;
+  const decoded = decodeJWT(accessToken);
+  const nested = decoded?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;
+  const candidate =
+    (nested?.email as string | undefined) ??
+    (nested?.chatgpt_user_email as string | undefined) ??
+    (decoded?.email as string | undefined) ??
+    (decoded?.preferred_username as string | undefined);
+  if (typeof candidate === "string" && candidate.includes("@") && candidate.trim()) {
+    return candidate;
+  }
+  return undefined;
+}
+
+export function sanitizeEmail(email: string | undefined): string | undefined {
+  if (!email) return undefined;
+  const trimmed = email.trim();
+  if (!trimmed || !trimmed.includes("@")) return undefined;
+  return trimmed.toLowerCase();
 }
 
 function isRateLimited(account: ManagedAccount): boolean {
@@ -70,6 +93,7 @@ export class AccountManager {
 
   constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV1 | null) {
     const fallbackAccountId = extractAccountId(authFallback?.access);
+    const fallbackAccountEmail = extractAccountEmail(authFallback?.access);
 
     if (stored && stored.accounts.length > 0) {
       const baseNow = nowMs();
@@ -90,6 +114,9 @@ export class AccountManager {
           return {
             index,
             accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
+            email: matchesFallback
+              ? sanitizeEmail(fallbackAccountEmail) ?? sanitizeEmail(account.email)
+              : sanitizeEmail(account.email),
             refreshToken,
             access: matchesFallback ? authFallback.access : undefined,
             expires: matchesFallback ? authFallback.expires : undefined,
@@ -113,16 +140,18 @@ export class AccountManager {
 
       if (authFallback && !hasMatchingFallback) {
         const now = nowMs();
-        this.accounts.push({
-          index: this.accounts.length,
-          accountId: fallbackAccountId,
-          refreshToken: authFallback.refresh,
-          access: authFallback.access,
-          expires: authFallback.expires,
-          addedAt: now,
-          lastUsed: now,
-          lastSwitchReason: "initial",
-        });
+          this.accounts.push({
+            index: this.accounts.length,
+            accountId: fallbackAccountId,
+            email: sanitizeEmail(fallbackAccountEmail),
+            refreshToken: authFallback.refresh,
+            access: authFallback.access,
+            expires: authFallback.expires,
+            addedAt: now,
+            lastUsed: now,
+            lastSwitchReason: "initial",
+          });
+
       }
 
       if (this.accounts.length > 0) {
@@ -139,6 +168,7 @@ export class AccountManager {
         {
           index: 0,
           accountId: fallbackAccountId,
+          email: sanitizeEmail(fallbackAccountEmail),
           refreshToken: authFallback.refresh,
           access: authFallback.access,
           expires: authFallback.expires,
@@ -269,6 +299,7 @@ export class AccountManager {
     account.access = auth.access;
     account.expires = auth.expires;
     account.accountId = extractAccountId(auth.access) ?? account.accountId;
+    account.email = sanitizeEmail(extractAccountEmail(auth.access)) ?? account.email;
   }
 
   toAuthDetails(account: ManagedAccount): Auth {
@@ -305,6 +336,7 @@ export class AccountManager {
       version: 1,
       accounts: this.accounts.map((account) => ({
         accountId: account.accountId,
+        email: account.email,
         refreshToken: account.refreshToken,
         addedAt: account.addedAt,
         lastUsed: account.lastUsed,
@@ -319,10 +351,18 @@ export class AccountManager {
   }
 }
 
-export function formatAccountLabel(accountId: string | undefined, index: number): string {
-  if (!accountId) return `Account ${index + 1}`;
-  const suffix = accountId.length > 6 ? accountId.slice(-6) : accountId;
-  return `Account ${index + 1} (${suffix})`;
+export function formatAccountLabel(
+  account: { email?: string; accountId?: string } | undefined,
+  index: number,
+): string {
+  const email = account?.email?.trim();
+  const accountId = account?.accountId?.trim();
+  const idSuffix = accountId ? (accountId.length > 6 ? accountId.slice(-6) : accountId) : null;
+
+  if (email && idSuffix) return `Account ${index + 1} (${email}, id:${idSuffix})`;
+  if (email) return `Account ${index + 1} (${email})`;
+  if (idSuffix) return `Account ${index + 1} (${idSuffix})`;
+  return `Account ${index + 1}`;
 }
 
 export function formatWaitTime(ms: number): string {
