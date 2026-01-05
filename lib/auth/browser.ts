@@ -59,13 +59,25 @@ function commandExists(command: string): boolean {
  */
 export function openBrowserUrl(url: string): boolean {
 	try {
+		// Windows: `start` needs an empty title and proper quoting or the URL gets truncated (causing invalid session).
+		if (process.platform === "win32") {
+			const quotedUrl = `"${url.replace(/"/g, "\"")}"`;
+			const child = spawn(
+				"cmd.exe",
+				["/c", "start", "", quotedUrl],
+				{ stdio: "ignore" },
+			);
+			child.on("error", () => {});
+			return true;
+		}
+
 		const opener = getBrowserOpener();
 		if (!commandExists(opener)) {
 			return false;
 		}
 		const child = spawn(opener, [url], {
 			stdio: "ignore",
-			shell: process.platform === "win32",
+			shell: false,
 		});
 		child.on("error", () => {});
 		return true;
@@ -74,3 +86,4 @@ export function openBrowserUrl(url: string): boolean {
 		return false;
 	}
 }
+
