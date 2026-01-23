@@ -2,12 +2,14 @@
 
 Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
 
+---
+
 ## Quick Reference
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["opencode-openai-codex-auth-multi@latest"],
   "provider": {
     "openai": {
       "options": {
@@ -16,22 +18,6 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
         "textVerbosity": "medium",
         "include": ["reasoning.encrypted_content"],
         "store": false
-      },
-      "models": {
-        "gpt-5.1-codex-low": {
-          "name": "GPT 5.1 Codex Low (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "low",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        }
       }
     }
   }
@@ -46,144 +32,88 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
 
 Controls computational effort for reasoning.
 
-**GPT-5.2 Values** (per OpenAI API docs and Codex CLI `ReasoningEffort` enum):
-- `none` - No dedicated reasoning phase (disables reasoning)
-- `low` - Light reasoning
-- `medium` - Balanced (default)
-- `high` - Deep reasoning
-- `xhigh` - Extra depth for long-horizon tasks
+| Model | Supported Values |
+|-------|------------------|
+| `gpt-5.2` | none, low, medium, high, xhigh |
+| `gpt-5.2-codex` | low, medium, high, xhigh |
+| `gpt-5.1-codex-max` | low, medium, high, xhigh |
+| `gpt-5.1-codex` | low, medium, high |
+| `gpt-5.1-codex-mini` | medium, high |
+| `gpt-5.1` | none, low, medium, high |
 
-**GPT-5.2-Codex Values:**
-- `low` - Fastest for code
-- `medium` - Balanced (default)
-- `high` - Maximum code quality
-- `xhigh` - Extra depth for long-horizon tasks
+<details>
+<summary><b>Value Descriptions</b></summary>
 
-**GPT-5.1 Values** (per OpenAI API docs and Codex CLI `ReasoningEffort` enum):
-- `none` - No dedicated reasoning phase (disables reasoning)
-- `low` - Light reasoning
-- `medium` - Balanced (default)
-- `high` - Deep reasoning
+| Value | Description |
+|-------|-------------|
+| `none` | No dedicated reasoning phase (GPT-5.2/5.1 base only) |
+| `low` | Light reasoning, fastest |
+| `medium` | Balanced (default) |
+| `high` | Deep reasoning |
+| `xhigh` | Extra depth for complex tasks (GPT-5.2, 5.2-codex, codex-max) |
 
-**GPT-5.1-Codex / GPT-5.1-Codex-Max Values:**
-- `low` - Fastest for code
-- `medium` - Balanced (default)
-- `high` - Maximum code quality
-- `xhigh` - Extra depth (Codex Max only)
+**Notes:**
+- `none` auto-converts to `low` for Codex variants
+- `xhigh` downgrades to `high` on models that don't support it
+- Codex Mini only supports `medium` or `high`
 
-**GPT-5.1-Codex-Mini Values:**
-- `medium` - Balanced (default)
-- `high` - Maximum code quality
-
-**Notes**:
-- `none` is supported for GPT-5.2 and GPT-5.1 (general purpose) per OpenAI API documentation
-- `none` is NOT supported for Codex variants (including GPT-5.2 Codex) - it auto-converts to `low` for Codex/Codex Max or `medium` for Codex Mini
-- `minimal` auto-converts to `low` for Codex models
-- `xhigh` is supported for GPT-5.2, GPT-5.2 Codex, and GPT-5.1-Codex-Max; other models downgrade to `high`
-- Codex Mini only supports `medium` or `high`; lower settings clamp to `medium`
-
-**Example:**
-```json
-{
-  "options": {
-    "reasoningEffort": "high"
-  }
-}
-```
+</details>
 
 ### reasoningSummary
 
 Controls reasoning summary verbosity.
 
-**Values:**
-- `auto` - Automatically adapts (default)
-- `concise` - Short summaries
-- `detailed` - Verbose summaries
-- `off` - Disable reasoning summary (Codex Max supports)
-- `on` - Force enable summary (Codex Max supports)
-
-**Example:**
-```json
-{
-  "options": {
-    "reasoningSummary": "detailed"
-  }
-}
-```
+| Value | Description |
+|-------|-------------|
+| `auto` | Automatically adapts (default) |
+| `concise` | Short summaries |
+| `detailed` | Verbose summaries |
+| `off` | Disable summary (Codex Max) |
+| `on` | Force enable (Codex Max) |
 
 ### textVerbosity
 
 Controls output length.
 
-**GPT-5 Values:**
-- `low` - Concise
-- `medium` - Balanced (default)
-- `high` - Verbose
-
-**GPT-5.2-Codex / GPT-5.1-Codex / Codex Max:**
-- `medium` or `high` (Codex Max defaults to `medium`)
-
-**Example:**
-```json
-{
-  "options": {
-    "textVerbosity": "high"
-  }
-}
-```
+| Value | Description |
+|-------|-------------|
+| `low` | Concise responses |
+| `medium` | Balanced (default) |
+| `high` | Verbose responses |
 
 ### include
 
 Array of additional response fields to include.
 
-**Default**: `["reasoning.encrypted_content"]`
+| Value | Purpose |
+|-------|---------|
+| `reasoning.encrypted_content` | Enables multi-turn with `store: false` |
 
-**Why needed**: Enables multi-turn conversations with `store: false` (stateless mode)
-
-**Example:**
-```json
-{
-  "options": {
-    "include": ["reasoning.encrypted_content"]
-  }
-}
-```
+**Required** for multi-turn conversations in stateless mode.
 
 ### store
 
 Controls server-side conversation persistence.
 
-**⚠️ Required**: `false` (for AI SDK 2.0.50+ compatibility)
+| Value | Description |
+|-------|-------------|
+| `false` | Stateless mode (required) |
+| `true` | Not supported by Codex API |
 
-**Values:**
-- `false` - Stateless mode (required for Codex API)
-- `true` - Server-side storage (not supported by Codex API)
-
-**Why required:**
-AI SDK 2.0.50+ automatically uses `item_reference` items when `store: true`. The Codex API requires stateless operation (`store: false`), where references cannot be resolved.
-
-**Example:**
-```json
-{
-  "options": {
-    "store": false
-  }
-}
-```
-
-**Note:** The plugin automatically injects this via a `chat.params` hook, but explicit configuration is recommended for clarity.
+> **Important**: Must be `false` for AI SDK 2.0.50+ compatibility.
 
 ---
 
 ## Configuration Patterns
 
-### Pattern 1: Global Options
+<details open>
+<summary><b>Pattern 1: Global Options</b></summary>
 
 Apply same settings to all models:
 
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["opencode-openai-codex-auth-multi@latest"],
   "provider": {
     "openai": {
       "options": {
@@ -196,15 +126,15 @@ Apply same settings to all models:
 }
 ```
 
-**Use when**: You want consistent behavior across all models.
+</details>
 
-### Pattern 2: Per-Model Options
+<details>
+<summary><b>Pattern 2: Per-Model Options</b></summary>
 
 Different settings for different models:
 
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
   "provider": {
     "openai": {
       "options": {
@@ -212,20 +142,13 @@ Different settings for different models:
         "store": false
       },
       "models": {
-        "gpt-5-codex-fast": {
-          "name": "Fast Codex",
-          "options": {
-            "reasoningEffort": "low",
-            "store": false
-          }
+        "gpt-5.2-fast": {
+          "name": "Fast GPT-5.2",
+          "options": { "reasoningEffort": "low" }
         },
-        "gpt-5-codex-smart": {
-          "name": "Smart Codex",
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "store": false
-          }
+        "gpt-5.2-smart": {
+          "name": "Smart GPT-5.2",
+          "options": { "reasoningEffort": "high" }
         }
       }
     }
@@ -233,79 +156,12 @@ Different settings for different models:
 }
 ```
 
-**Use when**: You want quick-switch presets for different tasks.
-
 **Precedence**: Model options override global options.
 
-### Pattern 3: Config Key vs Name
+</details>
 
-**Understanding the fields:**
-
-```json
-{
-  "models": {
-    "my-custom-id": {           // ← Config key (used everywhere)
-      "name": "My Display Name",  // ← Shows in TUI
-      "options": { ... }
-    }
-  }
-}
-```
-
-- **Config key** (`my-custom-id`): Used in CLI, config lookups, TUI persistence
-- **`name` field**: Friendly display name in model selector
-- **`id` field**: DEPRECATED - not used by OpenAI provider
-
-**Example Usage:**
-```bash
-# Use the config key in CLI
-opencode run "task" --model=openai/my-custom-id
-
-# TUI shows: "My Display Name"
-```
-
-> **⚠️ Recommendation:** Stick to the official presets in `opencode-modern.json` (v1.0.210+) or `opencode-legacy.json` rather than creating custom model variants. GPT 5 models need specific configurations to work reliably.
-
-See [development/CONFIG_FIELDS.md](development/CONFIG_FIELDS.md) for complete explanation.
-
----
-
-## Advanced Scenarios
-
-### Scenario: Quick Switch Presets
-
-Create named variants for common tasks:
-
-```json
-{
-  "models": {
-    "codex-quick": {
-      "name": "⚡ Quick Code",
-      "options": {
-        "reasoningEffort": "low",
-        "store": false
-      }
-    },
-    "codex-balanced": {
-      "name": "⚖️ Balanced Code",
-      "options": {
-        "reasoningEffort": "medium",
-        "store": false
-      }
-    },
-    "codex-quality": {
-      "name": "🎯 Max Quality",
-      "options": {
-        "reasoningEffort": "high",
-        "reasoningSummary": "detailed",
-        "store": false
-      }
-    }
-  }
-}
-```
-
-### Scenario: Per-Agent Models
+<details>
+<summary><b>Pattern 3: Per-Agent Models</b></summary>
 
 Different agents use different models:
 
@@ -324,40 +180,37 @@ Different agents use different models:
 }
 ```
 
-### Scenario: Project-Specific Overrides
+</details>
 
-Global config has defaults, project overrides for specific work:
+<details>
+<summary><b>Pattern 4: Project-Specific Overrides</b></summary>
 
-**~/.config/opencode/opencode.json** (global):
+**Global** (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["opencode-openai-codex-auth-multi@latest"],
   "provider": {
     "openai": {
-      "options": {
-        "reasoningEffort": "medium",
-        "store": false
-      }
+      "options": { "reasoningEffort": "medium" }
     }
   }
 }
 ```
 
-**my-project/.opencode.json** (project):
+**Project** (`my-project/.opencode.json`):
 ```json
 {
   "provider": {
     "openai": {
-      "options": {
-        "reasoningEffort": "high",
-        "store": false
-      }
+      "options": { "reasoningEffort": "high" }
     }
   }
 }
 ```
 
 Result: Project uses `high`, other projects use `medium`.
+
+</details>
 
 ---
 
@@ -371,52 +224,41 @@ Advanced plugin settings in `~/.opencode/openai-codex-auth-config.json`:
 }
 ```
 
-### CODEX_MODE
+### Options
 
-**What it does:**
-- `true` (default): Uses Codex-OpenCode bridge prompt (Task tool & MCP aware)
-- `false`: Uses legacy tool remap message
-- Bridge prompt content is synced with the latest Codex CLI release (ETag-cached)
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with Codex CLI) |
 
-**When to disable:**
-- Compatibility issues with OpenCode updates
-- Testing different prompt styles
-- Debugging tool call issues
+### Environment Variables
 
-**Override with environment variable:**
-```bash
-CODEX_MODE=0 opencode run "task"  # Temporarily disable
-CODEX_MODE=1 opencode run "task"  # Temporarily enable
-```
-
-### Prompt caching
-
-- When OpenCode provides a `prompt_cache_key` (its session identifier), the plugin forwards it directly to Codex.
-- The same value is sent via headers (`conversation_id`, `session_id`) and request body, reducing latency and token usage.
-- The plugin does not synthesize a fallback key; hosts that omit `prompt_cache_key` will see uncached behaviour until they provide one.
-- No configuration needed—cache headers are injected during request transformation.
-
-### Usage limit messaging
-
-- When the ChatGPT subscription hits a limit, the plugin returns a Codex CLI-style summary (5-hour + weekly windows).
-- Messages bubble up in OpenCode exactly where SDK errors normally surface.
-- Helpful when working inside the OpenCode UI or CLI—users immediately see reset timing.
+| Variable | Description |
+|----------|-------------|
+| `DEBUG_CODEX_PLUGIN=1` | Enable debug logging |
+| `ENABLE_PLUGIN_REQUEST_LOGGING=1` | Log all API requests |
+| `CODEX_MODE=0` | Temporarily disable bridge prompt |
+| `CODEX_MODE=1` | Temporarily enable bridge prompt |
 
 ---
 
 ## Configuration Files
 
-**Provided Examples:**
-- [config/opencode-modern.json](../config/opencode-modern.json) - Variants-based config for OpenCode v1.0.210+
-- [config/opencode-legacy.json](../config/opencode-legacy.json) - Legacy full list for v1.0.209 and below
+### Provided Examples
 
-> **Recommended:** Use the config that matches your OpenCode version (`opencode-modern.json` or `opencode-legacy.json`). Minimal configs are intended for debugging only and may not include the per-model `limit` metadata needed for the full OpenCode UI/UX.
+| File | Use Case |
+|------|----------|
+| `config/opencode-modern.json` | OpenCode v1.0.210+ (variants) |
+| `config/opencode-legacy.json` | OpenCode v1.0.209 and below |
 
+### Your Files
 
-**Your Configs:**
-- `~/.config/opencode/opencode.json` - Global config
-- `<project>/.opencode.json` - Project-specific config
-- `~/.opencode/openai-codex-auth-config.json` - Plugin config
+| File | Purpose |
+|------|---------|
+| `~/.config/opencode/opencode.json` | Global config |
+| `<project>/.opencode.json` | Project-specific |
+| `~/.opencode/openai-codex-auth-config.json` | Plugin config |
+| `~/.opencode/auth/openai.json` | OAuth tokens |
+| `~/.opencode/openai-codex-accounts.json` | Multi-account storage |
 
 ---
 
@@ -425,20 +267,19 @@ CODEX_MODE=1 opencode run "task"  # Temporarily enable
 ### Check Config is Valid
 
 ```bash
-# OpenCode will show errors if config is invalid
 opencode
+# Shows errors if config is invalid
 ```
 
 ### Verify Model Resolution
 
 ```bash
-# Enable debug logging
-DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/your-model-name
+DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5.2
 ```
 
 Look for:
 ```
-[openai-codex-plugin] Model config lookup: "your-model-name" → normalized to "gpt-5-codex" for API {
+[openai-codex-plugin] Model config lookup: "gpt-5.2" → normalized to "gpt-5.2-codex" for API {
   hasModelSpecificConfig: true,
   resolvedConfig: { ... }
 }
@@ -447,9 +288,8 @@ Look for:
 ### Test Per-Model Options
 
 ```bash
-# Run with different models, check logs show different options
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5-codex-low
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5-codex-high
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-low
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-high
 
 # Compare reasoning.effort in logs
 cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasoning.effort'
@@ -457,122 +297,10 @@ cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasonin
 
 ---
 
-## Migration Guide
-
-### From Old Config Names
-
-Old verbose names still work:
-
-**⚠️ IMPORTANT:** Old configs with GPT 5.0 models are deprecated. You MUST migrate to the new GPT 5.x configs (`opencode-modern.json` or `opencode-legacy.json`).
-
-**Old config (deprecated):**
-```json
-{
-  "models": {
-    "gpt-5-codex-low": {
-      "name": "GPT 5 Codex Low (OAuth)",
-      "options": { "reasoningEffort": "low" }
-    }
-  }
-}
-```
-
-**New config (required):**
-
-Use the official config file (`opencode-modern.json` for v1.0.210+, `opencode-legacy.json` for older) which includes:
-
-```json
-{
-  "models": {
-    "gpt-5.1-codex-low": {
-      "name": "GPT 5.1 Codex Low (OAuth)",
-      "limit": {
-        "context": 272000,
-        "output": 128000
-      },
-      "options": {
-        "reasoningEffort": "low",
-        "reasoningSummary": "auto",
-        "textVerbosity": "medium",
-        "include": ["reasoning.encrypted_content"],
-        "store": false
-      }
-    }
-  }
-}
-```
-
-**Benefits:**
-- GPT 5.2/5.1 support (5.0 is deprecated)
-- Proper limit metadata for OpenCode features
-- Verified configuration that works reliably
-
----
-
-## Common Patterns
-
-### Pattern: Task-Based Presets
-
-```json
-{
-  "models": {
-    "quick-chat": {
-      "name": "Quick Chat",
-      "options": {
-        "reasoningEffort": "minimal",
-        "textVerbosity": "low",
-        "store": false
-      }
-    },
-    "code-gen": {
-      "name": "Code Generation",
-      "options": {
-        "reasoningEffort": "medium",
-        "store": false
-      }
-    },
-    "debug-help": {
-      "name": "Debug Analysis",
-      "options": {
-        "reasoningEffort": "high",
-        "reasoningSummary": "detailed",
-        "store": false
-      }
-    }
-  }
-}
-```
-
-### Pattern: Cost vs Quality
-
-```json
-{
-  "models": {
-    "economy": {
-      "name": "Economy Mode",
-      "options": {
-        "reasoningEffort": "low",
-        "textVerbosity": "low",
-        "store": false
-      }
-    },
-    "premium": {
-      "name": "Premium Mode",
-      "options": {
-        "reasoningEffort": "high",
-        "textVerbosity": "high",
-        "store": false
-      }
-    }
-  }
-}
-```
-
----
-
 ## Troubleshooting Config
 
-### Model Not Found
+<details>
+<summary><b>Model Not Found</b></summary>
 
 **Error**: `Model 'openai/my-model' not found`
 
@@ -586,31 +314,33 @@ Use the official config file (`opencode-modern.json` for v1.0.210+, `opencode-le
 opencode run "test" --model=openai/my-model  # Must match exactly
 ```
 
-### Per-Model Options Not Applied
+</details>
 
-**Check**: Is config key used for lookup?
+<details>
+<summary><b>Per-Model Options Not Applied</b></summary>
 
+**Debug:**
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/your-model
 ```
 
-Look for `hasModelSpecificConfig: true` in debug output.
+Look for `hasModelSpecificConfig: true` in output.
 
-### Options Ignored
+**If false**: Config lookup failed. Check:
+1. Model name in CLI matches config key
+2. No typos in config file
+3. Correct config file location
+
+</details>
+
+<details>
+<summary><b>Options Ignored</b></summary>
 
 **Cause**: Model normalizes before lookup
 
-**Example Problem:**
-```json
-{ "models": { "gpt-5.1-codex": { "options": { ... } } } }
-```
-```bash
---model=openai/gpt-5.1-codex-low  # Normalizes to "gpt-5.1-codex" before lookup
-```
+**Fix**: Use the official config files (`opencode-modern.json` or `opencode-legacy.json`) instead of custom configs.
 
-**Fix**: Use exact name you specify in CLI as config key.
-
-> **⚠️ Best Practice:** Use the official `opencode-modern.json` or `opencode-legacy.json` configuration instead of creating custom configs. This ensures proper model normalization and compatibility with GPT 5 models.
+</details>
 
 ---
 
