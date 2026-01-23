@@ -32,7 +32,9 @@ export function parseAuthorizationInput(input: string): ParsedAuthInput {
 			code: url.searchParams.get("code") ?? undefined,
 			state: url.searchParams.get("state") ?? undefined,
 		};
-	} catch {}
+	} catch {
+		// Invalid URL, try other parsing methods
+	}
 
 	if (value.includes("#")) {
 		const [code, state] = value.split("#", 2);
@@ -74,7 +76,7 @@ export async function exchangeAuthorizationCode(
 	if (!res.ok) {
 		const text = await res.text().catch(() => "");
 		console.error("[openai-codex-plugin] code->token failed:", res.status, text);
-		return { type: "failed" };
+		return { type: "failed", reason: "http_error", statusCode: res.status, message: text || undefined };
 	}
 	const json = (await res.json()) as {
 		access_token?: string;
@@ -87,7 +89,7 @@ export async function exchangeAuthorizationCode(
 		typeof json?.expires_in !== "number"
 	) {
 		console.error("[openai-codex-plugin] token response missing fields:", json);
-		return { type: "failed" };
+		return { type: "failed", reason: "invalid_response", message: "Missing access_token, refresh_token, or expires_in" };
 	}
 	return {
 		type: "success",
@@ -143,7 +145,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 				response.status,
 				text,
 			);
-			return { type: "failed" };
+			return { type: "failed", reason: "http_error", statusCode: response.status, message: text || undefined };
 		}
 
 		const json = (await response.json()) as {
@@ -156,13 +158,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 				"[openai-codex-plugin] Token refresh response missing fields:",
 				json,
 			);
-			return { type: "failed" };
+			return { type: "failed", reason: "invalid_response", message: "Missing access_token or expires_in" };
 		}
 
 		const nextRefresh = json.refresh_token ?? refreshToken;
 		if (!nextRefresh) {
 			console.error("[openai-codex-plugin] Token refresh missing refresh token");
-			return { type: "failed" };
+			return { type: "failed", reason: "missing_refresh", message: "No refresh token in response or input" };
 		}
 
 		return {
@@ -174,7 +176,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 	} catch (error) {
 		const err = error as Error;
 		console.error("[openai-codex-plugin] Token refresh error:", err);
-		return { type: "failed" };
+		return { type: "failed", reason: "network_error", message: err?.message };
 	}
 }
 

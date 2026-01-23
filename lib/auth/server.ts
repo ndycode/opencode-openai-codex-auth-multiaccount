@@ -37,10 +37,11 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			res.setHeader("Content-Type", "text/html; charset=utf-8");
 			res.end(successHtml);
 			(server as http.Server & { _lastCode?: string })._lastCode = code;
-		} catch {
-			res.statusCode = 500;
-			res.end("Internal error");
-		}
+	} catch (err) {
+		console.error("[openai-codex-plugin] Request handler error:", (err as Error)?.message ?? String(err));
+		res.statusCode = 500;
+		res.end("Internal error");
+	}
 	});
 
 	return new Promise((resolve) => {
@@ -50,15 +51,19 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 					port: 1455,
 					ready: true,
 					close: () => server.close(),
-					waitForCode: async () => {
-						const poll = () => new Promise<void>((r) => setTimeout(r, 100));
-						for (let i = 0; i < 600; i++) {
-							const lastCode = (server as http.Server & { _lastCode?: string })._lastCode;
-							if (lastCode) return { code: lastCode };
-							await poll();
-						}
-						return null;
-					},
+				waitForCode: async () => {
+					const POLL_INTERVAL_MS = 100;
+					const TIMEOUT_MS = 5 * 60 * 1000;
+					const maxIterations = Math.floor(TIMEOUT_MS / POLL_INTERVAL_MS);
+					const poll = () => new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
+					for (let i = 0; i < maxIterations; i++) {
+						const lastCode = (server as http.Server & { _lastCode?: string })._lastCode;
+						if (lastCode) return { code: lastCode };
+						await poll();
+					}
+					console.error("[openai-codex-plugin] OAuth poll timeout after 5 minutes");
+					return null;
+				},
 				});
 			})
 			.on("error", (err: NodeJS.ErrnoException) => {
@@ -70,11 +75,13 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 				resolve({
 					port: 1455,
 					ready: false,
-					close: () => {
-						try {
-							server.close();
-						} catch {}
-					},
+				close: () => {
+					try {
+						server.close();
+					} catch (err) {
+						console.error("[openai-codex-plugin] Failed to close OAuth server:", (err as Error)?.message ?? String(err));
+					}
+				},
 					waitForCode: async () => null,
 				});
 			});

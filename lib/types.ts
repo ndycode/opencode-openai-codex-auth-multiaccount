@@ -111,10 +111,23 @@ export interface TokenSuccess {
 }
 
 /**
- * Token exchange failure result
+ * Token failure reason codes
+ */
+export type TokenFailureReason =
+	| "http_error"
+	| "invalid_response"
+	| "network_error"
+	| "missing_refresh"
+	| "unknown";
+
+/**
+ * Token exchange failure result with optional detailed error info
  */
 export interface TokenFailure {
 	type: "failed";
+	reason?: TokenFailureReason;
+	statusCode?: number;
+	message?: string;
 }
 
 /**

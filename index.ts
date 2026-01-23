@@ -113,9 +113,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 instructions: AUTH_LABELS.INSTRUCTIONS_MANUAL,
                 callback: async (input: string) => {
                         const parsed = parseAuthorizationInput(input);
-                        if (!parsed.code) {
-                                return { type: "failed" as const };
-                        }
+		if (!parsed.code) {
+			return { type: "failed" as const, reason: "invalid_response" as const, message: "No authorization code provided" };
+		}
                         const tokens = await exchangeAuthorizationCode(
                                 parsed.code,
                                 pkce.verifier,
@@ -176,7 +176,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null = null;
                 try {
                         serverInfo = await startLocalOAuthServer({ state });
-                } catch {
+                } catch (err) {
+                        logDebug(`[${PLUGIN_NAME}] Failed to start OAuth server: ${(err as Error)?.message ?? String(err)}`);
                         serverInfo = null;
                 }
                 openBrowserUrl(url);
@@ -189,9 +190,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 const result = await serverInfo.waitForCode(state);
                 serverInfo.close();
 
-                if (!result) {
-                        return { type: "failed" as const };
-                }
+		if (!result) {
+			return { type: "failed" as const, reason: "unknown" as const, message: "OAuth callback timeout or cancelled" };
+		}
 
                 return await exchangeAuthorizationCode(
                         result.code,
@@ -349,9 +350,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return Math.max(0, Math.min(raw, total - 1));
 		};
 
-		const hydrateEmails = async (
-				storage: AccountStorageV3 | null,
-		): Promise<AccountStorageV3 | null> => {
+	const hydrateEmails = async (
+			storage: AccountStorageV3 | null,
+	): Promise<AccountStorageV3 | null> => {
                 if (!storage) return storage;
                 const skipHydrate =
                         process.env.VITEST_WORKER_ID !== undefined ||
@@ -359,30 +360,36 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         process.env.OPENCODE_SKIP_EMAIL_HYDRATE === "1";
                 if (skipHydrate) return storage;
 
+                const accountsToHydrate = storage.accounts.filter(
+                        (account) => account && !account.email,
+                );
+                if (accountsToHydrate.length === 0) return storage;
+
                 let changed = false;
-                for (const account of storage.accounts) {
-                        if (!account || account.email) continue;
-                        try {
-                                const refreshed = await refreshAccessToken(account.refreshToken);
-                                if (refreshed.type !== "success") continue;
-                                const id = extractAccountId(refreshed.access);
-                                const email = sanitizeEmail(extractAccountEmail(refreshed.access));
-                                if (id && id !== account.accountId) {
-                                        account.accountId = id;
-                                        changed = true;
+                await Promise.all(
+                        accountsToHydrate.map(async (account) => {
+                                try {
+                                        const refreshed = await refreshAccessToken(account.refreshToken);
+                                        if (refreshed.type !== "success") return;
+                                        const id = extractAccountId(refreshed.access);
+                                        const email = sanitizeEmail(extractAccountEmail(refreshed.access));
+                                        if (id && id !== account.accountId) {
+                                                account.accountId = id;
+                                                changed = true;
+                                        }
+                                        if (email && email !== account.email) {
+                                                account.email = email;
+                                                changed = true;
+                                        }
+                                        if (refreshed.refresh && refreshed.refresh !== account.refreshToken) {
+                                                account.refreshToken = refreshed.refresh;
+                                                changed = true;
+                                        }
+                                } catch {
+                                        logDebug(`[${PLUGIN_NAME}] Failed to hydrate email for account`);
                                 }
-                                if (email && email !== account.email) {
-                                        account.email = email;
-                                        changed = true;
-                                }
-                                if (refreshed.refresh && refreshed.refresh !== account.refreshToken) {
-                                        account.refreshToken = refreshed.refresh;
-                                        changed = true;
-                                }
-                        } catch {
-                                // ignore hydration failures
-                        }
-                }
+                        }),
+                );
 
                 if (changed) {
                         await saveAccounts(storage);
@@ -453,18 +460,11 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         auth as OAuthAuthDetails,
                                 );
                                 cachedAccountManager = accountManager;
-                                const storedSnapshot = await loadAccounts();
                                 const refreshToken =
                                         auth.type === "oauth" ? auth.refresh : "";
                                 const needsPersist =
-                                        !storedSnapshot ||
-                                        storedSnapshot.accounts.length !==
-                                                accountManager.getAccountCount() ||
-                                        (refreshToken &&
-                                                !storedSnapshot.accounts.some(
-                                                        (account) =>
-                                                                account.refreshToken === refreshToken,
-                                                ));
+                                        refreshToken &&
+                                        !accountManager.hasRefreshToken(refreshToken);
                                 if (needsPersist) {
                                         await accountManager.saveToDisk();
                                 }
@@ -582,35 +582,36 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
 											try {
-												if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
-													accountAuth = (await refreshAndUpdateToken(
-														accountAuth,
-														client,
-													)) as OAuthAuthDetails;
-													accountManager.updateFromAuth(account, accountAuth);
-													await accountManager.saveToDisk();
-												}
-											} catch {
-												accountManager.markAccountCoolingDown(
-													account,
-													ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
-													"auth-failure",
-												);
-												await accountManager.saveToDisk();
-												continue;
-											}
+							if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
+								accountAuth = (await refreshAndUpdateToken(
+									accountAuth,
+									client,
+								)) as OAuthAuthDetails;
+								accountManager.updateFromAuth(account, accountAuth);
+								accountManager.saveToDiskDebounced();
+							}
+			} catch (err) {
+				logDebug(`[${PLUGIN_NAME}] Auth refresh failed for account: ${(err as Error)?.message ?? String(err)}`);
+				accountManager.markAccountCoolingDown(
+								account,
+								ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+								"auth-failure",
+							);
+							accountManager.saveToDiskDebounced();
+							continue;
+						}
 
-											const accountId =
-												account.accountId ?? extractAccountId(accountAuth.access);
-											if (!accountId) {
-												accountManager.markAccountCoolingDown(
-													account,
-													ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
-													"auth-failure",
-												);
-												await accountManager.saveToDisk();
-												continue;
-											}
+						const accountId =
+							account.accountId ?? extractAccountId(accountAuth.access);
+						if (!accountId) {
+							accountManager.markAccountCoolingDown(
+								account,
+								ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+								"auth-failure",
+							);
+							accountManager.saveToDiskDebounced();
+							continue;
+						}
 											account.accountId = accountId;
 											account.email =
 												extractAccountEmail(accountAuth.access) ?? account.email;
@@ -682,18 +683,14 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																																	continue;
 																																}
 
-																														accountManager.markRateLimited(
-																															account,
-																															delayMs,
-																															modelFamily,
-																															model,
-																														);
-																														accountManager.markSwitched(
-																															account,
-																															"rate-limit",
-																															modelFamily,
-																														);
-																														await accountManager.saveToDisk();
+					accountManager.markRateLimited(
+						account,
+						delayMs,
+						modelFamily,
+						model,
+					);
+					account.lastSwitchReason = "rate-limit";
+					accountManager.saveToDiskDebounced();
 
 																														if (
 																															accountManager.getAccountCount() > 1 &&
@@ -837,8 +834,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                                 [result],
                                                                                 isFirstAccount && startFresh,
                                                                         );
-                                                                } catch {
-                                                                        // Ignore storage failures
+                                                                } catch (err) {
+                                                                        logDebug(`[${PLUGIN_NAME}] Failed to persist account pool: ${(err as Error)?.message ?? String(err)}`);
                                                                 }
 
                                                                 if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
@@ -851,8 +848,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                         if (currentStorage) {
                                                                                 currentAccountCount = currentStorage.accounts.length;
                                                                         }
-                                                                } catch {
-                                                                        // Ignore storage read failures
+                                                                } catch (err) {
+                                                                        logDebug(`[${PLUGIN_NAME}] Failed to load accounts for count: ${(err as Error)?.message ?? String(err)}`);
                                                                 }
 
                                                                 const addAnother = await promptAddAnotherAccount(
@@ -881,8 +878,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 if (finalStorage) {
                                                                         actualAccountCount = finalStorage.accounts.length;
                                                                 }
-                                                        } catch {
-                                                                // Ignore storage read failures
+                                                        } catch (err) {
+                                                                logDebug(`[${PLUGIN_NAME}] Failed to load final account count: ${(err as Error)?.message ?? String(err)}`);
                                                         }
 
                                                         return {
@@ -898,7 +895,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                         null;
                                                 try {
                                                         serverInfo = await startLocalOAuthServer({ state });
-                                                } catch {
+                                                } catch (err) {
+                                                        logDebug(`[${PLUGIN_NAME}] Failed to start OAuth server for add flow: ${(err as Error)?.message ?? String(err)}`);
                                                         serverInfo = null;
                                                 }
 

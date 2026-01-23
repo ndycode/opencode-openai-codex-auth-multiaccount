@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,9 +9,12 @@ const GITHUB_API_RELEASES =
 const GITHUB_HTML_RELEASES =
 	"https://github.com/openai/codex/releases/latest";
 const CACHE_DIR = join(homedir(), ".opencode", "cache");
+const CACHE_TTL_MS = 15 * 60 * 1000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const memoryCache = new Map<string, { content: string; timestamp: number }>();
 
 /**
  * Model family type for prompt selection
@@ -65,7 +68,6 @@ const CACHE_FILES: Record<ModelFamily, string> = {
  * @returns The model family for prompt selection
  */
 export function getModelFamily(normalizedModel: string): ModelFamily {
-	// Order matters - check more specific patterns first
 	if (
 		normalizedModel.includes("gpt-5.2-codex") ||
 		normalizedModel.includes("gpt 5.2 codex")
@@ -87,6 +89,14 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 	return "gpt-5.1";
 }
 
+async function readFileOrNull(path: string): Promise<string | null> {
+	try {
+		return await fs.readFile(path, "utf8");
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Get the latest release tag from GitHub
  * @returns Release tag name (e.g., "rust-v0.43.0")
@@ -101,6 +111,7 @@ async function getLatestReleaseTag(): Promise<string> {
 			}
 		}
 	} catch {
+		// Fall through to HTML fallback
 	}
 
 	const htmlResponse = await fetch(GITHUB_HTML_RELEASES);
@@ -142,6 +153,12 @@ export async function getCodexInstructions(
 	normalizedModel = "gpt-5.1-codex",
 ): Promise<string> {
 	const modelFamily = getModelFamily(normalizedModel);
+	
+	const cached = memoryCache.get(modelFamily);
+	if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+		return cached.content;
+	}
+
 	const promptFile = PROMPT_FILES[modelFamily];
 	const cacheFile = join(CACHE_DIR, CACHE_FILES[modelFamily]);
 	const cacheMetaFile = join(
@@ -150,40 +167,36 @@ export async function getCodexInstructions(
 	);
 
 	try {
-		// Load cached metadata (includes ETag, tag, and lastChecked timestamp)
 		let cachedETag: string | null = null;
 		let cachedTag: string | null = null;
 		let cachedTimestamp: number | null = null;
 
-		if (existsSync(cacheMetaFile)) {
-			const metadata = JSON.parse(
-				readFileSync(cacheMetaFile, "utf8"),
-			) as CacheMetadata;
+		const metaContent = await readFileOrNull(cacheMetaFile);
+		if (metaContent) {
+			const metadata = JSON.parse(metaContent) as CacheMetadata;
 			cachedETag = metadata.etag;
 			cachedTag = metadata.tag;
 			cachedTimestamp = metadata.lastChecked;
 		}
 
-		// Rate limit protection: If cache is less than 15 minutes old, use it
-		const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 		if (
 			cachedTimestamp &&
-			Date.now() - cachedTimestamp < CACHE_TTL_MS &&
-			existsSync(cacheFile)
+			Date.now() - cachedTimestamp < CACHE_TTL_MS
 		) {
-			return readFileSync(cacheFile, "utf8");
+			const diskContent = await readFileOrNull(cacheFile);
+			if (diskContent) {
+				memoryCache.set(modelFamily, { content: diskContent, timestamp: Date.now() });
+				return diskContent;
+			}
 		}
 
-		// Get the latest release tag (only if cache is stale or missing)
 		const latestTag = await getLatestReleaseTag();
 		const CODEX_INSTRUCTIONS_URL = `https://raw.githubusercontent.com/openai/codex/${latestTag}/codex-rs/core/${promptFile}`;
 
-		// If tag changed, we need to fetch new instructions
 		if (cachedTag !== latestTag) {
-			cachedETag = null; // Force re-fetch
+			cachedETag = null;
 		}
 
-		// Make conditional request with If-None-Match header
 		const headers: Record<string, string> = {};
 		if (cachedETag) {
 			headers["If-None-Match"] = cachedETag;
@@ -191,27 +204,21 @@ export async function getCodexInstructions(
 
 		const response = await fetch(CODEX_INSTRUCTIONS_URL, { headers });
 
-		// 304 Not Modified - our cached version is still current
 		if (response.status === 304) {
-			if (existsSync(cacheFile)) {
-				return readFileSync(cacheFile, "utf8");
+			const diskContent = await readFileOrNull(cacheFile);
+			if (diskContent) {
+				memoryCache.set(modelFamily, { content: diskContent, timestamp: Date.now() });
+				return diskContent;
 			}
-			// Cache file missing but GitHub says not modified - fall through to re-fetch
 		}
 
-		// 200 OK - new content or first fetch
 		if (response.ok) {
 			const instructions = await response.text();
 			const newETag = response.headers.get("etag");
 
-			// Create cache directory if it doesn't exist
-			if (!existsSync(CACHE_DIR)) {
-				mkdirSync(CACHE_DIR, { recursive: true });
-			}
-
-			// Cache the instructions with ETag and tag (verbatim from GitHub)
-			writeFileSync(cacheFile, instructions, "utf8");
-			writeFileSync(
+			await fs.mkdir(CACHE_DIR, { recursive: true });
+			await fs.writeFile(cacheFile, instructions, "utf8");
+			await fs.writeFile(
 				cacheMetaFile,
 				JSON.stringify({
 					etag: newETag,
@@ -222,6 +229,7 @@ export async function getCodexInstructions(
 				"utf8",
 			);
 
+			memoryCache.set(modelFamily, { content: instructions, timestamp: Date.now() });
 			return instructions;
 		}
 
@@ -233,19 +241,21 @@ export async function getCodexInstructions(
 			err.message,
 		);
 
-		// Try to use cached version even if stale
-		if (existsSync(cacheFile)) {
+		const diskContent = await readFileOrNull(cacheFile);
+		if (diskContent) {
 			console.error(
 				`[openai-codex-plugin] Using cached ${modelFamily} instructions`,
 			);
-			return readFileSync(cacheFile, "utf8");
+			memoryCache.set(modelFamily, { content: diskContent, timestamp: Date.now() });
+			return diskContent;
 		}
 
-		// Fall back to bundled version (use codex-instructions.md as default)
 		console.error(
 			`[openai-codex-plugin] Falling back to bundled instructions for ${modelFamily}`,
 		);
-		return readFileSync(join(__dirname, "codex-instructions.md"), "utf8");
+		const bundled = await fs.readFile(join(__dirname, "codex-instructions.md"), "utf8");
+		memoryCache.set(modelFamily, { content: bundled, timestamp: Date.now() });
+		return bundled;
 	}
 }
 

@@ -44,16 +44,22 @@ vi.mock("../lib/accounts.js", () => {
 			return { index: 0, accountId: "account-1", email: "user@example.com" };
 		}
 
-		toAuthDetails() {
-			return {
-				type: "oauth",
-				access: "access-token",
-				refresh: "refresh-token",
-				expires: Date.now() + 60_000,
-			};
-		}
+	toAuthDetails() {
+		return {
+			type: "oauth",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+		};
+	}
 
-		updateFromAuth() {}
+	hasRefreshToken(_token: string) {
+		return true;
+	}
+
+	saveToDiskDebounced() {}
+
+	updateFromAuth() {}
 
 		async saveToDisk() {}
 

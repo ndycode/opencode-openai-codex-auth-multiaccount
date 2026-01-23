@@ -131,7 +131,14 @@ function isRateLimitedForFamily(account: ManagedAccount, family: ModelFamily, mo
  */
 export class AccountManager {
   private accounts: ManagedAccount[] = [];
-  private cursor = 0;
+  // Per-family cursors for true round-robin rotation
+  private cursorByFamily: Record<ModelFamily, number> = {
+    "gpt-5.2-codex": 0,
+    "codex-max": 0,
+    codex: 0,
+    "gpt-5.2": 0,
+    "gpt-5.1": 0,
+  };
   private currentAccountIndexByFamily: Record<ModelFamily, number> = {
     "gpt-5.2-codex": -1,
     "codex-max": -1,
@@ -141,6 +148,8 @@ export class AccountManager {
   };
   private lastToastAccountIndex = -1;
   private lastToastTime = 0;
+  private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSave: Promise<void> | null = null;
 
   /**
    * Loads account manager from disk storage with optional auth fallback.
@@ -150,6 +159,10 @@ export class AccountManager {
   static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
     const stored = await loadAccounts();
     return new AccountManager(authFallback, stored);
+  }
+
+  hasRefreshToken(refreshToken: string): boolean {
+    return this.accounts.some((account) => account.refreshToken === refreshToken);
   }
 
   constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
@@ -216,12 +229,12 @@ export class AccountManager {
 
       if (this.accounts.length > 0) {
         const defaultIndex = clampNonNegativeInt(stored.activeIndex, 0) % this.accounts.length;
-        this.cursor = defaultIndex;
 
         for (const family of MODEL_FAMILIES) {
           const rawIndex = stored.activeIndexByFamily?.[family];
           const nextIndex = clampNonNegativeInt(rawIndex, defaultIndex) % this.accounts.length;
           this.currentAccountIndexByFamily[family] = nextIndex;
+          this.cursorByFamily[family] = nextIndex;
         }
       }
       return;
@@ -243,9 +256,9 @@ export class AccountManager {
           rateLimitResetTimes: {},
         },
       ];
-      this.cursor = 0;
       for (const family of MODEL_FAMILIES) {
         this.currentAccountIndexByFamily[family] = 0;
+        this.cursorByFamily[family] = 0;
       }
     }
   }
@@ -281,8 +294,8 @@ export class AccountManager {
 
     for (const family of MODEL_FAMILIES) {
       this.currentAccountIndexByFamily[family] = index;
+      this.cursorByFamily[family] = index;
     }
-    this.cursor = index;
 
     account.lastUsed = nowMs();
     account.lastSwitchReason = "rotation";
@@ -306,40 +319,55 @@ export class AccountManager {
   }
 
   getCurrentOrNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
-    const current = this.getCurrentAccountForFamily(family);
-    if (current) {
-      clearExpiredRateLimits(current);
-      if (!isRateLimitedForFamily(current, family, model) && !this.isAccountCoolingDown(current)) {
-        current.lastUsed = nowMs();
-        return current;
+    const count = this.accounts.length;
+    if (count === 0) return null;
+
+    // True round-robin: always advance cursor and pick next available account
+    const cursor = this.cursorByFamily[family];
+    
+    for (let i = 0; i < count; i++) {
+      const idx = (cursor + i) % count;
+      const account = this.accounts[idx];
+      if (!account) continue;
+      
+      clearExpiredRateLimits(account);
+      if (isRateLimitedForFamily(account, family, model) || this.isAccountCoolingDown(account)) {
+        continue;
       }
+      
+      // Found available account - advance cursor for next request
+      this.cursorByFamily[family] = (idx + 1) % count;
+      this.currentAccountIndexByFamily[family] = idx;
+      account.lastUsed = nowMs();
+      return account;
     }
 
-    const next = this.getNextForFamily(family, model);
-    if (next) {
-      this.currentAccountIndexByFamily[family] = next.index;
-    }
-    return next;
+    // All accounts blocked
+    return null;
   }
 
   getNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
-    const available = this.accounts.filter((account) => {
+    const count = this.accounts.length;
+    if (count === 0) return null;
+
+    const cursor = this.cursorByFamily[family];
+    
+    for (let i = 0; i < count; i++) {
+      const idx = (cursor + i) % count;
+      const account = this.accounts[idx];
+      if (!account) continue;
+      
       clearExpiredRateLimits(account);
-      return !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
-    });
-
-    if (available.length === 0) {
-      return null;
+      if (isRateLimitedForFamily(account, family, model) || this.isAccountCoolingDown(account)) {
+        continue;
+      }
+      
+      this.cursorByFamily[family] = (idx + 1) % count;
+      account.lastUsed = nowMs();
+      return account;
     }
 
-    const account = available[this.cursor % available.length];
-    if (!account) {
-      return null;
-    }
-
-    this.cursor += 1;
-    account.lastUsed = nowMs();
-    return account;
+    return null;
   }
 
   markSwitched(account: ManagedAccount, reason: "rate-limit" | "initial" | "rotation", family: ModelFamily): void {
@@ -459,17 +487,22 @@ export class AccountManager {
     });
 
     if (this.accounts.length === 0) {
-      this.cursor = 0;
       for (const family of MODEL_FAMILIES) {
+        this.cursorByFamily[family] = 0;
         this.currentAccountIndexByFamily[family] = -1;
       }
       return true;
     }
 
-    if (this.cursor > idx) {
-      this.cursor -= 1;
+    const cursor = this.cursorByFamily["codex"];
+    if (cursor > idx) {
+      for (const family of MODEL_FAMILIES) {
+        this.cursorByFamily[family] = Math.max(0, this.cursorByFamily[family] - 1);
+      }
     }
-    this.cursor = this.cursor % this.accounts.length;
+    for (const family of MODEL_FAMILIES) {
+      this.cursorByFamily[family] = this.cursorByFamily[family] % this.accounts.length;
+    }
 
     for (const family of MODEL_FAMILIES) {
       if (this.currentAccountIndexByFamily[family] > idx) {
@@ -511,6 +544,29 @@ export class AccountManager {
     };
 
     await saveAccounts(storage);
+  }
+
+  saveToDiskDebounced(delayMs = 500): void {
+    if (this.saveDebounceTimer) {
+      clearTimeout(this.saveDebounceTimer);
+    }
+    this.saveDebounceTimer = setTimeout(() => {
+      this.saveDebounceTimer = null;
+      this.pendingSave = this.saveToDisk().finally(() => {
+        this.pendingSave = null;
+      });
+    }, delayMs);
+  }
+
+  async flushPendingSave(): Promise<void> {
+    if (this.saveDebounceTimer) {
+      clearTimeout(this.saveDebounceTimer);
+      this.saveDebounceTimer = null;
+      await this.saveToDisk();
+    }
+    if (this.pendingSave) {
+      await this.pendingSave;
+    }
   }
 }
 
