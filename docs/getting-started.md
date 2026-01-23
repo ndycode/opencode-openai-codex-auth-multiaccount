@@ -2,25 +2,36 @@
 
 Complete installation and setup guide for the OpenCode OpenAI Codex Auth Plugin.
 
-## ⚠️ Before You Begin
+---
 
-**This plugin is for personal development use only.** It uses OpenAI's official OAuth authentication for individual coding assistance with your ChatGPT Plus/Pro subscription.
+<details open>
+<summary><b>Before You Begin</b></summary>
 
-**Not intended for:** Commercial services, API resale, multi-user applications, or any use that violates [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/).
+> [!CAUTION]
+> **This plugin is for personal development use only.** It uses OpenAI's official OAuth authentication for individual coding assistance with your ChatGPT Plus/Pro subscription.
+>
+> **Not intended for:** Commercial services, API resale, multi-user applications, or any use that violates [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/).
+>
+> For production applications, use the [OpenAI Platform API](https://platform.openai.com/).
 
-For production applications, use the [OpenAI Platform API](https://platform.openai.com/).
+</details>
 
 ---
 
 ## Prerequisites
 
-- **OpenCode** installed ([installation guide](https://opencode.ai))
-- **ChatGPT Plus or Pro subscription** (required for Codex access)
-- **Node.js** 20+ (for OpenCode)
+| Requirement | Notes |
+|-------------|-------|
+| **OpenCode** | [Installation guide](https://opencode.ai) |
+| **ChatGPT Plus or Pro** | Required for Codex access |
+| **Node.js 20+** | For OpenCode runtime |
+
+---
 
 ## Installation
 
-### Install/update from npm (recommended)
+<details open>
+<summary><b>Option A: One-Command Install (Recommended)</b></summary>
 
 Works on **Windows, macOS, and Linux**:
 
@@ -28,15 +39,20 @@ Works on **Windows, macOS, and Linux**:
 npx -y opencode-openai-codex-auth-multi@latest
 ```
 
-This writes the **global** config at `~/.config/opencode/opencode.json`, backs it up, and clears the OpenCode plugin cache so the latest version installs.
+This:
+- Writes config to `~/.config/opencode/opencode.json`
+- Backs up existing config
+- Clears OpenCode plugin cache
 
-Need legacy config (OpenCode v1.0.209 and below)?
-
+**Legacy OpenCode (v1.0.209 and below)?**
 ```bash
 npx -y opencode-openai-codex-auth-multi@latest --legacy
 ```
 
-### Install from source (optional)
+</details>
+
+<details>
+<summary><b>Option B: Install from Source</b></summary>
 
 ```bash
 git clone https://github.com/ndycode/opencode-openai-codex-auth-multi.git
@@ -45,7 +61,7 @@ npm ci
 npm run build
 ```
 
-Point OpenCode at the local build output (replace with your absolute path):
+Point OpenCode at the local build output:
 
 ```json
 {
@@ -53,271 +69,26 @@ Point OpenCode at the local build output (replace with your absolute path):
 }
 ```
 
+> **Note**: Must point to `dist/` folder (built output), not root.
+
+</details>
+
 ---
+
+## Setup Steps
 
 ### Step 1: Add Plugin to Config
 
-OpenCode can load plugins from npm (by name) or from a local build (`file://` URL).
-
-If you installed from source, set `"plugin"` to your local `dist/` folder (see the example above).
-
-**Choose your configuration style:**
-
-#### ✅ Recommended: Full Configuration
-
-**Recommended**: Use the full configuration for the best UX and stable behavior with GPT 5.x/Codex models.
-
-**Why the full config is recommended:**
-- GPT 5 models can be temperamental and need proper configuration
-- Minimal configs are intended for debugging only and may miss required model metadata
-- OpenCode features require proper model metadata
-- This configuration has been tested and verified to work
-
-
-Add this to `~/.config/opencode/opencode.json` (if you installed from source, replace `"plugin"` with your local `file:///.../dist` path):
-
-**Tip**: The snippet below is a truncated excerpt. For the complete legacy list, copy `config/opencode-legacy.json`. For the modern variants config (OpenCode v1.0.210+), use `config/opencode-modern.json`.
+Edit `~/.config/opencode/opencode.json`:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi"],
-  "provider": {
-    "openai": {
-      "options": {
-        "reasoningEffort": "medium",
-        "reasoningSummary": "auto",
-        "textVerbosity": "medium",
-        "include": ["reasoning.encrypted_content"],
-        "store": false
-      },
-      "models": {
-        "gpt-5.1-codex-low": {
-          "name": "GPT 5.1 Codex Low (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "low",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-medium": {
-          "name": "GPT 5.1 Codex Medium (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "medium",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-high": {
-          "name": "GPT 5.1 Codex High (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-max": {
-          "name": "GPT 5.1 Codex Max (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-max-low": {
-          "name": "GPT 5.1 Codex Max Low (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "low",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-max-medium": {
-          "name": "GPT 5.1 Codex Max Medium (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "medium",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-max-high": {
-          "name": "GPT 5.1 Codex Max High (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-max-xhigh": {
-          "name": "GPT 5.1 Codex Max Extra High (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "xhigh",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-mini-medium": {
-          "name": "GPT 5.1 Codex Mini Medium (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "medium",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-codex-mini-high": {
-          "name": "GPT 5.1 Codex Mini High (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-low": {
-          "name": "GPT 5.1 Low (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "low",
-            "reasoningSummary": "auto",
-            "textVerbosity": "low",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-medium": {
-          "name": "GPT 5.1 Medium (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "medium",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        },
-        "gpt-5.1-high": {
-          "name": "GPT 5.1 High (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed",
-            "textVerbosity": "high",
-            "include": ["reasoning.encrypted_content"],
-            "store": false
-          }
-        }
-      }
-    }
-  }
+  "plugin": ["opencode-openai-codex-auth-multi@latest"]
 }
 ```
 
-  **What you get:**
-  - ✅ GPT 5.2 (None/Low/Medium/High/xHigh reasoning)
-  - ✅ GPT 5.2 Codex (Low/Medium/High/xHigh reasoning)
-  - ✅ GPT 5.1 Codex Max (Low/Medium/High/xHigh reasoning presets)
-  - ✅ GPT 5.1 Codex (Low/Medium/High reasoning)
-  - ✅ GPT 5.1 Codex Mini (Medium/High reasoning)
-  - ✅ GPT 5.1 (None/Low/Medium/High reasoning)
-  - ✅ 272k context + 128k output window for all GPT 5.x presets.
-  - ✅ All visible in OpenCode model selector
-  - ✅ Optimal settings for each reasoning level
-
-> **Note**: All `gpt-5.1-codex-mini*` presets use 272k context / 128k output limits.
->
-> **Note**: Codex Max presets map to the `gpt-5.1-codex-max` slug with 272k context and 128k output. Use `gpt-5.1-codex-max-low/medium/high/xhigh` to pick the reasoning level (only `-xhigh` uses `xhigh` reasoning).
->
-> **Note**: GPT 5.2 and GPT 5.2 Codex support `xhigh` reasoning. Use explicit reasoning levels (e.g., `gpt-5.2-xhigh`, `gpt-5.2-codex-xhigh`) for precise control.
-
-Prompt caching is enabled out of the box: when OpenCode sends its session identifier as `prompt_cache_key`, the plugin forwards it untouched so multi-turn runs reuse prior work. The CODEX_MODE bridge prompt bundled with the plugin is kept in sync with the latest Codex CLI release, so the OpenCode UI and Codex share the same tool contract. If you hit your ChatGPT subscription limits, the plugin returns a friendly Codex-style message with the 5-hour and weekly usage windows so you know when capacity resets.
-
-> **Tip**: The full configuration is strongly recommended for the best OpenCode UX (model metadata, variants/presets, and predictable behavior). Minimal configs are intended for debugging only.
-
-#### ⚠️ Minimal Configuration (Advanced/Debugging Only)
-
-Minimal configs can be useful for debugging, but they do not include the full model metadata/presets. Expect fewer OpenCode UI features.
-
-```json
-// ⚠️ Debugging only
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi"],
-  "model": "openai/gpt-5-codex"
-}
-```
-
-**Limitations:**
-- Missing model metadata can reduce OpenCode UI features (picker labels, limits, etc.)
-- You won’t get the full preset/variant matrix from `config/opencode-*.json`
-
+> If you installed from source, use the `file://` path instead.
 
 ### Step 2: Authenticate
 
@@ -331,21 +102,68 @@ opencode auth login
 4. Log in with your ChatGPT account
 5. Done! Token saved to `~/.opencode/auth/openai.json`
 
-**⚠️ Important**: If you have the official Codex CLI running, stop it first (both use port 1455 for OAuth callback).
+<details>
+<summary><b>OAuth Not Working?</b></summary>
 
-**Manual fallback**: On SSH/WSL/remote environments, pick **"ChatGPT Plus/Pro (Manual URL Paste)"** and paste the full redirect URL after login.
+**Port conflict:**
+- Stop Codex CLI if running (both use port 1455)
+- Check: `lsof -i :1455` (macOS/Linux) or `netstat -ano | findstr :1455` (Windows)
 
-### Step 3: Test It
+**SSH/WSL/Remote:**
+- Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
+- Paste the full redirect URL after login
+
+</details>
+
+### Step 3: Add Model Configuration
+
+Use one of the provided config files:
+
+| OpenCode Version | Config File |
+|------------------|-------------|
+| v1.0.210+ (modern) | `config/opencode-modern.json` |
+| v1.0.209 and below | `config/opencode-legacy.json` |
+
+Copy the relevant config to your `~/.config/opencode/opencode.json`.
+
+<details>
+<summary><b>Why use the full config?</b></summary>
+
+- GPT-5 models need proper configuration to work reliably
+- Full configs include `limit` metadata for OpenCode UI features
+- Minimal configs are for debugging only
+
+</details>
+
+### Step 4: Test It
 
 ```bash
-# Quick test
-opencode run "write hello world to test.txt" --model=openai/gpt-5.1-codex-medium
+# Modern OpenCode (v1.0.210+)
+opencode run "write hello world to test.txt" --model=openai/gpt-5.2 --variant=medium
+
+# Legacy OpenCode (v1.0.209 and below)
+opencode run "write hello world to test.txt" --model=openai/gpt-5.2-medium
 
 # Or start interactive session
 opencode
 ```
 
-You'll see all 22 GPT 5.x variants (GPT 5.2, GPT 5.2 Codex, Codex Max, Codex, Codex Mini, and GPT 5.1 presets) in the model selector!
+You'll see all 22 GPT-5.x variants in the model selector!
+
+---
+
+## Available Models
+
+| Model | Variants | Notes |
+|-------|----------|-------|
+| `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 |
+| `gpt-5.2-codex` | low, medium, high, xhigh | Code-optimized |
+| `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
+| `gpt-5.1-codex` | low, medium, high | Standard Codex |
+| `gpt-5.1-codex-mini` | medium, high | Lightweight |
+| `gpt-5.1` | none, low, medium, high | Base model |
+
+**Total: 22 model presets** with 272k context / 128k output.
 
 ---
 
@@ -353,17 +171,31 @@ You'll see all 22 GPT 5.x variants (GPT 5.2, GPT 5.2 Codex, Codex Max, Codex, Co
 
 OpenCode checks multiple config files in order:
 
-1. **Project config**: `./.opencode.json` (current directory)
-2. **Parent configs**: Walks up directory tree
-3. **Global config**: `~/.config/opencode/opencode.json`
+| Priority | Location | Use Case |
+|----------|----------|----------|
+| 1 | `./.opencode.json` | Project-specific |
+| 2 | Parent directories | Monorepo |
+| 3 | `~/.config/opencode/opencode.json` | Global defaults |
 
-**Recommendation**: Use global config for plugin, project config for model/agent overrides.
+**Recommendation**: Plugin in global config, model/agent overrides in project config.
 
 ---
 
-## ⚠️ Updating the Plugin (Important!)
+## Updating the Plugin
 
-### If you installed from source
+<details>
+<summary><b>From npm</b></summary>
+
+OpenCode caches plugins. Re-run the installer:
+
+```bash
+npx -y opencode-openai-codex-auth-multi@latest
+```
+
+</details>
+
+<details>
+<summary><b>From source</b></summary>
 
 ```bash
 cd opencode-openai-codex-auth-multi
@@ -372,19 +204,7 @@ npm ci
 npm run build
 ```
 
-### If you installed from npm (once published)
-
-OpenCode caches plugins. To install the latest version, re-run the installer:
-
-```bash
-npx -y opencode-openai-codex-auth-multi@latest
-```
-
-Legacy OpenCode (v1.0.209 and below):
-
-```bash
-npx -y opencode-openai-codex-auth-multi@latest --legacy
-```
+</details>
 
 **When to update:**
 - New features released
@@ -392,29 +212,6 @@ npx -y opencode-openai-codex-auth-multi@latest --legacy
 - Security updates
 
 **Check for updates**: [Releases Page](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases)
-
-**Pro tip**: Subscribe to release notifications on GitHub to get notified of updates.
-
----
-
-## Local Development Setup
-
-For plugin development or testing unreleased changes:
-
-```json
-{
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multi/dist"]
-}
-```
-
-**Note**: Must point to `dist/` folder (built output), not root.
-
-**Build the plugin:**
-```bash
-cd opencode-openai-codex-auth-multi
-npm ci
-npm run build
-```
 
 ---
 
@@ -431,26 +228,25 @@ opencode --version
 
 ```bash
 cat ~/.opencode/auth/openai.json
-# Should show OAuth credentials (if authenticated)
+# Should show OAuth credentials
 ```
 
 ### Test API Access
 
 ```bash
 # Enable logging to verify requests
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5-codex
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2
 
 # Check logs
 ls ~/.opencode/logs/codex-plugin/
-# Should show request logs
 ```
 
 ---
 
 ## Next Steps
 
-- [Configuration Guide](configuration.md) - Advanced config options
-- [Troubleshooting](troubleshooting.md) - Common issues and solutions
-- [Developer Docs](development/ARCHITECTURE.md) - Technical deep dive
+- [Configuration Guide](configuration.md) — Advanced config options
+- [Troubleshooting](troubleshooting.md) — Common issues and solutions
+- [Architecture](development/ARCHITECTURE.md) — Technical deep dive
 
-**Back to**: [Documentation Home](index.md)
+**Back to**: [Documentation Home](index.md) | [Main README](../README.md)
