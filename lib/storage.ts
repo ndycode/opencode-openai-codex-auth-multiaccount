@@ -6,6 +6,17 @@ import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 
 const log = createLogger("storage");
 
+let storageMutex: Promise<void> = Promise.resolve();
+
+function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
+  const previousMutex = storageMutex;
+  let releaseLock: () => void;
+  storageMutex = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  return previousMutex.then(fn).finally(() => releaseLock());
+}
+
 export type CooldownReason = "auth-failure" | "network-error";
 
 export interface RateLimitStateV3 {
@@ -398,10 +409,12 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
  * @param storage - Account storage data to save
  */
 export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
-  const path = getStoragePath();
-  await fs.mkdir(dirname(path), { recursive: true });
-  const content = JSON.stringify(storage, null, 2);
-  await fs.writeFile(path, content, "utf-8");
+  return withStorageLock(async () => {
+    const path = getStoragePath();
+    await fs.mkdir(dirname(path), { recursive: true });
+    const content = JSON.stringify(storage, null, 2);
+    await fs.writeFile(path, content, "utf-8");
+  });
 }
 
 /**
@@ -409,13 +422,15 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
  * Silently ignores if file doesn't exist.
  */
 export async function clearAccounts(): Promise<void> {
-  try {
-    const path = getStoragePath();
-    await fs.unlink(path);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") {
-      log.error("Failed to clear account storage", { error: String(error) });
+  return withStorageLock(async () => {
+    try {
+      const path = getStoragePath();
+      await fs.unlink(path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        log.error("Failed to clear account storage", { error: String(error) });
+      }
     }
-  }
+  });
 }

@@ -216,9 +216,10 @@ export function createCodexHeaders(
 export async function handleErrorResponse(
         response: Response,
 ): Promise<ErrorHandlingResult> {
-        const mapped = await mapUsageLimit404(response);
+        const bodyText = await safeReadBody(response);
+        const mapped = mapUsageLimit404WithBody(response, bodyText);
         const finalResponse = mapped ?? response;
-        const rateLimit = await extractRateLimitInfo(finalResponse);
+        const rateLimit = extractRateLimitInfoFromBody(finalResponse, bodyText);
 
         logRequest(LOG_STAGES.ERROR_RESPONSE, {
                 status: finalResponse.status,
@@ -255,48 +256,48 @@ export async function handleSuccessResponse(
 	});
 }
 
-async function mapUsageLimit404(response: Response): Promise<Response | null> {
-        if (response.status !== HTTP_STATUS.NOT_FOUND) return null;
+async function safeReadBody(response: Response): Promise<string> {
+        try {
+                return await response.clone().text();
+        } catch {
+                return "";
+        }
+}
 
-	const clone = response.clone();
-	let text = "";
-	try {
-		text = await clone.text();
-	} catch {
-		text = "";
-	}
-	if (!text) return null;
+function mapUsageLimit404WithBody(response: Response, bodyText: string): Response | null {
+        if (response.status !== HTTP_STATUS.NOT_FOUND) return null;
+        if (!bodyText) return null;
 
 	let code = "";
 	try {
-		const parsed = JSON.parse(text) as { error?: { code?: string | number; type?: string } };
+		const parsed = JSON.parse(bodyText) as { error?: { code?: string | number; type?: string } };
 		code = (parsed?.error?.code ?? parsed?.error?.type ?? "").toString();
 	} catch {
 		code = "";
 	}
 
-	const haystack = `${code} ${text}`.toLowerCase();
+	const haystack = `${code} ${bodyText}`.toLowerCase();
 	if (!/usage_limit_reached|usage_not_included|rate_limit_exceeded|usage limit/i.test(haystack)) {
 		return null;
 	}
 
         const headers = new Headers(response.headers);
-        return new Response(response.body, {
+        return new Response(bodyText, {
                 status: HTTP_STATUS.TOO_MANY_REQUESTS,
                 statusText: "Too Many Requests",
                 headers,
         });
 }
 
-async function extractRateLimitInfo(
+function extractRateLimitInfoFromBody(
         response: Response,
-): Promise<RateLimitInfo | undefined> {
+        bodyText: string,
+): RateLimitInfo | undefined {
         const isStatusRateLimit =
                 response.status === HTTP_STATUS.TOO_MANY_REQUESTS;
-        const body = await safeReadBody(response);
-        const parsed = parseRateLimitBody(body);
+        const parsed = parseRateLimitBody(bodyText);
 
-        const haystack = `${parsed?.code ?? ""} ${body}`.toLowerCase();
+        const haystack = `${parsed?.code ?? ""} ${bodyText}`.toLowerCase();
         const isRateLimit =
                 isStatusRateLimit ||
                 /usage_limit_reached|usage_not_included|rate_limit_exceeded|rate_limit/i.test(
@@ -308,14 +309,6 @@ async function extractRateLimitInfo(
                 parseRetryAfterMs(response, parsed) ?? 60000;
 
         return { retryAfterMs, code: parsed?.code };
-}
-
-async function safeReadBody(response: Response): Promise<string> {
-        try {
-                return await response.clone().text();
-        } catch {
-                return "";
-        }
 }
 
 interface RateLimitErrorBody {

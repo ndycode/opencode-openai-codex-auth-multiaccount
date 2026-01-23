@@ -143,4 +143,76 @@ describe("AccountManager", () => {
     expect(formatAccountLabel({ accountId: "abcdef123456" }, 2)).toBe("Account 3 (123456)");
     expect(formatAccountLabel(undefined as any, 3)).toBe("Account 4");
   });
+
+  it("performs true round-robin rotation across multiple requests", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3,
+      activeIndex: 0,
+      accounts: [
+        { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        { refreshToken: "token-2", addedAt: now, lastUsed: now },
+        { refreshToken: "token-3", addedAt: now, lastUsed: now },
+      ],
+    };
+
+    const manager = new AccountManager(undefined, stored);
+    
+    const first = manager.getCurrentOrNext();
+    const second = manager.getCurrentOrNext();
+    const third = manager.getCurrentOrNext();
+    const fourth = manager.getCurrentOrNext();
+
+    expect(first?.refreshToken).toBe("token-1");
+    expect(second?.refreshToken).toBe("token-2");
+    expect(third?.refreshToken).toBe("token-3");
+    expect(fourth?.refreshToken).toBe("token-1");
+  });
+
+  it("skips rate-limited accounts during rotation", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3,
+      activeIndex: 0,
+      accounts: [
+        { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        { refreshToken: "token-2", addedAt: now, lastUsed: now, rateLimitResetTimes: { codex: now + 60_000 } },
+        { refreshToken: "token-3", addedAt: now, lastUsed: now },
+      ],
+    };
+
+    const manager = new AccountManager(undefined, stored);
+    
+    const first = manager.getCurrentOrNext();
+    const second = manager.getCurrentOrNext();
+    const third = manager.getCurrentOrNext();
+
+    expect(first?.refreshToken).toBe("token-1");
+    expect(second?.refreshToken).toBe("token-3");
+    expect(third?.refreshToken).toBe("token-1");
+  });
+
+  it("uses independent cursors per model family", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3,
+      activeIndex: 0,
+      accounts: [
+        { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        { refreshToken: "token-2", addedAt: now, lastUsed: now },
+      ],
+    };
+
+    const manager = new AccountManager(undefined, stored);
+    
+    const codexFirst = manager.getCurrentOrNextForFamily("codex");
+    const gpt51First = manager.getCurrentOrNextForFamily("gpt-5.1");
+    const codexSecond = manager.getCurrentOrNextForFamily("codex");
+    const gpt51Second = manager.getCurrentOrNextForFamily("gpt-5.1");
+
+    expect(codexFirst?.refreshToken).toBe("token-1");
+    expect(gpt51First?.refreshToken).toBe("token-1");
+    expect(codexSecond?.refreshToken).toBe("token-2");
+    expect(gpt51Second?.refreshToken).toBe("token-2");
+  });
 });
