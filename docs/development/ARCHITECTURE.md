@@ -428,6 +428,62 @@ let include: Vec<String> = if reasoning.is_some() {
 
 ---
 
+## Multi-Account Rotation (v4.4.0+)
+
+### Health-Based Account Selection
+
+The plugin tracks account health and uses intelligent rotation:
+
+```
+Account Selection Flow:
+1. Score = (health × 2) + (tokens × 5) + (freshness × 0.1)
+2. Select account with highest score
+3. Consume token from bucket
+4. On success: health +1
+5. On rate limit: health -10, mark rate-limited
+6. On failure: health -20
+7. Passive recovery: +2 health/hour
+```
+
+### Token Bucket Rate Limiting
+
+Client-side rate limiting prevents hitting API limits:
+
+| Parameter | Value |
+|-----------|-------|
+| Max tokens | 50 |
+| Regeneration | 6 tokens/min |
+| Consume per request | 1 token |
+
+### Reason-Aware Backoff
+
+Different rate limit reasons use different backoff multipliers:
+
+| Reason | Multiplier | Description |
+|--------|------------|-------------|
+| `quota` | 3.0× | Daily quota exhausted |
+| `tokens` | 1.5× | Token limit hit |
+| `concurrent` | 0.5× | Concurrent request limit |
+| `unknown` | 1.0× | Default |
+
+### RefreshQueue (v4.5.0+)
+
+Prevents race conditions when multiple concurrent requests try to refresh the same token:
+
+```typescript
+// Without RefreshQueue: N concurrent requests = N refresh attempts
+// With RefreshQueue: N concurrent requests = 1 refresh, N-1 await
+
+const queue = getRefreshQueue();
+const tokens = await queue.queuedRefresh(refreshToken, async () => {
+  return await actualRefresh(refreshToken);
+});
+```
+
+**Source**: `lib/refresh-queue.ts`, `lib/rotation.ts`
+
+---
+
 ## Performance Considerations
 
 ### Token Usage
