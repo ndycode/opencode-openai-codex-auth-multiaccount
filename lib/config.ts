@@ -16,6 +16,8 @@ const DEFAULT_CONFIG: PluginConfig = {
 	retryAllAccountsMaxRetries: Infinity,
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
+	sessionRecovery: true,
+	autoResume: true,
 };
 
 /**
@@ -136,5 +138,21 @@ export function getRateLimitToastDebounceMs(pluginConfig: PluginConfig): number 
 		pluginConfig.rateLimitToastDebounceMs,
 		60_000,
 		{ min: 0 },
+	);
+}
+
+export function getSessionRecovery(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_SESSION_RECOVERY",
+		pluginConfig.sessionRecovery,
+		true,
+	);
+}
+
+export function getAutoResume(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_AUTO_RESUME",
+		pluginConfig.autoResume,
+		true,
 	);
 }

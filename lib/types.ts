@@ -1,44 +1,14 @@
 import type { Auth, Provider, Model } from "@opencode-ai/sdk";
 
-/**
- * Plugin configuration from ~/.opencode/openai-codex-auth-config.json
- */
 export interface PluginConfig {
-	/**
-	 * Enable CODEX_MODE (Codex-OpenCode bridge prompt instead of tool remap)
-	 * @default true
-	 */
 	codexMode?: boolean;
-
-	/**
-	 * When all accounts are blocked, optionally wait and retry.
-	 * @default false
-	 */
 	retryAllAccountsRateLimited?: boolean;
-
-	/**
-	 * Maximum wait time (ms) for the wait-and-retry path.
-	 * @default 30000
-	 */
 	retryAllAccountsMaxWaitMs?: number;
-
-	/**
-	 * Maximum additional retry cycles after the initial attempt.
-	 * @default 1
-	 */
 	retryAllAccountsMaxRetries?: number;
-
-	/**
-	 * Refresh OAuth access token if it expires within this skew window (ms).
-	 * @default 60000
-	 */
 	tokenRefreshSkewMs?: number;
-
-	/**
-	 * Debounce rate-limit toast notifications (ms).
-	 * @default 60000
-	 */
 	rateLimitToastDebounceMs?: number;
+	sessionRecovery?: boolean;
+	autoResume?: boolean;
 }
 
 /**
