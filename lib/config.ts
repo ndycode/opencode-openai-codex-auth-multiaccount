@@ -11,9 +11,9 @@ const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json"
  */
 const DEFAULT_CONFIG: PluginConfig = {
 	codexMode: true,
-	retryAllAccountsRateLimited: false,
-	retryAllAccountsMaxWaitMs: 30_000,
-	retryAllAccountsMaxRetries: 1,
+	retryAllAccountsRateLimited: true,
+	retryAllAccountsMaxWaitMs: 0,
+	retryAllAccountsMaxRetries: Infinity,
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
 };
@@ -99,7 +99,7 @@ export function getRetryAllAccountsRateLimited(pluginConfig: PluginConfig): bool
 	return resolveBooleanSetting(
 		"CODEX_AUTH_RETRY_ALL_RATE_LIMITED",
 		pluginConfig.retryAllAccountsRateLimited,
-		false,
+		true,
 	);
 }
 
@@ -107,7 +107,7 @@ export function getRetryAllAccountsMaxWaitMs(pluginConfig: PluginConfig): number
 	return resolveNumberSetting(
 		"CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS",
 		pluginConfig.retryAllAccountsMaxWaitMs,
-		30_000,
+		0,
 		{ min: 0 },
 	);
 }
@@ -116,7 +116,7 @@ export function getRetryAllAccountsMaxRetries(pluginConfig: PluginConfig): numbe
 	return resolveNumberSetting(
 		"CODEX_AUTH_RETRY_ALL_MAX_RETRIES",
 		pluginConfig.retryAllAccountsMaxRetries,
-		1,
+		Infinity,
 		{ min: 0 },
 	);
 }

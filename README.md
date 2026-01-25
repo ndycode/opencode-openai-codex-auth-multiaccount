@@ -10,7 +10,8 @@ Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so 
 ## What You Get
 
 - **GPT-5.2, GPT-5.2 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
-- **Multi-account support** — add multiple ChatGPT accounts, auto-rotates when rate-limited
+- **Multi-account support** — add multiple ChatGPT accounts, health-aware rotation with automatic failover
+- **Auto-update notifications** — get notified when a new version is available
 - **22 model presets** — full variant system with reasoning levels (none/low/medium/high/xhigh)
 - **Prompt caching** — session-based caching for faster multi-turn conversations
 - **Usage-aware errors** — friendly messages with rate limit reset timing
@@ -438,6 +439,7 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log all API requests
+CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
 ```
 

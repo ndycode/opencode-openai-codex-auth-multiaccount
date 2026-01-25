@@ -1,7 +1,10 @@
+import type { RateLimitReason } from "../accounts.js";
+
 export interface RateLimitBackoffResult {
 	attempt: number;
 	delayMs: number;
 	isDuplicate: boolean;
+	reason?: RateLimitReason;
 }
 
 /**
@@ -81,4 +84,36 @@ export function resetRateLimitBackoff(accountIndex: number, quotaKey: string): v
 
 export function clearRateLimitBackoffState(): void {
 	rateLimitStateByAccountQuota.clear();
+}
+
+const BACKOFF_MULTIPLIERS: Record<RateLimitReason, number> = {
+	quota: 3.0,
+	tokens: 1.5,
+	concurrent: 0.5,
+	unknown: 1.0,
+};
+
+export function calculateBackoffMs(
+	baseDelayMs: number,
+	attempt: number,
+	reason: RateLimitReason = "unknown",
+): number {
+	const multiplier = BACKOFF_MULTIPLIERS[reason] ?? 1.0;
+	const exponentialDelay = baseDelayMs * Math.pow(2, attempt - 1);
+	return Math.min(Math.floor(exponentialDelay * multiplier), MAX_BACKOFF_MS);
+}
+
+export function getRateLimitBackoffWithReason(
+	accountIndex: number,
+	quotaKey: string,
+	serverRetryAfterMs: number | null | undefined,
+	reason: RateLimitReason = "unknown",
+): RateLimitBackoffResult {
+	const result = getRateLimitBackoff(accountIndex, quotaKey, serverRetryAfterMs);
+	const adjustedDelay = calculateBackoffMs(result.delayMs, result.attempt, reason);
+	return {
+		...result,
+		delayMs: adjustedDelay,
+		reason,
+	};
 }

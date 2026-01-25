@@ -18,6 +18,83 @@ All notable changes to this project are documented here. Dates use the ISO forma
 - Stored account emails are trimmed/lowercased when present.
 - Dependency refresh: @opencode-ai plugin/sdk 1.1.34, hono 4.11.5, vitest 4.0.18, @types/node 25.0.10, @typescript-eslint 8.53.1.
 
+## [4.5.0] - 2026-01-25
+
+**Feature release**: Queued token refresh, enhanced logging, and auto-update notifications.
+
+### Added
+- **Queued Token Refresh**: New `RefreshQueue` class prevents race conditions when multiple concurrent requests try to refresh the same account's token simultaneously:
+  - Deduplicates concurrent refresh calls per account
+  - Subsequent callers await the existing in-flight refresh promise
+  - Automatic cleanup of stale entries after 30 seconds
+  - New module: `lib/refresh-queue.ts`
+- **Enhanced Logging System**: Upgraded logger with proper log levels and timing utilities:
+  - Log levels: `debug`, `info`, `warn`, `error`
+  - Configurable via `CODEX_PLUGIN_LOG_LEVEL` environment variable
+  - Scoped loggers with timing functions (`time()`, `timeEnd()`)
+  - Duration formatting utilities
+- **Auto-Update Notifications**: Plugin now checks npm for newer versions on load:
+  - Checks npm registry once per 24 hours (cached)
+  - Shows toast notification when update is available
+  - New module: `lib/auto-update-checker.ts`
+- **13 new unit tests** for RefreshQueue (now 345 total tests)
+
+### Changed
+- Token refresh calls now use `queuedRefresh()` instead of direct `refreshAccessToken()` for race condition safety
+- Logger exports expanded: `logInfo()`, `logError()`, `ScopedLogger` interface, `formatDuration()`
+
+### Technical Details
+- RefreshQueue uses a Map to track in-flight refresh promises, keyed by refresh token
+- Stale entries (>30s) are automatically cleaned up to prevent memory leaks
+- Auto-update check is non-blocking and fails silently to avoid disrupting plugin operation
+
+## [4.4.0] - 2026-01-25
+
+**Feature release**: Intelligent rate-limit rotation with health-based account selection.
+
+### Added
+- **Health Score Tracking**: Accounts now track health scores based on success/failure history:
+  - +1 point on successful request
+  - -10 points on rate limit
+  - -20 points on other failures
+  - +2 points/hour passive recovery
+- **Token Bucket Rate Limiting**: Client-side rate limiting (50 max tokens, 6 tokens/min regeneration) to prevent hitting rate limits.
+- **Hybrid Account Selection**: New scoring algorithm selects optimal account:
+  - Score = (health × 2) + (tokens × 5) + (freshness × 0.1)
+  - Prefers healthy accounts with available tokens that haven't been used recently
+- **Reason-Aware Backoff**: Different rate limit reasons use different backoff multipliers:
+  - `quota`: 3.0× (daily quota exhausted - longer wait)
+  - `tokens`: 1.5× (token limit - moderate wait)
+  - `concurrent`: 0.5× (concurrent requests - short wait)
+  - `unknown`: 1.0× (default)
+- **New AccountManager methods**: `getCurrentOrNextForFamilyHybrid()`, `recordSuccess()`, `recordRateLimit()`, `recordFailure()`, `markRateLimitedWithReason()`
+- **New module**: `lib/rotation.ts` with `HealthScoreTracker`, `TokenBucketTracker`, `selectHybridAccount`
+
+### Changed
+- **BREAKING: Default retry behavior changed** - Plugin now **always waits and retries** when all accounts are rate-limited:
+  - `retryAllAccountsRateLimited`: `false` → `true`
+  - `retryAllAccountsMaxWaitMs`: `30000` → `0` (no limit)
+  - `retryAllAccountsMaxRetries`: `1` → `Infinity` (unlimited)
+- **Account selection strategy**: Uses hybrid health-based selection instead of simple round-robin
+- **Rate limit handling**: Records health metrics on success/failure for smarter future selections
+
+### Migration Notes
+If you need the old behavior (give up when all accounts are rate-limited), add to `~/.opencode/openai-codex-auth-config.json`:
+```json
+{
+  "retryAllAccountsRateLimited": false,
+  "retryAllAccountsMaxWaitMs": 30000,
+  "retryAllAccountsMaxRetries": 1
+}
+```
+
+Or use environment variables:
+```bash
+export CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0
+export CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000
+export CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1
+```
+
 ## [4.3.0] - 2026-01-04
 
 **Feature + reliability release**: variants support, one-command installer, and auth/error handling fixes.

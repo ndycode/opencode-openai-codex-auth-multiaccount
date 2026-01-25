@@ -44,6 +44,16 @@ vi.mock("../lib/accounts.js", () => {
 			return { index: 0, accountId: "account-1", email: "user@example.com" };
 		}
 
+		getCurrentOrNextForFamilyHybrid() {
+			return this.getCurrentOrNextForFamily();
+		}
+
+		recordSuccess() {}
+
+		recordRateLimit() {}
+
+		recordFailure() {}
+
 	toAuthDetails() {
 		return {
 			type: "oauth",
@@ -95,6 +105,12 @@ vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "",
 	loadAccounts: async () => null,
 	saveAccounts: async () => {},
+}));
+
+vi.mock("../lib/auto-update-checker.js", () => ({
+	checkAndNotify: async () => {},
+	checkForUpdates: async () => ({ hasUpdate: false, currentVersion: "4.5.0", latestVersion: null, updateCommand: "" }),
+	clearUpdateCache: () => {},
 }));
 
 describe("OpenAIAuthPlugin rate-limit retry", () => {

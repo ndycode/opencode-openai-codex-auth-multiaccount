@@ -4,7 +4,7 @@
  */
 
 import type { Auth, OpencodeClient } from "@opencode-ai/sdk";
-import { refreshAccessToken } from "../auth/auth.js";
+import { queuedRefresh } from "../refresh-queue.js";
 import { logRequest } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
@@ -54,7 +54,7 @@ export async function refreshAndUpdateToken(
 	client: OpencodeClient,
 ): Promise<Auth> {
 	const refreshToken = currentAuth.type === "oauth" ? currentAuth.refresh : "";
-	const refreshResult = await refreshAccessToken(refreshToken);
+	const refreshResult = await queuedRefresh(refreshToken);
 
 	if (refreshResult.type === "failed") {
 		throw new Error(ERROR_MESSAGES.TOKEN_REFRESH_FAILED);
