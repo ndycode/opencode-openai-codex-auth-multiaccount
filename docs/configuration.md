@@ -220,7 +220,10 @@ Advanced plugin settings in `~/.opencode/openai-codex-auth-config.json`:
 
 ```json
 {
-  "codexMode": true
+  "codexMode": true,
+  "retryAllAccountsRateLimited": true,
+  "retryAllAccountsMaxWaitMs": 0,
+  "retryAllAccountsMaxRetries": null
 }
 ```
 
@@ -229,6 +232,9 @@ Advanced plugin settings in `~/.opencode/openai-codex-auth-config.json`:
 | Option | Default | What it does |
 |--------|---------|--------------|
 | `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with Codex CLI) |
+| `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
+| `retryAllAccountsMaxWaitMs` | `0` | Max wait time in ms (0 = unlimited) |
+| `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts (null = unlimited) |
 
 ### Environment Variables
 
@@ -236,8 +242,12 @@ Advanced plugin settings in `~/.opencode/openai-codex-auth-config.json`:
 |----------|-------------|
 | `DEBUG_CODEX_PLUGIN=1` | Enable debug logging |
 | `ENABLE_PLUGIN_REQUEST_LOGGING=1` | Log all API requests |
+| `CODEX_PLUGIN_LOG_LEVEL=debug` | Set log level (debug, info, warn, error) |
 | `CODEX_MODE=0` | Temporarily disable bridge prompt |
 | `CODEX_MODE=1` | Temporarily enable bridge prompt |
+| `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | Disable wait-and-retry behavior |
+| `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | Set max wait time |
+| `CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1` | Set max retries |
 
 ---
 
