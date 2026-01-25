@@ -46,6 +46,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				sessionRecovery: true,
+				autoResume: true,
 			});
 			expect(mockExistsSync).toHaveBeenCalledWith(
 				path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json')
@@ -65,6 +67,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				sessionRecovery: true,
+				autoResume: true,
 			});
 		});
 
@@ -81,6 +85,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				sessionRecovery: true,
+				autoResume: true,
 			});
 		});
 
@@ -98,6 +104,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				sessionRecovery: true,
+				autoResume: true,
 			});
 			expect(consoleSpy).toHaveBeenCalled();
 			consoleSpy.mockRestore();
@@ -119,6 +127,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				sessionRecovery: true,
+				autoResume: true,
 			});
 			expect(consoleSpy).toHaveBeenCalled();
 			consoleSpy.mockRestore();
