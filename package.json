@@ -1,6 +1,6 @@
 {
   "name": "opencode-openai-codex-auth-multi",
-  "version": "4.5.0",
+  "version": "4.6.0",
   "description": "Fork of opencode-openai-codex-auth with multi-account rotation (ChatGPT OAuth / Codex backend)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

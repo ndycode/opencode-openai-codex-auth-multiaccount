@@ -6,6 +6,7 @@ import { getNormalizedModel } from "./helpers/model-map.js";
 import {
 	filterOpenCodeSystemPromptsWithCachedPrompt,
 	normalizeOrphanedToolOutputs,
+	injectMissingToolOutputs,
 } from "./helpers/input-utils.js";
 import type {
 	ConfigOptions,
@@ -498,6 +499,7 @@ export async function transformRequestBody(
 		// convert them to messages to preserve context while avoiding API errors
 		if (body.input) {
 			body.input = normalizeOrphanedToolOutputs(body.input);
+			body.input = injectMissingToolOutputs(body.input);
 		}
 	}
 

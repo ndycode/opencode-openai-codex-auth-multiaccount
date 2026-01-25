@@ -54,7 +54,7 @@ Install the opencode-openai-codex-auth-multi plugin and add the OpenAI model def
 **Option B: One-command install**
 
 ```bash
-npx -y opencode-openai-codex-auth-multi@4.3.1
+npx -y opencode-openai-codex-auth-multi@latest
 ```
 
 This writes the config to `~/.config/opencode/opencode.json`, backs up existing config, and clears the plugin cache.
@@ -67,7 +67,7 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 
    ```json
    {
-     "plugin": ["opencode-openai-codex-auth-multi@4.3.1"]
+     "plugin": ["opencode-openai-codex-auth-multi@latest"]
    }
    ```
 
@@ -99,7 +99,7 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 2. Add the plugin to the `plugin` array:
    ```json
    {
-     "plugin": ["opencode-openai-codex-auth-multi@4.3.1"]
+     "plugin": ["opencode-openai-codex-auth-multi@latest"]
    }
    ```
 
@@ -147,7 +147,7 @@ Add this to your `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi@4.3.1"],
+  "plugin": ["opencode-openai-codex-auth-multi@latest"],
   "provider": {
     "openai": {
       "options": {
@@ -236,7 +236,7 @@ For legacy OpenCode (v1.0.209 and below), use `config/opencode-legacy.json` whic
 
 ## Multi-Account Setup
 
-Add multiple ChatGPT accounts for higher combined quotas. The plugin automatically rotates between accounts when one is rate-limited.
+Add multiple ChatGPT accounts for higher combined quotas. The plugin uses **health-aware rotation** with automatic failover.
 
 ```bash
 opencode auth login  # Run again to add more accounts
@@ -246,6 +246,12 @@ opencode auth login  # Run again to add more accounts
 - `openai-accounts` — List all accounts
 - `openai-accounts-switch` — Switch active account
 - `openai-accounts-status` — Show rate limit status
+
+**How rotation works (v4.4.0+):**
+- Health scoring tracks success/failure per account
+- Token bucket prevents hitting rate limits
+- Hybrid selection prefers healthy accounts with available tokens
+- Always retries when all accounts are rate-limited (waits for reset)
 
 **Storage:** `~/.opencode/openai-codex-accounts.json`
 
@@ -354,7 +360,7 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 **Solutions:**
 1. Update plugin:
    ```bash
-   npx -y opencode-openai-codex-auth-multi@4.3.1
+npx -y opencode-openai-codex-auth-multi@latest
    ```
 2. Ensure config has:
    ```json
@@ -399,7 +405,7 @@ Works alongside oh-my-opencode. No special configuration needed.
 ```json
 {
   "plugin": [
-    "opencode-openai-codex-auth-multi@4.3.1",
+    "opencode-openai-codex-auth-multi@latest",
     "oh-my-opencode@latest"
   ]
 }
@@ -412,7 +418,7 @@ List this plugin BEFORE DCP:
 ```json
 {
   "plugin": [
-    "opencode-openai-codex-auth-multi@4.3.1",
+    "opencode-openai-codex-auth-multi@latest",
     "@tarquinen/opencode-dcp@latest"
   ]
 }
@@ -433,6 +439,14 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | Option | Default | What it does |
 |--------|---------|--------------|
 | `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with latest Codex CLI) |
+
+### Retry Behavior (v4.4.0+)
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
+| `retryAllAccountsMaxWaitMs` | `0` | Max wait time (0 = unlimited) |
+| `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts |
 
 ### Environment Variables
 

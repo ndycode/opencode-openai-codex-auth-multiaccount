@@ -8,15 +8,27 @@ All notable changes to this project are documented here. Dates use the ISO forma
 
 ### Changed
 
-## [4.3.1] - 2026-01-23
+## [4.6.0] - 2026-01-25
+
+**Feature release**: Context overflow handling and missing tool result injection.
 
 ### Added
-- `openai-accounts-status --json` for scriptable status output with email/ID labels.
+- **Context Overflow Handler**: Gracefully handles "prompt too long" / context length exceeded errors:
+  - Returns synthetic SSE response with helpful instructions instead of raw 400 error
+  - Suggests `/compact`, `/clear`, or `/undo` commands to reduce context size
+  - Prevents OpenCode session from getting locked on context overflow
+  - New module: `lib/context-overflow.ts`
+- **Missing Tool Result Injection**: Automatically handles cancelled tool calls (ESC mid-execution):
+  - Detects orphaned `function_call` items (calls without matching outputs)
+  - Injects synthetic output: `"Operation cancelled by user"`
+  - Prevents "missing tool_result" API errors when user cancels mid-tool
+  - New function: `injectMissingToolOutputs()` in `lib/request/helpers/input-utils.ts`
+- **34 new unit tests** for context overflow and tool injection (now 379 total tests)
 
-### Changed
-- Account labels now prefer email and show ID suffix when available; list/status outputs are columnized for readability.
-- Stored account emails are trimmed/lowercased when present.
-- Dependency refresh: @opencode-ai plugin/sdk 1.1.34, hono 4.11.5, vitest 4.0.18, @types/node 25.0.10, @typescript-eslint 8.53.1.
+### Technical Details
+- Context overflow detection matches patterns: `prompt_too_long`, `context_length_exceeded`, `maximum context length`, `token limit exceeded`, `too many tokens`
+- Synthetic SSE response includes proper message_start/content_block_delta/message_stop events
+- Tool injection preserves message order: outputs are placed immediately after their calls
 
 ## [4.5.0] - 2026-01-25
 
@@ -47,6 +59,16 @@ All notable changes to this project are documented here. Dates use the ISO forma
 - RefreshQueue uses a Map to track in-flight refresh promises, keyed by refresh token
 - Stale entries (>30s) are automatically cleaned up to prevent memory leaks
 - Auto-update check is non-blocking and fails silently to avoid disrupting plugin operation
+
+## [4.3.1] - 2026-01-23
+
+### Added
+- `openai-accounts-status --json` for scriptable status output with email/ID labels.
+
+### Changed
+- Account labels now prefer email and show ID suffix when available; list/status outputs are columnized for readability.
+- Stored account emails are trimmed/lowercased when present.
+- Dependency refresh: @opencode-ai plugin/sdk 1.1.34, hono 4.11.5, vitest 4.0.18, @types/node 25.0.10, @typescript-eslint 8.53.1.
 
 ## [4.4.0] - 2026-01-25
 

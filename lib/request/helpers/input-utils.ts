@@ -208,3 +208,53 @@ export const normalizeOrphanedToolOutputs = (
 		return item;
 	});
 };
+
+const CANCELLED_TOOL_OUTPUT = "Operation cancelled by user";
+
+const collectOutputCallIds = (input: InputItem[]): Set<string> => {
+	const outputCallIds = new Set<string>();
+	for (const item of input) {
+		if (
+			item.type === "function_call_output" ||
+			item.type === "local_shell_call_output" ||
+			item.type === "custom_tool_call_output"
+		) {
+			const callId = getCallId(item);
+			if (callId) outputCallIds.add(callId);
+		}
+	}
+	return outputCallIds;
+};
+
+export const injectMissingToolOutputs = (input: InputItem[]): InputItem[] => {
+	const outputCallIds = collectOutputCallIds(input);
+	const result: InputItem[] = [];
+
+	for (const item of input) {
+		result.push(item);
+
+		if (
+			item.type === "function_call" ||
+			item.type === "local_shell_call" ||
+			item.type === "custom_tool_call"
+		) {
+			const callId = getCallId(item);
+			if (callId && !outputCallIds.has(callId)) {
+				const outputType =
+					item.type === "function_call"
+						? "function_call_output"
+						: item.type === "local_shell_call"
+							? "local_shell_call_output"
+							: "custom_tool_call_output";
+
+				result.push({
+					type: outputType,
+					call_id: callId,
+					output: CANCELLED_TOOL_OUTPUT,
+				} as unknown as InputItem);
+			}
+		}
+	}
+
+	return result;
+};
