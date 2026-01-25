@@ -10,9 +10,17 @@ import {
 } from "./storage.js";
 import type { OAuthAuthDetails } from "./types.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
+import {
+  getHealthTracker,
+  getTokenTracker,
+  selectHybridAccount,
+  type AccountWithMetrics,
+} from "./rotation.js";
 
 export type BaseQuotaKey = ModelFamily;
 export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
+
+export type RateLimitReason = "quota" | "tokens" | "concurrent" | "unknown";
 
 function nowMs(): number {
   return Date.now();
@@ -90,6 +98,7 @@ export interface ManagedAccount {
   addedAt: number;
   lastUsed: number;
   lastSwitchReason?: "rate-limit" | "initial" | "rotation";
+  lastRateLimitReason?: RateLimitReason;
   rateLimitResetTimes: RateLimitStateV3;
   coolingDownUntil?: number;
   cooldownReason?: CooldownReason;
@@ -370,12 +379,76 @@ export class AccountManager {
     return null;
   }
 
+  getCurrentOrNextForFamilyHybrid(family: ModelFamily, model?: string | null): ManagedAccount | null {
+    const count = this.accounts.length;
+    if (count === 0) return null;
+
+    const quotaKey = model ? `${family}:${model}` : family;
+    const healthTracker = getHealthTracker();
+    const tokenTracker = getTokenTracker();
+
+    const accountsWithMetrics: AccountWithMetrics[] = this.accounts
+      .map((account): AccountWithMetrics | null => {
+        if (!account) return null;
+        clearExpiredRateLimits(account);
+        const isAvailable =
+          !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
+        return {
+          index: account.index,
+          isAvailable,
+          lastUsed: account.lastUsed,
+        };
+      })
+      .filter((a): a is AccountWithMetrics => a !== null);
+
+    const selected = selectHybridAccount(accountsWithMetrics, healthTracker, tokenTracker, quotaKey);
+    if (!selected) return null;
+
+    const account = this.accounts[selected.index];
+    if (!account) return null;
+
+    this.currentAccountIndexByFamily[family] = account.index;
+    this.cursorByFamily[family] = (account.index + 1) % count;
+    account.lastUsed = nowMs();
+    return account;
+  }
+
+  recordSuccess(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
+    const quotaKey = model ? `${family}:${model}` : family;
+    const healthTracker = getHealthTracker();
+    healthTracker.recordSuccess(account.index, quotaKey);
+  }
+
+  recordRateLimit(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
+    const quotaKey = model ? `${family}:${model}` : family;
+    const healthTracker = getHealthTracker();
+    const tokenTracker = getTokenTracker();
+    healthTracker.recordRateLimit(account.index, quotaKey);
+    tokenTracker.drain(account.index, quotaKey);
+  }
+
+  recordFailure(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
+    const quotaKey = model ? `${family}:${model}` : family;
+    const healthTracker = getHealthTracker();
+    healthTracker.recordFailure(account.index, quotaKey);
+  }
+
   markSwitched(account: ManagedAccount, reason: "rate-limit" | "initial" | "rotation", family: ModelFamily): void {
     account.lastSwitchReason = reason;
     this.currentAccountIndexByFamily[family] = account.index;
   }
 
   markRateLimited(account: ManagedAccount, retryAfterMs: number, family: ModelFamily, model?: string | null): void {
+    this.markRateLimitedWithReason(account, retryAfterMs, family, "unknown", model);
+  }
+
+  markRateLimitedWithReason(
+    account: ManagedAccount,
+    retryAfterMs: number,
+    family: ModelFamily,
+    reason: RateLimitReason,
+    model?: string | null,
+  ): void {
     const retryMs = Math.max(0, Math.floor(retryAfterMs));
     const resetAt = nowMs() + retryMs;
 
@@ -386,6 +459,8 @@ export class AccountManager {
       const modelKey = getQuotaKey(family, model);
       account.rateLimitResetTimes[modelKey] = resetAt;
     }
+
+    account.lastRateLimitReason = reason;
   }
 
   markAccountCoolingDown(account: ManagedAccount, cooldownMs: number, reason: CooldownReason): void {
