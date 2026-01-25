@@ -55,6 +55,7 @@ import {
 } from "./lib/constants.js";
 import { logRequest, logDebug } from "./lib/logger.js";
 import { checkAndNotify } from "./lib/auto-update-checker.js";
+import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
         AccountManager,
         extractAccountEmail,
@@ -660,10 +661,16 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																											headers: Object.fromEntries(response.headers.entries()),
 																										});
 
-																											if (!response.ok) {
-																												const { response: errorResponse, rateLimit } =
-																													await handleErrorResponse(response);
-																												if (rateLimit) {
+								if (!response.ok) {
+									// Check for context overflow (400 "prompt too long") before other error handling
+									const contextOverflowResult = await handleContextOverflow(response, model);
+									if (contextOverflowResult.handled) {
+										return contextOverflowResult.response;
+									}
+
+									const { response: errorResponse, rateLimit } =
+										await handleErrorResponse(response);
+									if (rateLimit) {
 																														const { attempt, delayMs } = getRateLimitBackoff(
 																															account.index,
 																															quotaKey,
