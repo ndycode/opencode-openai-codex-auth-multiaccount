@@ -42,6 +42,8 @@ import {
 	getRetryAllAccountsMaxWaitMs,
 	getRetryAllAccountsRateLimited,
 	getTokenRefreshSkewMs,
+	getSessionRecovery,
+	getAutoResume,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -83,6 +85,12 @@ import {
 } from "./lib/request/rate-limit-backoff.js";
 import { getModelFamily, MODEL_FAMILIES, type ModelFamily } from "./lib/prompts/codex.js";
 import type { OAuthAuthDetails, TokenResult, UserConfig } from "./lib/types.js";
+import {
+	createSessionRecoveryHook,
+	isRecoverableError,
+	detectErrorType,
+	getRecoveryToastContent,
+} from "./lib/recovery.js";
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -497,6 +505,16 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
 				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
 
+				const sessionRecoveryEnabled = getSessionRecovery(pluginConfig);
+				const autoResumeEnabled = getAutoResume(pluginConfig);
+
+				const recoveryHook = sessionRecoveryEnabled
+					? createSessionRecoveryHook(
+							{ client, directory: process.cwd() },
+							{ sessionRecovery: true, autoResume: autoResumeEnabled }
+						)
+					: null;
+
 				checkAndNotify(async (message, variant) => {
 					await showToast(message, variant);
 				}).catch(() => {});
@@ -662,14 +680,24 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																										});
 
 								if (!response.ok) {
-									// Check for context overflow (400 "prompt too long") before other error handling
 									const contextOverflowResult = await handleContextOverflow(response, model);
 									if (contextOverflowResult.handled) {
 										return contextOverflowResult.response;
 									}
 
-									const { response: errorResponse, rateLimit } =
+									const { response: errorResponse, rateLimit, errorBody } =
 										await handleErrorResponse(response);
+
+									if (recoveryHook && errorBody && isRecoverableError(errorBody)) {
+										const errorType = detectErrorType(errorBody);
+										const toastContent = getRecoveryToastContent(errorType);
+										await showToast(
+											`${toastContent.title}: ${toastContent.message}`,
+											"warning",
+										);
+										logDebug(`[${PLUGIN_NAME}] Recoverable error detected: ${errorType}`);
+									}
+
 									if (rateLimit) {
 																														const { attempt, delayMs } = getRateLimitBackoff(
 																															account.index,

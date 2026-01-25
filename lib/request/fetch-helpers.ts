@@ -28,6 +28,7 @@ export interface RateLimitInfo {
 export interface ErrorHandlingResult {
         response: Response;
         rateLimit?: RateLimitInfo;
+        errorBody?: unknown;
 }
 
 /**
@@ -221,12 +222,19 @@ export async function handleErrorResponse(
         const finalResponse = mapped ?? response;
         const rateLimit = extractRateLimitInfoFromBody(finalResponse, bodyText);
 
+        let errorBody: unknown;
+        try {
+                errorBody = bodyText ? JSON.parse(bodyText) : undefined;
+        } catch {
+                errorBody = { message: bodyText };
+        }
+
         logRequest(LOG_STAGES.ERROR_RESPONSE, {
                 status: finalResponse.status,
                 statusText: finalResponse.statusText,
         });
 
-        return { response: finalResponse, rateLimit };
+        return { response: finalResponse, rateLimit, errorBody };
 }
 
 /**
