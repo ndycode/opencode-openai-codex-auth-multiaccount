@@ -41,9 +41,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
-				retryAllAccountsRateLimited: false,
-				retryAllAccountsMaxWaitMs: 30_000,
-				retryAllAccountsMaxRetries: 1,
+				retryAllAccountsRateLimited: true,
+				retryAllAccountsMaxWaitMs: 0,
+				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 			});
@@ -60,9 +60,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: false,
-				retryAllAccountsRateLimited: false,
-				retryAllAccountsMaxWaitMs: 30_000,
-				retryAllAccountsMaxRetries: 1,
+				retryAllAccountsRateLimited: true,
+				retryAllAccountsMaxWaitMs: 0,
+				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 			});
@@ -76,9 +76,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
-				retryAllAccountsRateLimited: false,
-				retryAllAccountsMaxWaitMs: 30_000,
-				retryAllAccountsMaxRetries: 1,
+				retryAllAccountsRateLimited: true,
+				retryAllAccountsMaxWaitMs: 0,
+				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 			});
@@ -93,9 +93,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
-				retryAllAccountsRateLimited: false,
-				retryAllAccountsMaxWaitMs: 30_000,
-				retryAllAccountsMaxRetries: 1,
+				retryAllAccountsRateLimited: true,
+				retryAllAccountsMaxWaitMs: 0,
+				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 			});
@@ -114,9 +114,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
-				retryAllAccountsRateLimited: false,
-				retryAllAccountsMaxWaitMs: 30_000,
-				retryAllAccountsMaxRetries: 1,
+				retryAllAccountsRateLimited: true,
+				retryAllAccountsMaxWaitMs: 0,
+				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 			});

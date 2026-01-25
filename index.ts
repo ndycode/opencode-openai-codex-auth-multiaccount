@@ -30,8 +30,8 @@ import {
         exchangeAuthorizationCode,
         parseAuthorizationInput,
         REDIRECT_URI,
-        refreshAccessToken,
 } from "./lib/auth/auth.js";
+import { queuedRefresh } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
@@ -54,6 +54,7 @@ import {
         ACCOUNT_LIMITS,
 } from "./lib/constants.js";
 import { logRequest, logDebug } from "./lib/logger.js";
+import { checkAndNotify } from "./lib/auto-update-checker.js";
 import {
         AccountManager,
         extractAccountEmail,
@@ -370,7 +371,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 await Promise.all(
                         accountsToHydrate.map(async (account) => {
                                 try {
-                                        const refreshed = await refreshAccessToken(account.refreshToken);
+                                        const refreshed = await queuedRefresh(account.refreshToken);
                                         if (refreshed.type !== "success") return;
                                         const id = extractAccountId(refreshed.access);
                                         const email = sanitizeEmail(extractAccountEmail(refreshed.access));
@@ -495,6 +496,10 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
 				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
 
+				checkAndNotify(async (message, variant) => {
+					await showToast(message, variant);
+				}).catch(() => {});
+
 
 				// Return SDK configuration
 				return {
@@ -574,11 +579,11 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										const accountCount = accountManager.getAccountCount();
 										const attempted = new Set<number>();
 
-										while (attempted.size < Math.max(1, accountCount)) {
-											const account = accountManager.getCurrentOrNextForFamily(modelFamily, model);
-											if (!account || attempted.has(account.index)) {
-												break;
-											}
+							while (attempted.size < Math.max(1, accountCount)) {
+								const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model);
+								if (!account || attempted.has(account.index)) {
+									break;
+								}
 											attempted.add(account.index);
 
 											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
@@ -690,6 +695,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						modelFamily,
 						model,
 					);
+					accountManager.recordRateLimit(account, modelFamily, model);
 					account.lastSwitchReason = "rate-limit";
 					accountManager.saveToDiskDebounced();
 
@@ -711,8 +717,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																													return errorResponse;
 																											}
 
-																						resetRateLimitBackoff(account.index, quotaKey);
-																								return await handleSuccessResponse(response, isStreaming);
+								resetRateLimitBackoff(account.index, quotaKey);
+								accountManager.recordSuccess(account, modelFamily, model);
+									return await handleSuccessResponse(response, isStreaming);
 																								}
 										}
 
@@ -1200,7 +1207,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
                                                 const label = formatAccountLabel(account, i);
                                                 try {
-                                                        const refreshResult = await refreshAccessToken(account.refreshToken);
+								const refreshResult = await queuedRefresh(account.refreshToken);
                                                         if (refreshResult.type === "success") {
                                                                 results.push(`  ✓ ${label}: Healthy`);
                                                                 healthyCount++;
