@@ -12,7 +12,7 @@ export const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 /** Dummy API key used for OpenAI SDK (actual auth via OAuth) */
 export const DUMMY_API_KEY = "chatgpt-oauth";
 
-/** Provider ID for opencode configuration */
+/** Provider ID for UI display - shows under "OpenAI" in auth dropdown */
 export const PROVIDER_ID = "openai";
 
 /** HTTP Status Codes */
@@ -71,9 +71,9 @@ export const PLATFORM_OPENERS = {
 
 /** OAuth authorization labels */
 export const AUTH_LABELS = {
-	OAUTH: "ChatGPT Plus/Pro (Codex Subscription)",
-	OAUTH_MANUAL: "ChatGPT Plus/Pro (Manual URL Paste)",
-	API_KEY: "Manually enter API Key",
+	OAUTH: "ChatGPT Plus/Pro MULTI (Codex Subscription)",
+	OAUTH_MANUAL: "ChatGPT Plus/Pro MULTI (Manual URL Paste)",
+	API_KEY: "Manually enter API Key MULTI",
 	INSTRUCTIONS:
 		"A browser window should open. If it doesn't, copy the URL and open it manually.",
 	INSTRUCTIONS_MANUAL:

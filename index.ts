@@ -23,7 +23,8 @@
 
  */
 
-import { tool, type Plugin, type PluginInput } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin/tool";
+import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
 import {
         createAuthorizationFlow,
@@ -108,8 +109,8 @@ import {
  * }
  * ```
  */
-export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
-        let cachedAccountManager: AccountManager | null = null;
+export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
+	let cachedAccountManager: AccountManager | null = null;
 
         type TokenSuccess = Extract<TokenResult, { type: "success" }>;
 
@@ -238,9 +239,9 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						}
 					}
 
-				for (const result of results) {
-						const accountId = extractAccountId(result.access);
-						const accountEmail = sanitizeEmail(extractAccountEmail(result.access));
+			for (const result of results) {
+					const accountId = extractAccountId(result.access);
+					const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
 						const existingByEmail =
 								accountEmail && indexByEmail.has(accountEmail)
 										? indexByEmail.get(accountEmail)
@@ -383,7 +384,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         const refreshed = await queuedRefresh(account.refreshToken);
                                         if (refreshed.type !== "success") return;
                                         const id = extractAccountId(refreshed.access);
-                                        const email = sanitizeEmail(extractAccountEmail(refreshed.access));
+                                        const email = sanitizeEmail(extractAccountEmail(refreshed.access, refreshed.idToken));
                                         if (id && id !== account.accountId) {
                                                 account.accountId = id;
                                                 changed = true;
@@ -442,7 +443,14 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return `resets in ${formatWaitTime(remaining)}`;
 		};
 
+        // Event handler for session recovery (matches antigravity plugin pattern)
+        const eventHandler = async (_input: { event: { type: string; properties?: unknown } }) => {
+                // Session recovery is handled inside the loader, but we need to expose the event handler
+                // to match the antigravity plugin structure that OpenCode expects
+        };
+
         return {
+                event: eventHandler,
                 auth: {
 			provider: PROVIDER_ID,
 			/**
@@ -459,13 +467,21 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			 * @param provider - Provider configuration from opencode.json
 			 * @returns SDK configuration object or empty object for non-OAuth auth
 			 */
-			async loader(getAuth: () => Promise<Auth>, provider: unknown) {
-				const auth = await getAuth();
+		async loader(getAuth: () => Promise<Auth>, provider: unknown) {
+			const auth = await getAuth();
 
-				// Only handle OAuth auth type, skip API key auth
-				if (auth.type !== "oauth") {
-					return {};
-				}
+			// Only handle OAuth auth type, skip API key auth
+			if (auth.type !== "oauth") {
+				return {};
+			}
+
+			// Only handle multi-account auth (identified by multiAccount flag)
+			// If auth was created by built-in plugin, let built-in handle it
+			const authWithMulti = auth as typeof auth & { multiAccount?: boolean };
+			if (!authWithMulti.multiAccount) {
+				logDebug(`[${PLUGIN_NAME}] Auth is not multi-account, skipping loader`);
+				return {};
+			}
 
                                 const accountManager = await AccountManager.loadFromDisk(
                                         auth as OAuthAuthDetails,
@@ -811,7 +827,8 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					 * @returns Authorization flow configuration
 					 */
                                         authorize: async (inputs?: Record<string, string>) => {
-                                                if (inputs) {
+                                                console.log(`[DEBUG] authorize called, inputs:`, JSON.stringify(inputs));
+                                                if (inputs && Object.keys(inputs).length > 0) {
                                                         const accounts: TokenSuccess[] = [];
                                                         const noBrowser =
                                                                 inputs.noBrowser === "true" ||
@@ -850,17 +867,17 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const forceNewLogin = accounts.length > 0;
 					const result = await runOAuthFlow(useManualMode, forceNewLogin);
 
-					if (result.type === "success") {
-						const email = extractAccountEmail(result.access);
-						const accountId = extractAccountId(result.access);
-						const label = email || accountId || "Unknown account";
-						console.log(`\n✓ Authenticated as: ${label}\n`);
+				if (result.type === "success") {
+					const email = extractAccountEmail(result.access, result.idToken);
+					const accountId = extractAccountId(result.access);
+					const label = email || accountId || "Unknown account";
+					console.log(`\n✓ Authenticated as: ${label}\n`);
 
-						const isDuplicate = accounts.some(
-							(acc) =>
-								(accountId && extractAccountId(acc.access) === accountId) ||
-								(email && extractAccountEmail(acc.access) === email),
-						);
+					const isDuplicate = accounts.some(
+						(acc) =>
+							(accountId && extractAccountId(acc.access) === accountId) ||
+							(email && extractAccountEmail(acc.access, acc.idToken) === email),
+					);
 
 						if (isDuplicate) {
 							console.warn(
@@ -959,6 +976,23 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                         };
                                                 }
 
+                                                let startFresh = true;
+                                                const existingStorage = await hydrateEmails(await loadAccounts());
+                                                if (existingStorage && existingStorage.accounts.length > 0) {
+                                                        const existingAccounts = existingStorage.accounts.map((account, index) => ({
+                                                                accountId: account.accountId,
+                                                                email: account.email,
+                                                                index,
+                                                        }));
+                                                        const loginMode = await promptLoginMode(existingAccounts);
+                                                        startFresh = loginMode === "fresh";
+                                                        if (startFresh) {
+                                                                console.log("\nStarting fresh - existing accounts will be replaced.\n");
+                                                        } else {
+                                                                console.log("\nAdding to existing accounts.\n");
+                                                        }
+                                                }
+
                                                 const { pkce, state, url } = await createAuthorizationFlow();
                                                 let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null =
                                                         null;
@@ -974,7 +1008,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 if (!serverInfo || !serverInfo.ready) {
                                                         serverInfo?.close();
                                                         return buildManualOAuthFlow(pkce, url, async (tokens) => {
-                                                                await persistAccountPool([tokens], false);
+                                                                await persistAccountPool([tokens], startFresh);
                                                         });
                                                 }
 
@@ -997,7 +1031,7 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 );
 
                                                                 if (tokens?.type === "success") {
-                                                                        await persistAccountPool([tokens], false);
+                                                                        await persistAccountPool([tokens], startFresh);
                                                                 }
 
                                                                 return tokens?.type === "success"
@@ -1268,4 +1302,6 @@ export const OpenAIAuthPlugin: Plugin = async ({ client }: PluginInput) => {
         };
 };
 
-export default OpenAIAuthPlugin;
+export const OpenAIAuthPlugin = OpenAIOAuthPlugin;
+
+export default OpenAIOAuthPlugin;

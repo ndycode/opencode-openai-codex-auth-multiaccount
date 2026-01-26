@@ -8,6 +8,73 @@ Common issues and debugging techniques for the OpenCode OpenAI Codex Auth Plugin
 
 ---
 
+## Known Limitations
+
+<details open>
+<summary><b>⚠️ OpenCode blocks this plugin by design</b></summary>
+
+**Status:** This is a known issue affecting all users.
+
+**What's happening:**
+
+OpenCode's plugin loader explicitly skips plugins with `opencode-openai-codex-auth` in the name (see `packages/opencode/src/plugin/index.ts` line ~53):
+
+```typescript
+if (plugin.includes("opencode-openai-codex-auth") || plugin.includes("opencode-copilot-auth")) continue
+```
+
+This is intentional — OpenCode has built-in `CodexAuthPlugin` and `CopilotAuthPlugin` that handle OAuth for these providers. External plugins are blocked to prevent conflicts.
+
+**Impact:**
+- The plugin downloads successfully
+- The plugin is present in `~/.cache/opencode/node_modules/`
+- But it never loads or executes
+- No logs appear in `~/.opencode/logs/codex-plugin/`
+
+**Workarounds:**
+
+1. **Wait for upstream fix** — We've submitted a [PR proposal](OPENCODE_PR_PROPOSAL.md) to allow multiple auth plugins per provider
+2. **Use a patched OpenCode fork** — For advanced users only (requires building from source)
+3. **Use the built-in single-account auth** — Run `opencode auth login` without this plugin
+
+**Tracking:** [Issue #11](https://github.com/ndycode/opencode-chatgpt-multi-auth/issues/11)
+
+</details>
+
+---
+
+## Installation & Loading Issues
+
+<details open>
+<summary><b>Plugin not downloading / no logs</b></summary>
+
+**Symptoms:**
+- Plugin folder missing under `~/.cache/opencode/node_modules/`
+- No files in `~/.opencode/logs/codex-plugin/` even with logging enabled
+
+**Checks:**
+1. **Verify config path and plugin list**:
+   - Global: `~/.config/opencode/opencode.json`
+   - Project: `./.opencode.json`
+   - Entry should include: `"plugin": ["opencode-openai-codex-auth-multi@latest"]`
+2. **Confirm plugin cache location** (npm plugins are cached, not stored in `~/.opencode/plugins/`):
+   ```bash
+   ls ~/.cache/opencode/node_modules/opencode-openai-codex-auth-multi
+   ```
+3. **Remember: request logs only appear after the first OpenAI request**:
+   ```bash
+   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2
+   ```
+4. **Check registry access**:
+   ```bash
+   npm view opencode-openai-codex-auth-multi version
+   ```
+5. **If the plugin is present but still won’t load**, upgrade to v4.8.1+ (fixes Node ESM load issues with `@opencode-ai/plugin`).
+
+</details>
+
+---
+
 ## Authentication Issues
 
 <details open>

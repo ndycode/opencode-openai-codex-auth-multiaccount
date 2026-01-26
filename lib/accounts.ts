@@ -53,12 +53,20 @@ export function extractAccountId(accessToken?: string): string | undefined {
 }
 
 /**
- * Extracts the email address from a JWT access token.
- * Checks multiple claim paths for compatibility.
- * @param accessToken - JWT access token from OAuth flow
- * @returns Email string or undefined if not found
+ * Extracts the email address from OAuth tokens.
+ * Checks id_token first (where OpenAI puts email), then falls back to access_token.
  */
-export function extractAccountEmail(accessToken?: string): string | undefined {
+export function extractAccountEmail(accessToken?: string, idToken?: string): string | undefined {
+  // Try id_token first - OpenAI puts email here
+  if (idToken) {
+    const idDecoded = decodeJWT(idToken);
+    const idEmail = idDecoded?.email as string | undefined;
+    if (typeof idEmail === "string" && idEmail.includes("@") && idEmail.trim()) {
+      return idEmail;
+    }
+  }
+
+  // Fall back to access_token
   if (!accessToken) return undefined;
   const decoded = decodeJWT(accessToken);
   const nested = decoded?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;

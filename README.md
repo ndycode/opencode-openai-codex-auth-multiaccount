@@ -2,10 +2,13 @@
 
 [![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
 [![npm downloads](https://img.shields.io/npm/dw/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
-[![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions)
+[![Tests](https://github.com/ndycode/opencode-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-chatgpt-multi-auth/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so you can use ChatGPT Plus/Pro rate limits and access models like `gpt-5.2`, `gpt-5.2-codex`, and `gpt-5.1-codex-max` with your ChatGPT credentials.
+
+> [!WARNING]
+> **Known Issue:** OpenCode currently blocks this plugin by design. The plugin downloads but never loads because OpenCode's plugin loader skips plugins containing `opencode-openai-codex-auth` in the name (to prevent conflicts with the built-in auth). We're working on an upstream fix. See [Issue #11](https://github.com/ndycode/opencode-chatgpt-multi-auth/issues/11) and [Troubleshooting](docs/troubleshooting.md#known-limitations) for details.
 
 ## What You Get
 
@@ -48,7 +51,7 @@ Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so 
 Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 
 ```
-Install the opencode-openai-codex-auth-multi plugin and add the OpenAI model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/ndycode/opencode-openai-codex-auth-multi/main/README.md
+Install the opencode-openai-codex-auth-multi plugin and add the OpenAI model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/ndycode/opencode-chatgpt-multi-auth/main/README.md
 ```
 
 **Option B: One-command install**
