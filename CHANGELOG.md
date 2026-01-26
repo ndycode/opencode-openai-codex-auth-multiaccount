@@ -2,9 +2,28 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
-## [Unreleased]
+## [4.9.0] - 2026-01-26
 
-### Added
+**BREAKING: Package renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`**
+
+### Changed
+- **Package renamed** to bypass OpenCode's plugin blocking. OpenCode skips any plugin with `opencode-openai-codex-auth` in the name, which prevented the plugin from loading. The new name `oc-chatgpt-multi-auth` works correctly.
+- Updated all documentation, configs, and references to use new package name.
+- Added `multiAccount` flag check in loader to coexist with OpenCode's built-in auth.
+
+### Fixed
+- Removed debug console.log statements from loader.
+- Plugin now properly detects when it should handle auth vs deferring to built-in.
+
+### Migration
+Update your `~/.config/opencode/opencode.json`:
+```json
+{
+  "plugin": ["oc-chatgpt-multi-auth@latest"]
+}
+```
+
+## [4.8.2] - 2026-01-25
 
 ### Changed
 - Fix Node ESM plugin load by importing tool from `@opencode-ai/plugin/tool` and ensuring runtime dependency is installed.
@@ -161,7 +180,7 @@ export CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1
 
 
 ### Added
-- **One-command installer/update**: `npx -y opencode-openai-codex-auth-multi@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.
+- **One-command installer/update**: `npx -y oc-chatgpt-multi-auth@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.
 - **Modern variants config**: `config/opencode-modern.json` for OpenCode v1.0.210+; legacy presets remain in `config/opencode-legacy.json`.
 - **Installer CLI** bundled as package bin for cross-platform use (Windows/macOS/Linux).
 

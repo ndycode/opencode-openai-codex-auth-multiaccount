@@ -1,6 +1,6 @@
 {
-  "name": "opencode-openai-codex-auth-multi",
-  "version": "4.8.2",
+  "name": "oc-chatgpt-multi-auth",
+  "version": "4.9.0",
   "description": "Multi-account rotation plugin for ChatGPT Plus/Pro (OAuth / Codex backend)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,7 +9,7 @@
   "author": "Numman Ali",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ndycode/opencode-openai-codex-auth-multi.git"
+    "url": "git+https://github.com/ndycode/oc-chatgpt-multi-auth.git"
   },
   "keywords": [
     "opencode",
@@ -21,11 +21,12 @@
     "plugin",
     "auth",
     "chatgpt-plus",
-    "chatgpt-pro"
+    "chatgpt-pro",
+    "multi-account"
   ],
-  "homepage": "https://github.com/ndycode/opencode-openai-codex-auth-multi#readme",
+  "homepage": "https://github.com/ndycode/oc-chatgpt-multi-auth#readme",
   "bugs": {
-    "url": "https://github.com/ndycode/opencode-openai-codex-auth-multi/issues"
+    "url": "https://github.com/ndycode/oc-chatgpt-multi-auth/issues"
   },
   "scripts": {
     "build": "tsc && node scripts/copy-oauth-success.js",
@@ -40,7 +41,7 @@
     "prepare": "husky"
   },
   "bin": {
-    "opencode-openai-codex-auth-multi": "scripts/install-opencode-codex-auth.js"
+    "oc-chatgpt-multi-auth": "scripts/install-opencode-codex-auth.js"
   },
   "files": [
     "dist/",

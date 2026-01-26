@@ -165,10 +165,11 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		const plugin = await OpenAIAuthPlugin({ client });
 
 		const getAuth = async () => ({
-			type: "oauth",
+			type: "oauth" as const,
 			access: "a",
 			refresh: "r",
 			expires: Date.now() + 60_000,
+			multiAccount: true,
 		});
 
 		const sdk = (await plugin.auth.loader(getAuth, { options: {}, models: {} })) as any;

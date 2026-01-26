@@ -36,7 +36,7 @@ Complete installation and setup guide for the OpenCode OpenAI Codex Auth Plugin.
 Works on **Windows, macOS, and Linux**:
 
 ```bash
-npx -y opencode-openai-codex-auth-multi@latest
+npx -y oc-chatgpt-multi-auth@latest
 ```
 
 This:
@@ -46,7 +46,7 @@ This:
 
 **Legacy OpenCode (v1.0.209 and below)?**
 ```bash
-npx -y opencode-openai-codex-auth-multi@latest --legacy
+npx -y oc-chatgpt-multi-auth@latest --legacy
 ```
 
 </details>
@@ -55,8 +55,8 @@ npx -y opencode-openai-codex-auth-multi@latest --legacy
 <summary><b>Option B: Install from Source</b></summary>
 
 ```bash
-git clone https://github.com/ndycode/opencode-openai-codex-auth-multi.git
-cd opencode-openai-codex-auth-multi
+git clone https://github.com/ndycode/oc-chatgpt-multi-auth.git
+cd oc-chatgpt-multi-auth
 npm ci
 npm run build
 ```
@@ -65,7 +65,7 @@ Point OpenCode at the local build output:
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-openai-codex-auth-multi/dist"]
+  "plugin": ["file:///absolute/path/to/oc-chatgpt-multi-auth/dist"]
 }
 ```
 
@@ -84,7 +84,7 @@ Edit `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi@latest"]
+  "plugin": ["oc-chatgpt-multi-auth@latest"]
 }
 ```
 
@@ -189,7 +189,7 @@ OpenCode checks multiple config files in order:
 OpenCode caches plugins. Re-run the installer:
 
 ```bash
-npx -y opencode-openai-codex-auth-multi@latest
+npx -y oc-chatgpt-multi-auth@latest
 ```
 
 </details>
@@ -198,7 +198,7 @@ npx -y opencode-openai-codex-auth-multi@latest
 <summary><b>From source</b></summary>
 
 ```bash
-cd opencode-openai-codex-auth-multi
+cd oc-chatgpt-multi-auth
 git pull
 npm ci
 npm run build
@@ -211,7 +211,7 @@ npm run build
 - Bug fixes available
 - Security updates
 
-**Check for updates**: [Releases Page](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases)
+**Check for updates**: [Releases Page](https://github.com/ndycode/oc-chatgpt-multi-auth/releases)
 
 ---
 

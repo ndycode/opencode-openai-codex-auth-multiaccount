@@ -9,7 +9,7 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi@latest"],
+  "plugin": ["oc-chatgpt-multi-auth@latest"],
   "provider": {
     "openai": {
       "options": {
@@ -113,7 +113,7 @@ Apply same settings to all models:
 
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi@latest"],
+  "plugin": ["oc-chatgpt-multi-auth@latest"],
   "provider": {
     "openai": {
       "options": {
@@ -188,7 +188,7 @@ Different agents use different models:
 **Global** (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi@latest"],
+  "plugin": ["oc-chatgpt-multi-auth@latest"],
   "provider": {
     "openai": {
       "options": { "reasoningEffort": "medium" }
