@@ -82,15 +82,16 @@ describe('Fetch Helpers Module', () => {
 
 			const updated = await refreshAndUpdateToken(auth, client);
 
-			expect(client.auth.set).toHaveBeenCalledWith({
-				path: { id: 'openai' },
-				body: {
-					type: 'oauth',
-					access: 'new',
-					refresh: 'newr',
-					expires: 123,
-				},
-			});
+		expect(client.auth.set).toHaveBeenCalledWith({
+			path: { id: 'openai' },
+			body: {
+				type: 'oauth',
+				access: 'new',
+				refresh: 'newr',
+				expires: 123,
+				multiAccount: true,
+			},
+		});
 			expect(updated.access).toBe('new');
 			expect(updated.refresh).toBe('newr');
 			expect(updated.expires).toBe(123);

@@ -827,13 +827,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					 * @returns Authorization flow configuration
 					 */
                                         authorize: async (inputs?: Record<string, string>) => {
-                                                console.log(`[DEBUG] authorize called, inputs:`, JSON.stringify(inputs));
-                                                if (inputs && Object.keys(inputs).length > 0) {
-                                                        const accounts: TokenSuccess[] = [];
-                                                        const noBrowser =
-                                                                inputs.noBrowser === "true" ||
-                                                                inputs["no-browser"] === "true";
-                                                        const useManualMode = noBrowser;
+                                                // Always use the multi-account flow regardless of inputs
+                                                // The inputs parameter is only used for noBrowser flag, not for flow selection
+                                                const accounts: TokenSuccess[] = [];
+                                                const noBrowser =
+                                                        inputs?.noBrowser === "true" ||
+                                                        inputs?.["no-browser"] === "true";
+                                                const useManualMode = noBrowser;
 
                                                         let startFresh = true;
                                                         const existingStorage = await hydrateEmails(await loadAccounts());
@@ -974,71 +974,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                 method: "auto",
                                                                 callback: async () => primary,
                                                         };
-                                                }
-
-                                                let startFresh = true;
-                                                const existingStorage = await hydrateEmails(await loadAccounts());
-                                                if (existingStorage && existingStorage.accounts.length > 0) {
-                                                        const existingAccounts = existingStorage.accounts.map((account, index) => ({
-                                                                accountId: account.accountId,
-                                                                email: account.email,
-                                                                index,
-                                                        }));
-                                                        const loginMode = await promptLoginMode(existingAccounts);
-                                                        startFresh = loginMode === "fresh";
-                                                        if (startFresh) {
-                                                                console.log("\nStarting fresh - existing accounts will be replaced.\n");
-                                                        } else {
-                                                                console.log("\nAdding to existing accounts.\n");
-                                                        }
-                                                }
-
-                                                const { pkce, state, url } = await createAuthorizationFlow();
-                                                let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null =
-                                                        null;
-                                                try {
-                                                        serverInfo = await startLocalOAuthServer({ state });
-                                                } catch (err) {
-                                                        logDebug(`[${PLUGIN_NAME}] Failed to start OAuth server for add flow: ${(err as Error)?.message ?? String(err)}`);
-                                                        serverInfo = null;
-                                                }
-
-                                                openBrowserUrl(url);
-
-                                                if (!serverInfo || !serverInfo.ready) {
-                                                        serverInfo?.close();
-                                                        return buildManualOAuthFlow(pkce, url, async (tokens) => {
-                                                                await persistAccountPool([tokens], startFresh);
-                                                        });
-                                                }
-
-                                                return {
-                                                        url,
-                                                        method: "auto" as const,
-                                                        instructions: AUTH_LABELS.INSTRUCTIONS,
-                                                        callback: async () => {
-                                                                const result = await serverInfo.waitForCode(state);
-                                                                serverInfo.close();
-
-                                                                if (!result) {
-                                                                        return { type: "failed" as const };
-                                                                }
-
-                                                                const tokens = await exchangeAuthorizationCode(
-                                                                        result.code,
-                                                                        pkce.verifier,
-                                                                        REDIRECT_URI,
-                                                                );
-
-                                                                if (tokens?.type === "success") {
-                                                                        await persistAccountPool([tokens], startFresh);
-                                                                }
-
-                                                                return tokens?.type === "success"
-                                                                        ? tokens
-                                                                        : { type: "failed" as const };
-                                                        },
-                                                };
                                         },
 					},
 					{

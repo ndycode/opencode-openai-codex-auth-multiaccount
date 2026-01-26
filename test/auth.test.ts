@@ -172,12 +172,14 @@ describe('Auth Module', () => {
 
 			try {
 				const result = await refreshAccessToken('existing-refresh');
-				expect(result).toEqual({
-					type: 'success',
-					access: 'new-access',
-					refresh: 'existing-refresh',
-					expires: 61_000,
-				});
+			expect(result).toEqual({
+				type: 'success',
+				access: 'new-access',
+				refresh: 'existing-refresh',
+				expires: 61_000,
+				idToken: undefined,
+				multiAccount: true,
+			});
 			} finally {
 				globalThis.fetch = originalFetch;
 				vi.restoreAllMocks();
