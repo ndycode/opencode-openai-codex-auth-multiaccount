@@ -19,7 +19,7 @@
  *
  * @license MIT with Usage Disclaimer (see LICENSE file)
  * @author numman-ali
- * @repository https://github.com/ndycode/opencode-openai-codex-auth-multi
+ * @repository https://github.com/ndycode/oc-chatgpt-multi-auth
 
  */
 
@@ -103,7 +103,7 @@ import {
  * @example
  * ```json
  * {
- *   "plugin": ["opencode-openai-codex-auth-multi"],
+ *   "plugin": ["oc-chatgpt-multi-auth"],
 
  *   "model": "openai/gpt-5-codex"
  * }

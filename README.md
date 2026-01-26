@@ -1,14 +1,14 @@
 # OpenAI Codex Auth Plugin for OpenCode
 
-[![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
-[![npm downloads](https://img.shields.io/npm/dw/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
-[![Tests](https://github.com/ndycode/opencode-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-chatgpt-multi-auth/actions)
+[![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
+[![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
+[![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so you can use ChatGPT Plus/Pro rate limits and access models like `gpt-5.2`, `gpt-5.2-codex`, and `gpt-5.1-codex-max` with your ChatGPT credentials.
 
-> [!WARNING]
-> **Known Issue:** OpenCode currently blocks this plugin by design. The plugin downloads but never loads because OpenCode's plugin loader skips plugins containing `opencode-openai-codex-auth` in the name (to prevent conflicts with the built-in auth). We're working on an upstream fix. See [Issue #11](https://github.com/ndycode/opencode-chatgpt-multi-auth/issues/11) and [Troubleshooting](docs/troubleshooting.md#known-limitations) for details.
+> [!NOTE]
+> **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
 
 ## What You Get
 
@@ -51,13 +51,13 @@ Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so 
 Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 
 ```
-Install the opencode-openai-codex-auth-multi plugin and add the OpenAI model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/ndycode/opencode-chatgpt-multi-auth/main/README.md
+Install the oc-chatgpt-multi-auth plugin and add the OpenAI model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/ndycode/oc-chatgpt-multi-auth/main/README.md
 ```
 
 **Option B: One-command install**
 
 ```bash
-npx -y opencode-openai-codex-auth-multi@latest
+npx -y oc-chatgpt-multi-auth@latest
 ```
 
 This writes the config to `~/.config/opencode/opencode.json`, backs up existing config, and clears the plugin cache.
@@ -70,7 +70,7 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 
    ```json
    {
-     "plugin": ["opencode-openai-codex-auth-multi@latest"]
+     "plugin": ["oc-chatgpt-multi-auth@latest"]
    }
    ```
 
@@ -102,7 +102,7 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 2. Add the plugin to the `plugin` array:
    ```json
    {
-     "plugin": ["opencode-openai-codex-auth-multi@latest"]
+     "plugin": ["oc-chatgpt-multi-auth@latest"]
    }
    ```
 
@@ -150,7 +150,7 @@ Add this to your `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-openai-codex-auth-multi@latest"],
+  "plugin": ["oc-chatgpt-multi-auth@latest"],
   "provider": {
     "openai": {
       "options": {
@@ -363,7 +363,7 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 **Solutions:**
 1. Update plugin:
    ```bash
-npx -y opencode-openai-codex-auth-multi@latest
+npx -y oc-chatgpt-multi-auth@latest
    ```
 2. Ensure config has:
    ```json
@@ -408,7 +408,7 @@ Works alongside oh-my-opencode. No special configuration needed.
 ```json
 {
   "plugin": [
-    "opencode-openai-codex-auth-multi@latest",
+    "oc-chatgpt-multi-auth@latest",
     "oh-my-opencode@latest"
   ]
 }
@@ -421,7 +421,7 @@ List this plugin BEFORE DCP:
 ```json
 {
   "plugin": [
-    "opencode-openai-codex-auth-multi@latest",
+    "oc-chatgpt-multi-auth@latest",
     "@tarquinen/opencode-dcp@latest"
   ]
 }

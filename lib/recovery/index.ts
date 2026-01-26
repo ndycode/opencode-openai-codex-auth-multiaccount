@@ -1,5 +1,5 @@
 /**
- * Session recovery module for opencode-openai-codex-auth-multi.
+ * Session recovery module for oc-chatgpt-multi-auth.
  *
  * Provides recovery from:
  * - tool_result_missing: Interrupted tool executions

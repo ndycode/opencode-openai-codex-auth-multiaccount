@@ -32,5 +32,5 @@ This plugin bridges two different systems with careful engineering:
 
 ---
 
-**Quick Links**: [GitHub](https://github.com/ndycode/opencode-openai-codex-auth-multi) • [npm](https://www.npmjs.com/package/opencode-openai-codex-auth-multi) • [Issues](https://github.com/ndycode/opencode-openai-codex-auth-multi/issues)
+**Quick Links**: [GitHub](https://github.com/ndycode/oc-chatgpt-multi-auth) • [npm](https://www.npmjs.com/package/oc-chatgpt-multi-auth) • [Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues)
 

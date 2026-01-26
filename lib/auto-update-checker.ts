@@ -5,7 +5,7 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("update-checker");
 
-const PACKAGE_NAME = "opencode-openai-codex-auth-multi";
+const PACKAGE_NAME = "oc-chatgpt-multi-auth";
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 const CACHE_DIR = join(homedir(), ".opencode", "cache");
 const CACHE_FILE = join(CACHE_DIR, "update-check-cache.json");

@@ -9,7 +9,7 @@ Comprehensive testing matrix for all config scenarios and backwards compatibilit
 **Config:**
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"]
+  "plugin": ["oc-chatgpt-multi-auth"]
 }
 ```
 
@@ -40,7 +40,7 @@ Comprehensive testing matrix for all config scenarios and backwards compatibilit
 **Config:**
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -81,7 +81,7 @@ Comprehensive testing matrix for all config scenarios and backwards compatibilit
 **Config:**
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -116,7 +116,7 @@ Comprehensive testing matrix for all config scenarios and backwards compatibilit
 **Config:**
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "models": {
@@ -209,7 +209,7 @@ API receives: "gpt-5-codex" ✅
 **Config:**
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"]
+  "plugin": ["oc-chatgpt-multi-auth"]
 }
 ```
 
@@ -346,7 +346,7 @@ Turn 4: > now delete it
 **Config:**
 ```json
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "model": "openai/gpt-5-codex"
 }
 ```
@@ -443,12 +443,12 @@ DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5-codex
 
 ```bash
 # 1. Clear cache
-(cd ~ && rm -rf .cache/opencode/node_modules/opencode-openai-codex-auth-multi)
+(cd ~ && rm -rf .cache/opencode/node_modules/oc-chatgpt-multi-auth)
 
 # 2. Use minimal config
 cat > ~/.config/opencode/opencode.json <<'EOF'
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "model": "openai/gpt-5-codex"
 }
 EOF
@@ -472,7 +472,7 @@ DEBUG_CODEX_PLUGIN=1 opencode run "write hello world to test.txt"
 # Update config with custom models
 cat > ~/.config/opencode/opencode.json <<'EOF'
 {
-  "plugin": ["opencode-openai-codex-auth-multi"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "models": {

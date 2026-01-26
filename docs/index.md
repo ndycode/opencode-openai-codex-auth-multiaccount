@@ -1,7 +1,7 @@
 # OpenCode OpenAI Codex Auth Plugin
 
-[![npm version](https://img.shields.io/npm/v/opencode-openai-codex-auth-multi.svg)](https://www.npmjs.com/package/opencode-openai-codex-auth-multi)
-[![Tests](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/opencode-openai-codex-auth-multi/actions)
+[![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
+[![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 > Access GPT-5 Codex through your ChatGPT Plus/Pro subscription in OpenCode
@@ -32,7 +32,7 @@
 | [Configuration](configuration.md) | Advanced config options and patterns |
 | [Troubleshooting](troubleshooting.md) | Debug techniques and common issues |
 | [Privacy & Data](privacy.md) | How your data is handled |
-| [Release Notes](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases) | Version history |
+| [Release Notes](https://github.com/ndycode/oc-chatgpt-multi-auth/releases) | Version history |
 
 ### For Developers
 
@@ -49,7 +49,7 @@
 
 ```bash
 # 1. Install
-npx -y opencode-openai-codex-auth-multi@latest
+npx -y oc-chatgpt-multi-auth@latest
 
 # 2. Authenticate
 opencode auth login
@@ -115,9 +115,9 @@ See [Architecture](development/ARCHITECTURE.md) for technical details.
 
 | Resource | Link |
 |----------|------|
-| Issues | [GitHub Issues](https://github.com/ndycode/opencode-openai-codex-auth-multi/issues) |
-| Releases | [Release Notes](https://github.com/ndycode/opencode-openai-codex-auth-multi/releases) |
-| Repository | [GitHub](https://github.com/ndycode/opencode-openai-codex-auth-multi) |
+| Issues | [GitHub Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues) |
+| Releases | [Release Notes](https://github.com/ndycode/oc-chatgpt-multi-auth/releases) |
+| Repository | [GitHub](https://github.com/ndycode/oc-chatgpt-multi-auth) |
 
 ---
 
