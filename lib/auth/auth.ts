@@ -82,6 +82,7 @@ export async function exchangeAuthorizationCode(
 		access_token?: string;
 		refresh_token?: string;
 		expires_in?: number;
+		id_token?: string;
 	};
 	if (
 		!json?.access_token ||
@@ -96,6 +97,8 @@ export async function exchangeAuthorizationCode(
 		access: json.access_token,
 		refresh: json.refresh_token,
 		expires: Date.now() + json.expires_in * 1000,
+		idToken: json.id_token,
+		multiAccount: true,
 	};
 }
 
@@ -152,6 +155,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 			access_token?: string;
 			refresh_token?: string;
 			expires_in?: number;
+			id_token?: string;
 		};
 		if (!json?.access_token || typeof json?.expires_in !== "number") {
 			console.error(
@@ -172,6 +176,8 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
 			access: json.access_token,
 			refresh: nextRefresh,
 			expires: Date.now() + json.expires_in * 1000,
+			idToken: json.id_token,
+			multiAccount: true,
 		};
 	} catch (error) {
 		const err = error as Error;

@@ -1,7 +1,7 @@
 {
   "name": "opencode-openai-codex-auth-multi",
-  "version": "4.7.0",
-  "description": "Fork of opencode-openai-codex-auth with multi-account rotation (ChatGPT OAuth / Codex backend)",
+  "version": "4.8.2",
+  "description": "Multi-account rotation plugin for ChatGPT Plus/Pro (OAuth / Codex backend)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
@@ -56,13 +56,12 @@
     ]
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "^1.1.34"
+    "typescript": "^5"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.1.34",
     "@opencode-ai/sdk": "^1.1.34",
     "@types/node": "^25.0.10",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
@@ -75,6 +74,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@opencode-ai/plugin": "^1.1.34",
     "@openauthjs/openauth": "^0.4.3",
     "hono": "^4.11.5"
   },

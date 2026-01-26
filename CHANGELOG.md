@@ -7,6 +7,8 @@ All notable changes to this project are documented here. Dates use the ISO forma
 ### Added
 
 ### Changed
+- Fix Node ESM plugin load by importing tool from `@opencode-ai/plugin/tool` and ensuring runtime dependency is installed.
+- Correct package metadata (repository links, update-check package name) and add troubleshooting guidance for plugin install/load.
 
 ## [4.7.0] - 2026-01-25
 

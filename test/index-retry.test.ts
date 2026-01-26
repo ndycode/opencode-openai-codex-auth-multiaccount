@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@opencode-ai/plugin", () => {
+vi.mock("@opencode-ai/plugin/tool", () => {
 	const makeSchema = () => ({
 		optional: () => makeSchema(),
 		describe: () => makeSchema(),

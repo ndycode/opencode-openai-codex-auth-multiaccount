@@ -78,6 +78,10 @@ export interface TokenSuccess {
 	access: string;
 	refresh: string;
 	expires: number;
+	/** ID token from OAuth response - contains email and other identity claims */
+	idToken?: string;
+	/** Flag to identify this auth as multi-account (vs built-in single account) */
+	multiAccount?: boolean;
 }
 
 /**

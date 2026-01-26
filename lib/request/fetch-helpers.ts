@@ -61,7 +61,6 @@ export async function refreshAndUpdateToken(
 		throw new Error(ERROR_MESSAGES.TOKEN_REFRESH_FAILED);
 	}
 
-	// Update stored credentials
 	await client.auth.set({
 		path: { id: "openai" },
 		body: {
@@ -69,7 +68,8 @@ export async function refreshAndUpdateToken(
 			access: refreshResult.access,
 			refresh: refreshResult.refresh,
 			expires: refreshResult.expires,
-		},
+			multiAccount: true,
+		} as Parameters<typeof client.auth.set>[0]["body"],
 	});
 
 	// Update current auth reference if it's OAuth type
