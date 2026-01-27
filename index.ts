@@ -409,10 +409,34 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return `resets in ${formatWaitTime(remaining)}`;
 		};
 
-        // Event handler for session recovery (matches antigravity plugin pattern)
-        const eventHandler = async (_input: { event: { type: string; properties?: unknown } }) => {
-                // Session recovery is handled inside the loader, but we need to expose the event handler
-                // to match the antigravity plugin structure that OpenCode expects
+        // Event handler for session recovery and account selection
+        const eventHandler = async (input: { event: { type: string; properties?: unknown } }) => {
+                const { event } = input;
+                // Handle TUI account selection events
+                // Accepts generic selection events with an index property
+                if (
+                        event.type === "account.select" ||
+                        event.type === "openai.account.select"
+                ) {
+                        const props = event.properties as { index?: number; accountIndex?: number; provider?: string };
+                        // Filter by provider if specified
+                        if (props.provider && props.provider !== "openai" && props.provider !== PROVIDER_ID) {
+                                return;
+                        }
+
+                        const index = props.index ?? props.accountIndex;
+                        if (typeof index === "number" && cachedAccountManager) {
+                                // Convert 1-based index (UI) to 0-based index (internal) if needed,
+                                // or handle 0-based directly. Usually UI lists are 0-based in code but 1-based in display.
+                                // AccountManager.setActiveIndex expects 0-based index.
+                                // Assuming the event passes the raw index from the list.
+                                const account = cachedAccountManager.setActiveIndex(index);
+                                if (account) {
+                                        await cachedAccountManager.saveToDisk();
+                                        await showToast(`Switched to account ${index + 1}`, "info");
+                                }
+                        }
+                }
         };
 
         return {
@@ -1008,12 +1032,8 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                                 await persistAccountPool([tokens], false);
                                                         });
                                                 },
-					},
-					{
-						label: AUTH_LABELS.API_KEY,
-						type: "api" as const,
-					},
-			],
+                                        },
+                        ],
                 },
                 tool: {
                         "openai-accounts": tool({

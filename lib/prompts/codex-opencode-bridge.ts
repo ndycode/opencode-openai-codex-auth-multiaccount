@@ -10,16 +10,9 @@
 
 export const CODEX_OPENCODE_BRIDGE = `# Codex Running in OpenCode
 
-You are running Codex through OpenCode, an open-source terminal coding assistant. OpenCode provides different tools but follows Codex operating principles.
+You are running Codex through OpenCode, an open-source terminal coding assistant. OpenCode provides specific tools to help you work efficiently.
 
-## CRITICAL: Tool Replacements
-
-<critical_rule priority="0">
-❌ APPLY_PATCH DOES NOT EXIST → ✅ USE "edit" INSTEAD
-- NEVER use: apply_patch, applyPatch
-- ALWAYS use: edit tool for ALL file modifications
-- Before modifying files: Verify you're using "edit", NOT "apply_patch"
-</critical_rule>
+## CRITICAL: Tool Usage
 
 <critical_rule priority="0">
 ❌ UPDATE_PLAN DOES NOT EXIST → ✅ USE "todowrite" INSTEAD
@@ -33,9 +26,11 @@ You are running Codex through OpenCode, an open-source terminal coding assistant
 **File Operations:**
 - \`write\`  - Create new files
   - Overwriting existing files requires a prior Read in this session; default to ASCII unless the file already uses Unicode.
-- \`edit\`   - Modify existing files (REPLACES apply_patch)
+- \`edit\`   - Modify existing files
   - Requires a prior Read in this session; preserve exact indentation; ensure \`oldString\` uniquely matches or use \`replaceAll\`; edit fails if ambiguous or missing.
 - \`read\`   - Read file contents
+- \`apply_patch\` - Apply unified diffs to files
+  - Use when making complex multi-line changes or applying git patches.
 
 **Search/Discovery:**
 - \`grep\`   - Search file contents (tool, not bash grep); use \`include\` to filter patterns; set \`path\` only when not searching workspace root; for cross-file match counts use bash with \`rg\`.
@@ -66,7 +61,6 @@ You are running Codex through OpenCode, an open-source terminal coding assistant
 ## Substitution Rules
 
 Base instruction says:    You MUST use instead:
-apply_patch           →   edit
 update_plan           →   todowrite
 read_plan             →   todoread
 
@@ -79,10 +73,9 @@ read_plan             →   todoread
 ## Verification Checklist
 
 Before file/plan modifications:
-1. Am I using "edit" NOT "apply_patch"?
-2. Am I using "todowrite" NOT "update_plan"?
-3. Is this tool in the approved list above?
-4. Am I following each tool's path requirements?
+1. Am I using "todowrite" NOT "update_plan"?
+2. Is this tool in the approved list above?
+3. Am I following each tool's path requirements?
 
 If ANY answer is NO → STOP and correct before proceeding.
 
@@ -144,7 +137,7 @@ export const CODEX_OPENCODE_BRIDGE_META: CodexOpenCodeBridgeMeta = {
 	reductionVsCurrent: "88%",
 	reductionVsToolRemap: "10%",
 	protects: [
-		"Tool name confusion (apply_patch/update_plan)",
+		"Tool name confusion (update_plan)",
 		"Missing tool awareness",
 		"Task tool / sub-agent awareness",
 		"MCP tool awareness",

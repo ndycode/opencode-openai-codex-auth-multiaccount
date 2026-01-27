@@ -28,10 +28,20 @@ export function parseAuthorizationInput(input: string): ParsedAuthInput {
 
 	try {
 		const url = new URL(value);
-		return {
-			code: url.searchParams.get("code") ?? undefined,
-			state: url.searchParams.get("state") ?? undefined,
-		};
+		let code = url.searchParams.get("code") ?? undefined;
+		let state = url.searchParams.get("state") ?? undefined;
+
+		// Fallback: check hash if not found in searchParams (for #code=... format)
+		if (url.hash && (!code || !state)) {
+			const hashValue = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+			const hashParams = new URLSearchParams(hashValue);
+			code = code ?? hashParams.get("code") ?? undefined;
+			state = state ?? hashParams.get("state") ?? undefined;
+		}
+
+		if (code || state) {
+			return { code, state };
+		}
 	} catch {
 		// Invalid URL, try other parsing methods
 	}

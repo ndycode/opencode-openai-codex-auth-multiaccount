@@ -23,7 +23,7 @@ describe("AccountManager", () => {
   it("rotates when the active account is rate-limited", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         {
@@ -49,7 +49,7 @@ describe("AccountManager", () => {
   it("skips accounts that are cooling down", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         {
@@ -76,7 +76,7 @@ describe("AccountManager", () => {
   it("returns min wait time when all accounts are blocked", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         {
@@ -104,7 +104,7 @@ describe("AccountManager", () => {
   it("debounces account toasts for the same account index", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         {
@@ -147,7 +147,7 @@ describe("AccountManager", () => {
   it("performs true round-robin rotation across multiple requests", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         { refreshToken: "token-1", addedAt: now, lastUsed: now },
@@ -172,7 +172,7 @@ describe("AccountManager", () => {
   it("skips rate-limited accounts during rotation", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         { refreshToken: "token-1", addedAt: now, lastUsed: now },
@@ -195,7 +195,7 @@ describe("AccountManager", () => {
   it("uses independent cursors per model family", () => {
     const now = Date.now();
     const stored = {
-      version: 3,
+      version: 3 as const,
       activeIndex: 0,
       accounts: [
         { refreshToken: "token-1", addedAt: now, lastUsed: now },
@@ -214,5 +214,25 @@ describe("AccountManager", () => {
     expect(gpt51First?.refreshToken).toBe("token-1");
     expect(codexSecond?.refreshToken).toBe("token-2");
     expect(gpt51Second?.refreshToken).toBe("token-2");
+  });
+
+  it("hybrid selection prefers active index when available", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3 as const,
+      activeIndex: 1, // Set active index to second account
+      activeIndexByFamily: { codex: 1 },
+      accounts: [
+        { refreshToken: "token-1", addedAt: now, lastUsed: 0 }, // Very stale (high freshness score)
+        { refreshToken: "token-2", addedAt: now, lastUsed: now }, // Just used (low freshness score)
+      ],
+    };
+
+    const manager = new AccountManager(undefined, stored as any);
+    
+    // Even though token-1 has better freshness score, token-2 is active and available
+    const selected = manager.getCurrentOrNextForFamilyHybrid("codex");
+    expect(selected?.refreshToken).toBe("token-2");
+    expect(selected?.index).toBe(1);
   });
 });

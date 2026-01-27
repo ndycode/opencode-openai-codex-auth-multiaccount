@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
 	createState,
 	parseAuthorizationInput,
@@ -40,6 +40,12 @@ describe('Auth Module', () => {
 
 		it('should parse query string format', () => {
 			const input = 'code=abc123&state=xyz789';
+			const result = parseAuthorizationInput(input);
+			expect(result).toEqual({ code: 'abc123', state: 'xyz789' });
+		});
+
+		it('should parse URL with fragment parameters (#code=...)', () => {
+			const input = 'http://localhost:1455/auth/callback#code=abc123&state=xyz789';
 			const result = parseAuthorizationInput(input);
 			expect(result).toEqual({ code: 'abc123', state: 'xyz789' });
 		});

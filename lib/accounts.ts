@@ -391,6 +391,23 @@ export class AccountManager {
     const count = this.accounts.length;
     if (count === 0) return null;
 
+    // Preference: If the currently active account for this family is available (not rate-limited, not cooling down),
+    // use it directly. This ensures manual switching is respected.
+    const currentIndex = this.currentAccountIndexByFamily[family];
+    if (currentIndex >= 0 && currentIndex < count) {
+      const currentAccount = this.accounts[currentIndex];
+      if (currentAccount) {
+        clearExpiredRateLimits(currentAccount);
+        if (
+          !isRateLimitedForFamily(currentAccount, family, model) &&
+          !this.isAccountCoolingDown(currentAccount)
+        ) {
+          currentAccount.lastUsed = nowMs();
+          return currentAccount;
+        }
+      }
+    }
+
     const quotaKey = model ? `${family}:${model}` : family;
     const healthTracker = getHealthTracker();
     const tokenTracker = getTokenTracker();
