@@ -1556,6 +1556,99 @@ describe('Request Transformer Module', () => {
 					const tool = (result.tools as any)[0];
 					expect(tool.function.parameters.properties).toHaveProperty('_placeholder');
 				});
+
+				it('should flatten anyOf with const values to enum', async () => {
+					const body: RequestBody = {
+						model: 'gpt-5-codex',
+						input: [],
+						tools: [
+							{
+								type: 'function',
+								function: {
+									name: 'enum_tool',
+									parameters: {
+										type: 'object',
+										properties: {
+											choice: {
+												anyOf: [
+													{ const: 'A' },
+													{ const: 'B' }
+												]
+											}
+										}
+									}
+								}
+							}
+						]
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+					const tool = (result.tools as any)[0];
+					const prop = tool.function.parameters.properties.choice;
+					expect(prop.anyOf).toBeUndefined();
+					expect(prop.enum).toEqual(['A', 'B']);
+					expect(prop.type).toBe('string');
+				});
+
+				it('should normalize nullable array types to single type + description', async () => {
+					const body: RequestBody = {
+						model: 'gpt-5-codex',
+						input: [],
+						tools: [
+							{
+								type: 'function',
+								function: {
+									name: 'null_tool',
+									parameters: {
+										type: 'object',
+										properties: {
+											optional_str: {
+												type: ['string', 'null'],
+												description: 'An optional string'
+											}
+										}
+									}
+								}
+							}
+						]
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+					const tool = (result.tools as any)[0];
+					const prop = tool.function.parameters.properties.optional_str;
+					expect(prop.type).toBe('string');
+					expect(prop.description).toBe('An optional string (nullable)');
+				});
+
+				it('should remove unsupported keywords', async () => {
+					const body: RequestBody = {
+						model: 'gpt-5-codex',
+						input: [],
+						tools: [
+							{
+								type: 'function',
+								function: {
+									name: 'clean_tool',
+									parameters: {
+										type: 'object',
+										properties: {
+											prop: { type: 'string', const: 'fixed' }
+										},
+										additionalProperties: false,
+										$schema: 'http://json-schema.org/draft-07/schema#'
+									}
+								}
+							}
+						]
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+					const tool = (result.tools as any)[0];
+					const params = tool.function.parameters;
+					expect(params.additionalProperties).toBeUndefined();
+					expect(params.$schema).toBeUndefined();
+					expect(params.properties.prop.const).toBeUndefined();
+				});
 			});
 		});
 	});
