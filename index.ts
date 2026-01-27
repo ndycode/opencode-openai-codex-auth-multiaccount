@@ -35,7 +35,7 @@ import {
 import { queuedRefresh } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
+import { promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getRateLimitToastDebounceMs,
@@ -141,49 +141,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 },
         });
 
-        const promptOAuthCallbackValue = async (message: string): Promise<string> => {
-                const { createInterface } = await import("node:readline/promises");
-                const { stdin, stdout } = await import("node:process");
-                const rl = createInterface({ input: stdin, output: stdout });
-                try {
-                        return (await rl.question(message)).trim();
-                } finally {
-                        rl.close();
-                }
-        };
-
-        const runManualOAuthFlow = async (
-                pkce: { verifier: string },
-                _url: string,
-        ): Promise<TokenResult> => {
-                console.log("1. Open the URL above in your browser and sign in.");
-                console.log("2. After approving, copy the full redirect URL.");
-                console.log("3. Paste it back here.\n");
-                const callbackInput = await promptOAuthCallbackValue(
-                        "Paste the redirect URL (or just the code) here: ",
-                );
-                const parsed = parseAuthorizationInput(callbackInput);
-                if (!parsed.code) {
-                        return { type: "failed" as const };
-                }
-                return await exchangeAuthorizationCode(
-                        parsed.code,
-                        pkce.verifier,
-                        REDIRECT_URI,
-                );
-        };
-
 	const runOAuthFlow = async (
-		useManualMode: boolean,
 		forceNewLogin: boolean = false,
 	): Promise<TokenResult> => {
 		const { pkce, state, url } = await createAuthorizationFlow({ forceNewLogin });
                 console.log("\nOAuth URL:\n" + url + "\n");
-
-                if (useManualMode) {
-                        openBrowserUrl(url);
-                        return await runManualOAuthFlow(pkce, url);
-                }
 
                 let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null = null;
                 try {
@@ -196,7 +158,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
                 if (!serverInfo || !serverInfo.ready) {
                         serverInfo?.close();
-                        return await runManualOAuthFlow(pkce, url);
+                        const message =
+                                `\n[${PLUGIN_NAME}] OAuth callback server failed to start. ` +
+                                `Please retry with "${AUTH_LABELS.OAUTH_MANUAL}".\n`;
+                        console.warn(message);
+                        return { type: "failed" as const };
                 }
 
                 const result = await serverInfo.waitForCode(state);
@@ -614,12 +580,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										const accountCount = accountManager.getAccountCount();
 										const attempted = new Set<number>();
 
-							while (attempted.size < Math.max(1, accountCount)) {
-								const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model);
-								if (!account || attempted.has(account.index)) {
-									break;
-								}
-											attempted.add(account.index);
+while (attempted.size < Math.max(1, accountCount)) {
+				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model);
+				if (!account || attempted.has(account.index)) {
+					break;
+				}
+							attempted.add(account.index);
+							// Log account selection for debugging rotation
+							console.log(`[oc-chatgpt-multi-auth] Using account ${account.index + 1}/${accountCount}: ${account.email ?? "unknown"} for ${modelFamily}`);
 
 											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
 											try {
@@ -740,15 +708,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																																	continue;
 																																}
 
-					accountManager.markRateLimited(
-						account,
-						delayMs,
-						modelFamily,
-						model,
-					);
-					accountManager.recordRateLimit(account, modelFamily, model);
-					account.lastSwitchReason = "rate-limit";
-					accountManager.saveToDiskDebounced();
+				accountManager.markRateLimited(
+					account,
+					delayMs,
+					modelFamily,
+					model,
+				);
+				accountManager.recordRateLimit(account, modelFamily, model);
+				account.lastSwitchReason = "rate-limit";
+				accountManager.saveToDiskDebounced();
+				console.log(`[oc-chatgpt-multi-auth] Rate limited! Account ${account.index + 1} (${account.email ?? "unknown"}) will rotate to next account`);
 
 																														if (
 																															accountManager.getAccountCount() > 1 &&
@@ -812,8 +781,40 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         },
 				methods: [
 					{
-						label: AUTH_LABELS.OAUTH,
-						type: "oauth" as const,
+					label: AUTH_LABELS.OAUTH,
+					type: "oauth" as const,
+					prompts: [
+						{
+							type: "select",
+							key: "loginMode",
+							message: "Account handling",
+							options: [
+								{
+									label: "Add to existing accounts",
+									value: "add",
+									hint: "Keep current accounts",
+								},
+								{
+									label: "Start fresh",
+									value: "fresh",
+									hint: "Replace existing accounts",
+								},
+							],
+						},
+						{
+							type: "text",
+							key: "accountCount",
+							message: "How many accounts to add? (1-5)",
+							placeholder: "1",
+							validate: (value) => {
+								const parsed = Number.parseInt(value, 10);
+								if (!Number.isFinite(parsed)) return "Enter a number";
+								if (parsed < 1) return "Minimum is 1";
+								if (parsed > ACCOUNT_LIMITS.MAX_ACCOUNTS) return `Maximum is ${ACCOUNT_LIMITS.MAX_ACCOUNTS}`;
+								return undefined;
+							},
+						},
+					],
 					/**
 					 * OAuth authorization flow
 					 *
@@ -827,45 +828,84 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					 * @returns Authorization flow configuration
 					 */
                                         authorize: async (inputs?: Record<string, string>) => {
-                                                // Always use the multi-account flow regardless of inputs
-                                                // The inputs parameter is only used for noBrowser flag, not for flow selection
-                                                const accounts: TokenSuccess[] = [];
-                                                const noBrowser =
-                                                        inputs?.noBrowser === "true" ||
-                                                        inputs?.["no-browser"] === "true";
-                                                const useManualMode = noBrowser;
+							// Always use the multi-account flow regardless of inputs
+							// The inputs parameter is only used for noBrowser flag, not for flow selection
+							const accounts: TokenSuccess[] = [];
+							const noBrowser =
+								inputs?.noBrowser === "true" ||
+								inputs?.["no-browser"] === "true";
+							const useManualMode = noBrowser;
+							const existingStorage = await hydrateEmails(await loadAccounts());
+							const existingCount = existingStorage?.accounts.length ?? 0;
 
-                                                        let startFresh = true;
-                                                        const existingStorage = await hydrateEmails(await loadAccounts());
-                                                        if (existingStorage && existingStorage.accounts.length > 0) {
-                                                                const existingAccounts = existingStorage.accounts.map(
-                                                                        (account, index) => ({
-                                                                                accountId: account.accountId,
-                                                                                email: account.email,
-                                                                                index,
-                                                                        }),
-                                                                );
-                                                                const loginMode = await promptLoginMode(existingAccounts);
-                                                                startFresh = loginMode === "fresh";
+							let startFresh = false;
+							if (existingCount > 0 && existingStorage) {
+								if (inputs?.loginMode) {
+									startFresh = inputs.loginMode === "fresh";
+								} else {
+									const existingAccounts = existingStorage.accounts.map(
+										(account, index) => ({
+											accountId: account.accountId,
+											email: account.email,
+											index,
+										}),
+									);
+									const loginMode = await promptLoginMode(existingAccounts);
+									startFresh = loginMode === "fresh";
+								}
 
-                                                                if (startFresh) {
-                                                                        console.log(
-                                                                                "\nStarting fresh - existing accounts will be replaced.\n",
-                                                                        );
-                                                                } else {
-                                                                        console.log("\nAdding to existing accounts.\n");
-                                                                }
-                                                        }
+								if (startFresh) {
+									console.log(
+										"\nStarting fresh - existing accounts will be replaced.\n",
+									);
+								} else {
+									console.log("\nAdding to existing accounts.\n");
+								}
+							}
 
-				while (accounts.length < ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+							const requestedCount = Number.parseInt(
+								inputs?.accountCount ?? "1",
+								10,
+							);
+							const normalizedRequested = Number.isFinite(requestedCount)
+								? requestedCount
+								: 1;
+							const availableSlots = startFresh
+								? ACCOUNT_LIMITS.MAX_ACCOUNTS
+								: ACCOUNT_LIMITS.MAX_ACCOUNTS - existingCount;
+							const targetCount = Math.max(
+								1,
+								Math.min(normalizedRequested, availableSlots),
+							);
+
+							if (availableSlots <= 0) {
+								return {
+									url: "",
+									instructions:
+										"Account limit reached. Remove an account or start fresh.",
+									method: "auto",
+									callback: async () => ({
+										type: "failed" as const,
+									}),
+								};
+							}
+
+							if (useManualMode) {
+								const { pkce, url } = await createAuthorizationFlow();
+								return buildManualOAuthFlow(pkce, url, async (tokens) => {
+									await persistAccountPool([tokens], startFresh);
+								});
+							}
+
+							while (accounts.length < targetCount) {
 					console.log(
 						`\n=== OpenAI OAuth (Account ${
 							accounts.length + 1
 						}) ===`,
 					);
 
-					const forceNewLogin = accounts.length > 0;
-					const result = await runOAuthFlow(useManualMode, forceNewLogin);
+								const forceNewLogin = accounts.length > 0;
+								const result = await runOAuthFlow(forceNewLogin);
 
 				if (result.type === "success") {
 					const email = extractAccountEmail(result.access, result.idToken);
@@ -924,26 +964,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                                         logDebug(`[${PLUGIN_NAME}] Failed to persist account pool: ${(err as Error)?.message ?? String(err)}`);
                                                                 }
 
-                                                                if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-                                                                        break;
-                                                                }
-
-                                                                let currentAccountCount = accounts.length;
-                                                                try {
-                                                                        const currentStorage = await loadAccounts();
-                                                                        if (currentStorage) {
-                                                                                currentAccountCount = currentStorage.accounts.length;
-                                                                        }
-                                                                } catch (err) {
-                                                                        logDebug(`[${PLUGIN_NAME}] Failed to load accounts for count: ${(err as Error)?.message ?? String(err)}`);
-                                                                }
-
-                                                                const addAnother = await promptAddAnotherAccount(
-                                                                        currentAccountCount,
-                                                                );
-                                                                if (!addAnother) {
-                                                                        break;
-                                                                }
+								if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+									break;
+								}
                                                         }
 
                                                         const primary = accounts[0];
