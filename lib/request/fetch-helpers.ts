@@ -229,12 +229,19 @@ export async function handleErrorResponse(
                 errorBody = { message: bodyText };
         }
 
+        const normalizedError = normalizeErrorPayload(
+                errorBody,
+                bodyText,
+                finalResponse.statusText,
+        );
+        const errorResponse = ensureJsonErrorResponse(finalResponse, normalizedError);
+
         logRequest(LOG_STAGES.ERROR_RESPONSE, {
                 status: finalResponse.status,
                 statusText: finalResponse.statusText,
         });
 
-        return { response: finalResponse, rateLimit, errorBody };
+        return { response: errorResponse, rateLimit, errorBody: normalizedError };
 }
 
 /**
@@ -308,7 +315,7 @@ function extractRateLimitInfoFromBody(
         const haystack = `${parsed?.code ?? ""} ${bodyText}`.toLowerCase();
         const isRateLimit =
                 isStatusRateLimit ||
-                /usage_limit_reached|usage_not_included|rate_limit_exceeded|rate_limit/i.test(
+                /usage_limit_reached|usage_not_included|rate_limit_exceeded|rate_limit|usage limit/i.test(
                         haystack,
                 );
         if (!isRateLimit) return undefined;
@@ -344,6 +351,67 @@ function parseRateLimitBody(
 	} catch {
 		return undefined;
 	}
+}
+
+type ErrorPayload = {
+        error: {
+                message: string;
+                type?: string;
+                code?: string | number;
+        };
+};
+
+function normalizeErrorPayload(
+        errorBody: unknown,
+        bodyText: string,
+        statusText: string,
+): ErrorPayload {
+        if (isRecord(errorBody)) {
+                const maybeError = errorBody.error;
+                if (isRecord(maybeError) && typeof maybeError.message === "string") {
+                        const payload: ErrorPayload = {
+                                error: {
+                                        message: maybeError.message,
+                                },
+                        };
+                        if (typeof maybeError.type === "string") {
+                                payload.error.type = maybeError.type;
+                        }
+                        if (typeof maybeError.code === "string" || typeof maybeError.code === "number") {
+                                payload.error.code = maybeError.code;
+                        }
+                        return payload;
+                }
+
+                if (typeof errorBody.message === "string") {
+                        return { error: { message: errorBody.message } };
+                }
+        }
+
+        const trimmed = bodyText.trim();
+        if (trimmed) {
+                return { error: { message: trimmed } };
+        }
+
+        if (statusText) {
+                return { error: { message: statusText } };
+        }
+
+        return { error: { message: "Request failed" } };
+}
+
+function ensureJsonErrorResponse(response: Response, payload: ErrorPayload): Response {
+        const headers = new Headers(response.headers);
+        headers.set("content-type", "application/json; charset=utf-8");
+        return new Response(JSON.stringify(payload), {
+                status: response.status,
+                statusText: response.statusText,
+                headers,
+        });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+        return typeof value === "object" && value !== null;
 }
 
 function parseRetryAfterMs(
