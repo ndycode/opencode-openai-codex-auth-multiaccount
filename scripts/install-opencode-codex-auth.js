@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
-const PLUGIN_NAME = "opencode-openai-codex-auth-multi";
+const PLUGIN_NAME = "oc-chatgpt-multi-auth";
 
 const args = new Set(process.argv.slice(2));
 
