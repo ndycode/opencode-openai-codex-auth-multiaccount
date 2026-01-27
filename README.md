@@ -14,6 +14,8 @@ Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so 
 
 - **GPT-5.2, GPT-5.2 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
 - **Multi-account support** — add multiple ChatGPT accounts, health-aware rotation with automatic failover
+- **Click-to-switch** — switch accounts directly from the OpenCode TUI
+- **Strict tool validation** — automatically cleans schemas for compatibility with strict models (Claude, Gemini)
 - **Auto-update notifications** — get notified when a new version is available
 - **22 model presets** — full variant system with reasoning levels (none/low/medium/high/xhigh)
 - **Prompt caching** — session-based caching for faster multi-turn conversations
@@ -306,7 +308,7 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 1. **Manual URL paste:**
    - Re-run `opencode auth login`
    - Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
-   - Paste the full redirect URL after login
+   - Paste the full redirect URL (including `#code=...`) after login
 
 2. **Check port availability:**
    ```bash
