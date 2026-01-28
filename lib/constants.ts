@@ -18,6 +18,7 @@ export const PROVIDER_ID = "openai";
 /** HTTP Status Codes */
 export const HTTP_STATUS = {
 	OK: 200,
+	FORBIDDEN: 403,
 	UNAUTHORIZED: 401,
 	NOT_FOUND: 404,
 	TOO_MANY_REQUESTS: 429,

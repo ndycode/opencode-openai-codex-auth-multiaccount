@@ -7,6 +7,8 @@ import {
     rewriteUrlForCodex,
     createCodexHeaders,
     handleErrorResponse,
+    isEntitlementError,
+    createEntitlementErrorResponse,
 } from '../lib/request/fetch-helpers.js';
 import type { Auth } from '../lib/types.js';
 import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES } from '../lib/constants.js';
@@ -200,5 +202,55 @@ describe('Fetch Helpers Module', () => {
 			expect(headers.get(OPENAI_HEADERS.CONVERSATION_ID)).toBeNull();
 			expect(headers.get(OPENAI_HEADERS.SESSION_ID)).toBeNull();
 		});
+
+		it('maps usage_not_included 404 to 403 entitlement error, not rate limit', async () => {
+			const body = {
+				error: {
+					code: 'usage_not_included',
+					message: 'Usage not included in your plan',
+				},
+			};
+			const resp = new Response(JSON.stringify(body), { status: 404 });
+			const { response: result, rateLimit } = await handleErrorResponse(resp);
+			expect(result.status).toBe(403);
+			expect(rateLimit).toBeUndefined();
+			const json = await result.json() as any;
+			expect(json.error.type).toBe('entitlement_error');
+			expect(json.error.message).toContain('not included in your ChatGPT subscription');
+		});
     });
+
+	describe('isEntitlementError', () => {
+		it('returns true for usage_not_included code', () => {
+			expect(isEntitlementError('usage_not_included', '')).toBe(true);
+		});
+
+		it('returns true when body contains "not included in your plan"', () => {
+			expect(isEntitlementError('', 'Usage not included in your plan')).toBe(true);
+		});
+
+		it('returns false for usage_limit_reached (rate limit)', () => {
+			expect(isEntitlementError('usage_limit_reached', '')).toBe(false);
+		});
+
+		it('returns false for rate_limit_exceeded', () => {
+			expect(isEntitlementError('rate_limit_exceeded', '')).toBe(false);
+		});
+
+		it('returns false for generic errors', () => {
+			expect(isEntitlementError('not_found', 'Resource not found')).toBe(false);
+		});
+	});
+
+	describe('createEntitlementErrorResponse', () => {
+		it('returns 403 status with user-friendly message', async () => {
+			const resp = createEntitlementErrorResponse('original body');
+			expect(resp.status).toBe(403);
+			expect(resp.statusText).toBe('Forbidden');
+			const json = await resp.json() as any;
+			expect(json.error.type).toBe('entitlement_error');
+			expect(json.error.code).toBe('usage_not_included');
+			expect(json.error.message).toContain('ChatGPT subscription');
+		});
+	});
 });

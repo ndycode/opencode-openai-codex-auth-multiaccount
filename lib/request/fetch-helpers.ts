@@ -25,6 +25,50 @@ export interface RateLimitInfo {
         code?: string;
 }
 
+export interface EntitlementError {
+        isEntitlement: true;
+        code: string;
+        message: string;
+}
+
+/**
+ * Checks if an error code indicates an entitlement/subscription issue
+ * These errors should NOT be treated as rate limits because:
+ * 1. They won't resolve by waiting
+ * 2. They won't resolve by switching accounts (all accounts likely have same issue)
+ * 3. User needs to upgrade their subscription
+ */
+export function isEntitlementError(code: string, bodyText: string): boolean {
+        const haystack = `${code} ${bodyText}`.toLowerCase();
+        // "usage_not_included" means the subscription doesn't include this feature
+        // This is different from "usage_limit_reached" which is a temporary quota limit
+        return /usage_not_included|not.included.in.your.plan|subscription.does.not.include/i.test(haystack);
+}
+
+/**
+ * Creates a user-friendly entitlement error response
+ */
+export function createEntitlementErrorResponse(_bodyText: string): Response {
+        const message = 
+                "This model is not included in your ChatGPT subscription. " +
+                "Please check that your account has access to Codex models (requires ChatGPT Plus/Pro). " +
+                "If you recently subscribed, try logging out and back in with `opencode auth login`.";
+        
+        const payload = {
+                error: {
+                        message,
+                        type: "entitlement_error",
+                        code: "usage_not_included",
+                },
+        };
+
+        return new Response(JSON.stringify(payload), {
+                status: 403, // Forbidden - not a rate limit
+                statusText: "Forbidden",
+                headers: { "content-type": "application/json; charset=utf-8" },
+        });
+}
+
 export interface ErrorHandlingResult {
         response: Response;
         rateLimit?: RateLimitInfo;
@@ -219,6 +263,12 @@ export async function handleErrorResponse(
 ): Promise<ErrorHandlingResult> {
         const bodyText = await safeReadBody(response);
         const mapped = mapUsageLimit404WithBody(response, bodyText);
+        
+        // Entitlement errors return a ready-to-use Response with 403 status
+        if (mapped && mapped.status === HTTP_STATUS.FORBIDDEN) {
+                return { response: mapped, rateLimit: undefined, errorBody: undefined };
+        }
+        
         const finalResponse = mapped ?? response;
         const rateLimit = extractRateLimitInfoFromBody(finalResponse, bodyText);
 
@@ -291,8 +341,13 @@ function mapUsageLimit404WithBody(response: Response, bodyText: string): Respons
 		code = "";
 	}
 
+	// Check for entitlement errors first - these should NOT be treated as rate limits
+	if (isEntitlementError(code, bodyText)) {
+		return createEntitlementErrorResponse(bodyText);
+	}
+
 	const haystack = `${code} ${bodyText}`.toLowerCase();
-	if (!/usage_limit_reached|usage_not_included|rate_limit_exceeded|usage limit/i.test(haystack)) {
+	if (!/usage_limit_reached|rate_limit_exceeded|usage limit/i.test(haystack)) {
 		return null;
 	}
 
@@ -313,9 +368,15 @@ function extractRateLimitInfoFromBody(
         const parsed = parseRateLimitBody(bodyText);
 
         const haystack = `${parsed?.code ?? ""} ${bodyText}`.toLowerCase();
+        
+        // Entitlement errors should not be treated as rate limits
+        if (isEntitlementError(parsed?.code ?? "", bodyText)) {
+                return undefined;
+        }
+        
         const isRateLimit =
                 isStatusRateLimit ||
-                /usage_limit_reached|usage_not_included|rate_limit_exceeded|rate_limit|usage limit/i.test(
+                /usage_limit_reached|rate_limit_exceeded|rate_limit|usage limit/i.test(
                         haystack,
                 );
         if (!isRateLimit) return undefined;
