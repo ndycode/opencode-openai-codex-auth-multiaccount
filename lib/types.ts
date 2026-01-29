@@ -118,6 +118,15 @@ export interface ParsedAuthInput {
 }
 
 /**
+ * Source of the accountId used for ChatGPT requests.
+ * - token: derived from access token claim
+ * - id_token: derived from id_token claim
+ * - org: selected from organizations/workspaces list
+ * - manual: explicit override (env/user selection)
+ */
+export type AccountIdSource = "token" | "id_token" | "org" | "manual";
+
+/**
  * JWT payload with ChatGPT account info
  */
 export interface JWTPayload {
@@ -126,6 +135,11 @@ export interface JWTPayload {
 		email?: string;
 		chatgpt_user_email?: string;
 	};
+	organizations?: unknown;
+	orgs?: unknown;
+	accounts?: unknown;
+	workspaces?: unknown;
+	teams?: unknown;
 	email?: string;
 	preferred_username?: string;
 	[key: string]: unknown;

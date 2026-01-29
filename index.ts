@@ -35,7 +35,7 @@ import {
 import { queuedRefresh } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { promptLoginMode } from "./lib/cli.js";
+import { promptAccountSelection, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getRateLimitToastDebounceMs,
@@ -56,17 +56,19 @@ import {
         PROVIDER_ID,
         ACCOUNT_LIMITS,
 } from "./lib/constants.js";
-import { logRequest, logDebug } from "./lib/logger.js";
+import { initLogger, logRequest, logDebug, logInfo, logWarn } from "./lib/logger.js";
 import { checkAndNotify } from "./lib/auto-update-checker.js";
 import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
         AccountManager,
+        getAccountIdCandidates,
         extractAccountEmail,
         extractAccountId,
         formatAccountLabel,
         formatCooldown,
         formatWaitTime,
         sanitizeEmail,
+        shouldUpdateAccountIdFromToken,
 } from "./lib/accounts.js";
 import { getStoragePath, loadAccounts, saveAccounts, type AccountStorageV3 } from "./lib/storage.js";
 import {
@@ -85,7 +87,7 @@ import {
 	resetRateLimitBackoff,
 } from "./lib/request/rate-limit-backoff.js";
 import { getModelFamily, MODEL_FAMILIES, type ModelFamily } from "./lib/prompts/codex.js";
-import type { OAuthAuthDetails, TokenResult, UserConfig } from "./lib/types.js";
+import type { AccountIdSource, OAuthAuthDetails, TokenResult, UserConfig } from "./lib/types.js";
 import {
 	createSessionRecoveryHook,
 	isRecoverableError,
@@ -110,14 +112,79 @@ import {
  * ```
  */
 export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
+	initLogger(client);
 	let cachedAccountManager: AccountManager | null = null;
 
         type TokenSuccess = Extract<TokenResult, { type: "success" }>;
+        type TokenSuccessWithAccount = TokenSuccess & {
+                accountIdOverride?: string;
+                accountIdSource?: AccountIdSource;
+                accountLabel?: string;
+        };
+
+        const resolveAccountSelection = async (
+                tokens: TokenSuccess,
+        ): Promise<TokenSuccessWithAccount> => {
+                const override = (process.env.CODEX_AUTH_ACCOUNT_ID ?? "").trim();
+                if (override) {
+                        const suffix = override.length > 6 ? override.slice(-6) : override;
+                        logInfo(`Using account override from CODEX_AUTH_ACCOUNT_ID (id:${suffix}).`);
+                        return {
+                                ...tokens,
+                                accountIdOverride: override,
+                                accountIdSource: "manual",
+                                accountLabel: `Override [id:${suffix}]`,
+                        };
+                }
+
+                const candidates = getAccountIdCandidates(tokens.access, tokens.idToken);
+                if (candidates.length === 0) {
+                        return tokens;
+                }
+
+                if (candidates.length === 1) {
+                        const candidate = candidates[0];
+                        return {
+                                ...tokens,
+                                accountIdOverride: candidate.accountId,
+                                accountIdSource: candidate.source,
+                                accountLabel: candidate.label,
+                        };
+                }
+
+                const defaultIndex = (() => {
+                        const orgDefaultIndex = candidates.findIndex(
+                                (candidate) => candidate.isDefault && candidate.source === "org",
+                        );
+                        if (orgDefaultIndex >= 0) return orgDefaultIndex;
+
+                        const tokenIndex = candidates.findIndex(
+                                (candidate) => candidate.source === "token",
+                        );
+                        if (tokenIndex >= 0) return tokenIndex;
+
+                        return 0;
+                })();
+
+                const selected = await promptAccountSelection(candidates, {
+                        defaultIndex,
+                        title: "Multiple workspaces detected for this account:",
+                });
+                const choice = selected ?? candidates[defaultIndex];
+                if (!choice) return tokens;
+
+                return {
+                        ...tokens,
+                        accountIdOverride: choice.accountId,
+                        accountIdSource: choice.source ?? "token",
+                        accountLabel: choice.label,
+                };
+        };
 
         const buildManualOAuthFlow = (
                 pkce: { verifier: string },
                 url: string,
-                onSuccess?: (tokens: TokenSuccess) => Promise<void>,
+                onSuccess?: (tokens: TokenSuccessWithAccount) => Promise<void>,
         ) => ({
                 url,
                 method: "code" as const,
@@ -132,10 +199,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 pkce.verifier,
                                 REDIRECT_URI,
                         );
-                        if (tokens?.type === "success" && onSuccess) {
-                                await onSuccess(tokens);
+                        if (tokens?.type === "success") {
+                                const resolved = await resolveAccountSelection(tokens);
+                                if (onSuccess) {
+                                        await onSuccess(resolved);
+                                }
+                                return resolved;
                         }
-                        return tokens?.type === "success"
+                        return tokens?.type === "failed"
                                 ? tokens
                                 : { type: "failed" as const };
                 },
@@ -145,7 +216,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		forceNewLogin: boolean = false,
 	): Promise<TokenResult> => {
 		const { pkce, state, url } = await createAuthorizationFlow({ forceNewLogin });
-                console.log("\nOAuth URL:\n" + url + "\n");
+		logInfo(`OAuth URL: ${url}`);
 
                 let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null = null;
                 try {
@@ -161,7 +232,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         const message =
                                 `\n[${PLUGIN_NAME}] OAuth callback server failed to start. ` +
                                 `Please retry with "${AUTH_LABELS.OAUTH_MANUAL}".\n`;
-                        console.warn(message);
+				logWarn(message);
                         return { type: "failed" as const };
                 }
 
@@ -180,7 +251,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
         };
 
         const persistAccountPool = async (
-                results: TokenSuccess[],
+                results: TokenSuccessWithAccount[],
                 replaceAll: boolean = false,
         ): Promise<void> => {
                 if (results.length === 0) return;
@@ -206,7 +277,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 
 			for (const result of results) {
-					const accountId = extractAccountId(result.access);
+					const accountId = result.accountIdOverride ?? extractAccountId(result.access);
+					const accountIdSource =
+							accountId
+									? result.accountIdSource ??
+										(result.accountIdOverride ? "manual" : "token")
+									: undefined;
+					const accountLabel = result.accountLabel;
 					const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
 						const existingByEmail =
 								accountEmail && indexByEmail.has(accountEmail)
@@ -223,6 +300,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 const newIndex = accounts.length;
                                 accounts.push({
                                         accountId,
+                                        accountIdSource,
+                                        accountLabel,
                                         email: accountEmail,
                                         refreshToken: result.refresh,
                                         addedAt: now,
@@ -244,9 +323,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const oldToken = existing.refreshToken;
 						const oldEmail = existing.email;
 						const nextEmail = accountEmail ?? existing.email;
+						const nextAccountId = accountId ?? existing.accountId;
+						const nextAccountIdSource =
+								accountId ? accountIdSource ?? existing.accountIdSource : existing.accountIdSource;
+						const nextAccountLabel = accountLabel ?? existing.accountLabel;
 						accounts[existingIndex] = {
 								...existing,
-								accountId: accountId ?? existing.accountId,
+								accountId: nextAccountId,
+								accountIdSource: nextAccountIdSource,
+								accountLabel: nextAccountLabel,
 								email: nextEmail,
 								refreshToken: result.refresh,
 								lastUsed: now,
@@ -351,8 +436,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         if (refreshed.type !== "success") return;
                                         const id = extractAccountId(refreshed.access);
                                         const email = sanitizeEmail(extractAccountEmail(refreshed.access, refreshed.idToken));
-                                        if (id && id !== account.accountId) {
+                                        if (
+                                                id &&
+                                                id !== account.accountId &&
+                                                shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId)
+                                        ) {
                                                 account.accountId = id;
+                                                account.accountIdSource = "token";
                                                 changed = true;
                                         }
                                         if (email && email !== account.email) {
@@ -611,7 +701,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 				}
 							attempted.add(account.index);
 							// Log account selection for debugging rotation
-							console.log(`[oc-chatgpt-multi-auth] Using account ${account.index + 1}/${accountCount}: ${account.email ?? "unknown"} for ${modelFamily}`);
+							logDebug(
+								`Using account ${account.index + 1}/${accountCount}: ${account.email ?? "unknown"} for ${modelFamily}`,
+							);
 
 											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
 											try {
@@ -634,6 +726,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							continue;
 						}
 
+						const hadAccountId = !!account.accountId;
 						const accountId =
 							account.accountId ?? extractAccountId(accountAuth.access);
 						if (!accountId) {
@@ -646,6 +739,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 							continue;
 						}
 											account.accountId = accountId;
+											if (!hadAccountId) {
+												account.accountIdSource = account.accountIdSource ?? "token";
+											}
 											account.email =
 												extractAccountEmail(accountAuth.access) ?? account.email;
 
@@ -741,7 +837,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 				accountManager.recordRateLimit(account, modelFamily, model);
 				account.lastSwitchReason = "rate-limit";
 				accountManager.saveToDiskDebounced();
-				console.log(`[oc-chatgpt-multi-auth] Rate limited! Account ${account.index + 1} (${account.email ?? "unknown"}) will rotate to next account`);
+						logWarn(
+							`Rate limited. Rotating account ${account.index + 1} (${account.email ?? "unknown"}).`,
+						);
 
 																														if (
 																															accountManager.getAccountCount() > 1 &&
@@ -854,7 +952,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         authorize: async (inputs?: Record<string, string>) => {
 							// Always use the multi-account flow regardless of inputs
 							// The inputs parameter is only used for noBrowser flag, not for flow selection
-							const accounts: TokenSuccess[] = [];
+							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =
 								inputs?.noBrowser === "true" ||
 								inputs?.["no-browser"] === "true";
@@ -870,6 +968,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									const existingAccounts = existingStorage.accounts.map(
 										(account, index) => ({
 											accountId: account.accountId,
+											accountLabel: account.accountLabel,
 											email: account.email,
 											index,
 										}),
@@ -879,12 +978,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								if (startFresh) {
-									console.log(
-										"\nStarting fresh - existing accounts will be replaced.\n",
-									);
-								} else {
-									console.log("\nAdding to existing accounts.\n");
-								}
+						logInfo(
+							"Starting fresh - existing accounts will be replaced.",
+						);
+					} else {
+						logInfo("Adding to existing accounts.");
+					}
 							}
 
 							const requestedCount = Number.parseInt(
@@ -922,35 +1021,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 							}
 
 							while (accounts.length < targetCount) {
-					console.log(
-						`\n=== OpenAI OAuth (Account ${
-							accounts.length + 1
-						}) ===`,
-					);
+						logInfo(
+							`=== OpenAI OAuth (Account ${accounts.length + 1}) ===`,
+						);
 
 								const forceNewLogin = accounts.length > 0;
 								const result = await runOAuthFlow(forceNewLogin);
 
+								let resolved: TokenSuccessWithAccount | null = null;
 				if (result.type === "success") {
-					const email = extractAccountEmail(result.access, result.idToken);
-					const accountId = extractAccountId(result.access);
-					const label = email || accountId || "Unknown account";
-					console.log(`\n✓ Authenticated as: ${label}\n`);
+					resolved = await resolveAccountSelection(result);
+					const email = extractAccountEmail(resolved.access, resolved.idToken);
+					const accountId =
+						resolved.accountIdOverride ?? extractAccountId(resolved.access);
+					const label = resolved.accountLabel ?? email ?? accountId ?? "Unknown account";
+						logInfo(`Authenticated as: ${label}`);
 
 					const isDuplicate = accounts.some(
 						(acc) =>
-							(accountId && extractAccountId(acc.access) === accountId) ||
+							(accountId &&
+								(acc.accountIdOverride ?? extractAccountId(acc.access)) === accountId) ||
 							(email && extractAccountEmail(acc.access, acc.idToken) === email),
 					);
 
 						if (isDuplicate) {
-							console.warn(
+							logWarn(
 								`\n⚠️  WARNING: You authenticated with an account that is already in the list (${label}).`,
 							);
-							console.warn(
+							logWarn(
 								"This usually happens if you didn't log out or use a different browser profile.",
 							);
-							console.warn("The duplicate will update the existing entry.\n");
+							logWarn("The duplicate will update the existing entry.");
 						}
 					}
 
@@ -964,15 +1065,19 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                                                         callback: async () => result,
                                                                                 };
                                                                         }
-                                                                        console.warn(
-                                                                                `[${PLUGIN_NAME}] Skipping failed account ${
-                                                                                        accounts.length + 1
-                                                                                }`,
-                                                                        );
+							logWarn(
+								`[${PLUGIN_NAME}] Skipping failed account ${
+									accounts.length + 1
+								}`,
+							);
                                                                         break;
                                                                 }
 
-                                                                accounts.push(result);
+                                                                if (!resolved) {
+                                                                        continue;
+                                                                }
+
+                                                                accounts.push(resolved);
                                                                 await showToast(
                                                                         `Account ${accounts.length} authenticated`,
                                                                         "success",
@@ -981,7 +1086,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                                 try {
                                                                         const isFirstAccount = accounts.length === 1;
                                                                         await persistAccountPool(
-                                                                                [result],
+                                                                                [resolved],
                                                                                 isFirstAccount && startFresh,
                                                                         );
                                                                 } catch (err) {

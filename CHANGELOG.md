@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
 
+## [4.9.6] - 2026-01-29
+
+### Fixed
+- Business/Team workspace selection: detect multiple workspace account IDs from OAuth tokens and prompt for the correct one.
+- Prevent refresh/hydration from overwriting selected workspace IDs (org/manual choices remain stable).
+- Persist workspace labels and sources for clearer account listings.
+
+### Added
+- `CODEX_AUTH_ACCOUNT_ID` override to force a specific workspace ID (non-interactive login).
+- Troubleshooting guidance for “Usage not included in your plan”.
+
 ## [4.9.0] - 2026-01-26
 
 **BREAKING: Package renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`**
