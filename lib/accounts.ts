@@ -8,7 +8,7 @@ import {
   type CooldownReason,
   type RateLimitStateV3,
 } from "./storage.js";
-import type { OAuthAuthDetails } from "./types.js";
+import type { AccountIdSource, JWTPayload, OAuthAuthDetails } from "./types.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import {
   getHealthTracker,
@@ -21,6 +21,13 @@ export type BaseQuotaKey = ModelFamily;
 export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
 
 export type RateLimitReason = "quota" | "tokens" | "concurrent" | "unknown";
+
+export interface AccountIdCandidate {
+  accountId: string;
+  label: string;
+  source: AccountIdSource;
+  isDefault?: boolean;
+}
 
 function nowMs(): number {
   return Date.now();
@@ -38,6 +45,188 @@ function getQuotaKey(family: ModelFamily, model?: string | null): QuotaKey {
     return `${family}:${model}`;
   }
   return family;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function toStringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function toBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+}
+
+function formatAccountIdSuffix(accountId: string): string {
+  return accountId.length > 6 ? accountId.slice(-6) : accountId;
+}
+
+function extractAccountIdFromPayload(payload: JWTPayload | Record<string, unknown> | null): string | undefined {
+  if (!payload) return undefined;
+  const auth = payload[JWT_CLAIM_PATH];
+  if (isRecord(auth)) {
+    const id = toStringValue(auth.chatgpt_account_id);
+    if (id) return id;
+  }
+
+  const direct =
+    toStringValue((payload as Record<string, unknown>).chatgpt_account_id) ??
+    toStringValue((payload as Record<string, unknown>).account_id) ??
+    toStringValue((payload as Record<string, unknown>).accountId);
+  return direct;
+}
+
+function normalizeCandidateArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (isRecord(value)) {
+    const nested =
+      value.data ??
+      value.items ??
+      value.accounts ??
+      value.organizations ??
+      value.workspaces ??
+      value.teams;
+    if (Array.isArray(nested)) return nested;
+  }
+  return [];
+}
+
+function extractCandidateFromRecord(
+  record: Record<string, unknown>,
+  source: AccountIdSource,
+): AccountIdCandidate | null {
+  const accountId =
+    toStringValue(record.account_id) ??
+    toStringValue(record.accountId) ??
+    toStringValue(record.chatgpt_account_id) ??
+    toStringValue(record.organization_id) ??
+    toStringValue(record.org_id) ??
+    toStringValue(record.workspace_id) ??
+    toStringValue(record.team_id) ??
+    toStringValue(record.id);
+
+  if (!accountId) return null;
+
+  const name =
+    toStringValue(record.name) ??
+    toStringValue(record.display_name) ??
+    toStringValue(record.title) ??
+    toStringValue(record.organization_name) ??
+    toStringValue(record.workspace_name) ??
+    toStringValue(record.team_name) ??
+    toStringValue(record.slug);
+  const type =
+    toStringValue(record.type) ??
+    toStringValue(record.plan_type) ??
+    toStringValue(record.kind) ??
+    toStringValue(record.account_type);
+  const role =
+    toStringValue(record.role) ??
+    toStringValue(record.membership_role) ??
+    toStringValue(record.user_role);
+  const isDefault = toBoolean(
+    record.is_default ?? record.isDefault ?? record.default ?? record.primary ?? record.is_active ?? record.isActive ?? record.current,
+  );
+  const isPersonal = toBoolean(record.is_personal ?? record.isPersonal ?? record.personal);
+
+  const suffix = formatAccountIdSuffix(accountId);
+  const labelParts: string[] = [];
+  let labelBase = name ?? "Workspace";
+
+  if (!name && type) {
+    labelBase = type;
+  }
+
+  if (type && (!name || name.toLowerCase() !== type.toLowerCase())) {
+    labelParts.push(type);
+  }
+  if (role) {
+    labelParts.push(`role:${role}`);
+  }
+  if (isPersonal) {
+    labelParts.push("personal");
+  }
+
+  const meta = labelParts.length > 0 ? ` (${labelParts.join(", ")})` : "";
+  const label = `${labelBase}${meta} [id:${suffix}]`;
+
+  return {
+    accountId,
+    label,
+    source,
+    isDefault,
+  };
+}
+
+function collectCandidatesFromList(
+  value: unknown,
+  source: AccountIdSource,
+): AccountIdCandidate[] {
+  const result: AccountIdCandidate[] = [];
+  const list = normalizeCandidateArray(value);
+  if (list.length === 0) return result;
+
+  for (const item of list) {
+    if (!isRecord(item)) continue;
+    const candidate = extractCandidateFromRecord(item, source);
+    if (candidate) {
+      result.push(candidate);
+    }
+  }
+  return result;
+}
+
+function collectCandidatesFromPayload(
+  payload: JWTPayload | Record<string, unknown> | null,
+  source: AccountIdSource,
+): AccountIdCandidate[] {
+  if (!payload || !isRecord(payload)) return [];
+
+  const candidates: AccountIdCandidate[] = [];
+  const keys = ["organizations", "orgs", "accounts", "workspaces", "teams"];
+  for (const key of keys) {
+    if (key in payload) {
+      candidates.push(...collectCandidatesFromList(payload[key], source));
+    }
+  }
+
+  const auth = payload[JWT_CLAIM_PATH];
+  if (isRecord(auth)) {
+    for (const key of keys) {
+      if (key in auth) {
+        candidates.push(...collectCandidatesFromList(auth[key], source));
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function uniqueCandidates(candidates: AccountIdCandidate[]): AccountIdCandidate[] {
+  const seen = new Set<string>();
+  const result: AccountIdCandidate[] = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate.accountId)) continue;
+    seen.add(candidate.accountId);
+    result.push(candidate);
+  }
+  return result;
+}
+
+function formatTokenCandidateLabel(prefix: string, accountId: string): string {
+  const suffix = formatAccountIdSuffix(accountId);
+  return `${prefix} [id:${suffix}]`;
 }
 
 /**
@@ -82,6 +271,59 @@ export function extractAccountEmail(accessToken?: string, idToken?: string): str
 }
 
 /**
+ * Extracts all accountId candidates from access/id tokens.
+ * Used to support business workspaces/organizations that are not the token default.
+ */
+export function getAccountIdCandidates(
+  accessToken?: string,
+  idToken?: string,
+): AccountIdCandidate[] {
+  const candidates: AccountIdCandidate[] = [];
+  const accessId = extractAccountId(accessToken);
+  if (accessId) {
+    candidates.push({
+      accountId: accessId,
+      label: formatTokenCandidateLabel("Token account", accessId),
+      source: "token",
+      isDefault: true,
+    });
+  }
+
+  if (accessToken) {
+    const accessDecoded = decodeJWT(accessToken);
+    candidates.push(...collectCandidatesFromPayload(accessDecoded, "org"));
+  }
+
+  if (idToken) {
+    const decoded = decodeJWT(idToken);
+    const idAccountId = extractAccountIdFromPayload(decoded);
+    if (idAccountId && idAccountId !== accessId) {
+      candidates.push({
+        accountId: idAccountId,
+        label: formatTokenCandidateLabel("ID token account", idAccountId),
+        source: "id_token",
+      });
+    }
+    candidates.push(...collectCandidatesFromPayload(decoded, "org"));
+  }
+
+  return uniqueCandidates(candidates);
+}
+
+/**
+ * Determines if accountId should be updated from a token-derived value.
+ * We keep org/manual selections stable across refreshes.
+ */
+export function shouldUpdateAccountIdFromToken(
+  source: AccountIdSource | undefined,
+  currentAccountId?: string,
+): boolean {
+  if (!currentAccountId) return true;
+  if (!source) return true;
+  return source === "token" || source === "id_token";
+}
+
+/**
  * Sanitizes an email address by trimming whitespace and lowercasing.
  * @param email - Email string to sanitize
  * @returns Sanitized email or undefined if invalid
@@ -99,6 +341,8 @@ export function sanitizeEmail(email: string | undefined): string | undefined {
 export interface ManagedAccount {
   index: number;
   accountId?: string;
+  accountIdSource?: AccountIdSource;
+  accountLabel?: string;
   email?: string;
   refreshToken: string;
   access?: string;
@@ -204,6 +448,8 @@ export class AccountManager {
            return {
              index,
              accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
+             accountIdSource: account.accountIdSource,
+             accountLabel: account.accountLabel,
              email: matchesFallback
                ? sanitizeEmail(fallbackAccountEmail) ?? sanitizeEmail(account.email)
                : sanitizeEmail(account.email),
@@ -228,16 +474,17 @@ export class AccountManager {
             (fallbackAccountId && account.accountId === fallbackAccountId),
         );
 
-      if (authFallback && !hasMatchingFallback) {
-        const now = nowMs();
-        this.accounts.push({
-          index: this.accounts.length,
-          accountId: fallbackAccountId,
-          email: sanitizeEmail(fallbackAccountEmail),
-          refreshToken: authFallback.refresh,
-          access: authFallback.access,
-          expires: authFallback.expires,
-          addedAt: now,
+        if (authFallback && !hasMatchingFallback) {
+          const now = nowMs();
+          this.accounts.push({
+            index: this.accounts.length,
+            accountId: fallbackAccountId,
+            accountIdSource: fallbackAccountId ? "token" : undefined,
+            email: sanitizeEmail(fallbackAccountEmail),
+            refreshToken: authFallback.refresh,
+            access: authFallback.access,
+            expires: authFallback.expires,
+            addedAt: now,
           lastUsed: now,
           lastSwitchReason: "initial",
           rateLimitResetTimes: {},
@@ -263,6 +510,7 @@ export class AccountManager {
         {
           index: 0,
           accountId: fallbackAccountId,
+          accountIdSource: fallbackAccountId ? "token" : undefined,
           email: sanitizeEmail(fallbackAccountEmail),
           refreshToken: authFallback.refresh,
           access: authFallback.access,
@@ -525,7 +773,14 @@ export class AccountManager {
     account.refreshToken = auth.refresh;
     account.access = auth.access;
     account.expires = auth.expires;
-    account.accountId = extractAccountId(auth.access) ?? account.accountId;
+    const tokenAccountId = extractAccountId(auth.access);
+    if (
+      tokenAccountId &&
+      (shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId))
+    ) {
+      account.accountId = tokenAccountId;
+      account.accountIdSource = "token";
+    }
     account.email = sanitizeEmail(extractAccountEmail(auth.access)) ?? account.email;
   }
 
@@ -629,6 +884,8 @@ export class AccountManager {
       version: 3,
       accounts: this.accounts.map((account) => ({
         accountId: account.accountId,
+        accountIdSource: account.accountIdSource,
+        accountLabel: account.accountLabel,
         email: account.email,
         refreshToken: account.refreshToken,
         addedAt: account.addedAt,
@@ -677,13 +934,20 @@ export class AccountManager {
  * @returns Formatted label string
  */
 export function formatAccountLabel(
-  account: { email?: string; accountId?: string } | undefined,
+  account: { email?: string; accountId?: string; accountLabel?: string } | undefined,
   index: number,
 ): string {
+  const accountLabel = account?.accountLabel?.trim();
   const email = account?.email?.trim();
   const accountId = account?.accountId?.trim();
   const idSuffix = accountId ? (accountId.length > 6 ? accountId.slice(-6) : accountId) : null;
 
+  if (accountLabel && email && idSuffix) {
+    return `Account ${index + 1} (${accountLabel}, ${email}, id:${idSuffix})`;
+  }
+  if (accountLabel && email) return `Account ${index + 1} (${accountLabel}, ${email})`;
+  if (accountLabel && idSuffix) return `Account ${index + 1} (${accountLabel}, id:${idSuffix})`;
+  if (accountLabel) return `Account ${index + 1} (${accountLabel})`;
   if (email && idSuffix) return `Account ${index + 1} (${email}, id:${idSuffix})`;
   if (email) return `Account ${index + 1} (${email})`;
   if (idSuffix) return `Account ${index + 1} (${idSuffix})`;

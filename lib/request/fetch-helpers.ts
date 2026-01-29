@@ -5,13 +5,12 @@
 
 import type { Auth, OpencodeClient } from "@opencode-ai/sdk";
 import { queuedRefresh } from "../refresh-queue.js";
-import { logRequest } from "../logger.js";
+import { logRequest, logError } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { UserConfig, RequestBody } from "../types.js";
 import {
-        PLUGIN_NAME,
         HTTP_STATUS,
         OPENAI_HEADERS,
         OPENAI_HEADER_VALUES,
@@ -51,8 +50,8 @@ export function isEntitlementError(code: string, bodyText: string): boolean {
 export function createEntitlementErrorResponse(_bodyText: string): Response {
         const message = 
                 "This model is not included in your ChatGPT subscription. " +
-                "Please check that your account has access to Codex models (requires ChatGPT Plus/Pro). " +
-                "If you recently subscribed, try logging out and back in with `opencode auth login`.";
+                "Please check that your account or workspace has access to Codex models (Plus/Pro/Business/Enterprise). " +
+                "If you recently subscribed or switched workspaces, try logging out and back in with `opencode auth login`.";
         
         const payload = {
                 error: {
@@ -216,7 +215,7 @@ export async function transformRequestForCodex(
 			updatedInit: { ...init, body: JSON.stringify(transformedBody) },
 		};
 	} catch (e) {
-		console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.REQUEST_PARSE_ERROR}:`, e);
+		logError(`${ERROR_MESSAGES.REQUEST_PARSE_ERROR}`, e);
 		return undefined;
 	}
 }

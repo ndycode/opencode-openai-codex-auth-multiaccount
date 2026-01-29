@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
+import type { AccountIdSource } from "./types.js";
 
 const log = createLogger("storage");
 
@@ -25,6 +26,8 @@ export interface RateLimitStateV3 {
 
 export interface AccountMetadataV1 {
   accountId?: string;
+  accountIdSource?: AccountIdSource;
+  accountLabel?: string;
   email?: string;
   refreshToken: string;
   addedAt: number;
@@ -43,6 +46,8 @@ export interface AccountStorageV1 {
 
 export interface AccountMetadataV3 {
   accountId?: string;
+  accountIdSource?: AccountIdSource;
+  accountLabel?: string;
   email?: string;
   refreshToken: string;
   addedAt: number;
@@ -251,6 +256,8 @@ function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
       }
       return {
         accountId: account.accountId,
+        accountIdSource: account.accountIdSource,
+        accountLabel: account.accountLabel,
         email: account.email,
         refreshToken: account.refreshToken,
         addedAt: account.addedAt,
