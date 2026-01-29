@@ -354,6 +354,7 @@ export interface ManagedAccount {
   rateLimitResetTimes: RateLimitStateV3;
   coolingDownUntil?: number;
   cooldownReason?: CooldownReason;
+  consecutiveAuthFailures?: number;
 }
 
 function clearExpiredRateLimits(account: ManagedAccount): void {
@@ -754,6 +755,15 @@ export class AccountManager {
   clearAccountCooldown(account: ManagedAccount): void {
     delete account.coolingDownUntil;
     delete account.cooldownReason;
+  }
+
+  incrementAuthFailures(account: ManagedAccount): number {
+    account.consecutiveAuthFailures = (account.consecutiveAuthFailures ?? 0) + 1;
+    return account.consecutiveAuthFailures;
+  }
+
+  clearAuthFailures(account: ManagedAccount): void {
+    account.consecutiveAuthFailures = 0;
   }
 
   shouldShowAccountToast(accountIndex: number, debounceMs = 30000): boolean {

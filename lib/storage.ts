@@ -89,11 +89,41 @@ function isProjectDirectory(dir: string): boolean {
   return PROJECT_MARKERS.some((marker) => existsSync(join(dir, marker)));
 }
 
+/**
+ * Walk up the directory tree to find the nearest project root.
+ * Returns the first directory containing a project marker, or null if none found.
+ */
+function findProjectRoot(startDir: string): string | null {
+  let current = startDir;
+  const root = dirname(current) === current ? current : null;
+  
+  while (current) {
+    if (isProjectDirectory(current)) {
+      return current;
+    }
+    
+    const parent = dirname(current);
+    // Reached filesystem root
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  
+  return root && isProjectDirectory(root) ? root : null;
+}
+
 let currentStoragePath: string | null = null;
 
 export function setStoragePath(projectPath: string | null): void {
-  if (projectPath && isProjectDirectory(projectPath)) {
-    currentStoragePath = join(getProjectConfigDir(projectPath), "openai-codex-accounts.json");
+  if (!projectPath) {
+    currentStoragePath = null;
+    return;
+  }
+  
+  const projectRoot = findProjectRoot(projectPath);
+  if (projectRoot) {
+    currentStoragePath = join(getProjectConfigDir(projectRoot), "openai-codex-accounts.json");
   } else {
     currentStoragePath = null;
   }

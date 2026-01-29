@@ -87,4 +87,6 @@ export const ACCOUNT_LIMITS = {
 	MAX_ACCOUNTS: 20,
 	/** Cooldown period (ms) after auth failure before retrying account */
 	AUTH_FAILURE_COOLDOWN_MS: 30_000,
+	/** Number of consecutive auth failures before auto-removing account */
+	MAX_AUTH_FAILURES_BEFORE_REMOVAL: 3,
 } as const;

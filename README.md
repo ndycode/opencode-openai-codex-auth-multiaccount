@@ -252,19 +252,21 @@ opencode auth login  # run again to add more accounts
 - `openai-accounts` — list all accounts
 - `openai-accounts-switch` — switch active account
 - `openai-accounts-status` — show rate limit status
-- `openai-accounts-remove` — remove an account by index (new in v4.10.0)
+- `openai-accounts-remove` — remove an account by index
 - `openai-accounts-health` — check health of all accounts
+- `openai-accounts-refresh` — manually refresh all tokens (new in v4.11.0)
 
 **how rotation works:**
 - health scoring tracks success/failure per account
 - token bucket prevents hitting rate limits
 - hybrid selection prefers healthy accounts with available tokens
-- always retries when all accounts are rate-limited (waits for reset)
+- always retries when all accounts are rate-limited (waits for reset with live countdown)
 - 20% jitter on retry delays to avoid thundering herd
+- auto-removes accounts after 3 consecutive auth failures (new in v4.11.0)
 
 **per-project accounts (v4.10.0+):**
 
-by default, each project directory gets its own account storage. this means you can have different active accounts per project. disable with `perProjectAccounts: false` in your config.
+by default, each project directory gets its own account storage. this means you can have different active accounts per project. works from subdirectories too — the plugin walks up to find the project root (v4.11.0). disable with `perProjectAccounts: false` in your config.
 
 **storage locations:**
 - per-project: `{project-root}/.opencode/openai-codex-accounts.json`

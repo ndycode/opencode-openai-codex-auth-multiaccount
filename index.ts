@@ -674,31 +674,61 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																				const modelFamily = model ? getModelFamily(model) : "gpt-5.1";
 																				const quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
 
-																				const abortSignal = requestInit?.signal ?? init?.signal ?? null;
-									const sleep = (ms: number): Promise<void> =>
-										new Promise((resolve, reject) => {
-											if (abortSignal?.aborted) {
-												reject(new Error("Aborted"));
-												return;
-											}
+					const abortSignal = requestInit?.signal ?? init?.signal ?? null;
+					const sleep = (ms: number): Promise<void> =>
+						new Promise((resolve, reject) => {
+							if (abortSignal?.aborted) {
+								reject(new Error("Aborted"));
+								return;
+							}
 
-											const timeout = setTimeout(() => {
-												cleanup();
-												resolve();
-											}, ms);
+							const timeout = setTimeout(() => {
+								cleanup();
+								resolve();
+							}, ms);
 
-											const onAbort = () => {
-												cleanup();
-												reject(new Error("Aborted"));
-											};
+							const onAbort = () => {
+								cleanup();
+								reject(new Error("Aborted"));
+							};
 
-											const cleanup = () => {
-												clearTimeout(timeout);
-												abortSignal?.removeEventListener("abort", onAbort);
-											};
+							const cleanup = () => {
+								clearTimeout(timeout);
+								abortSignal?.removeEventListener("abort", onAbort);
+							};
 
-											abortSignal?.addEventListener("abort", onAbort, { once: true });
-										});
+							abortSignal?.addEventListener("abort", onAbort, { once: true });
+						});
+
+					const sleepWithCountdown = async (
+						totalMs: number,
+						message: string,
+						intervalMs: number = 5000,
+					): Promise<void> => {
+						const startTime = Date.now();
+						const endTime = startTime + totalMs;
+						
+						while (Date.now() < endTime) {
+							if (abortSignal?.aborted) {
+								throw new Error("Aborted");
+							}
+							
+							const remaining = Math.max(0, endTime - Date.now());
+							const waitLabel = formatWaitTime(remaining);
+							await showToast(
+								`${message} (${waitLabel} remaining)`,
+								"warning",
+								{ duration: Math.min(intervalMs + 1000, toastDurationMs) },
+							);
+							
+							const sleepTime = Math.min(intervalMs, remaining);
+							if (sleepTime > 0) {
+								await sleep(sleepTime);
+							} else {
+								break;
+							}
+						}
+					};
 
 									let allRateLimitedRetries = 0;
 
@@ -718,25 +748,40 @@ while (attempted.size < Math.max(1, accountCount)) {
 							);
 
 											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
-											try {
-							if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
-								accountAuth = (await refreshAndUpdateToken(
-									accountAuth,
-									client,
-								)) as OAuthAuthDetails;
-								accountManager.updateFromAuth(account, accountAuth);
-								accountManager.saveToDiskDebounced();
-							}
+								try {
+						if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
+							accountAuth = (await refreshAndUpdateToken(
+								accountAuth,
+								client,
+							)) as OAuthAuthDetails;
+							accountManager.updateFromAuth(account, accountAuth);
+							accountManager.clearAuthFailures(account);
+							accountManager.saveToDiskDebounced();
+						}
 			} catch (err) {
 				logDebug(`[${PLUGIN_NAME}] Auth refresh failed for account: ${(err as Error)?.message ?? String(err)}`);
+				const failures = accountManager.incrementAuthFailures(account);
+				const accountLabel = formatAccountLabel(account, account.index);
+				
+				if (failures >= ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_REMOVAL) {
+					accountManager.removeAccount(account);
+					accountManager.saveToDiskDebounced();
+					await showToast(
+						`Removed ${accountLabel} after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`,
+						"error",
+						{ duration: toastDurationMs * 2 },
+					);
+					continue;
+				}
+				
 				accountManager.markAccountCoolingDown(
 								account,
 								ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
 								"auth-failure",
 							);
-							accountManager.saveToDiskDebounced();
-							continue;
-						}
+						accountManager.saveToDiskDebounced();
+						continue;
+					}
 
 						const hadAccountId = !!account.accountId;
 						const accountId =
@@ -883,24 +928,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const waitMs = accountManager.getMinWaitTimeForFamily(modelFamily, model);
 										const count = accountManager.getAccountCount();
 
-										if (
-											retryAllAccountsRateLimited &&
-											count > 0 &&
-											waitMs > 0 &&
-											(retryAllAccountsMaxWaitMs === 0 ||
-												waitMs <= retryAllAccountsMaxWaitMs) &&
-											allRateLimitedRetries < retryAllAccountsMaxRetries
-										) {
-								const waitLabel = formatWaitTime(waitMs);
-									await showToast(
-										`All ${count} account(s) are rate-limited. Waiting ${waitLabel}...`,
-										"warning",
-										{ duration: toastDurationMs },
-									);
+								if (
+									retryAllAccountsRateLimited &&
+									count > 0 &&
+									waitMs > 0 &&
+									(retryAllAccountsMaxWaitMs === 0 ||
+										waitMs <= retryAllAccountsMaxWaitMs) &&
+									allRateLimitedRetries < retryAllAccountsMaxRetries
+								) {
+									const countdownMessage = `All ${count} account(s) rate-limited. Waiting`;
+									await sleepWithCountdown(addJitter(waitMs, 0.2), countdownMessage);
 									allRateLimitedRetries++;
-									await sleep(addJitter(waitMs, 0.2));
 									continue;
-										}
+								}
 
 										const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
 										const message =
@@ -1472,6 +1512,52 @@ while (attempted.size < Math.max(1, accountCount)) {
 							? `Remaining accounts: ${remaining}`
 							: "No accounts remaining. Run: opencode auth login",
 					].join("\n");
+				},
+			}),
+
+			"openai-accounts-refresh": tool({
+				description: "Manually refresh OAuth tokens for all accounts to verify they're still valid.",
+				args: {},
+				async execute() {
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						return "No OpenAI accounts configured. Run: opencode auth login";
+					}
+
+					const results: string[] = [
+						`Refreshing ${storage.accounts.length} account(s):`,
+						"",
+					];
+
+					let refreshedCount = 0;
+					let failedCount = 0;
+
+					for (let i = 0; i < storage.accounts.length; i++) {
+						const account = storage.accounts[i];
+						if (!account) continue;
+						const label = formatAccountLabel(account, i);
+
+						try {
+							const refreshResult = await queuedRefresh(account.refreshToken);
+							if (refreshResult.type === "success") {
+								account.refreshToken = refreshResult.refresh;
+								results.push(`  ✓ ${label}: Refreshed`);
+								refreshedCount++;
+							} else {
+								results.push(`  ✗ ${label}: Failed - ${refreshResult.message ?? refreshResult.reason}`);
+								failedCount++;
+							}
+						} catch (error) {
+							const errorMsg = error instanceof Error ? error.message : String(error);
+							results.push(`  ✗ ${label}: Error - ${errorMsg.slice(0, 50)}`);
+							failedCount++;
+						}
+					}
+
+					await saveAccounts(storage);
+					results.push("");
+					results.push(`Summary: ${refreshedCount} refreshed, ${failedCount} failed`);
+					return results.join("\n");
 				},
 			}),
 
