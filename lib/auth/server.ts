@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OAuthServerInfo } from "../types.js";
+import { logError, logWarn } from "../logger.js";
 
 // Resolve path to oauth-success.html (one level up from auth/ subfolder)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,7 +39,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			res.end(successHtml);
 			(server as http.Server & { _lastCode?: string })._lastCode = code;
 	} catch (err) {
-		console.error("[openai-codex-plugin] Request handler error:", (err as Error)?.message ?? String(err));
+		logError(`Request handler error: ${(err as Error)?.message ?? String(err)}`);
 		res.statusCode = 500;
 		res.end("Internal error");
 	}
@@ -61,16 +62,14 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 						if (lastCode) return { code: lastCode };
 						await poll();
 					}
-					console.error("[openai-codex-plugin] OAuth poll timeout after 5 minutes");
+					logWarn("OAuth poll timeout after 5 minutes");
 					return null;
 				},
 				});
 			})
 			.on("error", (err: NodeJS.ErrnoException) => {
-				console.error(
-					"[openai-codex-plugin] Failed to bind http://127.0.0.1:1455 (",
-					err?.code,
-					") Falling back to manual paste.",
+				logError(
+					`Failed to bind http://127.0.0.1:1455 (${err?.code}). Falling back to manual paste.`,
 				);
 				resolve({
 					port: 1455,
@@ -79,7 +78,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 					try {
 						server.close();
 					} catch (err) {
-						console.error("[openai-codex-plugin] Failed to close OAuth server:", (err as Error)?.message ?? String(err));
+					logError(`Failed to close OAuth server: ${(err as Error)?.message ?? String(err)}`);
 					}
 				},
 					waitForCode: async () => null,

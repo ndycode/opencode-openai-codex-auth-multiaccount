@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
+import { logWarn } from "./logger.js";
 
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
 
@@ -41,9 +42,8 @@ export function loadPluginConfig(): PluginConfig {
 			...userConfig,
 		};
 	} catch (error) {
-		console.warn(
-			`[openai-codex-plugin] Failed to load config from ${CONFIG_PATH}:`,
-			(error as Error).message
+		logWarn(
+			`Failed to load config from ${CONFIG_PATH}: ${(error as Error).message}`,
 		);
 		return DEFAULT_CONFIG;
 	}

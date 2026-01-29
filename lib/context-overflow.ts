@@ -6,7 +6,7 @@
  * This prevents the OpenCode session from getting locked on 400 errors.
  */
 
-import { PLUGIN_NAME } from "./constants.js";
+import { logDebug } from "./logger.js";
 
 /**
  * Error patterns that indicate context overflow
@@ -125,7 +125,7 @@ export async function handleContextOverflow(
   try {
     const bodyText = await response.clone().text();
     if (isContextOverflowError(response.status, bodyText)) {
-      console.log(`[${PLUGIN_NAME}] Context overflow detected, returning synthetic response`);
+		logDebug("Context overflow detected, returning synthetic response");
       return {
         handled: true,
         response: createContextOverflowResponse(model),

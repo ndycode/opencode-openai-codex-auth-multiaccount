@@ -5,6 +5,19 @@ import { PLUGIN_NAME } from "./constants.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+export interface LogClient {
+	app?: {
+		log?: (options: {
+			body: {
+				service: string;
+				level: LogLevel;
+				message: string;
+				extra?: Record<string, unknown>;
+			};
+		}) => unknown;
+	};
+}
+
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 	debug: 0,
 	info: 1,
@@ -22,13 +35,71 @@ function parseLogLevel(value: string | undefined): LogLevel {
 export const LOGGING_ENABLED = process.env.ENABLE_PLUGIN_REQUEST_LOGGING === "1";
 export const DEBUG_ENABLED = process.env.DEBUG_CODEX_PLUGIN === "1" || LOGGING_ENABLED;
 export const LOG_LEVEL = parseLogLevel(process.env.CODEX_PLUGIN_LOG_LEVEL);
+const CONSOLE_LOG_ENABLED = process.env.CODEX_CONSOLE_LOG === "1";
 const LOG_DIR = join(homedir(), ".opencode", "logs", "codex-plugin");
 
+let client: LogClient | null = null;
+
+export function initLogger(newClient: LogClient): void {
+	client = newClient;
+}
+
+function logToApp(
+	level: LogLevel,
+	message: string,
+	data?: unknown,
+	service: string = PLUGIN_NAME,
+): void {
+	const appLog = client?.app?.log;
+	if (!appLog) return;
+
+	const extra =
+		data === undefined
+			? undefined
+			: { data: typeof data === "object" ? data : { value: data } };
+
+	try {
+		const result = appLog({
+			body: {
+				service,
+				level,
+				message,
+				extra,
+			},
+		});
+		if (result && typeof (result as Promise<unknown>).catch === "function") {
+			(result as Promise<unknown>).catch(() => {});
+		}
+	} catch {
+		// Ignore app log failures
+	}
+}
+
+function logToConsole(level: LogLevel, message: string, data?: unknown): void {
+	if (!CONSOLE_LOG_ENABLED) return;
+	if (data !== undefined) {
+		if (level === "warn") console.warn(message, data);
+		else if (level === "error") console.error(message, data);
+		else console.log(message, data);
+		return;
+	}
+
+	if (level === "warn") console.warn(message);
+	else if (level === "error") console.error(message);
+	else console.log(message);
+}
+
 if (LOGGING_ENABLED) {
-	console.log(`[${PLUGIN_NAME}] Request logging ENABLED - logs will be saved to:`, LOG_DIR);
+	logToConsole(
+		"info",
+		`[${PLUGIN_NAME}] Request logging ENABLED - logs will be saved to: ${LOG_DIR}`,
+	);
 }
 if (DEBUG_ENABLED && !LOGGING_ENABLED) {
-	console.log(`[${PLUGIN_NAME}] Debug logging ENABLED (level: ${LOG_LEVEL})`);
+	logToConsole(
+		"info",
+		`[${PLUGIN_NAME}] Debug logging ENABLED (level: ${LOG_LEVEL})`,
+	);
 }
 
 let requestCounter = 0;
@@ -73,48 +144,42 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 			),
 			"utf8",
 		);
-		console.log(`[${PLUGIN_NAME}] Logged ${stage} to ${filename}`);
+		logToApp("info", `Logged ${stage} to ${filename}`);
+		logToConsole("info", `[${PLUGIN_NAME}] Logged ${stage} to ${filename}`);
 	} catch (e) {
 		const error = e as Error;
-		console.error(`[${PLUGIN_NAME}] Failed to write log:`, error.message);
+		logToApp("error", `Failed to write log: ${error.message}`);
+		logToConsole("error", `[${PLUGIN_NAME}] Failed to write log: ${error.message}`);
 	}
 }
 
 export function logDebug(message: string, data?: unknown): void {
 	if (!shouldLog("debug")) return;
+	logToApp("debug", message, data);
 
-	if (data !== undefined) {
-		console.log(`[${PLUGIN_NAME}] ${message}`, data);
-	} else {
-		console.log(`[${PLUGIN_NAME}] ${message}`);
-	}
+	const text = `[${PLUGIN_NAME}] ${message}`;
+	logToConsole("debug", text, data);
 }
 
 export function logInfo(message: string, data?: unknown): void {
 	if (!shouldLog("info")) return;
+	logToApp("info", message, data);
 
-	if (data !== undefined) {
-		console.log(`[${PLUGIN_NAME}] ${message}`, data);
-	} else {
-		console.log(`[${PLUGIN_NAME}] ${message}`);
-	}
+	const text = `[${PLUGIN_NAME}] ${message}`;
+	logToConsole("info", text, data);
 }
 
 export function logWarn(message: string, data?: unknown): void {
 	if (!shouldLog("warn")) return;
-	if (data !== undefined) {
-		console.warn(`[${PLUGIN_NAME}] ${message}`, data);
-	} else {
-		console.warn(`[${PLUGIN_NAME}] ${message}`);
-	}
+	logToApp("warn", message, data);
+	const text = `[${PLUGIN_NAME}] ${message}`;
+	logToConsole("warn", text, data);
 }
 
 export function logError(message: string, data?: unknown): void {
-	if (data !== undefined) {
-		console.error(`[${PLUGIN_NAME}] ${message}`, data);
-	} else {
-		console.error(`[${PLUGIN_NAME}] ${message}`);
-	}
+	logToApp("error", message, data);
+	const text = `[${PLUGIN_NAME}] ${message}`;
+	logToConsole("error", text, data);
 }
 
 export interface ScopedLogger {
@@ -130,38 +195,31 @@ const timers: Map<string, number> = new Map();
 
 export function createLogger(scope: string): ScopedLogger {
 	const prefix = `[${PLUGIN_NAME}:${scope}]`;
+	const service = `${PLUGIN_NAME}.${scope}`;
 
 	return {
 		debug(message: string, data?: unknown) {
 			if (!shouldLog("debug")) return;
-			if (data !== undefined) {
-				console.log(`${prefix} ${message}`, data);
-			} else {
-				console.log(`${prefix} ${message}`);
-			}
+			const text = `${prefix} ${message}`;
+			logToApp("debug", text, data, service);
+			logToConsole("debug", text, data);
 		},
 		info(message: string, data?: unknown) {
 			if (!shouldLog("info")) return;
-			if (data !== undefined) {
-				console.log(`${prefix} ${message}`, data);
-			} else {
-				console.log(`${prefix} ${message}`);
-			}
+			const text = `${prefix} ${message}`;
+			logToApp("info", text, data, service);
+			logToConsole("info", text, data);
 		},
 		warn(message: string, data?: unknown) {
 			if (!shouldLog("warn")) return;
-			if (data !== undefined) {
-				console.warn(`${prefix} ${message}`, data);
-			} else {
-				console.warn(`${prefix} ${message}`);
-			}
+			const text = `${prefix} ${message}`;
+			logToApp("warn", text, data, service);
+			logToConsole("warn", text, data);
 		},
 		error(message: string, data?: unknown) {
-			if (data !== undefined) {
-				console.error(`${prefix} ${message}`, data);
-			} else {
-				console.error(`${prefix} ${message}`);
-			}
+			const text = `${prefix} ${message}`;
+			logToApp("error", text, data, service);
+			logToConsole("error", text, data);
 		},
 		time(label: string): () => number {
 			const key = `${scope}:${label}`;
@@ -172,7 +230,9 @@ export function createLogger(scope: string): ScopedLogger {
 				const duration = endTime - startTime;
 				timers.delete(key);
 				if (shouldLog("debug")) {
-					console.log(`${prefix} ${label}: ${formatDuration(duration)}`);
+					const text = `${prefix} ${label}: ${formatDuration(duration)}`;
+					logToApp("debug", text, undefined, service);
+					logToConsole("debug", text);
 				}
 				return duration;
 			};
@@ -180,7 +240,9 @@ export function createLogger(scope: string): ScopedLogger {
 		timeEnd(label: string, startTime: number): void {
 			const duration = performance.now() - startTime;
 			if (shouldLog("debug")) {
-				console.log(`${prefix} ${label}: ${formatDuration(duration)}`);
+				const text = `${prefix} ${label}: ${formatDuration(duration)}`;
+				logToApp("debug", text, undefined, service);
+				logToConsole("debug", text);
 			}
 		},
 	};

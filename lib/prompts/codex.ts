@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CacheMetadata, GitHubRelease } from "../types.js";
+import { logWarn, logError } from "../logger.js";
 
 const GITHUB_API_RELEASES =
 	"https://api.github.com/repos/openai/codex/releases/latest";
@@ -236,23 +237,18 @@ export async function getCodexInstructions(
 		throw new Error(`HTTP ${response.status}`);
 	} catch (error) {
 		const err = error as Error;
-		console.error(
-			`[openai-codex-plugin] Failed to fetch ${modelFamily} instructions from GitHub:`,
-			err.message,
+		logError(
+			`Failed to fetch ${modelFamily} instructions from GitHub: ${err.message}`,
 		);
 
 		const diskContent = await readFileOrNull(cacheFile);
 		if (diskContent) {
-			console.error(
-				`[openai-codex-plugin] Using cached ${modelFamily} instructions`,
-			);
+			logWarn(`Using cached ${modelFamily} instructions`);
 			memoryCache.set(modelFamily, { content: diskContent, timestamp: Date.now() });
 			return diskContent;
 		}
 
-		console.error(
-			`[openai-codex-plugin] Falling back to bundled instructions for ${modelFamily}`,
-		);
+		logWarn(`Falling back to bundled instructions for ${modelFamily}`);
 		const bundled = await fs.readFile(join(__dirname, "codex-instructions.md"), "utf8");
 		memoryCache.set(modelFamily, { content: bundled, timestamp: Date.now() });
 		return bundled;

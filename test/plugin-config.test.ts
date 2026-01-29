@@ -4,6 +4,7 @@ import type { PluginConfig } from '../lib/types.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import * as logger from '../lib/logger.js';
 
 // Mock the fs module
 vi.mock('node:fs', async () => {
@@ -12,6 +13,15 @@ vi.mock('node:fs', async () => {
 		...actual,
 		existsSync: vi.fn(),
 		readFileSync: vi.fn(),
+	};
+});
+
+// Mock the logger module to track warnings
+vi.mock('../lib/logger.js', async () => {
+	const actual = await vi.importActual<typeof import('../lib/logger.js')>('../lib/logger.js');
+	return {
+		...actual,
+		logWarn: vi.fn(),
 	};
 });
 
@@ -90,49 +100,49 @@ describe('Plugin Configuration', () => {
 			});
 		});
 
-		it('should handle invalid JSON gracefully', () => {
-			mockExistsSync.mockReturnValue(true);
-			mockReadFileSync.mockReturnValue('invalid json');
+	it('should handle invalid JSON gracefully', () => {
+		mockExistsSync.mockReturnValue(true);
+		mockReadFileSync.mockReturnValue('invalid json');
 
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-			const config = loadPluginConfig();
+		const mockLogWarn = vi.mocked(logger.logWarn);
+		mockLogWarn.mockClear();
+		const config = loadPluginConfig();
 
-			expect(config).toEqual({
-				codexMode: true,
-				retryAllAccountsRateLimited: true,
-				retryAllAccountsMaxWaitMs: 0,
-				retryAllAccountsMaxRetries: Infinity,
-				tokenRefreshSkewMs: 60_000,
-				rateLimitToastDebounceMs: 60_000,
-				sessionRecovery: true,
-				autoResume: true,
-			});
-			expect(consoleSpy).toHaveBeenCalled();
-			consoleSpy.mockRestore();
+		expect(config).toEqual({
+			codexMode: true,
+			retryAllAccountsRateLimited: true,
+			retryAllAccountsMaxWaitMs: 0,
+			retryAllAccountsMaxRetries: Infinity,
+			tokenRefreshSkewMs: 60_000,
+			rateLimitToastDebounceMs: 60_000,
+			sessionRecovery: true,
+			autoResume: true,
+		});
+		expect(mockLogWarn).toHaveBeenCalled();
+	});
+
+	it('should handle file read errors gracefully', () => {
+		mockExistsSync.mockReturnValue(true);
+		mockReadFileSync.mockImplementation(() => {
+			throw new Error('Permission denied');
 		});
 
-		it('should handle file read errors gracefully', () => {
-			mockExistsSync.mockReturnValue(true);
-			mockReadFileSync.mockImplementation(() => {
-				throw new Error('Permission denied');
-			});
+		const mockLogWarn = vi.mocked(logger.logWarn);
+		mockLogWarn.mockClear();
+		const config = loadPluginConfig();
 
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-			const config = loadPluginConfig();
-
-			expect(config).toEqual({
-				codexMode: true,
-				retryAllAccountsRateLimited: true,
-				retryAllAccountsMaxWaitMs: 0,
-				retryAllAccountsMaxRetries: Infinity,
-				tokenRefreshSkewMs: 60_000,
-				rateLimitToastDebounceMs: 60_000,
-				sessionRecovery: true,
-				autoResume: true,
-			});
-			expect(consoleSpy).toHaveBeenCalled();
-			consoleSpy.mockRestore();
+		expect(config).toEqual({
+			codexMode: true,
+			retryAllAccountsRateLimited: true,
+			retryAllAccountsMaxWaitMs: 0,
+			retryAllAccountsMaxRetries: Infinity,
+			tokenRefreshSkewMs: 60_000,
+			rateLimitToastDebounceMs: 60_000,
+			sessionRecovery: true,
+			autoResume: true,
 		});
+		expect(mockLogWarn).toHaveBeenCalled();
+	});
 	});
 
 	describe('getCodexMode', () => {
