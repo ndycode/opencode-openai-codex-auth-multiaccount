@@ -248,13 +248,150 @@ add multiple chatgpt accounts for higher combined quotas. the plugin uses **heal
 opencode auth login  # run again to add more accounts
 ```
 
-**manage accounts:**
-- `openai-accounts` — list all accounts
-- `openai-accounts-switch` — switch active account
-- `openai-accounts-status` — show rate limit status
-- `openai-accounts-remove` — remove an account by index
-- `openai-accounts-health` — check health of all accounts
-- `openai-accounts-refresh` — manually refresh all tokens (new in v4.11.0)
+---
+
+## account management tools
+
+the plugin provides built-in tools for managing your openai accounts. these are available directly in opencode — just ask the agent or type the tool name.
+
+### openai-accounts
+
+list all configured accounts with their status.
+
+```
+openai-accounts
+```
+
+**output:**
+```
+OpenAI Accounts (3 total):
+
+  [1] user@gmail.com (active)
+  [2] work@company.com
+  [3] backup@email.com
+
+Use openai-accounts-switch to change active account.
+```
+
+---
+
+### openai-accounts-switch
+
+switch to a different account by index (1-based).
+
+```
+openai-accounts-switch index=2
+```
+
+**output:**
+```
+Switched to account [2] work@company.com
+```
+
+---
+
+### openai-accounts-status
+
+show detailed status including rate limits and health scores.
+
+```
+openai-accounts-status
+```
+
+**output:**
+```
+OpenAI Account Status:
+
+[1] user@gmail.com (active)
+    Health: 100/100
+    Rate Limit: 45/50 requests remaining
+    Resets: 2m 30s
+    Last Used: 5 minutes ago
+
+[2] work@company.com
+    Health: 85/100
+    Rate Limit: 12/50 requests remaining
+    Resets: 8m 15s
+    Last Used: 1 hour ago
+```
+
+---
+
+### openai-accounts-health
+
+check if all account tokens are still valid (read-only check).
+
+```
+openai-accounts-health
+```
+
+**output:**
+```
+Checking 3 account(s):
+
+  ✓ [1] user@gmail.com: Healthy
+  ✓ [2] work@company.com: Healthy
+  ✗ [3] old@expired.com: Token expired
+
+Summary: 2 healthy, 1 unhealthy
+```
+
+---
+
+### openai-accounts-refresh
+
+refresh all oauth tokens and save them to disk. use this after long idle periods.
+
+```
+openai-accounts-refresh
+```
+
+**output:**
+```
+Refreshing 3 account(s):
+
+  ✓ [1] user@gmail.com: Refreshed
+  ✓ [2] work@company.com: Refreshed
+  ✗ [3] old@expired.com: Failed - Token expired
+
+Summary: 2 refreshed, 1 failed
+```
+
+**difference from health check:** `openai-accounts-health` only validates tokens. `openai-accounts-refresh` actually refreshes them and saves new tokens to disk.
+
+---
+
+### openai-accounts-remove
+
+remove an account by index. useful for cleaning up expired accounts.
+
+```
+openai-accounts-remove index=3
+```
+
+**output:**
+```
+Removed: [3] old@expired.com
+
+Remaining accounts: 2
+```
+
+---
+
+### quick reference
+
+| tool | what it does | example |
+|------|--------------|---------|
+| `openai-accounts` | list all accounts | "list my accounts" |
+| `openai-accounts-switch` | switch active account | "switch to account 2" |
+| `openai-accounts-status` | show rate limits & health | "show account status" |
+| `openai-accounts-health` | validate tokens (read-only) | "check account health" |
+| `openai-accounts-refresh` | refresh & save tokens | "refresh my tokens" |
+| `openai-accounts-remove` | remove an account | "remove account 3" |
+
+---
+
+## rotation behavior
 
 **how rotation works:**
 - health scoring tracks success/failure per account
