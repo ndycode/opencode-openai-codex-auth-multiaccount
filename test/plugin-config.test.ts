@@ -56,6 +56,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				toastDurationMs: 5_000,
+				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
 			});
@@ -77,6 +79,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				toastDurationMs: 5_000,
+				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
 			});
@@ -95,6 +99,8 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsMaxRetries: Infinity,
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
+				toastDurationMs: 5_000,
+				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
 			});
@@ -108,16 +114,18 @@ describe('Plugin Configuration', () => {
 		mockLogWarn.mockClear();
 		const config = loadPluginConfig();
 
-		expect(config).toEqual({
-			codexMode: true,
-			retryAllAccountsRateLimited: true,
-			retryAllAccountsMaxWaitMs: 0,
-			retryAllAccountsMaxRetries: Infinity,
-			tokenRefreshSkewMs: 60_000,
-			rateLimitToastDebounceMs: 60_000,
-			sessionRecovery: true,
-			autoResume: true,
-		});
+	expect(config).toEqual({
+		codexMode: true,
+		retryAllAccountsRateLimited: true,
+		retryAllAccountsMaxWaitMs: 0,
+		retryAllAccountsMaxRetries: Infinity,
+		tokenRefreshSkewMs: 60_000,
+		rateLimitToastDebounceMs: 60_000,
+		toastDurationMs: 5_000,
+		perProjectAccounts: true,
+		sessionRecovery: true,
+		autoResume: true,
+	});
 		expect(mockLogWarn).toHaveBeenCalled();
 	});
 
@@ -138,6 +146,8 @@ describe('Plugin Configuration', () => {
 			retryAllAccountsMaxRetries: Infinity,
 			tokenRefreshSkewMs: 60_000,
 			rateLimitToastDebounceMs: 60_000,
+			toastDurationMs: 5_000,
+			perProjectAccounts: true,
 			sessionRecovery: true,
 			autoResume: true,
 		});

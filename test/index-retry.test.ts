@@ -105,6 +105,7 @@ vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "",
 	loadAccounts: async () => null,
 	saveAccounts: async () => {},
+	setStoragePath: () => {},
 }));
 
 vi.mock("../lib/auto-update-checker.js", () => ({
@@ -177,7 +178,7 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		const fetchPromise = sdk.fetch("https://example.com", {});
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 
-		await vi.advanceTimersByTimeAsync(1000);
+		await vi.advanceTimersByTimeAsync(1500);
 
 		const response = await fetchPromise;
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);

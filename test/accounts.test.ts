@@ -235,4 +235,80 @@ describe("AccountManager", () => {
     expect(selected?.refreshToken).toBe("token-2");
     expect(selected?.index).toBe(1);
   });
+
+  describe("removeAccount", () => {
+    it("removes an account and updates indices", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 1,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now },
+          { refreshToken: "token-3", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      expect(manager.getAccountCount()).toBe(3);
+      
+      const accountToRemove = manager.getCurrentAccount();
+      expect(accountToRemove).toBeDefined();
+      expect(accountToRemove?.refreshToken).toBe("token-2");
+      
+      const removed = manager.removeAccount(accountToRemove!);
+      expect(removed).toBe(true);
+      expect(manager.getAccountCount()).toBe(2);
+      
+      const remaining = manager.getAccountsSnapshot();
+      expect(remaining[0]?.refreshToken).toBe("token-1");
+      expect(remaining[1]?.refreshToken).toBe("token-3");
+      expect(remaining[0]?.index).toBe(0);
+      expect(remaining[1]?.index).toBe(1);
+    });
+
+    it("returns false when removing non-existent account", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const fakeAccount = {
+        index: 999,
+        refreshToken: "non-existent",
+        addedAt: now,
+        lastUsed: now,
+        rateLimitResetTimes: {},
+      };
+      
+      const removed = manager.removeAccount(fakeAccount as any);
+      expect(removed).toBe(false);
+      expect(manager.getAccountCount()).toBe(1);
+    });
+
+    it("handles removing the last account", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getCurrentAccount();
+      expect(account).not.toBe(null);
+      
+      const removed = manager.removeAccount(account!);
+      expect(removed).toBe(true);
+      expect(manager.getAccountCount()).toBe(0);
+      expect(manager.getCurrentAccount()).toBe(null);
+    });
+  });
 });

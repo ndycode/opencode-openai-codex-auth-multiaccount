@@ -1,74 +1,75 @@
-# OpenAI Codex Auth Plugin for OpenCode
+# openai codex auth plugin for opencode
 
 [![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Enable OpenCode to authenticate against **OpenAI's Codex backend** via OAuth so you can use ChatGPT Plus/Pro rate limits and access models like `gpt-5.2`, `gpt-5.2-codex`, and `gpt-5.1-codex-max` with your ChatGPT credentials.
+oauth plugin for opencode that lets you use chatgpt plus/pro rate limits with models like `gpt-5.2`, `gpt-5.2-codex`, and `gpt-5.1-codex-max`.
 
 > [!NOTE]
-> **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
+> **renamed from `opencode-openai-codex-auth-multi`** — if you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. the rename was necessary because opencode blocks plugins containing `opencode-openai-codex-auth` in the name.
 
-## What You Get
+## what you get
 
-- **GPT-5.2, GPT-5.2 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
-- **Multi-account support** — add multiple ChatGPT accounts, health-aware rotation with automatic failover
-- **Click-to-switch** — switch accounts directly from the OpenCode TUI
-- **Strict tool validation** — automatically cleans schemas for compatibility with strict models (Claude, Gemini)
-- **Auto-update notifications** — get notified when a new version is available
+- **gpt-5.2, gpt-5.2 codex, gpt-5.1 codex max** and all gpt-5.x variants via chatgpt oauth
+- **multi-account support** — add up to 20 chatgpt accounts, health-aware rotation with automatic failover
+- **per-project accounts** — each project gets its own account storage (new in v4.10.0)
+- **click-to-switch** — switch accounts directly from the opencode tui
+- **strict tool validation** — automatically cleans schemas for compatibility with strict models
+- **auto-update notifications** — get notified when a new version is available
 - **22 model presets** — full variant system with reasoning levels (none/low/medium/high/xhigh)
-- **Prompt caching** — session-based caching for faster multi-turn conversations
-- **Usage-aware errors** — friendly messages with rate limit reset timing
-- **Plugin compatible** — works alongside other OpenCode plugins (oh-my-opencode, dcp, etc.)
+- **prompt caching** — session-based caching for faster multi-turn conversations
+- **usage-aware errors** — friendly messages with rate limit reset timing
+- **plugin compatible** — works alongside other opencode plugins (oh-my-opencode, dcp, etc.)
 
 ---
 
 <details open>
-<summary><b>Terms of Service Warning — Read Before Installing</b></summary>
+<summary><b>terms of service warning — read before installing</b></summary>
 
 > [!CAUTION]
-> This plugin uses OpenAI's official OAuth authentication (the same method as OpenAI's official Codex CLI) for personal development use with your ChatGPT Plus/Pro subscription.
+> this plugin uses openai's official oauth authentication (the same method as openai's official codex cli) for personal development use with your chatgpt plus/pro subscription.
 >
-> **This plugin is for personal development only:**
-> - Not for commercial services, API resale, or multi-user applications
-> - For production use, see [OpenAI Platform API](https://platform.openai.com/)
+> **this plugin is for personal development only:**
+> - not for commercial services, api resale, or multi-user applications
+> - for production use, see [openai platform api](https://platform.openai.com/)
 >
-> **By using this plugin, you acknowledge:**
-> - This is an unofficial tool not endorsed by OpenAI
-> - Users are responsible for compliance with [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/)
-> - You assume all risks associated with using this plugin
+> **by using this plugin, you acknowledge:**
+> - this is an unofficial tool not endorsed by openai
+> - users are responsible for compliance with [openai's terms of use](https://openai.com/policies/terms-of-use/)
+> - you assume all risks associated with using this plugin
 
 </details>
 
 ---
 
-## Installation
+## installation
 
 <details open>
-<summary><b>For Humans</b></summary>
+<summary><b>for humans</b></summary>
 
-**Option A: Let an LLM do it**
+**option a: let an llm do it**
 
-Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
+paste this into any llm agent (claude code, opencode, cursor, etc.):
 
 ```
 Install the oc-chatgpt-multi-auth plugin and add the OpenAI model definitions to ~/.config/opencode/opencode.json by following: https://raw.githubusercontent.com/ndycode/oc-chatgpt-multi-auth/main/README.md
 ```
 
-**Option B: One-command install**
+**option b: one-command install**
 
 ```bash
 npx -y oc-chatgpt-multi-auth@latest
 ```
 
-This writes the config to `~/.config/opencode/opencode.json`, backs up existing config, and clears the plugin cache.
+this writes the config to `~/.config/opencode/opencode.json`, backs up existing config, and clears the plugin cache.
 
-> Want legacy config (OpenCode v1.0.209 and below)? Add `--legacy` flag.
+> want legacy config (opencode v1.0.209 and below)? add `--legacy` flag.
 
-**Option C: Manual setup**
+**option c: manual setup**
 
-1. **Add the plugin** to `~/.config/opencode/opencode.json`:
+1. **add the plugin** to `~/.config/opencode/opencode.json`:
 
    ```json
    {
@@ -76,15 +77,15 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
    }
    ```
 
-2. **Login** with your ChatGPT account:
+2. **login** with your chatgpt account:
 
    ```bash
    opencode auth login
    ```
 
-3. **Add models** — copy the [full configuration](#models) below
+3. **add models** — copy the [full configuration](#models) below
 
-4. **Use it:**
+4. **use it:**
 
    ```bash
    opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
@@ -93,26 +94,26 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 </details>
 
 <details>
-<summary><b>For LLM Agents</b></summary>
+<summary><b>for llm agents</b></summary>
 
-### Step-by-Step Instructions
+### step-by-step instructions
 
-1. Edit the OpenCode configuration file at `~/.config/opencode/opencode.json`
+1. edit the opencode configuration file at `~/.config/opencode/opencode.json`
    
-   > **Note**: This path works on all platforms. On Windows, `~` resolves to your user home directory (e.g., `C:\Users\YourName`).
+   > **note**: this path works on all platforms. on windows, `~` resolves to your user home directory (e.g., `C:\Users\YourName`).
 
-2. Add the plugin to the `plugin` array:
+2. add the plugin to the `plugin` array:
    ```json
    {
      "plugin": ["oc-chatgpt-multi-auth@latest"]
    }
    ```
 
-3. Add the model definitions from the [Full models configuration](#full-models-configuration-copy-paste-ready) section
+3. add the model definitions from the [full models configuration](#full-models-configuration-copy-paste-ready) section
 
-4. Set `provider` to `"openai"` and choose a model
+4. set `provider` to `"openai"` and choose a model
 
-### Verification
+### verification
 
 ```bash
 opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
@@ -122,32 +123,32 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 
 ---
 
-## Models
+## models
 
-### Model Reference
+### model reference
 
-| Model | Variants | Notes |
+| model | variants | notes |
 |-------|----------|-------|
-| `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 with reasoning levels |
-| `gpt-5.2-codex` | low, medium, high, xhigh | GPT-5.2 Codex for code generation |
-| `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
-| `gpt-5.1-codex` | low, medium, high | Standard Codex |
-| `gpt-5.1-codex-mini` | medium, high | Lightweight Codex |
-| `gpt-5.1` | none, low, medium, high | GPT-5.1 base model |
+| `gpt-5.2` | none, low, medium, high, xhigh | latest gpt-5.2 with reasoning levels |
+| `gpt-5.2-codex` | low, medium, high, xhigh | gpt-5.2 codex for code generation |
+| `gpt-5.1-codex-max` | low, medium, high, xhigh | maximum context codex |
+| `gpt-5.1-codex` | low, medium, high | standard codex |
+| `gpt-5.1-codex-mini` | medium, high | lightweight codex |
+| `gpt-5.1` | none, low, medium, high | gpt-5.1 base model |
 
-**Using variants:**
+**using variants:**
 ```bash
-# Modern OpenCode (v1.0.210+)
+# modern opencode (v1.0.210+)
 opencode run "Hello" --model=openai/gpt-5.2 --variant=high
 
-# Legacy OpenCode (v1.0.209 and below)
+# legacy opencode (v1.0.209 and below)
 opencode run "Hello" --model=openai/gpt-5.2-high
 ```
 
 <details>
-<summary><b>Full models configuration (copy-paste ready)</b></summary>
+<summary><b>full models configuration (copy-paste ready)</b></summary>
 
-Add this to your `~/.config/opencode/opencode.json`:
+add this to your `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -233,66 +234,76 @@ Add this to your `~/.config/opencode/opencode.json`:
 }
 ```
 
-For legacy OpenCode (v1.0.209 and below), use `config/opencode-legacy.json` which has individual model entries like `gpt-5.2-low`, `gpt-5.2-medium`, etc.
+for legacy opencode (v1.0.209 and below), use `config/opencode-legacy.json` which has individual model entries like `gpt-5.2-low`, `gpt-5.2-medium`, etc.
 
 </details>
 
 ---
 
-## Multi-Account Setup
+## multi-account setup
 
-Add multiple ChatGPT accounts for higher combined quotas. The plugin uses **health-aware rotation** with automatic failover.
+add multiple chatgpt accounts for higher combined quotas. the plugin uses **health-aware rotation** with automatic failover and supports up to 20 accounts.
 
 ```bash
-opencode auth login  # Run again to add more accounts
+opencode auth login  # run again to add more accounts
 ```
 
-**Manage accounts:**
-- `openai-accounts` — List all accounts
-- `openai-accounts-switch` — Switch active account
-- `openai-accounts-status` — Show rate limit status
+**manage accounts:**
+- `openai-accounts` — list all accounts
+- `openai-accounts-switch` — switch active account
+- `openai-accounts-status` — show rate limit status
+- `openai-accounts-remove` — remove an account by index (new in v4.10.0)
+- `openai-accounts-health` — check health of all accounts
 
-**How rotation works (v4.4.0+):**
-- Health scoring tracks success/failure per account
-- Token bucket prevents hitting rate limits
-- Hybrid selection prefers healthy accounts with available tokens
-- Always retries when all accounts are rate-limited (waits for reset)
+**how rotation works:**
+- health scoring tracks success/failure per account
+- token bucket prevents hitting rate limits
+- hybrid selection prefers healthy accounts with available tokens
+- always retries when all accounts are rate-limited (waits for reset)
+- 20% jitter on retry delays to avoid thundering herd
 
-**Storage:** `~/.opencode/openai-codex-accounts.json`
+**per-project accounts (v4.10.0+):**
+
+by default, each project directory gets its own account storage. this means you can have different active accounts per project. disable with `perProjectAccounts: false` in your config.
+
+**storage locations:**
+- per-project: `{project-root}/.opencode/openai-codex-accounts.json`
+- global (when per-project disabled): `~/.opencode/openai-codex-accounts.json`
 
 ---
 
-## Troubleshoot
+## troubleshooting
 
-> **Quick Reset**: Most issues can be resolved by deleting `~/.opencode/auth/openai.json` and running `opencode auth login` again.
+> **quick reset**: most issues can be resolved by deleting `~/.opencode/auth/openai.json` and running `opencode auth login` again.
 
-### Configuration Path (All Platforms)
+### configuration paths (all platforms)
 
-OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
+opencode uses `~/.config/opencode/` on **all platforms** including windows.
 
-| File | Path |
+| file | path |
 |------|------|
-| Main config | `~/.config/opencode/opencode.json` |
-| Auth tokens | `~/.opencode/auth/openai.json` |
-| Multi-account | `~/.opencode/openai-codex-accounts.json` |
-| Plugin config | `~/.opencode/openai-codex-auth-config.json` |
-| Debug logs | `~/.opencode/logs/codex-plugin/` |
+| main config | `~/.config/opencode/opencode.json` |
+| auth tokens | `~/.opencode/auth/openai.json` |
+| multi-account (global) | `~/.opencode/openai-codex-accounts.json` |
+| multi-account (per-project) | `{project}/.opencode/openai-codex-accounts.json` |
+| plugin config | `~/.opencode/openai-codex-auth-config.json` |
+| debug logs | `~/.opencode/logs/codex-plugin/` |
 
-> **Windows users**: `~` resolves to your user home directory (e.g., `C:\Users\YourName`).
+> **windows users**: `~` resolves to your user home directory (e.g., `C:\Users\YourName`).
 
 ---
 
 <details>
-<summary><b>401 Unauthorized Error</b></summary>
+<summary><b>401 unauthorized error</b></summary>
 
-**Cause:** Token expired or not authenticated.
+**cause:** token expired or not authenticated.
 
-**Solutions:**
-1. Re-authenticate:
+**solutions:**
+1. re-authenticate:
    ```bash
    opencode auth login
    ```
-2. Check auth file exists:
+2. check auth file exists:
    ```bash
    cat ~/.opencode/auth/openai.json
    ```
@@ -300,45 +311,45 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 </details>
 
 <details>
-<summary><b>Browser Doesn't Open for OAuth</b></summary>
+<summary><b>browser doesn't open for oauth</b></summary>
 
-**Cause:** Port 1455 conflict or SSH/WSL environment.
+**cause:** port 1455 conflict or ssh/wsl environment.
 
-**Solutions:**
-1. **Manual URL paste:**
-   - Re-run `opencode auth login`
-   - Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
-   - Paste the full redirect URL (including `#code=...`) after login
+**solutions:**
+1. **manual url paste:**
+   - re-run `opencode auth login`
+   - select **"chatgpt plus/pro (manual url paste)"**
+   - paste the full redirect url (including `#code=...`) after login
 
-2. **Check port availability:**
+2. **check port availability:**
    ```bash
-   # macOS/Linux
+   # macos/linux
    lsof -i :1455
    
-   # Windows
+   # windows
    netstat -ano | findstr :1455
    ```
 
-3. **Stop Codex CLI if running** — both use port 1455
+3. **stop codex cli if running** — both use port 1455
 
 </details>
 
 <details>
-<summary><b>Model Not Found</b></summary>
+<summary><b>model not found</b></summary>
 
-**Cause:** Missing provider prefix or config mismatch.
+**cause:** missing provider prefix or config mismatch.
 
-**Solutions:**
-1. Use `openai/` prefix:
+**solutions:**
+1. use `openai/` prefix:
    ```bash
-   # Correct
+   # correct
    --model=openai/gpt-5.2
    
-   # Wrong
+   # wrong
    --model=gpt-5.2
    ```
 
-2. Verify model is in your config:
+2. verify model is in your config:
    ```json
    { "models": { "gpt-5.2": { ... } } }
    ```
@@ -346,28 +357,28 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 </details>
 
 <details>
-<summary><b>Rate Limit Exceeded</b></summary>
+<summary><b>rate limit exceeded</b></summary>
 
-**Cause:** ChatGPT subscription usage limit reached.
+**cause:** chatgpt subscription usage limit reached.
 
-**Solutions:**
-1. Wait for reset (plugin shows timing in error message)
-2. Add more accounts: `opencode auth login`
-3. Switch to a different model family
+**solutions:**
+1. wait for reset (plugin shows timing in error message)
+2. add more accounts: `opencode auth login`
+3. switch to a different model family
 
 </details>
 
 <details>
-<summary><b>Multi-Turn Context Lost</b></summary>
+<summary><b>multi-turn context lost</b></summary>
 
-**Cause:** Old plugin version or missing config.
+**cause:** old plugin version or missing config.
 
-**Solutions:**
-1. Update plugin:
+**solutions:**
+1. update plugin:
    ```bash
-npx -y oc-chatgpt-multi-auth@latest
+   npx -y oc-chatgpt-multi-auth@latest
    ```
-2. Ensure config has:
+2. ensure config has:
    ```json
    {
      "include": ["reasoning.encrypted_content"],
@@ -378,34 +389,34 @@ npx -y oc-chatgpt-multi-auth@latest
 </details>
 
 <details>
-<summary><b>OAuth Callback Issues (Safari/WSL/Docker)</b></summary>
+<summary><b>oauth callback issues (safari/wsl/docker)</b></summary>
 
-**Safari HTTPS-Only Mode:**
-- Use Chrome or Firefox instead, or
-- Temporarily disable Safari > Settings > Privacy > "Enable HTTPS-Only Mode"
+**safari https-only mode:**
+- use chrome or firefox instead, or
+- temporarily disable safari > settings > privacy > "enable https-only mode"
 
-**WSL2:**
-- Use VS Code's port forwarding, or
-- Configure Windows → WSL port forwarding
+**wsl2:**
+- use vs code's port forwarding, or
+- configure windows → wsl port forwarding
 
-**SSH / Remote:**
+**ssh / remote:**
 ```bash
 ssh -L 1455:localhost:1455 user@remote
 ```
 
-**Docker / Containers:**
-- OAuth with localhost redirect doesn't work in containers
-- Use SSH port forwarding or manual URL flow
+**docker / containers:**
+- oauth with localhost redirect doesn't work in containers
+- use ssh port forwarding or manual url flow
 
 </details>
 
 ---
 
-## Plugin Compatibility
+## plugin compatibility
 
 ### oh-my-opencode
 
-Works alongside oh-my-opencode. No special configuration needed.
+works alongside oh-my-opencode. no special configuration needed.
 
 ```json
 {
@@ -418,7 +429,7 @@ Works alongside oh-my-opencode. No special configuration needed.
 
 ### @tarquinen/opencode-dcp
 
-List this plugin BEFORE DCP:
+list this plugin before dcp:
 
 ```json
 {
@@ -429,81 +440,88 @@ List this plugin BEFORE DCP:
 }
 ```
 
-### Plugins you don't need
+### plugins you don't need
 
-- **openai-codex-auth** — Not needed. This plugin replaces the original.
+- **openai-codex-auth** — not needed. this plugin replaces the original.
 
 ---
 
-## Configuration
+## configuration
 
-Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
+create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 
-### Model Behavior
+### model behavior
 
-| Option | Default | What it does |
+| option | default | what it does |
 |--------|---------|--------------|
-| `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with latest Codex CLI) |
+| `codexMode` | `true` | uses codex-opencode bridge prompt (synced with latest codex cli) |
 
-### Retry Behavior (v4.4.0+)
+### account settings (v4.10.0+)
 
-| Option | Default | What it does |
+| option | default | what it does |
 |--------|---------|--------------|
-| `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
-| `retryAllAccountsMaxWaitMs` | `0` | Max wait time (0 = unlimited) |
-| `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts |
+| `perProjectAccounts` | `true` | each project gets its own account storage |
+| `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
 
-### Environment Variables
+### retry behavior
+
+| option | default | what it does |
+|--------|---------|--------------|
+| `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts are rate-limited |
+| `retryAllAccountsMaxWaitMs` | `0` | max wait time (0 = unlimited) |
+| `retryAllAccountsMaxRetries` | `Infinity` | max retry attempts |
+
+### environment variables
 
 ```bash
-DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log all API requests
-CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
-CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
+DEBUG_CODEX_PLUGIN=1 opencode                    # enable debug logging
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # log all api requests
+CODEX_PLUGIN_LOG_LEVEL=debug opencode            # set log level (debug|info|warn|error)
+CODEX_MODE=0 opencode                            # temporarily disable bridge prompt
 ```
 
-For all options, see [docs/configuration.md](docs/configuration.md).
+for all options, see [docs/configuration.md](docs/configuration.md).
 
 ---
 
-## Documentation
+## documentation
 
-- [Getting Started](docs/getting-started.md) — Complete installation guide
-- [Configuration](docs/configuration.md) — All configuration options
-- [Troubleshooting](docs/troubleshooting.md) — Common issues and fixes
-- [Architecture](docs/development/ARCHITECTURE.md) — How the plugin works
+- [getting started](docs/getting-started.md) — complete installation guide
+- [configuration](docs/configuration.md) — all configuration options
+- [troubleshooting](docs/troubleshooting.md) — common issues and fixes
+- [architecture](docs/development/ARCHITECTURE.md) — how the plugin works
 
 ---
 
-## Credits
+## credits
 
-- [numman-ali/opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) by [numman-ali](https://github.com/numman-ali) — Original plugin
-- [ndycode](https://github.com/ndycode) — Multi-account support and maintenance
+- [numman-ali/opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) by [numman-ali](https://github.com/numman-ali) — original plugin
+- [ndycode](https://github.com/ndycode) — multi-account support and maintenance
 
-## License
+## license
 
-MIT License. See [LICENSE](LICENSE) for details.
+mit license. see [LICENSE](LICENSE) for details.
 
 <details>
-<summary><b>Legal</b></summary>
+<summary><b>legal</b></summary>
 
-### Intended Use
+### intended use
 
-- Personal / internal development only
-- Respect subscription quotas and data handling policies
-- Not for production services or bypassing intended limits
+- personal / internal development only
+- respect subscription quotas and data handling policies
+- not for production services or bypassing intended limits
 
-### Warning
+### warning
 
-By using this plugin, you acknowledge:
+by using this plugin, you acknowledge:
 
-- **Terms of Service risk** — This approach may violate ToS of AI model providers
-- **No guarantees** — APIs may change without notice
-- **Assumption of risk** — You assume all legal, financial, and technical risks
+- **terms of service risk** — this approach may violate tos of ai model providers
+- **no guarantees** — apis may change without notice
+- **assumption of risk** — you assume all legal, financial, and technical risks
 
-### Disclaimer
+### disclaimer
 
-- Not affiliated with OpenAI. This is an independent open-source project.
-- "ChatGPT", "GPT-5", "Codex", and "OpenAI" are trademarks of OpenAI, L.L.C.
+- not affiliated with openai. this is an independent open-source project.
+- "chatgpt", "gpt-5", "codex", and "openai" are trademarks of openai, l.l.c.
 
 </details>

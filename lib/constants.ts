@@ -84,7 +84,7 @@ export const AUTH_LABELS = {
 /** Multi-account configuration */
 export const ACCOUNT_LIMITS = {
 	/** Maximum number of OAuth accounts that can be registered */
-	MAX_ACCOUNTS: 10,
+	MAX_ACCOUNTS: 20,
 	/** Cooldown period (ms) after auth failure before retrying account */
 	AUTH_FAILURE_COOLDOWN_MS: 30_000,
 } as const;

@@ -7,6 +7,10 @@ export interface PluginConfig {
 	retryAllAccountsMaxRetries?: number;
 	tokenRefreshSkewMs?: number;
 	rateLimitToastDebounceMs?: number;
+	/** Duration for toast notifications in milliseconds (default: 5000) */
+	toastDurationMs?: number;
+	/** Use per-project account storage instead of global (default: true) */
+	perProjectAccounts?: boolean;
 	sessionRecovery?: boolean;
 	autoResume?: boolean;
 }

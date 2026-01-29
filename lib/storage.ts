@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "./logger.js";
@@ -79,11 +79,34 @@ function getConfigDir(): string {
   return join(homedir(), ".opencode");
 }
 
+function getProjectConfigDir(projectPath: string): string {
+  return join(projectPath, ".opencode");
+}
+
+const PROJECT_MARKERS = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", ".opencode"];
+
+function isProjectDirectory(dir: string): boolean {
+  return PROJECT_MARKERS.some((marker) => existsSync(join(dir, marker)));
+}
+
+let currentStoragePath: string | null = null;
+
+export function setStoragePath(projectPath: string | null): void {
+  if (projectPath && isProjectDirectory(projectPath)) {
+    currentStoragePath = join(getProjectConfigDir(projectPath), "openai-codex-accounts.json");
+  } else {
+    currentStoragePath = null;
+  }
+}
+
 /**
  * Returns the file path for the account storage JSON file.
- * @returns Absolute path to ~/.opencode/openai-codex-accounts.json
+ * @returns Absolute path to the accounts.json file
  */
 export function getStoragePath(): string {
+  if (currentStoragePath) {
+    return currentStoragePath;
+  }
   return join(getConfigDir(), "openai-codex-accounts.json");
 }
 

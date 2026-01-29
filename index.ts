@@ -45,6 +45,8 @@ import {
 	getTokenRefreshSkewMs,
 	getSessionRecovery,
 	getAutoResume,
+	getToastDurationMs,
+	getPerProjectAccounts,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -70,7 +72,7 @@ import {
         sanitizeEmail,
         shouldUpdateAccountIdFromToken,
 } from "./lib/accounts.js";
-import { getStoragePath, loadAccounts, saveAccounts, type AccountStorageV3 } from "./lib/storage.js";
+import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, type AccountStorageV3 } from "./lib/storage.js";
 import {
         createCodexHeaders,
         extractRequestUrl,
@@ -86,6 +88,7 @@ import {
 	RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
 	resetRateLimitBackoff,
 } from "./lib/request/rate-limit-backoff.js";
+import { addJitter } from "./lib/rotation.js";
 import { getModelFamily, MODEL_FAMILIES, type ModelFamily } from "./lib/prompts/codex.js";
 import type { AccountIdSource, OAuthAuthDetails, TokenResult, UserConfig } from "./lib/types.js";
 import {
@@ -385,12 +388,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
         const showToast = async (
                 message: string,
                 variant: "info" | "success" | "warning" | "error" = "success",
+                options?: { title?: string; duration?: number },
         ): Promise<void> => {
                 try {
                         await client.tui.showToast({
                                 body: {
                                         message,
                                         variant,
+                                        ...(options?.title && { title: options.title }),
+                                        ...(options?.duration && { duration: options.duration }),
                                 },
                         });
                 } catch {
@@ -600,6 +606,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const retryAllAccountsRateLimited = getRetryAllAccountsRateLimited(pluginConfig);
 				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
 				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
+				const toastDurationMs = getToastDurationMs(pluginConfig);
+				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
+
+				if (perProjectAccounts) {
+					setStoragePath(process.cwd());
+				}
 
 				const sessionRecoveryEnabled = getSessionRecovery(pluginConfig);
 				const autoResumeEnabled = getAutoResume(pluginConfig);
@@ -792,13 +804,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 									const { response: errorResponse, rateLimit, errorBody } =
 										await handleErrorResponse(response);
 
-									if (recoveryHook && errorBody && isRecoverableError(errorBody)) {
-										const errorType = detectErrorType(errorBody);
-										const toastContent = getRecoveryToastContent(errorType);
-										await showToast(
-											`${toastContent.title}: ${toastContent.message}`,
-											"warning",
-										);
+							if (recoveryHook && errorBody && isRecoverableError(errorBody)) {
+									const errorType = detectErrorType(errorBody);
+									const toastContent = getRecoveryToastContent(errorType);
+									await showToast(
+										`${toastContent.title}: ${toastContent.message}`,
+										"warning",
+										{ duration: toastDurationMs },
+									);
 										logDebug(`[${PLUGIN_NAME}] Recoverable error detected: ${errorType}`);
 									}
 
@@ -817,15 +830,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 																																		rateLimitToastDebounceMs,
 																																		)
 																																) {
-																																			await showToast(
-																																				`Rate limited. Retrying in ${waitLabel} (attempt ${attempt})...`,
-																																				"warning",
-																																			);
+																									await showToast(
+																										`Rate limited. Retrying in ${waitLabel} (attempt ${attempt})...`,
+																										"warning",
+																										{ duration: toastDurationMs },
+																									);
 																																			accountManager.markToastShown(account.index);
-																																		}
+								}
 
-																																	await sleep(delayMs);
-																																	continue;
+															await sleep(addJitter(delayMs, 0.2));
+															continue;
 																																}
 
 				accountManager.markRateLimited(
@@ -848,10 +862,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 																																rateLimitToastDebounceMs,
 																																)
 																														) {
-																																await showToast(
-																																	`Rate limited. Switching accounts (retry in ${waitLabel}).`,
-																																	"warning",
-																																	);
+																									await showToast(
+																										`Rate limited. Switching accounts (retry in ${waitLabel}).`,
+																										"warning",
+																										{ duration: toastDurationMs },
+																									);
 																																	accountManager.markToastShown(account.index);
 																																}
 																														break;
@@ -876,14 +891,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 												waitMs <= retryAllAccountsMaxWaitMs) &&
 											allRateLimitedRetries < retryAllAccountsMaxRetries
 										) {
-											const waitLabel = formatWaitTime(waitMs);
-											await showToast(
-												`All ${count} account(s) are rate-limited. Waiting ${waitLabel}...`,
-												"warning",
-											);
-											allRateLimitedRetries++;
-											await sleep(waitMs);
-											continue;
+								const waitLabel = formatWaitTime(waitMs);
+									await showToast(
+										`All ${count} account(s) are rate-limited. Waiting ${waitLabel}...`,
+										"warning",
+										{ duration: toastDurationMs },
+									);
+									allRateLimitedRetries++;
+									await sleep(addJitter(waitMs, 0.2));
+									continue;
 										}
 
 										const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
@@ -1336,52 +1352,130 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return lines.join("\n");
                                 },
                         }),
-                        "openai-accounts-health": tool({
-                                description: "Check health of all OpenAI accounts by validating refresh tokens.",
-                                args: {},
-                                async execute() {
-                                        const storage = await loadAccounts();
-                                        if (!storage || storage.accounts.length === 0) {
-                                                return "No OpenAI accounts configured. Run: opencode auth login";
-                                        }
+				"openai-accounts-health": tool({
+				description: "Check health of all OpenAI accounts by validating refresh tokens.",
+				args: {},
+				async execute() {
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						return "No OpenAI accounts configured. Run: opencode auth login";
+					}
 
-                                        const results: string[] = [
-                                                `Health Check (${storage.accounts.length} accounts):`,
-                                                "",
-                                        ];
+					const results: string[] = [
+						`Health Check (${storage.accounts.length} accounts):`,
+						"",
+					];
 
-                                        let healthyCount = 0;
-                                        let unhealthyCount = 0;
+					let healthyCount = 0;
+					let unhealthyCount = 0;
 
-                                        for (let i = 0; i < storage.accounts.length; i++) {
-                                                const account = storage.accounts[i];
-                                                if (!account) continue;
+					for (let i = 0; i < storage.accounts.length; i++) {
+						const account = storage.accounts[i];
+						if (!account) continue;
 
-                                                const label = formatAccountLabel(account, i);
-                                                try {
-								const refreshResult = await queuedRefresh(account.refreshToken);
-                                                        if (refreshResult.type === "success") {
-                                                                results.push(`  ✓ ${label}: Healthy`);
-                                                                healthyCount++;
-                                                        } else {
-                                                                results.push(`  ✗ ${label}: Token refresh failed`);
-                                                                unhealthyCount++;
-                                                        }
-                                                } catch (error) {
-                                                        const errorMsg = error instanceof Error ? error.message : String(error);
-                                                        results.push(`  ✗ ${label}: Error - ${errorMsg.slice(0, 50)}`);
-                                                        unhealthyCount++;
-                                                }
-                                        }
+						const label = formatAccountLabel(account, i);
+						try {
+				const refreshResult = await queuedRefresh(account.refreshToken);
+							if (refreshResult.type === "success") {
+								results.push(`  ✓ ${label}: Healthy`);
+								healthyCount++;
+							} else {
+								results.push(`  ✗ ${label}: Token refresh failed`);
+								unhealthyCount++;
+							}
+						} catch (error) {
+							const errorMsg = error instanceof Error ? error.message : String(error);
+							results.push(`  ✗ ${label}: Error - ${errorMsg.slice(0, 50)}`);
+							unhealthyCount++;
+						}
+					}
 
-                                        results.push("");
-                                        results.push(`Summary: ${healthyCount} healthy, ${unhealthyCount} unhealthy`);
+					results.push("");
+					results.push(`Summary: ${healthyCount} healthy, ${unhealthyCount} unhealthy`);
 
-                                        return results.join("\n");
-                                },
-                        }),
+					return results.join("\n");
+				},
+			}),
+			"openai-accounts-remove": tool({
+				description: "Remove an OpenAI account by index (1-based). Use openai-accounts to list accounts first.",
+				args: {
+					index: tool.schema.number().describe(
+						"Account number to remove (1-based, e.g., 1 for first account)",
+					),
+				},
+				async execute({ index }) {
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						return "No OpenAI accounts configured. Nothing to remove.";
+					}
 
-                },
+					const targetIndex = Math.floor((index ?? 0) - 1);
+					if (
+						!Number.isFinite(targetIndex) ||
+						targetIndex < 0 ||
+						targetIndex >= storage.accounts.length
+					) {
+						return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}\n\nUse openai-accounts to list all accounts.`;
+					}
+
+					const account = storage.accounts[targetIndex];
+					if (!account) {
+						return `Account ${index} not found.`;
+					}
+
+					const label = formatAccountLabel(account, targetIndex);
+
+					storage.accounts.splice(targetIndex, 1);
+
+					if (storage.accounts.length === 0) {
+						storage.activeIndex = 0;
+						storage.activeIndexByFamily = {};
+					} else {
+						if (storage.activeIndex >= storage.accounts.length) {
+							storage.activeIndex = 0;
+						} else if (storage.activeIndex > targetIndex) {
+							storage.activeIndex -= 1;
+						}
+
+						if (storage.activeIndexByFamily) {
+							for (const family of MODEL_FAMILIES) {
+								const idx = storage.activeIndexByFamily[family];
+								if (typeof idx === "number") {
+									if (idx >= storage.accounts.length) {
+										storage.activeIndexByFamily[family] = 0;
+									} else if (idx > targetIndex) {
+										storage.activeIndexByFamily[family] = idx - 1;
+									}
+								}
+							}
+						}
+					}
+
+					await saveAccounts(storage);
+
+					if (cachedAccountManager) {
+						const managedAccounts = cachedAccountManager.getAccountsSnapshot();
+						const managedAccount = managedAccounts.find(
+							(acc) => acc.refreshToken === account.refreshToken
+						);
+						if (managedAccount) {
+							cachedAccountManager.removeAccount(managedAccount);
+							await cachedAccountManager.saveToDisk();
+						}
+					}
+
+					const remaining = storage.accounts.length;
+					return [
+						`Removed: ${label}`,
+						"",
+						remaining > 0
+							? `Remaining accounts: ${remaining}`
+							: "No accounts remaining. Run: opencode auth login",
+					].join("\n");
+				},
+			}),
+
+		},
         };
 };
 

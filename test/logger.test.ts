@@ -40,4 +40,37 @@ describe('Logger Module', () => {
 			}).not.toThrow();
 		});
 	});
+
+	describe('token masking', () => {
+		it('should mask JWT tokens in data', () => {
+			const jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U';
+			expect(() => {
+				logRequest('test-stage', { token: jwtToken });
+			}).not.toThrow();
+		});
+
+		it('should mask sensitive keys in data', () => {
+			expect(() => {
+				logRequest('test-stage', {
+					access_token: 'secret-access-token',
+					refresh_token: 'secret-refresh-token',
+					authorization: 'Bearer xyz',
+					apiKey: 'sk-1234567890abcdef',
+				});
+			}).not.toThrow();
+		});
+
+		it('should handle nested sensitive data', () => {
+			expect(() => {
+				logRequest('test-stage', {
+					auth: {
+						access: 'secret-token',
+						nested: {
+							refresh: 'another-secret',
+						},
+					},
+				});
+			}).not.toThrow();
+		});
+	});
 });

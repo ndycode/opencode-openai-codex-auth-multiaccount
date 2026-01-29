@@ -32,6 +32,12 @@ interface RefreshEntry {
  * - Consistent token state across all waiting callers
  * - Reduced load on OpenAI's token endpoint
  *
+ * Token Rotation Handling:
+ * When OpenAI rotates the refresh token during a refresh operation, we maintain
+ * a mapping from old token → new token. This ensures that requests arriving with
+ * either the old or new token will find the in-flight refresh and not trigger
+ * duplicate refreshes.
+ *
  * @example
  * ```typescript
  * const queue = new RefreshQueue();
@@ -49,6 +55,13 @@ interface RefreshEntry {
  */
 export class RefreshQueue {
   private pending: Map<string, RefreshEntry> = new Map();
+  
+  /**
+   * Maps old refresh tokens to new tokens after rotation.
+   * This allows lookups with either old or new token to find the same entry.
+   * Format: oldToken → newToken
+   */
+  private tokenRotationMap: Map<string, string> = new Map();
 
   /**
    * Maximum time to keep a refresh entry in the queue (prevents memory leaks
@@ -75,10 +88,9 @@ export class RefreshQueue {
    * @returns Token result (success with new tokens, or failure)
    */
   async refresh(refreshToken: string): Promise<TokenResult> {
-    // Clean up stale entries first
     this.cleanup();
 
-    // Check for existing in-flight refresh
+    // Check for existing in-flight refresh (direct match)
     const existing = this.pending.get(refreshToken);
     if (existing) {
       log.info("Reusing in-flight refresh for token", {
@@ -88,18 +100,65 @@ export class RefreshQueue {
       return existing.promise;
     }
 
+    // Check if this token was rotated FROM another token that's still refreshing
+    // This handles: Request A starts with oldToken, gets newToken, Request B arrives with newToken
+    const rotatedFrom = this.findOriginalToken(refreshToken);
+    if (rotatedFrom) {
+      const originalEntry = this.pending.get(rotatedFrom);
+      if (originalEntry) {
+        log.info("Reusing in-flight refresh via rotation mapping", {
+          newTokenSuffix: refreshToken.slice(-6),
+          originalTokenSuffix: rotatedFrom.slice(-6),
+          waitingMs: Date.now() - originalEntry.startedAt,
+        });
+        return originalEntry.promise;
+      }
+    }
+
     // Start a new refresh
     const startedAt = Date.now();
-    const promise = this.executeRefresh(refreshToken);
+    const promise = this.executeRefreshWithRotationTracking(refreshToken);
 
     this.pending.set(refreshToken, { promise, startedAt });
 
     try {
       return await promise;
     } finally {
-      // Clean up after completion
       this.pending.delete(refreshToken);
+      this.cleanupRotationMapping(refreshToken);
     }
+  }
+
+  private findOriginalToken(newToken: string): string | undefined {
+    for (const [oldToken, mappedNewToken] of this.tokenRotationMap.entries()) {
+      if (mappedNewToken === newToken) {
+        return oldToken;
+      }
+    }
+    return undefined;
+  }
+
+  private cleanupRotationMapping(token: string): void {
+    this.tokenRotationMap.delete(token);
+    for (const [oldToken, newToken] of this.tokenRotationMap.entries()) {
+      if (newToken === token) {
+        this.tokenRotationMap.delete(oldToken);
+      }
+    }
+  }
+
+  private async executeRefreshWithRotationTracking(refreshToken: string): Promise<TokenResult> {
+    const result = await this.executeRefresh(refreshToken);
+    
+    if (result.type === "success" && result.refresh !== refreshToken) {
+      this.tokenRotationMap.set(refreshToken, result.refresh);
+      log.info("Token rotated during refresh", {
+        oldTokenSuffix: refreshToken.slice(-6),
+        newTokenSuffix: result.refresh.slice(-6),
+      });
+    }
+    
+    return result;
   }
 
   /**
@@ -188,6 +247,7 @@ export class RefreshQueue {
    */
   clear(): void {
     this.pending.clear();
+    this.tokenRotationMap.clear();
   }
 }
 

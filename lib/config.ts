@@ -17,6 +17,8 @@ const DEFAULT_CONFIG: PluginConfig = {
 	retryAllAccountsMaxRetries: Infinity,
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
+	toastDurationMs: 5_000,
+	perProjectAccounts: true,
 	sessionRecovery: true,
 	autoResume: true,
 };
@@ -153,6 +155,23 @@ export function getAutoResume(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting(
 		"CODEX_AUTH_AUTO_RESUME",
 		pluginConfig.autoResume,
+		true,
+	);
+}
+
+export function getToastDurationMs(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_TOAST_DURATION_MS",
+		pluginConfig.toastDurationMs,
+		5_000,
+		{ min: 1_000 },
+	);
+}
+
+export function getPerProjectAccounts(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_PER_PROJECT_ACCOUNTS",
+		pluginConfig.perProjectAccounts,
 		true,
 	);
 }

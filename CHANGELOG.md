@@ -1,33 +1,63 @@
-# Changelog
+# changelog
 
-All notable changes to this project are documented here. Dates use the ISO format (YYYY-MM-DD).
+all notable changes to this project. dates are ISO format (YYYY-MM-DD).
+
+## [4.10.0] - 2026-01-29
+
+### added
+- **per-project accounts**: each project gets its own account storage now. no more conflicts when working across different repos with different chatgpt accounts. auto-detects project directories (looks for .git, package.json, etc). falls back to global storage if you're not in a project folder.
+- **configurable toast duration**: rate limit notifications stick around longer now (5s default). set `toastDurationMs` in config if you want them longer/shorter.
+- **account removal tool**: new `openai-accounts-remove` tool to delete accounts by index. finally.
+- **token masking in logs**: all tokens, api keys, and bearer headers are now masked in debug logs. no more accidentally leaking creds.
+
+### changed
+- **account limit bumped to 20**: was 10, now 20. add more accounts if you need them.
+- **per-project accounts default on**: `perProjectAccounts` defaults to `true` now. disable with `perProjectAccounts: false` in config if you want the old global behavior.
+
+### fixed
+- **token refresh race condition**: added `tokenRotationMap` to prevent concurrent refresh requests from stepping on each other.
+- **rate limit retry jitter**: 20% jitter on retry delays to prevent thundering herd.
+- **apply_patch infinite loop**: removed apply_patch references from codex bridge that caused loops in some edge cases.
+
+### config
+new options in `~/.opencode/openai-codex-auth-config.json`:
+```json
+{
+  "perProjectAccounts": true,
+  "toastDurationMs": 5000
+}
+```
+
+env vars:
+- `CODEX_AUTH_PER_PROJECT_ACCOUNTS=1` - enable per-project accounts
+- `CODEX_AUTH_TOAST_DURATION_MS=8000` - set toast duration in ms
 
 ## [4.9.7] - 2026-01-29
 
-### Fixed
-- Business/Team workspace selection: detect multiple workspace account IDs from OAuth tokens and prompt for the correct one.
-- Prevent refresh/hydration from overwriting selected workspace IDs (org/manual choices remain stable).
-- Persist workspace labels and sources for clearer account listings.
+### fixed
+- business/team workspace selection: detect multiple workspace account IDs from oauth tokens and prompt for the correct one.
+- prevent refresh/hydration from overwriting selected workspace ids (org/manual choices remain stable).
+- persist workspace labels and sources for clearer account listings.
 
-### Added
-- `CODEX_AUTH_ACCOUNT_ID` override to force a specific workspace ID (non-interactive login).
-- Troubleshooting guidance for “Usage not included in your plan”.
+### added
+- `CODEX_AUTH_ACCOUNT_ID` override to force a specific workspace id (non-interactive login).
+- troubleshooting guidance for "usage not included in your plan".
 
 ## [4.9.0] - 2026-01-26
 
-**BREAKING: Package renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`**
+**breaking: package renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`**
 
-### Changed
-- **Package renamed** to bypass OpenCode's plugin blocking. OpenCode skips any plugin with `opencode-openai-codex-auth` in the name, which prevented the plugin from loading. The new name `oc-chatgpt-multi-auth` works correctly.
-- Updated all documentation, configs, and references to use new package name.
-- Added `multiAccount` flag check in loader to coexist with OpenCode's built-in auth.
+### changed
+- **package renamed** to bypass opencode's plugin blocking. opencode skips any plugin with `opencode-openai-codex-auth` in the name. the new name `oc-chatgpt-multi-auth` works correctly.
+- updated all documentation, configs, and references to use new package name.
+- added `multiAccount` flag check in loader to coexist with opencode's built-in auth.
 
-### Fixed
-- Removed debug console.log statements from loader.
-- Plugin now properly detects when it should handle auth vs deferring to built-in.
+### fixed
+- removed debug console.log statements from loader.
+- plugin now properly detects when it should handle auth vs deferring to built-in.
 
-### Migration
-Update your `~/.config/opencode/opencode.json`:
+### migration
+update your `~/.config/opencode/opencode.json`:
 ```json
 {
   "plugin": ["oc-chatgpt-multi-auth@latest"]
@@ -36,405 +66,77 @@ Update your `~/.config/opencode/opencode.json`:
 
 ## [4.8.2] - 2026-01-25
 
-### Changed
-- Fix Node ESM plugin load by importing tool from `@opencode-ai/plugin/tool` and ensuring runtime dependency is installed.
-- Correct package metadata (repository links, update-check package name) and add troubleshooting guidance for plugin install/load.
+### changed
+- fix node esm plugin load by importing tool from `@opencode-ai/plugin/tool` and ensuring runtime dependency is installed.
+- correct package metadata (repository links, update-check package name) and add troubleshooting guidance for plugin install/load.
 
 ## [4.7.0] - 2026-01-25
 
-**Feature release**: Full session recovery system ported from opencode-antigravity-auth.
+**feature release**: full session recovery system ported from opencode-antigravity-auth.
 
-### Added
-- **Session Recovery System**: Automatic recovery from common API errors that would previously crash sessions:
-  - `tool_result_missing`: Handles interrupted tool executions (ESC during tool run)
-  - `thinking_block_order`: Fixes corrupted thinking blocks in message history
-  - `thinking_disabled_violation`: Strips thinking blocks when switching to non-thinking models
-- **New Recovery Module** (`lib/recovery/`):
-  - `types.ts` - Type definitions for stored messages, parts, and recovery
-  - `constants.ts` - Storage paths (XDG-compliant) and type sets
-  - `storage.ts` - Filesystem operations for reading/writing OpenCode session data
-  - `index.ts` - Module re-exports
-- **Main Recovery Logic** (`lib/recovery.ts`):
-  - `detectErrorType()` - Identifies recoverable error patterns from API responses
-  - `isRecoverableError()` - Quick check for recovery eligibility
-  - `createSessionRecoveryHook()` - Creates hook for session-level error recovery
-  - Toast notifications during recovery attempts
-- **New Configuration Options**:
-  - `sessionRecovery` (default: `true`) - Enable/disable session recovery
-  - `autoResume` (default: `true`) - Auto-resume session after thinking block recovery
-  - Environment variables: `CODEX_AUTH_SESSION_RECOVERY`, `CODEX_AUTH_AUTO_RESUME`
-- **26 new unit tests** for recovery system (now 405 total tests)
+### added
+- **session recovery system**: automatic recovery from common api errors that would previously crash sessions:
+  - `tool_result_missing`: handles interrupted tool executions (esc during tool run)
+  - `thinking_block_order`: fixes corrupted thinking blocks in message history
+  - `thinking_disabled_violation`: strips thinking blocks when switching to non-thinking models
+- **new recovery module** (`lib/recovery/`):
+  - `types.ts` - type definitions for stored messages, parts, and recovery
+  - `constants.ts` - storage paths (xdg-compliant) and type sets
+  - `storage.ts` - filesystem operations for reading/writing opencode session data
+  - `index.ts` - module re-exports
+- **main recovery logic** (`lib/recovery.ts`):
+  - `detectErrorType()` - identifies recoverable error patterns from api responses
+  - `isRecoverableError()` - quick check for recovery eligibility
+  - `createSessionRecoveryHook()` - creates hook for session-level error recovery
+  - toast notifications during recovery attempts
+- **new configuration options**:
+  - `sessionRecovery` (default: `true`) - enable/disable session recovery
+  - `autoResume` (default: `true`) - auto-resume session after thinking block recovery
+  - environment variables: `CODEX_AUTH_SESSION_RECOVERY`, `CODEX_AUTH_AUTO_RESUME`
+- **26 new unit tests** for recovery system
 
-### Changed
-- **Account Label Format**: Changed from `Account N (email)` to `N. email` for cleaner display
-- **Error Response Handling**: `handleErrorResponse()` now returns `errorBody` for recovery detection
-- Enhanced error logging with recoverable error detection in fetch flow
-
-### Technical Details
-- Storage paths follow XDG spec: `~/.local/share/opencode/storage/` (Linux/Mac), `%APPDATA%/opencode/storage/` (Windows)
-- Recovery hook integrates into index.ts loader and detects recoverable errors in fetch response flow
-- Thinking block recovery reads/writes to OpenCode's filesystem-based message storage
-- Tool result recovery injects synthetic `tool_result` parts via session API
+### changed
+- **account label format**: changed from `Account N (email)` to `N. email` for cleaner display
+- **error response handling**: `handleErrorResponse()` now returns `errorBody` for recovery detection
+- enhanced error logging with recoverable error detection in fetch flow
 
 ## [4.6.0] - 2026-01-25
 
-**Feature release**: Context overflow handling and missing tool result injection.
-
-### Added
-- **Context Overflow Handler**: Gracefully handles "prompt too long" / context length exceeded errors:
-  - Returns synthetic SSE response with helpful instructions instead of raw 400 error
-  - Suggests `/compact`, `/clear`, or `/undo` commands to reduce context size
-  - Prevents OpenCode session from getting locked on context overflow
-  - New module: `lib/context-overflow.ts`
-- **Missing Tool Result Injection**: Automatically handles cancelled tool calls (ESC mid-execution):
-  - Detects orphaned `function_call` items (calls without matching outputs)
-  - Injects synthetic output: `"Operation cancelled by user"`
-  - Prevents "missing tool_result" API errors when user cancels mid-tool
-  - New function: `injectMissingToolOutputs()` in `lib/request/helpers/input-utils.ts`
-- **34 new unit tests** for context overflow and tool injection (now 379 total tests)
-
-### Technical Details
-- Context overflow detection matches patterns: `prompt_too_long`, `context_length_exceeded`, `maximum context length`, `token limit exceeded`, `too many tokens`
-- Synthetic SSE response includes proper message_start/content_block_delta/message_stop events
-- Tool injection preserves message order: outputs are placed immediately after their calls
-
-## [4.5.0] - 2026-01-25
-
-**Feature release**: Queued token refresh, enhanced logging, and auto-update notifications.
-
-### Added
-- **Queued Token Refresh**: New `RefreshQueue` class prevents race conditions when multiple concurrent requests try to refresh the same account's token simultaneously:
-  - Deduplicates concurrent refresh calls per account
-  - Subsequent callers await the existing in-flight refresh promise
-  - Automatic cleanup of stale entries after 30 seconds
-  - New module: `lib/refresh-queue.ts`
-- **Enhanced Logging System**: Upgraded logger with proper log levels and timing utilities:
-  - Log levels: `debug`, `info`, `warn`, `error`
-  - Configurable via `CODEX_PLUGIN_LOG_LEVEL` environment variable
-  - Scoped loggers with timing functions (`time()`, `timeEnd()`)
-  - Duration formatting utilities
-- **Auto-Update Notifications**: Plugin now checks npm for newer versions on load:
-  - Checks npm registry once per 24 hours (cached)
-  - Shows toast notification when update is available
-  - New module: `lib/auto-update-checker.ts`
-- **13 new unit tests** for RefreshQueue (now 345 total tests)
-
-### Changed
-- Token refresh calls now use `queuedRefresh()` instead of direct `refreshAccessToken()` for race condition safety
-- Logger exports expanded: `logInfo()`, `logError()`, `ScopedLogger` interface, `formatDuration()`
-
-### Technical Details
-- RefreshQueue uses a Map to track in-flight refresh promises, keyed by refresh token
-- Stale entries (>30s) are automatically cleaned up to prevent memory leaks
-- Auto-update check is non-blocking and fails silently to avoid disrupting plugin operation
-
-## [4.3.1] - 2026-01-23
-
-### Added
-- `openai-accounts-status --json` for scriptable status output with email/ID labels.
-
-### Changed
-- Account labels now prefer email and show ID suffix when available; list/status outputs are columnized for readability.
-- Stored account emails are trimmed/lowercased when present.
-- Dependency refresh: @opencode-ai plugin/sdk 1.1.34, hono 4.11.5, vitest 4.0.18, @types/node 25.0.10, @typescript-eslint 8.53.1.
-
-## [4.4.0] - 2026-01-25
-
-**Feature release**: Intelligent rate-limit rotation with health-based account selection.
-
-### Added
-- **Health Score Tracking**: Accounts now track health scores based on success/failure history:
-  - +1 point on successful request
-  - -10 points on rate limit
-  - -20 points on other failures
-  - +2 points/hour passive recovery
-- **Token Bucket Rate Limiting**: Client-side rate limiting (50 max tokens, 6 tokens/min regeneration) to prevent hitting rate limits.
-- **Hybrid Account Selection**: New scoring algorithm selects optimal account:
-  - Score = (health × 2) + (tokens × 5) + (freshness × 0.1)
-  - Prefers healthy accounts with available tokens that haven't been used recently
-- **Reason-Aware Backoff**: Different rate limit reasons use different backoff multipliers:
-  - `quota`: 3.0× (daily quota exhausted - longer wait)
-  - `tokens`: 1.5× (token limit - moderate wait)
-  - `concurrent`: 0.5× (concurrent requests - short wait)
-  - `unknown`: 1.0× (default)
-- **New AccountManager methods**: `getCurrentOrNextForFamilyHybrid()`, `recordSuccess()`, `recordRateLimit()`, `recordFailure()`, `markRateLimitedWithReason()`
-- **New module**: `lib/rotation.ts` with `HealthScoreTracker`, `TokenBucketTracker`, `selectHybridAccount`
-
-### Changed
-- **BREAKING: Default retry behavior changed** - Plugin now **always waits and retries** when all accounts are rate-limited:
-  - `retryAllAccountsRateLimited`: `false` → `true`
-  - `retryAllAccountsMaxWaitMs`: `30000` → `0` (no limit)
-  - `retryAllAccountsMaxRetries`: `1` → `Infinity` (unlimited)
-- **Account selection strategy**: Uses hybrid health-based selection instead of simple round-robin
-- **Rate limit handling**: Records health metrics on success/failure for smarter future selections
-
-### Migration Notes
-If you need the old behavior (give up when all accounts are rate-limited), add to `~/.opencode/openai-codex-auth-config.json`:
-```json
-{
-  "retryAllAccountsRateLimited": false,
-  "retryAllAccountsMaxWaitMs": 30000,
-  "retryAllAccountsMaxRetries": 1
-}
-```
-
-Or use environment variables:
-```bash
-export CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0
-export CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000
-export CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1
-```
-
-## [4.3.0] - 2026-01-04
-
-**Feature + reliability release**: variants support, one-command installer, and auth/error handling fixes.
-
-
-### Added
-- **One-command installer/update**: `npx -y oc-chatgpt-multi-auth@latest` (global config, backup, cache clear) with `--legacy` for OpenCode v1.0.209 and below.
-- **Modern variants config**: `config/opencode-modern.json` for OpenCode v1.0.210+; legacy presets remain in `config/opencode-legacy.json`.
-- **Installer CLI** bundled as package bin for cross-platform use (Windows/macOS/Linux).
-
-### Changed
-- **Variants-aware request config**: respects host-supplied `body.reasoning` / `providerOptions.openai` before falling back to defaults.
-- **OpenCode prompt source**: updates to the current upstream repository (`anomalyco/opencode`).
-- **Docs/README**: install-first layout with leaner guidance and explicit legacy path.
-
-### Fixed
-- **Headless login fallback**: missing `xdg-open` no longer fails the OAuth flow; manual URL paste stays available.
-- **Error handling alignment**: refresh failures throw; usage-limit 404s map to retryable 429s where appropriate.
-- **AGENTS.md preservation**: protected instruction markers stop accidental filtering of user instructions.
-- **Tool-call integrity**: orphan outputs now match `local_shell_call` and `custom_tool_call` (Codex CLI parity); unmatched outputs preserved as assistant messages.
-- **Logging noise**: debug logging gated behind flags to prevent stdout bleed.
-
-## [4.2.0] - 2025-12-19
-
-**Feature release**: GPT 5.2 Codex support and prompt alignment with latest Codex CLI.
-
-### Added
-- **GPT 5.2 Codex model family**: Full support for `gpt-5.2-codex` with presets:
-  - `gpt-5.2-codex-low` - Fast GPT 5.2 Codex responses
-  - `gpt-5.2-codex-medium` - Balanced GPT 5.2 Codex tasks
-  - `gpt-5.2-codex-high` - Complex GPT 5.2 Codex reasoning & tools
-  - `gpt-5.2-codex-xhigh` - Deep GPT 5.2 Codex long-horizon work
-- **New model family prompt**: `gpt-5.2-codex_prompt.md` fetched from the latest Codex CLI release with its own cache file.
-- **Test coverage**: Added unit tests for GPT 5.2 Codex normalization, family selection, and reasoning behavior.
-
-### Changed
-- **Prompt selection alignment**: GPT 5.2 general now uses `gpt_5_2_prompt.md` (Codex CLI parity).
-- **Reasoning configuration**: GPT 5.2 Codex supports `xhigh` but does **not** support `"none"`; `"none"` auto-upgrades to `"low"` and `"minimal"` normalizes to `"low"`.
-- **Config presets**: `config/opencode-legacy.json` includes the 22 pre-configured presets (adds GPT 5.2 Codex); `config/opencode-modern.json` provides the variant-based setup.
-- **Docs**: Updated README/AGENTS/config docs to include GPT 5.2 Codex and new model family behavior.
-
-## [4.1.1] - 2025-12-17
-
-**Minor release**: "none" reasoning effort support, orphaned function_call_output fix, and HTML version update.
-
-### Added
-- **"none" reasoning effort support**: GPT-5.1 and GPT-5.2 support `reasoning_effort: "none"` which disables the reasoning phase entirely. This can result in faster responses when reasoning is not needed.
-  - `gpt-5.2-none` - GPT-5.2 with reasoning disabled
-  - `gpt-5.1-none` - GPT-5.1 with reasoning disabled
-- **4 new unit tests** for "none" reasoning behavior (now 197 total unit tests).
-
-### Fixed
-- **Orphaned function_call_output 400 errors**: Fixed API errors when conversation history contains `item_reference` pointing to stored function calls. Previously, orphaned `function_call_output` items were only filtered when `!body.tools`. Now always handles orphans regardless of tools presence, and converts them to assistant messages to preserve context while avoiding API errors.
-- **OAuth HTML version display**: Updated version in oauth-success.html from 1.0.4 to 4.1.0.
-
-### Technical Details
-- `getReasoningConfig()` now detects GPT-5.1 general purpose models (not Codex variants) and allows "none" to pass through.
-- GPT-5.2 inherits "none" support as it's newer than GPT-5.1.
-- Codex variants (gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini) do NOT support "none":
-  - Codex and Codex Max: "none" auto-converts to "low"
-  - Codex Mini: "none" auto-converts to "medium" (as before)
-- Documentation updated with complete reasoning effort support matrix per model family.
-
-### References
-- **OpenAI API docs** (`platform.openai.com/docs/api-reference/chat/create`): "gpt-5.1 defaults to none, which does not perform reasoning. The supported reasoning values for gpt-5.1 are none, low, medium, and high."
-- **Codex CLI** (`codex-rs/protocol/src/openai_models.rs`): `ReasoningEffort` enum includes `None` variant with `#[serde(rename_all = "lowercase")]` serialization to `"none"`.
-- **Codex CLI** (`codex-rs/core/src/client.rs`): Request builder passes `ReasoningEffort::None` through to API without validation/rejection.
-- **Codex CLI** (`docs/config.md`): Documents `model_reasoning_effort = "none"` as valid config option.
-
-### Notes
-- This plugin defaults to "medium" for better coding assistance; users must explicitly set "none" if desired.
-
-## [4.1.0] - 2025-12-11
-
-**Feature release**: GPT 5.2 model support and image input capabilities.
-
-### Added
-- **GPT 5.2 model family support**: Full support for OpenAI's latest GPT 5.2 model with 4 reasoning level presets:
-  - `gpt-5.2-low` - Fast responses with light reasoning
-  - `gpt-5.2-medium` - Balanced reasoning for general tasks
-  - `gpt-5.2-high` - Complex reasoning and analysis
-  - `gpt-5.2-xhigh` - Deep multi-hour analysis (same as Codex Max)
-- **Full image input support**: All 16 model variants now include `modalities.input: ["text", "image"]` enabling full multimodal capabilities - read screenshots, diagrams, UI mockups, and any image directly in OpenCode.
-- **GPT 5.2 model family** added to `codex.ts` with dedicated prompt handling.
-- **Test coverage**: Updated integration tests to verify all 16 models (was 13), now 193 unit tests + 16 integration tests.
-
-### Changed
-- **Model ordering**: Config now ordered by model family priority: GPT 5.2 → Codex Max → Codex → Codex Mini → GPT 5.1.
-- **Removed default presets**: Removed `gpt-5.1-codex-max` and `gpt-5.2` (without reasoning suffix) to enforce explicit reasoning level selection.
-- **Test script**: `scripts/test-all-models.sh` now uses local dist for testing and includes GPT 5.2 tests.
-- **Documentation**: Updated README with GPT 5.2 models, image support, and condensed config example.
-
-### Technical Details
-- GPT 5.2 maps to `gpt-5.2` API model with same reasoning options as Codex Max (`low/medium/high/xhigh`).
-- `getModelFamily()` now returns `"gpt-5.2"` for GPT 5.2 models, using Codex Max prompts.
-- `getReasoningConfig()` treats GPT 5.2 like Codex Max for `xhigh` reasoning support.
-- Model normalization pattern matching updated to recognize GPT 5.2 before other patterns.
-
-## [4.0.2] - 2025-11-27
-
-**Bugfix release**: Fixes compaction context loss, agent creation, and SSE/JSON response handling.
-
-### Fixed
-- **Compaction losing context**: v4.0.1 was too aggressive in filtering tool calls - it removed ALL `function_call`/`function_call_output` items when tools weren't present. Now only **orphaned** outputs (without matching calls) are filtered, preserving matched pairs for compaction context.
-- **Agent creation failing**: The `/agent create` command was failing with "Invalid JSON response" because we were returning SSE streams instead of JSON for `generateText()` requests.
-- **SSE/JSON response handling**: Properly detect original request intent - `streamText()` requests get SSE passthrough, `generateText()` requests get SSE→JSON conversion.
-
-### Added
-- **`gpt-5.1-chat-latest` model support**: Added to model map, normalizes to `gpt-5.1`.
-
-### Technical Details
-- Root cause of compaction issue: OpenCode sends `item_reference` with `fc_*` IDs for function calls. We filter these for stateless mode, but v4.0.1 then removed ALL tool items. Now we only remove orphaned `function_call_output` items (where no matching `function_call` exists).
-- Root cause of agent creation issue: We were forcing `stream: true` for all requests and returning SSE for all responses. Now we capture original `stream` value before transformation and convert SSE→JSON only when original request wasn't streaming.
-- The Codex API always receives `stream: true` (required), but response handling is based on original intent.
-
-## [4.0.1] - 2025-11-27
-
-**Bugfix release**: Fixes API errors during summary/compaction and GitHub rate limiting.
-
-### Fixed
-- **Orphaned `function_call_output` errors**: Fixed 400 errors during summary/compaction requests when OpenCode sends `item_reference` pointers to server-stored function calls. The plugin now filters out `function_call` and `function_call_output` items when no tools are present in the request.
-- **GitHub API rate limiting**: Added fallback mechanism when fetching Codex instructions from GitHub. If the API returns 403 (rate limit), the plugin now falls back to parsing the HTML releases page.
-
-### Technical Details
-- Root cause: OpenCode's secondary model (gpt-5-nano) uses `item_reference` with `fc_*` IDs to reference stored function calls. Our plugin filters `item_reference` for stateless mode (`store: false`), leaving `function_call_output` orphaned. The Codex API rejects requests with orphaned outputs.
-- Fix: When `hasTools === false`, filter out all `function_call` and `function_call_output` items from the input array.
-- GitHub fallback chain: API endpoint → HTML page → redirect URL parsing → HTML regex parsing.
-
-## [4.0.0] - 2025-11-25
-
-**Major release**: Complete prompt engineering overhaul matching official Codex CLI behavior, with full **GPT-5.1 Codex Max** support.
-
-### Highlights
-- **Full Codex Max support** with dedicated prompt including frontend design guidelines
-- **Model-specific prompts** matching Codex CLI's prompt selection logic
-- **GPT-5.0 → GPT-5.1 migration** as legacy models are phased out
-
-### Added
-- **Model-specific system prompts**: Plugin now fetches the correct Codex prompt based on model family, matching Codex CLI's `model_family.rs` logic:
-  - `gpt-5.1-codex-max*` → `gpt-5.1-codex-max_prompt.md` (117 lines, includes frontend design guidelines)
-  - `gpt-5.1-codex*`, `gpt-5.1-codex-mini*` → `gpt_5_codex_prompt.md` (105 lines, focused coding prompt)
-  - `gpt-5.1*` → `gpt_5_1_prompt.md` (368 lines, full behavioral guidance)
-- New `ModelFamily` type (`"codex-max" | "codex" | "gpt-5.1"`) for prompt selection.
-- New `getModelFamily()` function to determine prompt selection based on normalized model name.
-- Model family now logged in request logs for debugging (`modelFamily` field in after-transform logs).
-- 16 new unit tests for model family detection (now **191 total unit tests**).
-- Integration tests now verify correct model family selection (13 integration tests with family verification).
-
-### Changed
-- **Legacy GPT-5.0 models now map to GPT-5.1**: All legacy `gpt-5` model variants automatically normalize to their `gpt-5.1` equivalents as GPT-5.0 is being phased out by OpenAI:
-  - `gpt-5-codex` → `gpt-5.1-codex`
-  - `gpt-5` → `gpt-5.1`
-  - `gpt-5-mini`, `gpt-5-nano` → `gpt-5.1`
-  - `codex-mini-latest` → `gpt-5.1-codex-mini`
-- **Lazy instruction loading**: Instructions are now fetched per-request based on model family (not pre-loaded at initialization).
-- **Separate caching per model family**: Each model family has its own cached prompt file:
-  - `codex-max-instructions.md` + `codex-max-instructions-meta.json`
-  - `codex-instructions.md` + `codex-instructions-meta.json`
-  - `gpt-5.1-instructions.md` + `gpt-5.1-instructions-meta.json`
-
-### Fixed
-- Fixed OpenCode prompt cache URL to fetch from `dev` branch instead of non-existent `main` branch.
-- Fixed model configuration test script to correctly identify model logs in multi-model sessions (opencode uses a small model like `gpt-5-nano` for title generation alongside the user's selected model).
-
-### Technical Details
-This release brings full parity with Codex CLI's prompt engineering:
-- **Codex family** (105 lines): Concise, tool-focused prompt for coding tasks
-- **Codex Max family** (117 lines): Adds frontend design guidelines for UI work
-- **GPT-5.1 general** (368 lines): Comprehensive behavioral guidance, personality, planning
-
-## [3.3.0] - 2025-11-19
-### Added
-- GPT 5.1 Codex Max support: normalization, per-model defaults, and new presets (`gpt-5.1-codex-max`, `gpt-5.1-codex-max-xhigh`) with extended reasoning options (including `none`/`xhigh`) while keeping the 272k context / 128k output limits.
-- Typing and config support for new reasoning options (`none`/`xhigh`, summary `off`/`on`) plus updated test matrix entries.
-
-### Changed
-- Codex Mini clamping now downgrades unsupported `xhigh` to `high` and guards against `none`/`minimal` inputs.
-- Documentation, config guides, and validation scripts now reflect 13 verified GPT 5.1 variants (3 codex, 5 codex-max, 2 codex-mini, 3 general), including Codex Max. See README for details on pre-configured variants.
-
-## [3.2.0] - 2025-11-14
-### Added
-- GPT 5.1 model family support: normalization for `gpt-5.1`, `gpt-5.1-codex`, and `gpt-5.1-codex-mini` plus new GPT 5.1-only presets in the canonical `config/opencode-legacy.json`.
-- Documentation updates (README, docs, AGENTS) describing the 5.1 families, their reasoning defaults, and how they map to ChatGPT slugs and token limits.
-
-### Changed
-- Model normalization docs and tests now explicitly cover both 5.0 and 5.1 Codex/general families and the two Codex Mini tiers.
-- The legacy GPT 5.0 full configuration is now published separately; new installs should prefer the 5.1 presets in `config/opencode-legacy.json`.
-
-## [3.1.0] - 2025-11-11
-### Added
-- Codex Mini support end-to-end: normalization to the `codex-mini-latest` slug, proper reasoning defaults, and two new presets (`gpt-5-codex-mini-medium` / `gpt-5-codex-mini-high`).
-- Documentation & configuration updates describing the Codex Mini tier (200k input / 100k output tokens) plus refreshed totals (11 presets, 160+ unit tests).
-
-### Fixed
-- Prevented Codex Mini from inheriting the lightweight (`minimal`) reasoning profile used by `gpt-5-mini`/`nano`, ensuring the API always receives supported effort levels.
-
-## [3.0.0] - 2025-11-04
-### Added
-- Codex-style usage-limit messaging that mirrors the 5-hour and weekly windows reported by the Codex CLI.
-- Documentation guidance noting that OpenCode's context auto-compaction and usage sidebar require the canonical `config/opencode-legacy.json`.
-
-### Changed
-- Prompt caching now relies solely on the host-supplied `prompt_cache_key`; conversation/session headers are forwarded only when OpenCode provides one.
-- CODEX_MODE bridge prompt refreshed to the newest Codex CLI release so tool awareness stays in sync.
-
-### Fixed
-- Clarified README, docs, and configuration references so the canonical config matches shipped behaviour.
-- Pinned `hono` (4.10.4) and `vite` (7.1.12) to resolve upstream security advisories.
-
-## [2.1.2] - 2025-10-12
-### Added
-- Comprehensive compliance documentation (ToS guidance, security, privacy) and a full user/developer doc set.
-
-### Fixed
-- Per-model configuration lookup, stateless multi-turn conversations, case-insensitive model normalization, and GitHub instruction caching.
-
-## [2.1.1] - 2025-10-04
-### Fixed
-- README cache-clearing snippet now runs in a subshell from the home directory to avoid path issues while removing cached plugin files.
-
-## [2.1.0] - 2025-10-04
-### Added
-- Enhanced CODEX_MODE bridge prompt with Task tool and MCP awareness plus ETag-backed verification of OpenCode system prompts.
-
-### Changed
-- Request transformation made async to support prompt verification caching; AGENTS.md renamed to provide cross-agent guidance.
-
-## [2.0.0] - 2025-10-03
-### Added
-- Full TypeScript rewrite with strict typing, 123 automated tests, and nine pre-configured model variants matching the Codex CLI.
-- CODEX_MODE introduced (enabled by default) with a lightweight bridge prompt and configurability via config file or `CODEX_MODE` env var.
-
-### Changed
-- Library reorganized into semantic folders (auth, prompts, request, etc.) and OAuth flow polished with the new success page.
-
-## [1.0.3] - 2025-10-02
-### Changed
-- Major internal refactor splitting the runtime into focused modules (logger, request/response handlers) and removing legacy debug output.
-
-## [1.0.2] - 2025-10-02
-### Added
-- ETag-based GitHub caching for Codex instructions and release-tag tracking for more stable prompt updates.
-
-### Fixed
-- Default model fallback, text verbosity initialization, and standardized error logging prefixes.
-
-## [1.0.1] - 2025-10-01
-### Added
-- README clarifications: opencode auto-installs plugins, config locations, and streamlined quick-start instructions.
-
-## [1.0.0] - 2025-10-01
-### Added
-- Initial production release with ChatGPT Plus/Pro OAuth support, tool remapping, auto-updating Codex instructions, and zero runtime dependencies.
+**feature release**: context overflow handling and missing tool result injection.
+
+### added
+- **context overflow handler**: gracefully handles "prompt too long" / context length exceeded errors:
+  - returns synthetic sse response with helpful instructions instead of raw 400 error
+  - suggests `/compact`, `/clear`, or `/undo` commands to reduce context size
+  - prevents opencode session from getting locked on context overflow
+  - new module: `lib/context-overflow.ts`
+- **missing tool result injection**: automatically handles cancelled tool calls (esc mid-execution):
+  - detects orphaned `function_call` items (calls without matching outputs)
+  - injects synthetic output: `"Operation cancelled by user"`
+  - prevents "missing tool_result" api errors when user cancels mid-tool
+  - new function: `injectMissingToolOutputs()` in `lib/request/helpers/input-utils.ts`
+- **34 new unit tests** for context overflow and tool injection
+
+## [4.5.0] - 2026-01-24
+
+### added
+- **strict tool validation**: automatically cleans tool schemas for compatibility with strict models (claude, gemini)
+- **auto-update notifications**: get notified when a new version is available
+- **22 model presets**: full variant system with reasoning levels (none/low/medium/high/xhigh)
+
+### changed
+- health-aware account rotation with automatic failover
+- hybrid selection prefers healthy accounts with available tokens
+
+## [4.4.0] - 2026-01-23
+
+### added
+- **health scoring**: tracks success/failure per account
+- **token bucket**: prevents hitting rate limits
+- **always retries** when all accounts are rate-limited (waits for reset)
+
+### config
+new retry options:
+- `retryAllAccountsRateLimited` (default: `true`)
+- `retryAllAccountsMaxWaitMs` (default: `0` = unlimited)
+- `retryAllAccountsMaxRetries` (default: `Infinity`)

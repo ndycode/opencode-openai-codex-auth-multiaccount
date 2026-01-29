@@ -1,10 +1,10 @@
-# Configuration Guide
+# configuration
 
-Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
+complete reference for configuring the plugin. most of this is optional - defaults work fine for most people.
 
 ---
 
-## Quick Reference
+## quick start
 
 ```json
 {
@@ -26,13 +26,13 @@ Complete reference for configuring the OpenCode OpenAI Codex Auth Plugin.
 
 ---
 
-## Configuration Options
+## model options
 
 ### reasoningEffort
 
-Controls computational effort for reasoning.
+controls how much thinking the model does.
 
-| Model | Supported Values |
+| model | supported values |
 |-------|------------------|
 | `gpt-5.2` | none, low, medium, high, xhigh |
 | `gpt-5.2-codex` | low, medium, high, xhigh |
@@ -41,75 +41,102 @@ Controls computational effort for reasoning.
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-<details>
-<summary><b>Value Descriptions</b></summary>
-
-| Value | Description |
-|-------|-------------|
-| `none` | No dedicated reasoning phase (GPT-5.2/5.1 base only) |
-| `low` | Light reasoning, fastest |
-| `medium` | Balanced (default) |
-| `high` | Deep reasoning |
-| `xhigh` | Extra depth for complex tasks (GPT-5.2, 5.2-codex, codex-max) |
-
-**Notes:**
-- `none` auto-converts to `low` for Codex variants
-- `xhigh` downgrades to `high` on models that don't support it
-- Codex Mini only supports `medium` or `high`
-
-</details>
+what they mean:
+- `none` - no reasoning phase (base models only, auto-converts to `low` for codex)
+- `low` - light reasoning, fastest
+- `medium` - balanced (default)
+- `high` - deep reasoning
+- `xhigh` - max depth for complex tasks (downgrades to `high` on unsupported models)
 
 ### reasoningSummary
 
-Controls reasoning summary verbosity.
-
-| Value | Description |
-|-------|-------------|
-| `auto` | Automatically adapts (default) |
-| `concise` | Short summaries |
-| `detailed` | Verbose summaries |
-| `off` | Disable summary (Codex Max) |
-| `on` | Force enable (Codex Max) |
+| value | what it does |
+|-------|--------------|
+| `auto` | adapts automatically (default) |
+| `concise` | short summaries |
+| `detailed` | verbose summaries |
+| `off` | disable (codex max only) |
+| `on` | force enable (codex max only) |
 
 ### textVerbosity
 
-Controls output length.
-
-| Value | Description |
-|-------|-------------|
-| `low` | Concise responses |
-| `medium` | Balanced (default) |
-| `high` | Verbose responses |
+| value | what it does |
+|-------|--------------|
+| `low` | concise responses |
+| `medium` | balanced (default) |
+| `high` | verbose responses |
 
 ### include
 
-Array of additional response fields to include.
+array of extra response fields.
 
-| Value | Purpose |
-|-------|---------|
-| `reasoning.encrypted_content` | Enables multi-turn with `store: false` |
-
-**Required** for multi-turn conversations in stateless mode.
+| value | why you need it |
+|-------|-----------------|
+| `reasoning.encrypted_content` | required for multi-turn with `store: false` |
 
 ### store
 
-Controls server-side conversation persistence.
-
-| Value | Description |
-|-------|-------------|
-| `false` | Stateless mode (required) |
-| `true` | Not supported by Codex API |
-
-> **Important**: Must be `false` for AI SDK 2.0.50+ compatibility.
+| value | what it does |
+|-------|--------------|
+| `false` | stateless mode (required for this plugin) |
+| `true` | not supported by codex api |
 
 ---
 
-## Configuration Patterns
+## plugin config
 
-<details open>
-<summary><b>Pattern 1: Global Options</b></summary>
+advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 
-Apply same settings to all models:
+```json
+{
+  "codexMode": true,
+  "perProjectAccounts": true,
+  "toastDurationMs": 5000,
+  "retryAllAccountsRateLimited": true,
+  "retryAllAccountsMaxWaitMs": 0,
+  "retryAllAccountsMaxRetries": null
+}
+```
+
+### options
+
+| option | default | what it does |
+|--------|---------|--------------|
+| `codexMode` | `true` | uses codex-opencode bridge prompt (synced with codex cli) |
+| `perProjectAccounts` | `true` | each project gets its own account storage |
+| `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
+| `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
+| `retryAllAccountsMaxWaitMs` | `0` | max wait time in ms (0 = unlimited) |
+| `retryAllAccountsMaxRetries` | `Infinity` | max retry attempts |
+| `sessionRecovery` | `true` | auto-recover from common api errors |
+| `autoResume` | `true` | auto-resume after thinking block recovery |
+| `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
+| `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
+
+### environment variables
+
+override any config with env vars:
+
+| variable | what it does |
+|----------|--------------|
+| `DEBUG_CODEX_PLUGIN=1` | enable debug logging |
+| `ENABLE_PLUGIN_REQUEST_LOGGING=1` | log all api requests |
+| `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
+| `CODEX_MODE=0` | disable bridge prompt |
+| `CODEX_AUTH_PER_PROJECT_ACCOUNTS=0` | disable per-project accounts |
+| `CODEX_AUTH_TOAST_DURATION_MS=8000` | set toast duration |
+| `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | disable wait-and-retry |
+| `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | set max wait time |
+| `CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1` | set max retries |
+| `CODEX_AUTH_ACCOUNT_ID=acc_xxx` | force specific workspace id |
+
+---
+
+## config patterns
+
+### global options
+
+same settings for all models:
 
 ```json
 {
@@ -126,12 +153,9 @@ Apply same settings to all models:
 }
 ```
 
-</details>
+### per-model options
 
-<details>
-<summary><b>Pattern 2: Per-Model Options</b></summary>
-
-Different settings for different models:
+different settings for different models:
 
 ```json
 {
@@ -143,11 +167,11 @@ Different settings for different models:
       },
       "models": {
         "gpt-5.2-fast": {
-          "name": "Fast GPT-5.2",
+          "name": "fast gpt-5.2",
           "options": { "reasoningEffort": "low" }
         },
         "gpt-5.2-smart": {
-          "name": "Smart GPT-5.2",
+          "name": "smart gpt-5.2",
           "options": { "reasoningEffort": "high" }
         }
       }
@@ -156,36 +180,11 @@ Different settings for different models:
 }
 ```
 
-**Precedence**: Model options override global options.
+model options override global options.
 
-</details>
+### project-specific
 
-<details>
-<summary><b>Pattern 3: Per-Agent Models</b></summary>
-
-Different agents use different models:
-
-```json
-{
-  "agent": {
-    "commit": {
-      "model": "openai/gpt-5.1-codex-low",
-      "prompt": "Generate concise commit messages"
-    },
-    "review": {
-      "model": "openai/gpt-5.1-codex-high",
-      "prompt": "Thorough code review"
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><b>Pattern 4: Project-Specific Overrides</b></summary>
-
-**Global** (`~/.config/opencode/opencode.json`):
+global (`~/.config/opencode/opencode.json`):
 ```json
 {
   "plugin": ["oc-chatgpt-multi-auth@latest"],
@@ -197,7 +196,7 @@ Different agents use different models:
 }
 ```
 
-**Project** (`my-project/.opencode.json`):
+project (`my-project/.opencode.json`):
 ```json
 {
   "provider": {
@@ -208,86 +207,40 @@ Different agents use different models:
 }
 ```
 
-Result: Project uses `high`, other projects use `medium`.
-
-</details>
+result: project uses `high`, other projects use `medium`.
 
 ---
 
-## Plugin Configuration
+## file locations
 
-Advanced plugin settings in `~/.opencode/openai-codex-auth-config.json`:
-
-```json
-{
-  "codexMode": true,
-  "retryAllAccountsRateLimited": true,
-  "retryAllAccountsMaxWaitMs": 0,
-  "retryAllAccountsMaxRetries": null
-}
-```
-
-### Options
-
-| Option | Default | What it does |
-|--------|---------|--------------|
-| `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with Codex CLI) |
-| `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
-| `retryAllAccountsMaxWaitMs` | `0` | Max wait time in ms (0 = unlimited) |
-| `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts (null = unlimited) |
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `DEBUG_CODEX_PLUGIN=1` | Enable debug logging |
-| `ENABLE_PLUGIN_REQUEST_LOGGING=1` | Log all API requests |
-| `CODEX_PLUGIN_LOG_LEVEL=debug` | Set log level (debug, info, warn, error) |
-| `CODEX_MODE=0` | Temporarily disable bridge prompt |
-| `CODEX_MODE=1` | Temporarily enable bridge prompt |
-| `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | Disable wait-and-retry behavior |
-| `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | Set max wait time |
-| `CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1` | Set max retries |
+| file | what it's for |
+|------|---------------|
+| `~/.config/opencode/opencode.json` | global opencode config |
+| `<project>/.opencode.json` | project-specific config |
+| `~/.opencode/openai-codex-auth-config.json` | plugin config |
+| `~/.opencode/auth/openai.json` | oauth tokens |
+| `~/.opencode/openai-codex-accounts.json` | global account storage |
+| `<project>/.opencode/openai-codex-accounts.json` | per-project account storage |
+| `~/.opencode/logs/codex-plugin/` | debug logs |
 
 ---
 
-## Configuration Files
+## debugging
 
-### Provided Examples
-
-| File | Use Case |
-|------|----------|
-| `config/opencode-modern.json` | OpenCode v1.0.210+ (variants) |
-| `config/opencode-legacy.json` | OpenCode v1.0.209 and below |
-
-### Your Files
-
-| File | Purpose |
-|------|---------|
-| `~/.config/opencode/opencode.json` | Global config |
-| `<project>/.opencode.json` | Project-specific |
-| `~/.opencode/openai-codex-auth-config.json` | Plugin config |
-| `~/.opencode/auth/openai.json` | OAuth tokens |
-| `~/.opencode/openai-codex-accounts.json` | Multi-account storage |
-
----
-
-## Validation
-
-### Check Config is Valid
+### check config is valid
 
 ```bash
 opencode
-# Shows errors if config is invalid
+# shows errors if config is invalid
 ```
 
-### Verify Model Resolution
+### verify model resolution
 
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5.2
 ```
 
-Look for:
+look for:
 ```
 [openai-codex-plugin] Model config lookup: "gpt-5.2" → normalized to "gpt-5.2-codex" for API {
   hasModelSpecificConfig: true,
@@ -295,63 +248,50 @@ Look for:
 }
 ```
 
-### Test Per-Model Options
+### test per-model options
 
 ```bash
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-low
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-high
 
-# Compare reasoning.effort in logs
+# compare reasoning.effort in logs
 cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasoning.effort'
 ```
 
 ---
 
-## Troubleshooting Config
+## troubleshooting
 
-<details>
-<summary><b>Model Not Found</b></summary>
+### model not found
 
-**Error**: `Model 'openai/my-model' not found`
+**error**: `Model 'openai/my-model' not found`
 
-**Cause**: Config key doesn't match model name in command
-
-**Fix**: Use exact config key:
+**fix**: make sure config key matches exactly:
 ```json
 { "models": { "my-model": { ... } } }
 ```
 ```bash
-opencode run "test" --model=openai/my-model  # Must match exactly
+opencode run "test" --model=openai/my-model
 ```
 
-</details>
+### per-model options not applied
 
-<details>
-<summary><b>Per-Model Options Not Applied</b></summary>
-
-**Debug:**
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/your-model
 ```
 
-Look for `hasModelSpecificConfig: true` in output.
+look for `hasModelSpecificConfig: true`. if it's false, config lookup failed - check for typos.
 
-**If false**: Config lookup failed. Check:
-1. Model name in CLI matches config key
-2. No typos in config file
-3. Correct config file location
+### per-project accounts not working
 
-</details>
+make sure you're in a project directory (has `.git`, `package.json`, etc). the plugin auto-detects and falls back to global storage otherwise.
 
-<details>
-<summary><b>Options Ignored</b></summary>
-
-**Cause**: Model normalizes before lookup
-
-**Fix**: Use the official config files (`opencode-modern.json` or `opencode-legacy.json`) instead of custom configs.
-
-</details>
+check which storage is being used:
+```bash
+DEBUG_CODEX_PLUGIN=1 opencode
+# look for storage path in logs
+```
 
 ---
 
-**Next**: [Troubleshooting](troubleshooting.md) | [Back to Documentation Home](index.md)
+**next**: [troubleshooting](troubleshooting.md) | [back to docs](index.md)

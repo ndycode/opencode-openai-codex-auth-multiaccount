@@ -25,6 +25,71 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 	error: 3,
 };
 
+const TOKEN_PATTERNS = [
+	/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+	/[a-f0-9]{40,}/gi,
+	/sk-[A-Za-z0-9]{20,}/g,
+	/Bearer\s+\S+/gi,
+];
+
+const SENSITIVE_KEYS = new Set([
+	"access",
+	"accesstoken",
+	"access_token",
+	"refresh",
+	"refreshtoken",
+	"refresh_token",
+	"token",
+	"authorization",
+	"apikey",
+	"api_key",
+	"secret",
+	"password",
+	"credential",
+	"id_token",
+	"idtoken",
+]);
+
+function maskToken(token: string): string {
+	if (token.length <= 12) return "***MASKED***";
+	return `${token.slice(0, 6)}...${token.slice(-4)}`;
+}
+
+function maskString(value: string): string {
+	let result = value;
+	for (const pattern of TOKEN_PATTERNS) {
+		result = result.replace(pattern, (match) => maskToken(match));
+	}
+	return result;
+}
+
+function sanitizeValue(value: unknown, depth = 0): unknown {
+	if (depth > 10) return "[max depth]";
+
+	if (typeof value === "string") {
+		return maskString(value);
+	}
+
+	if (Array.isArray(value)) {
+		return value.map((item) => sanitizeValue(item, depth + 1));
+	}
+
+	if (value !== null && typeof value === "object") {
+		const sanitized: Record<string, unknown> = {};
+		for (const [key, val] of Object.entries(value)) {
+			const normalizedKey = key.toLowerCase().replace(/[-_]/g, "");
+			if (SENSITIVE_KEYS.has(normalizedKey)) {
+				sanitized[key] = typeof val === "string" ? maskToken(val) : "***MASKED***";
+			} else {
+				sanitized[key] = sanitizeValue(val, depth + 1);
+			}
+		}
+		return sanitized;
+	}
+
+	return value;
+}
+
 function parseLogLevel(value: string | undefined): LogLevel {
 	if (!value) return "info";
 	const normalized = value.toLowerCase().trim() as LogLevel;
@@ -53,17 +118,19 @@ function logToApp(
 	const appLog = client?.app?.log;
 	if (!appLog) return;
 
+	const sanitizedMessage = maskString(message);
+	const sanitizedData = data === undefined ? undefined : sanitizeValue(data);
 	const extra =
-		data === undefined
+		sanitizedData === undefined
 			? undefined
-			: { data: typeof data === "object" ? data : { value: data } };
+			: { data: typeof sanitizedData === "object" ? sanitizedData : { value: sanitizedData } };
 
 	try {
 		const result = appLog({
 			body: {
 				service,
 				level,
-				message,
+				message: sanitizedMessage,
 				extra,
 			},
 		});
@@ -77,16 +144,18 @@ function logToApp(
 
 function logToConsole(level: LogLevel, message: string, data?: unknown): void {
 	if (!CONSOLE_LOG_ENABLED) return;
-	if (data !== undefined) {
-		if (level === "warn") console.warn(message, data);
-		else if (level === "error") console.error(message, data);
-		else console.log(message, data);
+	const sanitizedMessage = maskString(message);
+	const sanitizedData = data === undefined ? undefined : sanitizeValue(data);
+	if (sanitizedData !== undefined) {
+		if (level === "warn") console.warn(sanitizedMessage, sanitizedData);
+		else if (level === "error") console.error(sanitizedMessage, sanitizedData);
+		else console.log(sanitizedMessage, sanitizedData);
 		return;
 	}
 
-	if (level === "warn") console.warn(message);
-	else if (level === "error") console.error(message);
-	else console.log(message);
+	if (level === "warn") console.warn(sanitizedMessage);
+	else if (level === "error") console.error(sanitizedMessage);
+	else console.log(sanitizedMessage);
 }
 
 if (LOGGING_ENABLED) {
@@ -128,6 +197,7 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 	const timestamp = new Date().toISOString();
 	const requestId = ++requestCounter;
 	const filename = join(LOG_DIR, `request-${requestId}-${stage}.json`);
+	const sanitizedData = sanitizeValue(data) as Record<string, unknown>;
 
 	try {
 		writeFileSync(
@@ -137,7 +207,7 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 					timestamp,
 					requestId,
 					stage,
-					...data,
+					...sanitizedData,
 				},
 				null,
 				2,
