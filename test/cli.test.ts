@@ -12,6 +12,8 @@ const mockRl = {
 
 describe("CLI Module", () => {
   beforeEach(() => {
+    vi.resetModules();
+    process.env.FORCE_INTERACTIVE_MODE = "1";
     mockRl.question.mockReset();
     mockRl.close.mockReset();
     vi.mocked(createInterface).mockReturnValue(mockRl as any);
@@ -19,6 +21,7 @@ describe("CLI Module", () => {
   });
 
   afterEach(() => {
+    delete process.env.FORCE_INTERACTIVE_MODE;
     vi.restoreAllMocks();
   });
 

@@ -2,9 +2,28 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { AccountIdSource } from "./types.js";
 
+/**
+ * Detect if running in OpenCode Desktop/TUI mode where readline prompts don't work.
+ * In TUI mode, stdin/stdout are controlled by the TUI renderer, so readline breaks.
+ * Exported for testing purposes.
+ */
+export function isNonInteractiveMode(): boolean {
+  if (process.env.FORCE_INTERACTIVE_MODE === "1") return false;
+  if (!input.isTTY || !output.isTTY) return true;
+  if (process.env.OPENCODE_TUI === "1") return true;
+  if (process.env.OPENCODE_DESKTOP === "1") return true;
+  if (process.env.TERM_PROGRAM === "opencode") return true;
+  if (process.env.ELECTRON_RUN_AS_NODE === "1") return true;
+  return false;
+}
+
 export async function promptAddAnotherAccount(
   currentCount: number,
 ): Promise<boolean> {
+  if (isNonInteractiveMode()) {
+    return false;
+  }
+
   const rl = createInterface({ input, output });
   try {
     console.log(
@@ -48,6 +67,10 @@ function formatAccountLabel(account: ExistingAccountInfo, index: number): string
 export async function promptLoginMode(
   existingAccounts: ExistingAccountInfo[],
 ): Promise<LoginMode> {
+  if (isNonInteractiveMode()) {
+    return "add";
+  }
+
   const rl = createInterface({ input, output });
   try {
     console.log(`\n${existingAccounts.length} account(s) saved:`);
@@ -96,7 +119,7 @@ export async function promptAccountSelection(
       ? Math.max(0, Math.min(options.defaultIndex, candidates.length - 1))
       : 0;
 
-  if (!input.isTTY || !output.isTTY) {
+  if (isNonInteractiveMode()) {
     return candidates[defaultIndex] ?? candidates[0] ?? null;
   }
 

@@ -35,7 +35,7 @@ import {
 import { queuedRefresh } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { promptAccountSelection, promptLoginMode } from "./lib/cli.js";
+import { promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getRateLimitToastDebounceMs,
@@ -155,25 +155,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         };
                 }
 
-                const defaultIndex = (() => {
-                        const orgDefaultIndex = candidates.findIndex(
+                // Auto-select the default candidate without prompting
+                // The user already selected their workspace on OpenAI's auth page
+                // Prompting again breaks TUI mode and is redundant
+                const choice = (() => {
+                        // Prefer org-level default
+                        const orgDefault = candidates.find(
                                 (candidate) => candidate.isDefault && candidate.source === "org",
                         );
-                        if (orgDefaultIndex >= 0) return orgDefaultIndex;
+                        if (orgDefault) return orgDefault;
 
-                        const tokenIndex = candidates.findIndex(
+                        // Fall back to token-derived account
+                        const tokenAccount = candidates.find(
                                 (candidate) => candidate.source === "token",
                         );
-                        if (tokenIndex >= 0) return tokenIndex;
+                        if (tokenAccount) return tokenAccount;
 
-                        return 0;
+                        // Otherwise first candidate
+                        return candidates[0];
                 })();
-
-                const selected = await promptAccountSelection(candidates, {
-                        defaultIndex,
-                        title: "Multiple workspaces detected for this account:",
-                });
-                const choice = selected ?? candidates[defaultIndex];
                 if (!choice) return tokens;
 
                 return {
@@ -192,11 +192,18 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 url,
                 method: "code" as const,
                 instructions: AUTH_LABELS.INSTRUCTIONS_MANUAL,
+                validate: (input: string): string | undefined => {
+                        const parsed = parseAuthorizationInput(input);
+                        if (!parsed.code) {
+                                return "No authorization code found. Paste the full callback URL (e.g., http://localhost:1455/auth/callback?code=...)";
+                        }
+                        return undefined;
+                },
                 callback: async (input: string) => {
                         const parsed = parseAuthorizationInput(input);
-		if (!parsed.code) {
-			return { type: "failed" as const, reason: "invalid_response" as const, message: "No authorization code provided" };
-		}
+                        if (!parsed.code) {
+                                return { type: "failed" as const, reason: "invalid_response" as const, message: "No authorization code provided" };
+                        }
                         const tokens = await exchangeAuthorizationCode(
                                 parsed.code,
                                 pkce.verifier,
