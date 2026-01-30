@@ -10,6 +10,7 @@ vi.mock("@opencode-ai/plugin/tool", () => {
 	(tool as any).schema = {
 		number: () => makeSchema(),
 		boolean: () => makeSchema(),
+		string: () => makeSchema(),
 	};
 
 	return { tool };
@@ -106,6 +107,8 @@ vi.mock("../lib/storage.js", () => ({
 	loadAccounts: async () => null,
 	saveAccounts: async () => {},
 	setStoragePath: () => {},
+	exportAccounts: async () => {},
+	importAccounts: async () => ({ imported: 0, total: 0 }),
 }));
 
 vi.mock("../lib/auto-update-checker.js", () => ({

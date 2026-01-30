@@ -254,12 +254,14 @@ opencode auth login  # Run again to add more accounts
 
 The plugin provides built-in tools for managing your OpenAI accounts. These are available directly in OpenCode — just ask the agent or type the tool name.
 
-### openai-accounts
+> **Note:** Tools were renamed from `openai-accounts-*` to `codex-*` in v4.12.0 for brevity.
+
+### codex-list
 
 List all configured accounts with their status.
 
 ```
-openai-accounts
+codex-list
 ```
 
 **Output:**
@@ -270,17 +272,17 @@ OpenAI Accounts (3 total):
   [2] work@company.com
   [3] backup@email.com
 
-Use openai-accounts-switch to change active account.
+Use codex-switch to change active account.
 ```
 
 ---
 
-### openai-accounts-switch
+### codex-switch
 
 Switch to a different account by index (1-based).
 
 ```
-openai-accounts-switch index=2
+codex-switch index=2
 ```
 
 **Output:**
@@ -290,12 +292,12 @@ Switched to account [2] work@company.com
 
 ---
 
-### openai-accounts-status
+### codex-status
 
 Show detailed status including rate limits and health scores.
 
 ```
-openai-accounts-status
+codex-status
 ```
 
 **Output:**
@@ -317,12 +319,12 @@ OpenAI Account Status:
 
 ---
 
-### openai-accounts-health
+### codex-health
 
 Check if all account tokens are still valid (read-only check).
 
 ```
-openai-accounts-health
+codex-health
 ```
 
 **Output:**
@@ -338,12 +340,12 @@ Summary: 2 healthy, 1 unhealthy
 
 ---
 
-### openai-accounts-refresh
+### codex-refresh
 
 Refresh all OAuth tokens and save them to disk. Use this after long idle periods.
 
 ```
-openai-accounts-refresh
+codex-refresh
 ```
 
 **Output:**
@@ -357,16 +359,16 @@ Refreshing 3 account(s):
 Summary: 2 refreshed, 1 failed
 ```
 
-**Difference from health check:** `openai-accounts-health` only validates tokens. `openai-accounts-refresh` actually refreshes them and saves new tokens to disk.
+**Difference from health check:** `codex-health` only validates tokens. `codex-refresh` actually refreshes them and saves new tokens to disk.
 
 ---
 
-### openai-accounts-remove
+### codex-remove
 
 Remove an account by index. Useful for cleaning up expired accounts.
 
 ```
-openai-accounts-remove index=3
+codex-remove index=3
 ```
 
 **Output:**
@@ -378,16 +380,50 @@ Remaining accounts: 2
 
 ---
 
+### codex-export
+
+Export all accounts to a portable JSON file. Useful for backup or migration.
+
+```
+codex-export path="~/backup/accounts.json"
+```
+
+**Output:**
+```
+Exported 3 account(s) to ~/backup/accounts.json
+```
+
+---
+
+### codex-import
+
+Import accounts from a JSON file (exported via `codex-export`). Merges with existing accounts.
+
+```
+codex-import path="~/backup/accounts.json"
+```
+
+**Output:**
+```
+Imported 2 new account(s) (1 duplicate skipped)
+
+Total accounts: 4
+```
+
+---
+
 ### Quick Reference
 
 | Tool | What It Does | Example |
 |------|--------------|---------|
-| `openai-accounts` | List all accounts | "list my accounts" |
-| `openai-accounts-switch` | Switch active account | "switch to account 2" |
-| `openai-accounts-status` | Show rate limits & health | "show account status" |
-| `openai-accounts-health` | Validate tokens (read-only) | "check account health" |
-| `openai-accounts-refresh` | Refresh & save tokens | "refresh my tokens" |
-| `openai-accounts-remove` | Remove an account | "remove account 3" |
+| `codex-list` | List all accounts | "list my accounts" |
+| `codex-switch` | Switch active account | "switch to account 2" |
+| `codex-status` | Show rate limits & health | "show account status" |
+| `codex-health` | Validate tokens (read-only) | "check account health" |
+| `codex-refresh` | Refresh & save tokens | "refresh my tokens" |
+| `codex-remove` | Remove an account | "remove account 3" |
+| `codex-export` | Export accounts to file | "export my accounts" |
+| `codex-import` | Import accounts from file | "import accounts from backup" |
 
 ---
 

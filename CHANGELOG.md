@@ -2,6 +2,29 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [4.12.0] - 2026-01-30
+
+### breaking
+
+- **tool rename**: all `openai-accounts-*` tools renamed to shorter `codex-*` prefix:
+  - `openai-accounts` → `codex-list`
+  - `openai-accounts-switch` → `codex-switch`
+  - `openai-accounts-status` → `codex-status`
+  - `openai-accounts-health` → `codex-health`
+  - `openai-accounts-refresh` → `codex-refresh`
+  - `openai-accounts-remove` → `codex-remove`
+
+### added
+
+- **codex-export**: export all accounts to a portable JSON file for backup or migration
+- **codex-import**: import accounts from a JSON file, merges with existing accounts (skips duplicates)
+
+## [4.11.2] - 2026-01-30
+
+### fixed
+
+- **windows account persistence**: fixed silent failure when saving accounts on Windows. errors are now logged at WARN level with storage path in message, and a toast notification appears if persistence fails.
+
 ## [4.10.0] - 2026-01-29
 
 ### added

@@ -72,7 +72,7 @@ import {
         sanitizeEmail,
         shouldUpdateAccountIdFromToken,
 } from "./lib/accounts.js";
-import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, type AccountStorageV3 } from "./lib/storage.js";
+import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, exportAccounts, importAccounts, type AccountStorageV3 } from "./lib/storage.js";
 import {
         createCodexHeaders,
         extractRequestUrl,
@@ -1551,14 +1551,61 @@ while (attempted.size < Math.max(1, accountCount)) {
 						}
 					}
 
-					await saveAccounts(storage);
-					results.push("");
-					results.push(`Summary: ${refreshedCount} refreshed, ${failedCount} failed`);
-					return results.join("\n");
-				},
-			}),
+				await saveAccounts(storage);
+				results.push("");
+				results.push(`Summary: ${refreshedCount} refreshed, ${failedCount} failed`);
+				return results.join("\n");
+			},
+		}),
 
-		},
+		"codex-export": tool({
+			description: "Export accounts to a JSON file for backup or migration to another machine.",
+			args: {
+				path: tool.schema.string().describe(
+					"File path to export to (e.g., ~/codex-backup.json)"
+				),
+				force: tool.schema.boolean().optional().describe(
+					"Overwrite existing file (default: true)"
+				),
+			},
+			async execute({ path: filePath, force }) {
+				try {
+					await exportAccounts(filePath, force ?? true);
+					const storage = await loadAccounts();
+					const count = storage?.accounts.length ?? 0;
+					return `Exported ${count} account(s) to: ${filePath}`;
+				} catch (error) {
+					const msg = error instanceof Error ? error.message : String(error);
+					return `Export failed: ${msg}`;
+				}
+			},
+		}),
+
+		"codex-import": tool({
+			description: "Import accounts from a JSON file, merging with existing accounts.",
+			args: {
+				path: tool.schema.string().describe(
+					"File path to import from (e.g., ~/codex-backup.json)"
+				),
+			},
+			async execute({ path: filePath }) {
+				try {
+					const result = await importAccounts(filePath);
+					cachedAccountManager = null;
+					return [
+						`Import complete.`,
+						``,
+						`New accounts: ${result.imported}`,
+						`Total accounts: ${result.total}`,
+					].join("\n");
+				} catch (error) {
+					const msg = error instanceof Error ? error.message : String(error);
+					return `Import failed: ${msg}`;
+				}
+			},
+		}),
+
+	},
         };
 };
 

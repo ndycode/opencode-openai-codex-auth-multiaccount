@@ -1,5 +1,6 @@
 import { promises as fs, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { ACCOUNT_LIMITS } from "./constants.js";
 import { homedir } from "node:os";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
@@ -493,4 +494,88 @@ export async function clearAccounts(): Promise<void> {
       }
     }
   });
+}
+
+/**
+ * Resolves a file path, expanding tilde to home directory.
+ */
+function resolvePath(filePath: string): string {
+  if (filePath.startsWith("~")) {
+    return join(homedir(), filePath.slice(1));
+  }
+  return resolve(filePath);
+}
+
+/**
+ * Exports current accounts to a JSON file for backup/migration.
+ * @param filePath - Destination file path
+ * @param force - If true, overwrite existing file (default: true)
+ * @throws Error if file exists and force is false, or if no accounts to export
+ */
+export async function exportAccounts(filePath: string, force = true): Promise<void> {
+  const resolvedPath = resolvePath(filePath);
+  
+  if (!force && existsSync(resolvedPath)) {
+    throw new Error(`File already exists: ${resolvedPath}`);
+  }
+  
+  const storage = await loadAccounts();
+  if (!storage || storage.accounts.length === 0) {
+    throw new Error("No accounts to export");
+  }
+  
+  await fs.mkdir(dirname(resolvedPath), { recursive: true });
+  
+  const content = JSON.stringify(storage, null, 2);
+  await fs.writeFile(resolvedPath, content, "utf-8");
+  log.info("Exported accounts", { path: resolvedPath, count: storage.accounts.length });
+}
+
+/**
+ * Imports accounts from a JSON file, merging with existing accounts.
+ * Deduplicates by accountId/email, preserving most recently used entries.
+ * @param filePath - Source file path
+ * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
+ */
+export async function importAccounts(filePath: string): Promise<{ imported: number; total: number }> {
+  const resolvedPath = resolvePath(filePath);
+  
+  const content = await fs.readFile(resolvedPath, "utf-8");
+  const imported = JSON.parse(content) as unknown;
+  
+  const normalized = normalizeAccountStorage(imported);
+  if (!normalized) {
+    throw new Error("Invalid account storage format");
+  }
+  
+  const existing = await loadAccounts();
+  const existingAccounts = existing?.accounts ?? [];
+  const existingActiveIndex = existing?.activeIndex ?? 0;
+  
+  const merged = [...existingAccounts, ...normalized.accounts];
+  
+  if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+    const deduped = deduplicateAccountsByEmail(deduplicateAccounts(merged));
+    if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+      throw new Error(
+        `Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`
+      );
+    }
+  }
+  
+  const deduplicatedAccounts = deduplicateAccountsByEmail(deduplicateAccounts(merged));
+  
+  const newStorage: AccountStorageV3 = {
+    version: 3,
+    accounts: deduplicatedAccounts,
+    activeIndex: existingActiveIndex,
+    activeIndexByFamily: existing?.activeIndexByFamily,
+  };
+  
+  await saveAccounts(newStorage);
+  
+  const importedCount = deduplicatedAccounts.length - existingAccounts.length;
+  log.info("Imported accounts", { path: resolvedPath, imported: importedCount, total: deduplicatedAccounts.length });
+  
+  return { imported: importedCount, total: deduplicatedAccounts.length };
 }
