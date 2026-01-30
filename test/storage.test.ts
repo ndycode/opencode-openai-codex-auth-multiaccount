@@ -8,7 +8,9 @@ import {
   loadAccounts, 
   saveAccounts,
   getStoragePath,
-  setStoragePath
+  setStoragePath,
+  StorageError,
+  formatStorageErrorHint
 } from "../lib/storage.js";
 
 // Mocking the behavior we're about to implement for TDD
@@ -182,6 +184,107 @@ describe("storage", () => {
       // We'll need to mock/verify that loadAccounts checks for oldName if newName is missing
       // Since we haven't implemented it yet, this is just a placeholder for the logic
       expect(true).toBe(true); 
+    });
+  });
+
+  describe("StorageError and formatStorageErrorHint", () => {
+    describe("StorageError class", () => {
+      it("should store code, path, and hint properties", () => {
+        const err = new StorageError(
+          "Failed to write file",
+          "EACCES",
+          "/path/to/file.json",
+          "Permission denied. Check folder permissions."
+        );
+        
+        expect(err.name).toBe("StorageError");
+        expect(err.message).toBe("Failed to write file");
+        expect(err.code).toBe("EACCES");
+        expect(err.path).toBe("/path/to/file.json");
+        expect(err.hint).toBe("Permission denied. Check folder permissions.");
+      });
+
+      it("should be instanceof Error", () => {
+        const err = new StorageError("test", "CODE", "/path", "hint");
+        expect(err instanceof Error).toBe(true);
+        expect(err instanceof StorageError).toBe(true);
+      });
+    });
+
+    describe("formatStorageErrorHint", () => {
+      const testPath = "/home/user/.opencode/accounts.json";
+
+      it("should return permission hint for EACCES on Windows", () => {
+        const originalPlatform = process.platform;
+        Object.defineProperty(process, "platform", { value: "win32" });
+
+        const err = { code: "EACCES" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("antivirus");
+        expect(hint).toContain(testPath);
+
+        Object.defineProperty(process, "platform", { value: originalPlatform });
+      });
+
+      it("should return chmod hint for EACCES on Unix", () => {
+        const originalPlatform = process.platform;
+        Object.defineProperty(process, "platform", { value: "darwin" });
+
+        const err = { code: "EACCES" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("chmod");
+        expect(hint).toContain(testPath);
+
+        Object.defineProperty(process, "platform", { value: originalPlatform });
+      });
+
+      it("should return permission hint for EPERM", () => {
+        const err = { code: "EPERM" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("Permission denied");
+        expect(hint).toContain(testPath);
+      });
+
+      it("should return file locked hint for EBUSY", () => {
+        const err = { code: "EBUSY" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("locked");
+        expect(hint).toContain("another program");
+      });
+
+      it("should return disk full hint for ENOSPC", () => {
+        const err = { code: "ENOSPC" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("Disk is full");
+      });
+
+      it("should return empty file hint for EEMPTY", () => {
+        const err = { code: "EEMPTY" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("empty");
+      });
+
+      it("should return generic hint for unknown error codes", () => {
+        const err = { code: "UNKNOWN_CODE" } as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("Failed to write");
+        expect(hint).toContain(testPath);
+      });
+
+      it("should handle errors without code property", () => {
+        const err = new Error("Some error") as NodeJS.ErrnoException;
+        const hint = formatStorageErrorHint(err, testPath);
+
+        expect(hint).toContain("Failed to write");
+        expect(hint).toContain(testPath);
+      });
     });
   });
 });

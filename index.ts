@@ -58,7 +58,7 @@ import {
         PROVIDER_ID,
         ACCOUNT_LIMITS,
 } from "./lib/constants.js";
-import { initLogger, logRequest, logDebug, logInfo, logWarn } from "./lib/logger.js";
+import { initLogger, logRequest, logDebug, logInfo, logWarn, logError } from "./lib/logger.js";
 import { checkAndNotify } from "./lib/auto-update-checker.js";
 import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
@@ -72,7 +72,7 @@ import {
         sanitizeEmail,
         shouldUpdateAccountIdFromToken,
 } from "./lib/accounts.js";
-import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, exportAccounts, importAccounts, type AccountStorageV3 } from "./lib/storage.js";
+import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, exportAccounts, importAccounts, StorageError, formatStorageErrorHint, type AccountStorageV3 } from "./lib/storage.js";
 import {
         createCodexHeaders,
         extractRequestUrl,
@@ -827,18 +827,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 												},
 											);
 
-																								while (true) {
-																											const response = await fetch(url, {
-																												...requestInit,
-																												headers,
-																											});
+										while (true) {
+											let response: Response;
+											const fetchStart = performance.now();
+											try {
+												response = await fetch(url, {
+													...requestInit,
+													headers,
+												});
+											} catch (networkError) {
+												const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
+												logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
+												accountManager.recordFailure(account, modelFamily, model);
+												break;
+											}
+											const fetchLatencyMs = Math.round(performance.now() - fetchStart);
 
-																											logRequest(LOG_STAGES.RESPONSE, {
-																											status: response.status,
-																											ok: response.ok,
-																											statusText: response.statusText,
-																											headers: Object.fromEntries(response.headers.entries()),
-																										});
+											logRequest(LOG_STAGES.RESPONSE, {
+												status: response.status,
+												ok: response.ok,
+												statusText: response.statusText,
+												latencyMs: fetchLatencyMs,
+												headers: Object.fromEntries(response.headers.entries()),
+											});
 
 								if (!response.ok) {
 									const contextOverflowResult = await handleContextOverflow(response, model);
@@ -1072,18 +1083,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 					if (useManualMode) {
 						const { pkce, url } = await createAuthorizationFlow();
 						return buildManualOAuthFlow(pkce, url, async (tokens) => {
-							try {
-								await persistAccountPool([tokens], startFresh);
-							} catch (err) {
-								const storagePath = getStoragePath();
-								logWarn(`[${PLUGIN_NAME}] Failed to persist account to disk: ${(err as Error)?.message ?? String(err)}`);
-								logWarn(`Storage path: ${storagePath}`);
-								await showToast(
-									`Account authenticated but failed to save to disk. Storage path: ${storagePath}`,
-									"warning",
-									{ title: "Account Persistence Failed", duration: 10000 },
-								);
-							}
+					try {
+							await persistAccountPool([tokens], startFresh);
+						} catch (err) {
+							const storagePath = getStoragePath();
+							const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
+							const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
+							logError(`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`);
+							await showToast(
+								hint,
+								"error",
+								{ title: "Account Persistence Failed", duration: 10000 },
+							);
+						}
 						});
 					}
 
@@ -1158,11 +1170,12 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                                         );
                                                                 } catch (err) {
                                                                         const storagePath = getStoragePath();
-                                                                        logWarn(`[${PLUGIN_NAME}] Failed to persist account to disk: ${(err as Error)?.message ?? String(err)}`);
-                                                                        logWarn(`Storage path: ${storagePath}`);
+                                                                        const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
+                                                                        const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
+                                                                        logError(`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`);
                                                                         await showToast(
-                                                                                `Account authenticated but failed to save to disk. Storage path: ${storagePath}`,
-                                                                                "warning",
+                                                                                hint,
+                                                                                "error",
                                                                                 { title: "Account Persistence Failed", duration: 10000 },
                                                                         );
                                                                 }
@@ -1212,11 +1225,12 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                                         await persistAccountPool([tokens], false);
                                                                 } catch (err) {
                                                                         const storagePath = getStoragePath();
-                                                                        logWarn(`[${PLUGIN_NAME}] Failed to persist account to disk: ${(err as Error)?.message ?? String(err)}`);
-                                                                        logWarn(`Storage path: ${storagePath}`);
+                                                                        const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
+                                                                        const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
+                                                                        logError(`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`);
                                                                         await showToast(
-                                                                                `Account authenticated but failed to save to disk. Storage path: ${storagePath}`,
-                                                                                "warning",
+                                                                                hint,
+                                                                                "error",
                                                                                 { title: "Account Persistence Failed", duration: 10000 },
                                                                         );
                                                                 }

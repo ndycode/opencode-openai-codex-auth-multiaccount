@@ -8,6 +8,50 @@ import type { AccountIdSource } from "./types.js";
 
 const log = createLogger("storage");
 
+/**
+ * Custom error class for storage operations with platform-aware hints.
+ */
+export class StorageError extends Error {
+  readonly code: string;
+  readonly path: string;
+  readonly hint: string;
+
+  constructor(message: string, code: string, path: string, hint: string) {
+    super(message);
+    this.name = "StorageError";
+    this.code = code;
+    this.path = path;
+    this.hint = hint;
+  }
+}
+
+/**
+ * Generate platform-aware troubleshooting hint based on error code.
+ */
+export function formatStorageErrorHint(error: unknown, path: string): string {
+  const err = error as NodeJS.ErrnoException;
+  const code = err?.code || "UNKNOWN";
+  const isWindows = process.platform === "win32";
+
+  switch (code) {
+    case "EACCES":
+    case "EPERM":
+      return isWindows
+        ? `Permission denied writing to ${path}. Check antivirus exclusions for this folder. Ensure you have write permissions.`
+        : `Permission denied writing to ${path}. Check folder permissions. Try: chmod 755 ~/.opencode`;
+    case "EBUSY":
+      return `File is locked at ${path}. The file may be open in another program. Close any editors or processes accessing it.`;
+    case "ENOSPC":
+      return `Disk is full. Free up space and try again. Path: ${path}`;
+    case "EEMPTY":
+      return `File written but is empty. This may indicate a disk or filesystem issue. Path: ${path}`;
+    default:
+      return isWindows
+        ? `Failed to write to ${path}. Check folder permissions and ensure path contains no special characters.`
+        : `Failed to write to ${path}. Check folder permissions and disk space.`;
+  }
+}
+
 let storageMutex: Promise<void> = Promise.resolve();
 
 function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -82,6 +126,34 @@ function getConfigDir(): string {
 
 function getProjectConfigDir(projectPath: string): string {
   return join(projectPath, ".opencode");
+}
+
+async function ensureGitignore(storagePath: string): Promise<void> {
+  if (!currentStoragePath) return;
+
+  const configDir = dirname(storagePath);
+  const projectRoot = dirname(configDir);
+  const gitDir = join(projectRoot, ".git");
+  const gitignorePath = join(projectRoot, ".gitignore");
+
+  if (!existsSync(gitDir)) return;
+
+  try {
+    let content = "";
+    if (existsSync(gitignorePath)) {
+      content = await fs.readFile(gitignorePath, "utf-8");
+      const lines = content.split("\n").map((l) => l.trim());
+      if (lines.includes(".opencode") || lines.includes(".opencode/") || lines.includes("/.opencode") || lines.includes("/.opencode/")) {
+        return;
+      }
+    }
+
+    const newContent = content.endsWith("\n") || content === "" ? content : content + "\n";
+    await fs.writeFile(gitignorePath, newContent + ".opencode/\n", "utf-8");
+    log.debug("Added .opencode to .gitignore", { path: gitignorePath });
+  } catch (error) {
+    log.warn("Failed to update .gitignore", { error: String(error) });
+  }
 }
 
 const PROJECT_MARKERS = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", ".opencode"];
@@ -465,16 +537,55 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
 }
 
 /**
- * Persists account storage to disk.
+ * Persists account storage to disk using atomic write (temp file + rename).
  * Creates the .opencode directory if it doesn't exist.
+ * Verifies file was written correctly and provides detailed error messages.
  * @param storage - Account storage data to save
+ * @throws StorageError with platform-aware hints on failure
  */
 export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   return withStorageLock(async () => {
     const path = getStoragePath();
-    await fs.mkdir(dirname(path), { recursive: true });
-    const content = JSON.stringify(storage, null, 2);
-    await fs.writeFile(path, content, "utf-8");
+    const tempPath = `${path}.${Date.now()}.tmp`;
+
+    try {
+      await fs.mkdir(dirname(path), { recursive: true });
+      await ensureGitignore(path);
+
+      const content = JSON.stringify(storage, null, 2);
+      await fs.writeFile(tempPath, content, "utf-8");
+
+      const stats = await fs.stat(tempPath);
+      if (stats.size === 0) {
+        const emptyError = Object.assign(new Error("File written but size is 0"), { code: "EEMPTY" });
+        throw emptyError;
+      }
+
+      await fs.rename(tempPath, path);
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+      }
+
+      const err = error as NodeJS.ErrnoException;
+      const code = err?.code || "UNKNOWN";
+      const hint = formatStorageErrorHint(error, path);
+
+      log.error("Failed to save accounts", {
+        path,
+        code,
+        message: err?.message,
+        hint,
+      });
+
+      throw new StorageError(
+        `Failed to save accounts: ${err?.message || "Unknown error"}`,
+        code,
+        path,
+        hint
+      );
+    }
   });
 }
 
