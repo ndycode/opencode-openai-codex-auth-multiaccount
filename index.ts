@@ -945,7 +945,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
 										const message =
 											count === 0
-												? "No OpenAI accounts configured. Run `opencode auth login`."
+												? "No Codex accounts configured. Run `opencode auth login`."
 												: `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`;
 										return new Response(JSON.stringify({ error: { message } }), {
 											status: 429,
@@ -1226,9 +1226,9 @@ while (attempted.size < Math.max(1, accountCount)) {
                         ],
                 },
                 tool: {
-                        "openai-accounts": tool({
+                        "codex-list": tool({
                                 description:
-                                        "List all OpenAI OAuth accounts and the current active index.",
+                                        "List all Codex OAuth accounts and the current active index.",
                                 args: {},
                                 async execute() {
                                         const storage = await loadAccounts();
@@ -1236,7 +1236,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
                                         if (!storage || storage.accounts.length === 0) {
                                                 return [
-                                                        "No OpenAI accounts configured.",
+                                                        "No Codex accounts configured.",
                                                         "",
                                                         "Add accounts:",
                                                         "  opencode auth login",
@@ -1248,7 +1248,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const now = Date.now();
 										const activeIndex = resolveActiveIndex(storage, "codex");
 										const lines: string[] = [
-                                                `OpenAI Accounts (${storage.accounts.length}):`,
+                                                `Codex Accounts (${storage.accounts.length}):`,
                                                 "",
                                                 " #  Label                                     Status",
                                                 "----------------------------------------------- ---------------------",
@@ -1280,14 +1280,14 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         lines.push("");
                                         lines.push("Commands:");
                                         lines.push("  - Add account: opencode auth login");
-                                        lines.push("  - Switch account: openai-accounts-switch");
-                                        lines.push("  - Status details: openai-accounts-status");
+                                        lines.push("  - Switch account: codex-switch");
+                                        lines.push("  - Status details: codex-status");
 
                                         return lines.join("\n");
                                 },
                         }),
-                        "openai-accounts-switch": tool({
-                                description: "Switch active OpenAI account by index (1-based).",
+                        "codex-switch": tool({
+                                description: "Switch active Codex account by index (1-based).",
                                 args: {
                                         index: tool.schema.number().describe(
                                                 "Account number to switch to (1-based, e.g., 1 for first account)",
@@ -1296,7 +1296,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                 async execute({ index }) {
                                         const storage = await loadAccounts();
                                         if (!storage || storage.accounts.length === 0) {
-                                                return "No OpenAI accounts configured. Run: opencode auth login";
+                                                return "No Codex accounts configured. Run: opencode auth login";
                                         }
 
                                         const targetIndex = Math.floor((index ?? 0) - 1);
@@ -1331,13 +1331,13 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         return `Switched to account: ${label}`;
                                 },
                         }),
-			"openai-accounts-status": tool({
-				description: "Show detailed status of OpenAI accounts and rate limits.",
+			"codex-status": tool({
+				description: "Show detailed status of Codex accounts and rate limits.",
 				args: {},
 				async execute() {
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
-						return "No OpenAI accounts configured. Run: opencode auth login";
+						return "No Codex accounts configured. Run: opencode auth login";
 					}
 
 					const now = Date.now();
@@ -1389,13 +1389,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return lines.join("\n");
                                 },
                         }),
-				"openai-accounts-health": tool({
-				description: "Check health of all OpenAI accounts by validating refresh tokens.",
+				"codex-health": tool({
+				description: "Check health of all Codex accounts by validating refresh tokens.",
 				args: {},
 				async execute() {
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
-						return "No OpenAI accounts configured. Run: opencode auth login";
+						return "No Codex accounts configured. Run: opencode auth login";
 					}
 
 					const results: string[] = [
@@ -1433,8 +1433,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 					return results.join("\n");
 				},
 			}),
-			"openai-accounts-remove": tool({
-				description: "Remove an OpenAI account by index (1-based). Use openai-accounts to list accounts first.",
+			"codex-remove": tool({
+				description: "Remove an Codex account by index (1-based). Use codex-list to list accounts first.",
 				args: {
 					index: tool.schema.number().describe(
 						"Account number to remove (1-based, e.g., 1 for first account)",
@@ -1443,7 +1443,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				async execute({ index }) {
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
-						return "No OpenAI accounts configured. Nothing to remove.";
+						return "No Codex accounts configured. Nothing to remove.";
 					}
 
 					const targetIndex = Math.floor((index ?? 0) - 1);
@@ -1452,7 +1452,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						targetIndex < 0 ||
 						targetIndex >= storage.accounts.length
 					) {
-						return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}\n\nUse openai-accounts to list all accounts.`;
+						return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}\n\nUse codex-list to list all accounts.`;
 					}
 
 					const account = storage.accounts[targetIndex];
@@ -1512,13 +1512,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 				},
 			}),
 
-			"openai-accounts-refresh": tool({
+			"codex-refresh": tool({
 				description: "Manually refresh OAuth tokens for all accounts to verify they're still valid.",
 				args: {},
 				async execute() {
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
-						return "No OpenAI accounts configured. Run: opencode auth login";
+						return "No Codex accounts configured. Run: opencode auth login";
 					}
 
 					const results: string[] = [
