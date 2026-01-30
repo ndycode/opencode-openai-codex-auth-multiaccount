@@ -1069,12 +1069,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 								};
 							}
 
-							if (useManualMode) {
-								const { pkce, url } = await createAuthorizationFlow();
-								return buildManualOAuthFlow(pkce, url, async (tokens) => {
-									await persistAccountPool([tokens], startFresh);
-								});
+					if (useManualMode) {
+						const { pkce, url } = await createAuthorizationFlow();
+						return buildManualOAuthFlow(pkce, url, async (tokens) => {
+							try {
+								await persistAccountPool([tokens], startFresh);
+							} catch (err) {
+								const storagePath = getStoragePath();
+								logWarn(`[${PLUGIN_NAME}] Failed to persist account to disk: ${(err as Error)?.message ?? String(err)}`);
+								logWarn(`Storage path: ${storagePath}`);
+								await showToast(
+									`Account authenticated but failed to save to disk. Storage path: ${storagePath}`,
+									"warning",
+									{ title: "Account Persistence Failed", duration: 10000 },
+								);
 							}
+						});
+					}
 
 							while (accounts.length < targetCount) {
 						logInfo(
@@ -1146,7 +1157,14 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                                                 isFirstAccount && startFresh,
                                                                         );
                                                                 } catch (err) {
-                                                                        logDebug(`[${PLUGIN_NAME}] Failed to persist account pool: ${(err as Error)?.message ?? String(err)}`);
+                                                                        const storagePath = getStoragePath();
+                                                                        logWarn(`[${PLUGIN_NAME}] Failed to persist account to disk: ${(err as Error)?.message ?? String(err)}`);
+                                                                        logWarn(`Storage path: ${storagePath}`);
+                                                                        await showToast(
+                                                                                `Account authenticated but failed to save to disk. Storage path: ${storagePath}`,
+                                                                                "warning",
+                                                                                { title: "Account Persistence Failed", duration: 10000 },
+                                                                        );
                                                                 }
 
 								if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
@@ -1184,13 +1202,24 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         };
                                         },
 					},
-					{
-						label: AUTH_LABELS.OAUTH_MANUAL,
-						type: "oauth" as const,
+				{
+					label: AUTH_LABELS.OAUTH_MANUAL,
+					type: "oauth" as const,
                                                 authorize: async () => {
                                                         const { pkce, url } = await createAuthorizationFlow();
                                                         return buildManualOAuthFlow(pkce, url, async (tokens) => {
-                                                                await persistAccountPool([tokens], false);
+                                                                try {
+                                                                        await persistAccountPool([tokens], false);
+                                                                } catch (err) {
+                                                                        const storagePath = getStoragePath();
+                                                                        logWarn(`[${PLUGIN_NAME}] Failed to persist account to disk: ${(err as Error)?.message ?? String(err)}`);
+                                                                        logWarn(`Storage path: ${storagePath}`);
+                                                                        await showToast(
+                                                                                `Account authenticated but failed to save to disk. Storage path: ${storagePath}`,
+                                                                                "warning",
+                                                                                { title: "Account Persistence Failed", duration: 10000 },
+                                                                        );
+                                                                }
                                                         });
                                                 },
                                         },
