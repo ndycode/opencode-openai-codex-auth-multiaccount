@@ -2,21 +2,66 @@
 
 This directory contains the test suite for the OpenAI Codex OAuth plugin.
 
+**Stats**: 1498 tests across 49 test files with 89% coverage.
+
 ## Test Structure
 
 ```
 test/
 ├── README.md                      # This file
 ├── accounts.test.ts               # Multi-account storage/rotation tests
+├── audit.test.ts                  # Rotating file audit log tests
+├── auth-rate-limit.test.ts        # Token bucket rate limiting
 ├── auth.test.ts                   # OAuth authentication tests
+├── auto-update-checker.test.ts    # npm version check tests
 ├── browser.test.ts                # Platform-specific browser open behavior
+├── chaos/
+│   └── fault-injection.test.ts    # Chaos/fault injection tests
+├── circuit-breaker.test.ts        # Failure isolation tests
+├── cli.test.ts                    # CLI helper tests
+├── codex-prompts.test.ts          # Codex prompt generation tests
 ├── codex.test.ts                  # Codex prompt/instructions behavior
 ├── config.test.ts                 # Configuration parsing/merging tests
+├── context-overflow.test.ts       # Context length handling tests
+├── copy-oauth-success.test.ts     # Build script tests
+├── errors.test.ts                 # Custom error type tests
 ├── fetch-helpers.test.ts          # Fetch flow helper tests
+├── health.test.ts                 # Account health status tests
+├── index-retry.test.ts            # Plugin retry logic tests
+├── index.test.ts                  # Main plugin integration tests
+├── input-utils.test.ts            # Input filtering tests
 ├── logger.test.ts                 # Logging functionality tests
+├── model-map.test.ts              # Model name normalization tests
+├── oauth-server.integration.test.ts # OAuth server integration (port 1455)
+├── opencode-codex.test.ts         # OpenCode-specific prompt tests
+├── parallel-probe.test.ts         # Concurrent health check tests
+├── paths.test.ts                  # Project root detection tests
 ├── plugin-config.test.ts          # Plugin config defaults + overrides
+├── proactive-refresh.test.ts      # Token refresh before expiry
+├── property/
+│   ├── helpers.ts                 # Property test utilities
+│   ├── rotation.property.test.ts  # Rotation property-based tests
+│   ├── setup.test.ts              # Property test setup
+│   ├── setup.ts
+│   └── transformer.property.test.ts # Transformer property tests
+├── rate-limit-backoff.test.ts     # Exponential backoff tests
+├── recovery-constants.test.ts     # Recovery constants tests
+├── recovery-storage.test.ts       # Recovery storage tests
+├── recovery.test.ts               # Session recovery tests
+├── refresh-queue.test.ts          # Queued token refresh tests
 ├── request-transformer.test.ts    # Request transformation tests
-└── response-handler.test.ts       # Response handling tests
+├── response-handler.test.ts       # Response handling tests
+├── rotation-integration.test.ts   # Rotation integration tests
+├── rotation.test.ts               # Account selection tests
+├── schemas.test.ts                # Zod schema validation tests
+├── server.unit.test.ts            # OAuth server unit tests
+├── shutdown.test.ts               # Graceful shutdown tests
+├── storage-async.test.ts          # Async storage operation tests
+├── storage.test.ts                # V3 storage format tests
+├── table-formatter.test.ts        # CLI table output tests
+├── token-utils.test.ts            # Token validation tests
+├── tool-utils.test.ts             # Tool schema helper tests
+└── utils.test.ts                  # Shared utility tests
 ```
 
 ## Running Tests
@@ -50,6 +95,7 @@ Tests multi-account behavior:
 - Account seeding from fallback auth
 - Account rotation when rate-limited
 - Cooldown handling for transient failures
+- Health scoring and recovery
 
 ### config.test.ts + plugin-config.test.ts
 Tests configuration parsing and merging:
@@ -82,16 +128,49 @@ Tests focused helpers used in the 7-step fetch flow:
 - Body normalization
 - Request/response edge cases
 
-### logger.test.ts
-Tests logging behavior:
-- Environment-gated request logging
-- Parameter handling
+### rotation.test.ts + rotation-integration.test.ts
+Tests account selection algorithm:
+- Health-based scoring
+- Token bucket consumption
+- Rate limit handling
+- Account cooldown
 
-### browser.test.ts
-Tests browser opening behavior across platforms.
+### property/
+Property-based tests using fast-check:
+- Rotation invariants
+- Transformer edge cases
+- Randomized input validation
 
-### codex.test.ts
-Tests Codex instructions/prompt behaviors and caching paths.
+### storage.test.ts + storage-async.test.ts
+Tests V3 storage format:
+- Per-project and global paths
+- Migration from V1/V2
+- Async operations
+- Error handling
+
+### circuit-breaker.test.ts
+Tests failure isolation:
+- Open/closed states
+- Failure thresholds
+- Recovery behavior
+
+### health.test.ts + parallel-probe.test.ts
+Tests account health monitoring:
+- Health score calculations
+- Concurrent health checks
+- Status aggregation
+
+### shutdown.test.ts
+Tests graceful shutdown:
+- Cleanup callbacks
+- Signal handling
+- Resource cleanup
+
+### chaos/fault-injection.test.ts
+Tests system resilience:
+- Network failure simulation
+- Token expiry scenarios
+- Rate limit exhaustion
 
 ## Test Philosophy
 
@@ -99,6 +178,7 @@ Tests Codex instructions/prompt behaviors and caching paths.
 2. **Fast Execution**: Unit tests should remain fast and deterministic
 3. **No External Dependencies**: Tests avoid real network calls
 4. **Type Safety**: All tests are TypeScript with strict type checking
+5. **Property-Based Testing**: Critical paths tested with randomized inputs
 
 ## CI/CD Integration
 

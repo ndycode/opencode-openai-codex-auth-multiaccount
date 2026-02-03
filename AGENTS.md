@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-01-30
-Commit: 6e53f46
+Generated: 2026-02-03
+Commit: 461ea2b
 Branch: main
 
 ## OVERVIEW
@@ -17,8 +17,7 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 ├── config/               # opencode.json examples (legacy/modern)
 ├── docs/                 # architecture + user docs
 ├── assets/               # static assets
-├── dist/                 # build output (generated, do not edit)
-└── winston/              # vendored logging (do not modify)
+└── dist/                 # build output (generated, do not edit)
 ```
 
 ## WHERE TO LOOK
@@ -48,7 +47,7 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 - ESM only (`"type": "module"`), Node >= 18.
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Do not edit `dist/`, `tmp*`, or `winston/` directories.
+- Do not edit `dist/` or `tmp*` directories.
 - Do not use `as any`, `@ts-ignore`, `@ts-expect-error`.
 - Do not open public security issues; see `SECURITY.md`.
 - Do not hardcode ports other than 1455 for OAuth server.
