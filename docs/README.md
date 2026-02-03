@@ -28,7 +28,7 @@ This plugin bridges two different systems with careful engineering:
 4. **15-Minute Caching** - Prevents GitHub API rate limit exhaustion
 5. **Per-Model Configuration** - Enables quality presets with quick switching
 
-**Testing**: 200+ unit tests + integration tests with actual API verification
+**Testing**: 1498 tests (89% coverage) + integration tests with actual API verification
 
 ---
 
