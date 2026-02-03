@@ -120,3 +120,31 @@ export function ensureContentType(headers: Headers): Headers {
 
 	return responseHeaders;
 }
+
+/**
+ * Check if a non-streaming response is empty or malformed.
+ * Returns true if the response body is empty, null, or lacks meaningful content.
+ * @param body - Parsed JSON body from the response
+ * @returns True if response should be considered empty/malformed
+ */
+export function isEmptyResponse(body: unknown): boolean {
+	if (body === null || body === undefined) return true;
+	if (typeof body === 'string' && body.trim() === '') return true;
+	if (typeof body !== 'object') return false;
+
+	const obj = body as Record<string, unknown>;
+
+	if (Object.keys(obj).length === 0) return true;
+
+	const hasOutput = 'output' in obj && obj.output !== null && obj.output !== undefined;
+	const hasChoices = 'choices' in obj && Array.isArray(obj.choices) && 
+		obj.choices.some(c => c !== null && c !== undefined && typeof c === 'object' && Object.keys(c as object).length > 0);
+	const hasContent = 'content' in obj && obj.content !== null && obj.content !== undefined &&
+		(typeof obj.content !== 'string' || obj.content.trim() !== '');
+
+	if ('id' in obj || 'object' in obj || 'model' in obj) {
+		return !hasOutput && !hasChoices && !hasContent;
+	}
+
+	return false;
+}

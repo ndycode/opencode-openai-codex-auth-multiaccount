@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ensureContentType, convertSseToJson } from '../lib/request/response-handler.js';
+import { ensureContentType, convertSseToJson, isEmptyResponse } from '../lib/request/response-handler.js';
 
 describe('Response Handler Module', () => {
 	describe('ensureContentType', () => {
@@ -137,6 +137,76 @@ data: {"type":"response.done","response":{"id":"resp_789"}}
 
 			await expect(convertSseToJson(response, headers)).rejects.toThrow('Stream read error');
 			expect(mockReader.releaseLock).toHaveBeenCalled();
+		});
+	});
+
+	describe('isEmptyResponse', () => {
+		it('should return true for null', () => {
+			expect(isEmptyResponse(null)).toBe(true);
+		});
+
+		it('should return true for undefined', () => {
+			expect(isEmptyResponse(undefined)).toBe(true);
+		});
+
+		it('should return true for empty string', () => {
+			expect(isEmptyResponse('')).toBe(true);
+			expect(isEmptyResponse('   ')).toBe(true);
+		});
+
+		it('should return true for empty object', () => {
+			expect(isEmptyResponse({})).toBe(true);
+		});
+
+		it('should return true for response object without meaningful content', () => {
+			expect(isEmptyResponse({ id: 'resp_123' })).toBe(true);
+			expect(isEmptyResponse({ id: 'resp_123', model: 'gpt-5.2' })).toBe(true);
+			expect(isEmptyResponse({ id: 'resp_123', object: 'response' })).toBe(true);
+		});
+
+		it('should return true for response with null/undefined output', () => {
+			expect(isEmptyResponse({ id: 'resp_123', output: null })).toBe(true);
+			expect(isEmptyResponse({ id: 'resp_123', output: undefined })).toBe(true);
+		});
+
+		it('should return true for response with empty choices array', () => {
+			expect(isEmptyResponse({ id: 'resp_123', choices: [] })).toBe(true);
+		});
+
+		it('should return false for response with output', () => {
+			expect(isEmptyResponse({ output: [{ text: 'hello' }] })).toBe(false);
+			expect(isEmptyResponse({ id: 'resp_123', output: 'some output' })).toBe(false);
+		});
+
+		it('should return false for response with choices', () => {
+			expect(isEmptyResponse({ choices: [{ message: { content: 'hi' } }] })).toBe(false);
+		});
+
+		it('should return true for response with empty choice objects', () => {
+			expect(isEmptyResponse({ id: 'resp_123', choices: [{}] })).toBe(true);
+			expect(isEmptyResponse({ id: 'resp_123', choices: [null] })).toBe(true);
+		});
+
+		it('should return false for response with content', () => {
+			expect(isEmptyResponse({ content: 'hello world' })).toBe(false);
+			expect(isEmptyResponse({ id: 'resp_123', content: [] })).toBe(false);
+		});
+
+		it('should return true for response with empty string content', () => {
+			expect(isEmptyResponse({ id: 'resp_123', content: '' })).toBe(true);
+			expect(isEmptyResponse({ id: 'resp_123', content: '   ' })).toBe(true);
+		});
+
+		it('should return false for non-object primitives', () => {
+			expect(isEmptyResponse(123)).toBe(false);
+			expect(isEmptyResponse(true)).toBe(false);
+			expect(isEmptyResponse('non-empty string')).toBe(false);
+		});
+
+		it('should return false for objects that are not response-like', () => {
+			// Objects without id/object/model are considered valid (not response objects)
+			expect(isEmptyResponse({ foo: 'bar' })).toBe(false);
+			expect(isEmptyResponse({ data: [1, 2, 3] })).toBe(false);
 		});
 	});
 });

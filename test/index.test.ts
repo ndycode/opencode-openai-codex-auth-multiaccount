@@ -72,6 +72,9 @@ vi.mock("../lib/config.js", () => ({
 	getAutoResume: () => false,
 	getToastDurationMs: () => 5000,
 	getPerProjectAccounts: () => false,
+	getEmptyResponseMaxRetries: () => 2,
+	getEmptyResponseRetryDelayMs: () => 1000,
+	getPidOffsetEnabled: () => false,
 	loadPluginConfig: () => ({}),
 }));
 
@@ -82,6 +85,14 @@ vi.mock("../lib/logger.js", () => ({
 	logInfo: vi.fn(),
 	logWarn: vi.fn(),
 	logError: vi.fn(),
+	createLogger: vi.fn(() => ({
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		time: vi.fn(() => vi.fn(() => 0)),
+		timeEnd: vi.fn(),
+	})),
 }));
 
 vi.mock("../lib/auto-update-checker.js", () => ({

@@ -62,6 +62,9 @@ describe('Plugin Configuration', () => {
 				autoResume: true,
 				parallelProbing: false,
 				parallelProbingMaxConcurrency: 2,
+				emptyResponseMaxRetries: 2,
+				emptyResponseRetryDelayMs: 1_000,
+				pidOffsetEnabled: false,
 			});
 			expect(mockExistsSync).toHaveBeenCalledWith(
 				path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json')
@@ -87,6 +90,9 @@ describe('Plugin Configuration', () => {
 				autoResume: true,
 				parallelProbing: false,
 				parallelProbingMaxConcurrency: 2,
+				emptyResponseMaxRetries: 2,
+				emptyResponseRetryDelayMs: 1_000,
+				pidOffsetEnabled: false,
 			});
 		});
 
@@ -109,6 +115,9 @@ describe('Plugin Configuration', () => {
 				autoResume: true,
 				parallelProbing: false,
 				parallelProbingMaxConcurrency: 2,
+				emptyResponseMaxRetries: 2,
+				emptyResponseRetryDelayMs: 1_000,
+				pidOffsetEnabled: false,
 			});
 		});
 
@@ -133,6 +142,9 @@ describe('Plugin Configuration', () => {
 		autoResume: true,
 		parallelProbing: false,
 		parallelProbingMaxConcurrency: 2,
+		emptyResponseMaxRetries: 2,
+		emptyResponseRetryDelayMs: 1_000,
+		pidOffsetEnabled: false,
 	});
 		expect(mockLogWarn).toHaveBeenCalled();
 	});
@@ -160,6 +172,9 @@ describe('Plugin Configuration', () => {
 			autoResume: true,
 			parallelProbing: false,
 			parallelProbingMaxConcurrency: 2,
+			emptyResponseMaxRetries: 2,
+			emptyResponseRetryDelayMs: 1_000,
+			pidOffsetEnabled: false,
 		});
 		expect(mockLogWarn).toHaveBeenCalled();
 	});

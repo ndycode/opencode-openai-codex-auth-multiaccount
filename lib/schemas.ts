@@ -23,6 +23,9 @@ export const PluginConfigSchema = z.object({
 	autoResume: z.boolean().optional(),
 	parallelProbing: z.boolean().optional(),
 	parallelProbingMaxConcurrency: z.number().min(1).max(5).optional(),
+	emptyResponseMaxRetries: z.number().min(0).optional(),
+	emptyResponseRetryDelayMs: z.number().min(0).optional(),
+	pidOffsetEnabled: z.boolean().optional(),
 });
 
 export type PluginConfigFromSchema = z.infer<typeof PluginConfigSchema>;

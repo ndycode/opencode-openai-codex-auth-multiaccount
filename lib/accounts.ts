@@ -14,6 +14,7 @@ import {
 	getTokenTracker,
 	selectHybridAccount,
 	type AccountWithMetrics,
+	type HybridSelectionOptions,
 } from "./rotation.js";
 import { nowMs } from "./utils.js";
 
@@ -313,7 +314,7 @@ export class AccountManager {
 		return null;
 	}
 
-	getCurrentOrNextForFamilyHybrid(family: ModelFamily, model?: string | null): ManagedAccount | null {
+	getCurrentOrNextForFamilyHybrid(family: ModelFamily, model?: string | null, options?: HybridSelectionOptions): ManagedAccount | null {
 		const count = this.accounts.length;
 		if (count === 0) return null;
 
@@ -350,7 +351,7 @@ export class AccountManager {
 			})
 			.filter((a): a is AccountWithMetrics => a !== null);
 
-		const selected = selectHybridAccount(accountsWithMetrics, healthTracker, tokenTracker, quotaKey);
+		const selected = selectHybridAccount(accountsWithMetrics, healthTracker, tokenTracker, quotaKey, {}, options);
 		if (!selected) return null;
 
 		const account = this.accounts[selected.index];

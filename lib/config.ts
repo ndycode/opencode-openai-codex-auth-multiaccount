@@ -24,6 +24,9 @@ const DEFAULT_CONFIG: PluginConfig = {
 	autoResume: true,
 	parallelProbing: false,
 	parallelProbingMaxConcurrency: 2,
+	emptyResponseMaxRetries: 2,
+	emptyResponseRetryDelayMs: 1_000,
+	pidOffsetEnabled: false,
 };
 
 /**
@@ -198,5 +201,31 @@ export function getParallelProbingMaxConcurrency(pluginConfig: PluginConfig): nu
 		pluginConfig.parallelProbingMaxConcurrency,
 		2,
 		{ min: 1 },
+	);
+}
+
+export function getEmptyResponseMaxRetries(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_EMPTY_RESPONSE_MAX_RETRIES",
+		pluginConfig.emptyResponseMaxRetries,
+		2,
+		{ min: 0 },
+	);
+}
+
+export function getEmptyResponseRetryDelayMs(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_EMPTY_RESPONSE_RETRY_DELAY_MS",
+		pluginConfig.emptyResponseRetryDelayMs,
+		1_000,
+		{ min: 0 },
+	);
+}
+
+export function getPidOffsetEnabled(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_PID_OFFSET_ENABLED",
+		pluginConfig.pidOffsetEnabled,
+		false,
 	);
 }

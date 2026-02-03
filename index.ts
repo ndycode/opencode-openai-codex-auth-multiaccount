@@ -47,6 +47,9 @@ import {
 	getAutoResume,
 	getToastDurationMs,
 	getPerProjectAccounts,
+	getEmptyResponseMaxRetries,
+	getEmptyResponseRetryDelayMs,
+	getPidOffsetEnabled,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -89,6 +92,7 @@ import {
 	RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
 	resetRateLimitBackoff,
 } from "./lib/request/rate-limit-backoff.js";
+import { isEmptyResponse } from "./lib/request/response-handler.js";
 import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
 import { getModelFamily, MODEL_FAMILIES, type ModelFamily } from "./lib/prompts/codex.js";
@@ -652,6 +656,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 				const sessionRecoveryEnabled = getSessionRecovery(pluginConfig);
 				const autoResumeEnabled = getAutoResume(pluginConfig);
+				const emptyResponseMaxRetries = getEmptyResponseMaxRetries(pluginConfig);
+				const emptyResponseRetryDelayMs = getEmptyResponseRetryDelayMs(pluginConfig);
+				const pidOffsetEnabled = getPidOffsetEnabled(pluginConfig);
 
 				const recoveryHook = sessionRecoveryEnabled
 					? createSessionRecoveryHook(
@@ -777,14 +784,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						}
 					};
 
-									let allRateLimitedRetries = 0;
+							let allRateLimitedRetries = 0;
+							let emptyResponseRetries = 0;
 
-									while (true) {
+							while (true) {
 										const accountCount = accountManager.getAccountCount();
 										const attempted = new Set<number>();
 
 while (attempted.size < Math.max(1, accountCount)) {
-				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model);
+				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model, { pidOffsetEnabled });
 				if (!account || attempted.has(account.index)) {
 					break;
 				}
@@ -1017,10 +1025,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 																													return errorResponse;
 																											}
 
-								resetRateLimitBackoff(account.index, quotaKey);
-								const successResponse = await handleSuccessResponse(response, isStreaming);
-								accountManager.recordSuccess(account, modelFamily, model);
-									return successResponse;
+					resetRateLimitBackoff(account.index, quotaKey);
+					const successResponse = await handleSuccessResponse(response, isStreaming);
+
+					if (!isStreaming && emptyResponseMaxRetries > 0) {
+						const clonedResponse = successResponse.clone();
+						try {
+							const bodyText = await clonedResponse.text();
+							const parsedBody = bodyText ? JSON.parse(bodyText) as unknown : null;
+							if (isEmptyResponse(parsedBody)) {
+								if (emptyResponseRetries < emptyResponseMaxRetries) {
+									emptyResponseRetries++;
+									logWarn(`Empty response received (attempt ${emptyResponseRetries}/${emptyResponseMaxRetries}). Retrying...`);
+									await showToast(
+										`Empty response. Retrying (${emptyResponseRetries}/${emptyResponseMaxRetries})...`,
+										"warning",
+										{ duration: toastDurationMs },
+									);
+									accountManager.refundToken(account, modelFamily, model);
+									accountManager.recordFailure(account, modelFamily, model);
+									await sleep(addJitter(emptyResponseRetryDelayMs, 0.2));
+									break;
+								}
+								logWarn(`Empty response after ${emptyResponseMaxRetries} retries. Returning as-is.`);
+							}
+						} catch {
+							// Intentionally empty: non-JSON response bodies should be returned as-is
+						}
+					}
+
+					accountManager.recordSuccess(account, modelFamily, model);
+						return successResponse;
 																								}
 										}
 

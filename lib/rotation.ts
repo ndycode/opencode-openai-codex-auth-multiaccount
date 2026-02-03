@@ -295,12 +295,17 @@ export const DEFAULT_HYBRID_SELECTION_CONFIG: HybridSelectionConfig = {
  * - tokens: Available tokens in bucket (0-maxTokens)
  * - freshness: Hours since last used (higher = more fresh for rotation)
  */
+export interface HybridSelectionOptions {
+  pidOffsetEnabled?: boolean;
+}
+
 export function selectHybridAccount(
   accounts: AccountWithMetrics[],
   healthTracker: HealthScoreTracker,
   tokenTracker: TokenBucketTracker,
   quotaKey?: string,
   config: Partial<HybridSelectionConfig> = {},
+  options: HybridSelectionOptions = {},
 ): AccountWithMetrics | null {
   const cfg = { ...DEFAULT_HYBRID_SELECTION_CONFIG, ...config };
   const available = accounts.filter((a) => a.isAvailable);
@@ -324,15 +329,24 @@ export function selectHybridAccount(
   let bestAccount: AccountWithMetrics | null = null;
   let bestScore = -Infinity;
 
+  // PID offset: distribute account selection across parallel processes
+  // Each process gets a small deterministic bonus based on its PID
+  const pidBonus = options.pidOffsetEnabled ? (process.pid % 100) * 0.01 : 0;
+
   for (const account of available) {
     const health = healthTracker.getScore(account.index, quotaKey);
     const tokens = tokenTracker.getTokens(account.index, quotaKey);
     const hoursSinceUsed = (now - account.lastUsed) / (1000 * 60 * 60);
 
-    const score =
+    let score =
       health * cfg.healthWeight +
       tokens * cfg.tokenWeight +
       hoursSinceUsed * cfg.freshnessWeight;
+
+    // PID-based offset distributes selection across parallel agents
+    if (options.pidOffsetEnabled) {
+      score += ((account.index * 0.131 + pidBonus) % 1) * cfg.freshnessWeight * 0.1;
+    }
 
     if (score > bestScore) {
       bestScore = score;

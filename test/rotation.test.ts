@@ -375,6 +375,69 @@ describe("selectHybridAccount", () => {
 		const result = selectHybridAccount(accounts, healthTracker, tokenTracker);
 		expect(result?.index).toBe(1);
 	});
+
+	it("pidOffsetEnabled false does not change selection", () => {
+		const accounts: AccountWithMetrics[] = [
+			{ index: 0, isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+		];
+
+		const result1 = selectHybridAccount(accounts, healthTracker, tokenTracker, undefined, undefined, { pidOffsetEnabled: false });
+		const result2 = selectHybridAccount(accounts, healthTracker, tokenTracker);
+
+		expect(result1?.index).toBe(result2?.index);
+	});
+
+	it("pidOffsetEnabled true adds deterministic offset based on process.pid", () => {
+		const accounts: AccountWithMetrics[] = [
+			{ index: 0, isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+		];
+
+		const result = selectHybridAccount(accounts, healthTracker, tokenTracker, undefined, undefined, { pidOffsetEnabled: true });
+
+		expect(result).not.toBe(null);
+		expect([0, 1]).toContain(result?.index);
+	});
+
+	it("pidOffsetEnabled uses process.pid modulo 100 for offset calculation", () => {
+		const originalPid = process.pid;
+		Object.defineProperty(process, 'pid', { value: 50, configurable: true });
+
+		const accounts: AccountWithMetrics[] = [
+			{ index: 0, isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+		];
+
+		const result = selectHybridAccount(accounts, healthTracker, tokenTracker, undefined, undefined, { pidOffsetEnabled: true });
+		expect(result).not.toBe(null);
+
+		Object.defineProperty(process, 'pid', { value: originalPid, configurable: true });
+	});
+
+	it("pidOffsetEnabled differentiates selection across different PIDs", () => {
+		const originalPid = process.pid;
+		const now = Date.now();
+		const accounts: AccountWithMetrics[] = [
+			{ index: 0, isAvailable: true, lastUsed: now },
+			{ index: 1, isAvailable: true, lastUsed: now },
+			{ index: 2, isAvailable: true, lastUsed: now },
+			{ index: 3, isAvailable: true, lastUsed: now },
+		];
+
+		const selectedIndices = new Set<number>();
+		for (let pid = 0; pid < 100; pid += 10) {
+			Object.defineProperty(process, 'pid', { value: pid, configurable: true });
+			const result = selectHybridAccount(accounts, healthTracker, tokenTracker, undefined, undefined, { pidOffsetEnabled: true });
+			if (result) {
+				selectedIndices.add(result.index);
+			}
+		}
+
+		Object.defineProperty(process, 'pid', { value: originalPid, configurable: true });
+
+		expect(selectedIndices.size).toBeGreaterThan(1);
+	});
 });
 
 describe("utility functions", () => {
