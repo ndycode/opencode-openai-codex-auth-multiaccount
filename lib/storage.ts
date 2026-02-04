@@ -4,7 +4,7 @@ import { ACCOUNT_LIMITS } from "./constants.js";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import { AnyAccountStorageSchema, getValidationErrors } from "./schemas.js";
-import { getConfigDir, getProjectConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
+import { getConfigDir, getProjectConfigDir, getProjectGlobalConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
 import {
   migrateV1ToV3,
   type CooldownReason,
@@ -18,6 +18,7 @@ import {
 export type { CooldownReason, RateLimitStateV3, AccountMetadataV1, AccountStorageV1, AccountMetadataV3, AccountStorageV3 };
 
 const log = createLogger("storage");
+const ACCOUNTS_FILE_NAME = "openai-codex-accounts.json";
 
 /**
  * Custom error class for storage operations with platform-aware hints.
@@ -113,23 +114,28 @@ async function ensureGitignore(storagePath: string): Promise<void> {
 }
 
 let currentStoragePath: string | null = null;
+let currentLegacyProjectStoragePath: string | null = null;
 
 export function setStoragePath(projectPath: string | null): void {
   if (!projectPath) {
     currentStoragePath = null;
+    currentLegacyProjectStoragePath = null;
     return;
   }
   
   const projectRoot = findProjectRoot(projectPath);
   if (projectRoot) {
-    currentStoragePath = join(getProjectConfigDir(projectRoot), "openai-codex-accounts.json");
+    currentStoragePath = join(getProjectGlobalConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
+    currentLegacyProjectStoragePath = join(getProjectConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
   } else {
     currentStoragePath = null;
+    currentLegacyProjectStoragePath = null;
   }
 }
 
 export function setStoragePathDirect(path: string | null): void {
   currentStoragePath = path;
+  currentLegacyProjectStoragePath = null;
 }
 
 /**
@@ -140,7 +146,40 @@ export function getStoragePath(): string {
   if (currentStoragePath) {
     return currentStoragePath;
   }
-  return join(getConfigDir(), "openai-codex-accounts.json");
+  return join(getConfigDir(), ACCOUNTS_FILE_NAME);
+}
+
+async function migrateLegacyProjectStorageIfNeeded(): Promise<AccountStorageV3 | null> {
+  if (
+    !currentStoragePath ||
+    !currentLegacyProjectStoragePath ||
+    currentLegacyProjectStoragePath === currentStoragePath ||
+    !existsSync(currentLegacyProjectStoragePath)
+  ) {
+    return null;
+  }
+
+  try {
+    const legacyContent = await fs.readFile(currentLegacyProjectStoragePath, "utf-8");
+    const legacyData = JSON.parse(legacyContent) as unknown;
+    const normalized = normalizeAccountStorage(legacyData);
+    if (!normalized) return null;
+
+    await saveAccounts(normalized);
+    log.info("Migrated legacy project account storage", {
+      from: currentLegacyProjectStoragePath,
+      to: currentStoragePath,
+      accounts: normalized.accounts.length,
+    });
+    return normalized;
+  } catch (error) {
+    log.warn("Failed to migrate legacy project account storage", {
+      from: currentLegacyProjectStoragePath,
+      to: currentStoragePath,
+      error: String(error),
+    });
+    return null;
+  }
 }
 
 function selectNewestAccount<T extends AccountLike>(
@@ -425,6 +464,8 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
+      const migrated = await migrateLegacyProjectStorageIfNeeded();
+      if (migrated) return migrated;
       return null;
     }
     log.error("Failed to load account storage", { error: String(error) });

@@ -10,6 +10,8 @@ import { existsSync } from "node:fs";
 import {
 	getConfigDir,
 	getProjectConfigDir,
+	getProjectGlobalConfigDir,
+	getProjectStorageKey,
 	isProjectDirectory,
 	findProjectRoot,
 	resolvePath,
@@ -44,6 +46,25 @@ describe("Storage Paths Module", () => {
 			const projectPath = "C:\\Users\\test\\project";
 			const result = getProjectConfigDir(projectPath);
 			expect(result).toBe(path.join(projectPath, ".opencode"));
+		});
+	});
+
+	describe("getProjectStorageKey", () => {
+		it("returns deterministic key for same project path", () => {
+			const projectPath = "/home/user/myproject";
+			const first = getProjectStorageKey(projectPath);
+			const second = getProjectStorageKey(projectPath);
+			expect(first).toBe(second);
+			expect(first).toMatch(/^myproject-[a-f0-9]{12}$/);
+		});
+	});
+
+	describe("getProjectGlobalConfigDir", () => {
+		it("returns ~/.opencode/projects/<key>", () => {
+			const projectPath = "/home/user/myproject";
+			const result = getProjectGlobalConfigDir(projectPath);
+			expect(result).toContain(path.join(homedir(), ".opencode", "projects"));
+			expect(result).toContain("myproject-");
 		});
 	});
 

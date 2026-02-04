@@ -220,7 +220,7 @@ result: project uses `high`, other projects use `medium`.
 | `~/.opencode/openai-codex-auth-config.json` | plugin config |
 | `~/.opencode/auth/openai.json` | oauth tokens |
 | `~/.opencode/openai-codex-accounts.json` | global account storage |
-| `<project>/.opencode/openai-codex-accounts.json` | per-project account storage |
+| `~/.opencode/projects/<project-key>/openai-codex-accounts.json` | per-project account storage |
 | `~/.opencode/logs/codex-plugin/` | debug logs |
 
 ---
@@ -284,7 +284,7 @@ look for `hasModelSpecificConfig: true`. if it's false, config lookup failed - c
 
 ### per-project accounts not working
 
-make sure you're in a project directory (has `.git`, `package.json`, etc). the plugin auto-detects and falls back to global storage otherwise.
+make sure you're in a project directory (has `.git`, `package.json`, etc). the plugin auto-detects the project root and uses a namespaced file under `~/.opencode/projects/`. if no project root is found, it falls back to global storage.
 
 check which storage is being used:
 ```bash

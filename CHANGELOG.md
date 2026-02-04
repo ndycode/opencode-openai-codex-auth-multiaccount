@@ -2,6 +2,16 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [4.12.5] - 2026-02-04
+
+### changed
+
+- **per-project storage location**: project-scoped account files now live under `~/.opencode/projects/<project-key>/openai-codex-accounts.json` instead of writing into `<project>/.opencode/`.
+
+### added
+
+- **legacy migration**: when the new project-scoped path is empty, the plugin now auto-migrates legacy `<project>/.opencode/openai-codex-accounts.json` data on first load.
+
 ## [4.12.0] - 2026-01-30
 
 ### breaking

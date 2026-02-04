@@ -708,11 +708,12 @@ describe("storage", () => {
       expect(path).toContain(".opencode");
     });
 
-    it("sets project-relative path when project root found (line 125 coverage)", () => {
+    it("sets project-scoped path under global .opencode when project root found", () => {
       setStoragePath(process.cwd());
       const path = getStoragePath();
       expect(path).toContain("openai-codex-accounts.json");
       expect(path).toContain(".opencode");
+      expect(path).toContain("projects");
     });
   });
 

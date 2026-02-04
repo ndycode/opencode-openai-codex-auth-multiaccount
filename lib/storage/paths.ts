@@ -4,10 +4,13 @@
  */
 
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
 const PROJECT_MARKERS = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", ".opencode"];
+const PROJECTS_DIR = "projects";
+const PROJECT_KEY_HASH_LENGTH = 12;
 
 export function getConfigDir(): string {
 	return join(homedir(), ".opencode");
@@ -15,6 +18,38 @@ export function getConfigDir(): string {
 
 export function getProjectConfigDir(projectPath: string): string {
 	return join(projectPath, ".opencode");
+}
+
+function normalizeProjectPath(projectPath: string): string {
+	const resolvedPath = resolve(projectPath);
+	const normalizedSeparators = resolvedPath.replace(/\\/g, "/");
+	return process.platform === "win32"
+		? normalizedSeparators.toLowerCase()
+		: normalizedSeparators;
+}
+
+function sanitizeProjectName(projectPath: string): string {
+	const name = basename(projectPath);
+	const sanitized = name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+	return sanitized || "project";
+}
+
+export function getProjectStorageKey(projectPath: string): string {
+	const normalizedPath = normalizeProjectPath(projectPath);
+	const hash = createHash("sha256")
+		.update(normalizedPath)
+		.digest("hex")
+		.slice(0, PROJECT_KEY_HASH_LENGTH);
+	const projectName = sanitizeProjectName(normalizedPath).slice(0, 40);
+	return `${projectName}-${hash}`;
+}
+
+/**
+ * Per-project storage is namespaced under ~/.opencode/projects
+ * to avoid writing account files into user repositories.
+ */
+export function getProjectGlobalConfigDir(projectPath: string): string {
+	return join(getConfigDir(), PROJECTS_DIR, getProjectStorageKey(projectPath));
 }
 
 export function isProjectDirectory(dir: string): boolean {

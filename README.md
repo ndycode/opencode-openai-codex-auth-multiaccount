@@ -439,10 +439,10 @@ Total accounts: 4
 
 **Per-project accounts (v4.10.0+):**
 
-By default, each project directory gets its own account storage. This means you can have different active accounts per project. Works from subdirectories too — the plugin walks up to find the project root (v4.11.0). Disable with `perProjectAccounts: false` in your config.
+By default, each project gets its own account storage namespace. This means you can keep different active accounts per project without writing account files into your repo. Works from subdirectories too; the plugin walks up to find the project root (v4.11.0). Disable with `perProjectAccounts: false` in your config.
 
 **Storage locations:**
-- Per-project: `{project-root}/.opencode/openai-codex-accounts.json`
+- Per-project: `~/.opencode/projects/{project-key}/openai-codex-accounts.json`
 - Global (when per-project disabled): `~/.opencode/openai-codex-accounts.json`
 
 ---
@@ -460,7 +460,7 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 | Main config | `~/.config/opencode/opencode.json` |
 | Auth tokens | `~/.opencode/auth/openai.json` |
 | Multi-account (global) | `~/.opencode/openai-codex-accounts.json` |
-| Multi-account (per-project) | `{project}/.opencode/openai-codex-accounts.json` |
+| Multi-account (per-project) | `~/.opencode/projects/{project-key}/openai-codex-accounts.json` |
 | Plugin config | `~/.opencode/openai-codex-auth-config.json` |
 | Debug logs | `~/.opencode/logs/codex-plugin/` |
 
@@ -635,7 +635,7 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 
 | Option | Default | What It Does |
 |--------|---------|--------------|
-| `perProjectAccounts` | `true` | Each project gets its own account storage |
+| `perProjectAccounts` | `true` | Each project gets its own account storage namespace under `~/.opencode/projects/` |
 | `toastDurationMs` | `5000` | How long toast notifications stay visible (ms) |
 
 ### Retry Behavior
@@ -700,3 +700,4 @@ By using this plugin, you acknowledge:
 - "ChatGPT", "GPT-5", "Codex", and "OpenAI" are trademarks of OpenAI, L.L.C.
 
 </details>
+
