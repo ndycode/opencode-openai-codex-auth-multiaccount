@@ -35,6 +35,8 @@ describe("PluginConfigSchema", () => {
 			perProjectAccounts: true,
 			sessionRecovery: true,
 			autoResume: false,
+			fetchTimeoutMs: 60000,
+			streamStallTimeoutMs: 45000,
 		};
 		const result = PluginConfigSchema.safeParse(config);
 		expect(result.success).toBe(true);
@@ -48,6 +50,13 @@ describe("PluginConfigSchema", () => {
 	it("rejects negative numbers for numeric fields", () => {
 		const result = PluginConfigSchema.safeParse({ retryAllAccountsMaxWaitMs: -100 });
 		expect(result.success).toBe(false);
+	});
+
+	it("rejects timeout settings below 1000ms", () => {
+		const fetchResult = PluginConfigSchema.safeParse({ fetchTimeoutMs: 999 });
+		const stallResult = PluginConfigSchema.safeParse({ streamStallTimeoutMs: 999 });
+		expect(fetchResult.success).toBe(false);
+		expect(stallResult.success).toBe(false);
 	});
 
 	it("rejects wrong types", () => {

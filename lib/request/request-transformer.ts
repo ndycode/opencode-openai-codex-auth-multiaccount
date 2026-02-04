@@ -17,6 +17,10 @@ import type {
 	UserConfig,
 } from "../types.js";
 
+type CollaborationMode = "plan" | "default" | "unknown";
+
+const PLAN_MODE_ONLY_TOOLS = new Set(["request_user_input"]);
+
 export {
 	isOpenCodeSystemPrompt,
 	filterOpenCodeSystemPromptsWithCachedPrompt,
@@ -177,6 +181,81 @@ function resolveInclude(modelConfig: ConfigOptions, body: RequestBody): string[]
 		include.push("reasoning.encrypted_content");
 	}
 	return include;
+}
+
+function parseCollaborationMode(value: string | undefined): CollaborationMode | undefined {
+	if (!value) return undefined;
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "plan") return "plan";
+	if (normalized === "default") return "default";
+	return undefined;
+}
+
+function extractMessageText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((item) => {
+			if (typeof item === "string") return item;
+			if (!item || typeof item !== "object") return "";
+			const typedItem = item as { text?: unknown };
+			return typeof typedItem.text === "string" ? typedItem.text : "";
+		})
+		.filter(Boolean)
+		.join("\n");
+}
+
+function detectCollaborationMode(body: RequestBody): CollaborationMode {
+	const envMode =
+		parseCollaborationMode(process.env.CODEX_COLLABORATION_MODE) ??
+		parseCollaborationMode(process.env.OPENCODE_COLLABORATION_MODE);
+	if (envMode) return envMode;
+	if (!Array.isArray(body.input)) return "unknown";
+
+	let sawPlan = false;
+	let sawDefault = false;
+
+	for (const item of body.input) {
+		if (!item || typeof item !== "object") continue;
+		const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+		if (role !== "developer" && role !== "system") continue;
+
+		const text = extractMessageText(item.content);
+		if (!text) continue;
+		if (/collaboration mode:\s*plan/i.test(text) || /in Plan mode/i.test(text)) {
+			sawPlan = true;
+		}
+		if (/collaboration mode:\s*default/i.test(text) || /in Default mode/i.test(text)) {
+			sawDefault = true;
+		}
+	}
+
+	if (sawPlan && !sawDefault) return "plan";
+	if (sawDefault) return "default";
+	return "unknown";
+}
+
+function sanitizePlanOnlyTools(tools: unknown, mode: CollaborationMode): unknown {
+	if (!Array.isArray(tools) || mode === "plan") return tools;
+
+	let removed = 0;
+	const filtered = tools.filter((entry) => {
+		if (!entry || typeof entry !== "object") return true;
+		const functionDef = (entry as { function?: unknown }).function;
+		if (!functionDef || typeof functionDef !== "object") return true;
+		const name = (functionDef as { name?: unknown }).name;
+		if (typeof name !== "string") return true;
+		if (!PLAN_MODE_ONLY_TOOLS.has(name)) return true;
+		removed++;
+		return false;
+	});
+
+	if (removed > 0) {
+		logWarn(
+			`Removed ${removed} plan-mode-only tool definition(s) because collaboration mode is ${mode}`,
+		);
+	}
+	return filtered;
 }
 
 /**
@@ -456,8 +535,10 @@ export async function transformRequestBody(
 
 	// Clean up tool definitions (implement strict "require" logic)
 	// Filters invalid required fields and ensures empty objects have placeholders
+	const collaborationMode = detectCollaborationMode(body);
 	if (body.tools) {
 		body.tools = cleanupToolDefinitions(body.tools);
+		body.tools = sanitizePlanOnlyTools(body.tools, collaborationMode);
 	}
 
 	body.instructions = codexInstructions;

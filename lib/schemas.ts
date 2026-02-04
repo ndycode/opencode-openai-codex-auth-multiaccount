@@ -26,6 +26,8 @@ export const PluginConfigSchema = z.object({
 	emptyResponseMaxRetries: z.number().min(0).optional(),
 	emptyResponseRetryDelayMs: z.number().min(0).optional(),
 	pidOffsetEnabled: z.boolean().optional(),
+	fetchTimeoutMs: z.number().min(1_000).optional(),
+	streamStallTimeoutMs: z.number().min(1_000).optional(),
 });
 
 export type PluginConfigFromSchema = z.infer<typeof PluginConfigSchema>;

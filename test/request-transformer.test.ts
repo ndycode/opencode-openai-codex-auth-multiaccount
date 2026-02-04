@@ -1270,6 +1270,53 @@ describe('Request Transformer Module', () => {
 				expect(result.input![0].role).toBe('developer');
 				expect((result.input![0].content as any)[0].text).toContain('Codex Running in OpenCode');
 			});
+
+			it('should remove request_user_input tool in default collaboration mode', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [
+						{
+							type: 'message',
+							role: 'developer',
+							content: [{ type: 'input_text', text: '# Collaboration Mode: Default' }],
+						},
+					],
+					tools: [
+						{ type: 'function', function: { name: 'request_user_input', parameters: { type: 'object', properties: {} } } },
+						{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object', properties: {} } } },
+					] as any,
+				};
+
+				const result = await transformRequestBody(body, codexInstructions);
+				const toolNames = ((result.tools ?? []) as Array<{ function?: { name?: string } }>)
+					.map((tool) => tool.function?.name)
+					.filter(Boolean);
+
+				expect(toolNames).toEqual(['exec_command']);
+			});
+
+			it('should keep request_user_input tool in plan collaboration mode', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [
+						{
+							type: 'message',
+							role: 'developer',
+							content: [{ type: 'input_text', text: '# Collaboration Mode: Plan' }],
+						},
+					],
+					tools: [
+						{ type: 'function', function: { name: 'request_user_input', parameters: { type: 'object', properties: {} } } },
+					] as any,
+				};
+
+				const result = await transformRequestBody(body, codexInstructions);
+				const toolNames = ((result.tools ?? []) as Array<{ function?: { name?: string } }>)
+					.map((tool) => tool.function?.name)
+					.filter(Boolean);
+
+				expect(toolNames).toEqual(['request_user_input']);
+			});
 		});
 
 		// NEW: Integration tests for all config scenarios

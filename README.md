@@ -319,6 +319,27 @@ OpenAI Account Status:
 
 ---
 
+### codex-metrics
+
+Show live runtime metrics (request counts, latency, errors, rotations) for the current plugin process.
+
+```
+codex-metrics
+```
+
+**Output:**
+```
+Codex Plugin Metrics:
+
+Uptime: 12m
+Total upstream requests: 84
+Successful responses: 77
+Failed responses: 7
+Average successful latency: 842ms
+```
+
+---
+
 ### codex-health
 
 Check if all account tokens are still valid (read-only check).
@@ -419,6 +440,7 @@ Total accounts: 4
 | `codex-list` | List all accounts | "list my accounts" |
 | `codex-switch` | Switch active account | "switch to account 2" |
 | `codex-status` | Show rate limits & health | "show account status" |
+| `codex-metrics` | Show runtime metrics | "show plugin metrics" |
 | `codex-health` | Validate tokens (read-only) | "check account health" |
 | `codex-refresh` | Refresh & save tokens | "refresh my tokens" |
 | `codex-remove` | Remove an account | "remove account 3" |
@@ -645,6 +667,8 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
 | `retryAllAccountsMaxWaitMs` | `0` | Max wait time (0 = unlimited) |
 | `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts |
+| `fetchTimeoutMs` | `60000` | Request timeout to Codex backend (ms) |
+| `streamStallTimeoutMs` | `45000` | Abort non-stream parsing if SSE stalls (ms) |
 
 ### Environment Variables
 
@@ -653,6 +677,8 @@ DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log all API requests
 CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
+CODEX_AUTH_FETCH_TIMEOUT_MS=120000 opencode      # Override request timeout
+CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000 opencode # Override SSE stall timeout
 ```
 
 For all options, see [docs/configuration.md](docs/configuration.md).
@@ -700,4 +726,3 @@ By using this plugin, you acknowledge:
 - "ChatGPT", "GPT-5", "Codex", and "OpenAI" are trademarks of OpenAI, L.L.C.
 
 </details>
-

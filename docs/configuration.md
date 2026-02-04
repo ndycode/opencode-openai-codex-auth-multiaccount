@@ -112,6 +112,8 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
 | `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
+| `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
+| `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
 
 ### environment variables
 
@@ -129,6 +131,8 @@ override any config with env vars:
 | `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | set max wait time |
 | `CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1` | set max retries |
 | `CODEX_AUTH_ACCOUNT_ID=acc_xxx` | force specific workspace id |
+| `CODEX_AUTH_FETCH_TIMEOUT_MS=120000` | override fetch timeout |
+| `CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000` | override SSE stall timeout |
 
 ---
 

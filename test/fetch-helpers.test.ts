@@ -365,6 +365,43 @@ describe('Fetch Helpers Module', () => {
 			
 			expect(json.error.code).toBe(12345);
 		});
+
+		it('includes 401 diagnostics from response headers', async () => {
+			const body = { error: { message: 'Unauthorized' } };
+			const headers = new Headers({
+				'cf-ray': 'abc123-def',
+				'x-request-id': 'req_123',
+			});
+			const response = new Response(JSON.stringify(body), { status: 401, headers });
+
+			const { response: result } = await handleErrorResponse(response, {
+				requestCorrelationId: 'corr-1',
+				threadId: 'thread-1',
+			});
+			const json = await result.json() as {
+				error: {
+					message: string;
+					diagnostics?: {
+						cfRay?: string;
+						requestId?: string;
+						correlationId?: string;
+						threadId?: string;
+						httpStatus?: number;
+					};
+				};
+			};
+
+			expect(json.error.message).toContain('opencode auth login');
+			expect(json.error.diagnostics).toEqual(
+				expect.objectContaining({
+					cfRay: 'abc123-def',
+					requestId: 'req_123',
+					correlationId: 'corr-1',
+					threadId: 'thread-1',
+					httpStatus: 401,
+				}),
+			);
+		});
 	});
 
 	describe('handleErrorResponse edge cases', () => {

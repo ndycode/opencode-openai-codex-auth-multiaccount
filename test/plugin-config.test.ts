@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { loadPluginConfig, getCodexMode, getTokenRefreshSkewMs, getRetryAllAccountsMaxRetries } from '../lib/config.js';
+import {
+	loadPluginConfig,
+	getCodexMode,
+	getTokenRefreshSkewMs,
+	getRetryAllAccountsMaxRetries,
+	getFetchTimeoutMs,
+	getStreamStallTimeoutMs,
+} from '../lib/config.js';
 import type { PluginConfig } from '../lib/types.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -65,6 +72,8 @@ describe('Plugin Configuration', () => {
 				emptyResponseMaxRetries: 2,
 				emptyResponseRetryDelayMs: 1_000,
 				pidOffsetEnabled: false,
+				fetchTimeoutMs: 60_000,
+				streamStallTimeoutMs: 45_000,
 			});
 			expect(mockExistsSync).toHaveBeenCalledWith(
 				path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json')
@@ -93,6 +102,8 @@ describe('Plugin Configuration', () => {
 				emptyResponseMaxRetries: 2,
 				emptyResponseRetryDelayMs: 1_000,
 				pidOffsetEnabled: false,
+				fetchTimeoutMs: 60_000,
+				streamStallTimeoutMs: 45_000,
 			});
 		});
 
@@ -118,6 +129,8 @@ describe('Plugin Configuration', () => {
 				emptyResponseMaxRetries: 2,
 				emptyResponseRetryDelayMs: 1_000,
 				pidOffsetEnabled: false,
+				fetchTimeoutMs: 60_000,
+				streamStallTimeoutMs: 45_000,
 			});
 		});
 
@@ -145,6 +158,8 @@ describe('Plugin Configuration', () => {
 		emptyResponseMaxRetries: 2,
 		emptyResponseRetryDelayMs: 1_000,
 		pidOffsetEnabled: false,
+		fetchTimeoutMs: 60_000,
+		streamStallTimeoutMs: 45_000,
 	});
 		expect(mockLogWarn).toHaveBeenCalled();
 	});
@@ -175,6 +190,8 @@ describe('Plugin Configuration', () => {
 			emptyResponseMaxRetries: 2,
 			emptyResponseRetryDelayMs: 1_000,
 			pidOffsetEnabled: false,
+			fetchTimeoutMs: 60_000,
+			streamStallTimeoutMs: 45_000,
 		});
 		expect(mockLogWarn).toHaveBeenCalled();
 	});
@@ -283,6 +300,19 @@ describe('Plugin Configuration', () => {
 			const result = getTokenRefreshSkewMs(config);
 			expect(result).toBe(30000);
 			delete process.env.CODEX_AUTH_TOKEN_REFRESH_SKEW_MS;
+		});
+	});
+
+	describe('timeout settings', () => {
+		it('should read fetch timeout from config', () => {
+			const config: PluginConfig = { fetchTimeoutMs: 120000 };
+			expect(getFetchTimeoutMs(config)).toBe(120000);
+		});
+
+		it('should read stream stall timeout from env', () => {
+			process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS = '30000';
+			expect(getStreamStallTimeoutMs({})).toBe(30000);
+			delete process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS;
 		});
 	});
 });

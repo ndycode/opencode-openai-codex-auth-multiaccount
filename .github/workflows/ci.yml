@@ -60,3 +60,23 @@ jobs:
 
       - name: Run ESLint
         run: npm run lint
+
+  codex-compat:
+    name: Codex Compatibility Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Codex compatibility tests
+        run: npm run test -- test/codex.test.ts test/opencode-codex.test.ts test/request-transformer.test.ts test/fetch-helpers.test.ts

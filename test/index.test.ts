@@ -75,6 +75,8 @@ vi.mock("../lib/config.js", () => ({
 	getEmptyResponseMaxRetries: () => 2,
 	getEmptyResponseRetryDelayMs: () => 1000,
 	getPidOffsetEnabled: () => false,
+	getFetchTimeoutMs: () => 60000,
+	getStreamStallTimeoutMs: () => 45000,
 	loadPluginConfig: () => ({}),
 }));
 
@@ -85,6 +87,8 @@ vi.mock("../lib/logger.js", () => ({
 	logInfo: vi.fn(),
 	logWarn: vi.fn(),
 	logError: vi.fn(),
+	setCorrelationId: vi.fn(() => "test-correlation-id"),
+	clearCorrelationId: vi.fn(),
 	createLogger: vi.fn(() => ({
 		debug: vi.fn(),
 		info: vi.fn(),
@@ -284,6 +288,7 @@ type PluginType = {
 		"codex-list": ToolExecute;
 		"codex-switch": ToolExecute<{ index: number }>;
 		"codex-status": ToolExecute;
+		"codex-metrics": ToolExecute;
 		"codex-health": ToolExecute;
 		"codex-remove": ToolExecute<{ index: number }>;
 		"codex-refresh": ToolExecute;
@@ -334,6 +339,7 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(plugin.tool["codex-list"]).toBeDefined();
 			expect(plugin.tool["codex-switch"]).toBeDefined();
 			expect(plugin.tool["codex-status"]).toBeDefined();
+			expect(plugin.tool["codex-metrics"]).toBeDefined();
 			expect(plugin.tool["codex-health"]).toBeDefined();
 			expect(plugin.tool["codex-remove"]).toBeDefined();
 			expect(plugin.tool["codex-refresh"]).toBeDefined();
@@ -483,6 +489,14 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-status"].execute();
 			expect(result).toContain("Account Status");
 			expect(result).toContain("Active index by model family");
+		});
+	});
+
+	describe("codex-metrics tool", () => {
+		it("shows runtime metrics", async () => {
+			const result = await plugin.tool["codex-metrics"].execute();
+			expect(result).toContain("Codex Plugin Metrics");
+			expect(result).toContain("Total upstream requests");
 		});
 	});
 

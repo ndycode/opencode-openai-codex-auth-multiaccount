@@ -138,6 +138,31 @@ data: {"type":"response.done","response":{"id":"resp_789"}}
 			await expect(convertSseToJson(response, headers)).rejects.toThrow('Stream read error');
 			expect(mockReader.releaseLock).toHaveBeenCalled();
 		});
+
+		it('should throw when stream stalls past timeout', async () => {
+			vi.useFakeTimers();
+			const mockReader = {
+				read: vi.fn(() => new Promise<{ done: boolean; value?: Uint8Array }>(() => {})),
+				cancel: vi.fn(async () => undefined),
+				releaseLock: vi.fn(),
+			};
+			const response = {
+				body: {
+					getReader: () => mockReader,
+				},
+				status: 200,
+				statusText: 'OK',
+			} as unknown as Response;
+
+			const pending = convertSseToJson(response, new Headers(), { streamStallTimeoutMs: 1000 });
+			const assertion = expect(pending).rejects.toThrow(/stalled/);
+			await vi.advanceTimersByTimeAsync(1100);
+
+			await assertion;
+			expect(mockReader.cancel).toHaveBeenCalled();
+			expect(mockReader.releaseLock).toHaveBeenCalled();
+			vi.useRealTimers();
+		});
 	});
 
 	describe('isEmptyResponse', () => {

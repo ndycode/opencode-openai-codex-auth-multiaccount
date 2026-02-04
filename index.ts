@@ -50,6 +50,8 @@ import {
 	getEmptyResponseMaxRetries,
 	getEmptyResponseRetryDelayMs,
 	getPidOffsetEnabled,
+	getFetchTimeoutMs,
+	getStreamStallTimeoutMs,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -61,7 +63,16 @@ import {
         PROVIDER_ID,
         ACCOUNT_LIMITS,
 } from "./lib/constants.js";
-import { initLogger, logRequest, logDebug, logInfo, logWarn, logError } from "./lib/logger.js";
+import {
+	initLogger,
+	logRequest,
+	logDebug,
+	logInfo,
+	logWarn,
+	logError,
+	setCorrelationId,
+	clearCorrelationId,
+} from "./lib/logger.js";
 import { checkAndNotify } from "./lib/auto-update-checker.js";
 import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
@@ -127,6 +138,38 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let accountManagerPromise: Promise<AccountManager> | null = null;
 	let loaderMutex: Promise<void> | null = null;
 	const MIN_BACKOFF_MS = 100;
+
+	type RuntimeMetrics = {
+		startedAt: number;
+		totalRequests: number;
+		successfulRequests: number;
+		failedRequests: number;
+		rateLimitedResponses: number;
+		serverErrors: number;
+		networkErrors: number;
+		authRefreshFailures: number;
+		emptyResponseRetries: number;
+		accountRotations: number;
+		cumulativeLatencyMs: number;
+		lastRequestAt: number | null;
+		lastError: string | null;
+	};
+
+	const runtimeMetrics: RuntimeMetrics = {
+		startedAt: Date.now(),
+		totalRequests: 0,
+		successfulRequests: 0,
+		failedRequests: 0,
+		rateLimitedResponses: 0,
+		serverErrors: 0,
+		networkErrors: 0,
+		authRefreshFailures: 0,
+		emptyResponseRetries: 0,
+		accountRotations: 0,
+		cumulativeLatencyMs: 0,
+		lastRequestAt: null,
+		lastError: null,
+	};
 
         type TokenSuccess = Extract<TokenResult, { type: "success" }>;
         type TokenSuccessWithAccount = TokenSuccess & {
@@ -649,6 +692,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
 				const toastDurationMs = getToastDurationMs(pluginConfig);
 				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
+				const fetchTimeoutMs = getFetchTimeoutMs(pluginConfig);
+				const streamStallTimeoutMs = getStreamStallTimeoutMs(pluginConfig);
 
 				if (perProjectAccounts) {
 					setStoragePath(process.cwd());
@@ -697,6 +742,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						input: Request | string | URL,
 						init?: RequestInit,
 					): Promise<Response> {
+						try {
                                                 // Step 1: Extract and rewrite URL for Codex backend
                                                 const originalUrl = extractRequestUrl(input);
                                                 const url = rewriteUrlForCodex(originalUrl);
@@ -727,6 +773,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 																				const model = transformation?.body.model;
 																				const modelFamily = model ? getModelFamily(model) : "gpt-5.1";
 																				const quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
+						const threadIdCandidate =
+							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")
+								.toString()
+								.trim() || undefined;
+						const requestCorrelationId = setCorrelationId(
+							threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
+						);
+						runtimeMetrics.lastRequestAt = Date.now();
 
 					const abortSignal = requestInit?.signal ?? init?.signal ?? null;
 					const sleep = (ms: number): Promise<void> =>
@@ -815,6 +869,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 						}
 			} catch (err) {
 				logDebug(`[${PLUGIN_NAME}] Auth refresh failed for account: ${(err as Error)?.message ?? String(err)}`);
+				runtimeMetrics.authRefreshFailures++;
+				runtimeMetrics.failedRequests++;
+				runtimeMetrics.accountRotations++;
+				runtimeMetrics.lastError = (err as Error)?.message ?? String(err);
 				const failures = accountManager.incrementAuthFailures(account);
 				const accountLabel = formatAccountLabel(account, account.index);
 				
@@ -892,10 +950,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 								// Merge user AbortSignal with timeout (Node 18 compatible - no AbortSignal.any)
 								const fetchController = new AbortController();
-								const fetchTimeoutMs = 60000;
+								const requestTimeoutMs = fetchTimeoutMs;
 								const fetchTimeoutId = setTimeout(
 									() => fetchController.abort(new Error("Request timeout")),
-									fetchTimeoutMs,
+									requestTimeoutMs,
 								);
 
 								const onUserAbort = abortSignal
@@ -910,6 +968,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								try {
+								runtimeMetrics.totalRequests++;
 								response = await fetch(url, {
 									...requestInit,
 									headers,
@@ -918,6 +977,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 				} catch (networkError) {
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
+								runtimeMetrics.failedRequests++;
+								runtimeMetrics.networkErrors++;
+								runtimeMetrics.accountRotations++;
+								runtimeMetrics.lastError = errorMsg;
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
 								break;
@@ -944,7 +1007,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 
 									const { response: errorResponse, rateLimit, errorBody } =
-										await handleErrorResponse(response);
+										await handleErrorResponse(response, {
+											requestCorrelationId,
+											threadId: threadIdCandidate,
+										});
 
 			if (recoveryHook && errorBody && isRecoverableError(errorBody)) {
 					const errorType = detectErrorType(errorBody);
@@ -960,12 +1026,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 					// Handle 5xx server errors by rotating to another account
 					if (response.status >= 500 && response.status < 600) {
 						logWarn(`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`);
+						runtimeMetrics.failedRequests++;
+						runtimeMetrics.serverErrors++;
+						runtimeMetrics.accountRotations++;
+						runtimeMetrics.lastError = `HTTP ${response.status}`;
 						accountManager.refundToken(account, modelFamily, model);
 						accountManager.recordFailure(account, modelFamily, model);
 						break;
 					}
 
 					if (rateLimit) {
+																														runtimeMetrics.rateLimitedResponses++;
 																														const { attempt, delayMs } = getRateLimitBackoff(
 																															account.index,
 																															quotaKey,
@@ -1001,6 +1072,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				);
 				accountManager.recordRateLimit(account, modelFamily, model);
 				account.lastSwitchReason = "rate-limit";
+				runtimeMetrics.accountRotations++;
 				accountManager.saveToDiskDebounced();
 						logWarn(
 							`Rate limited. Rotating account ${account.index + 1} (${account.email ?? "unknown"}).`,
@@ -1022,11 +1094,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 																																}
 																														break;
 																													}
+																													runtimeMetrics.failedRequests++;
+																													runtimeMetrics.lastError = `HTTP ${response.status}`;
 																													return errorResponse;
 																											}
 
 					resetRateLimitBackoff(account.index, quotaKey);
-					const successResponse = await handleSuccessResponse(response, isStreaming);
+					runtimeMetrics.cumulativeLatencyMs += fetchLatencyMs;
+					const successResponse = await handleSuccessResponse(response, isStreaming, {
+						streamStallTimeoutMs,
+					});
 
 					if (!isStreaming && emptyResponseMaxRetries > 0) {
 						const clonedResponse = successResponse.clone();
@@ -1036,6 +1113,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							if (isEmptyResponse(parsedBody)) {
 								if (emptyResponseRetries < emptyResponseMaxRetries) {
 									emptyResponseRetries++;
+									runtimeMetrics.emptyResponseRetries++;
 									logWarn(`Empty response received (attempt ${emptyResponseRetries}/${emptyResponseMaxRetries}). Retrying...`);
 									await showToast(
 										`Empty response. Retrying (${emptyResponseRetries}/${emptyResponseMaxRetries})...`,
@@ -1055,6 +1133,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					accountManager.recordSuccess(account, modelFamily, model);
+					runtimeMetrics.successfulRequests++;
+					runtimeMetrics.lastError = null;
 						return successResponse;
 																								}
 										}
@@ -1083,6 +1163,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 										: waitMs > 0
 											? `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`
 											: `All ${count} account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;
+								runtimeMetrics.failedRequests++;
+								runtimeMetrics.lastError = message;
 								return new Response(JSON.stringify({ error: { message } }), {
 									status: waitMs > 0 ? 429 : 503,
 											headers: {
@@ -1090,6 +1172,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 											},
 										});
 									}
+						} finally {
+							clearCorrelationId();
+						}
 										},
                                 };
 				} finally {
@@ -1448,6 +1533,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         lines.push("  - Add account: opencode auth login");
                                         lines.push("  - Switch account: codex-switch");
                                         lines.push("  - Status details: codex-status");
+                                        lines.push("  - Runtime metrics: codex-metrics");
 
                                         return lines.join("\n");
                                 },
@@ -1567,6 +1653,49 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return lines.join("\n");
                                 },
                         }),
+			"codex-metrics": tool({
+				description: "Show runtime request metrics for this plugin process.",
+				args: {},
+				execute() {
+					const now = Date.now();
+					const uptimeMs = Math.max(0, now - runtimeMetrics.startedAt);
+					const total = runtimeMetrics.totalRequests;
+					const successful = runtimeMetrics.successfulRequests;
+					const successRate = total > 0 ? ((successful / total) * 100).toFixed(1) : "0.0";
+					const avgLatencyMs =
+						successful > 0
+							? Math.round(runtimeMetrics.cumulativeLatencyMs / successful)
+							: 0;
+					const lastRequest =
+						runtimeMetrics.lastRequestAt !== null
+							? `${formatWaitTime(now - runtimeMetrics.lastRequestAt)} ago`
+							: "never";
+
+					const lines = [
+						"Codex Plugin Metrics:",
+						"",
+						`Uptime: ${formatWaitTime(uptimeMs)}`,
+						`Total upstream requests: ${total}`,
+						`Successful responses: ${successful}`,
+						`Failed responses: ${runtimeMetrics.failedRequests}`,
+						`Success rate: ${successRate}%`,
+						`Average successful latency: ${avgLatencyMs}ms`,
+						`Rate-limited responses: ${runtimeMetrics.rateLimitedResponses}`,
+						`Server errors (5xx): ${runtimeMetrics.serverErrors}`,
+						`Network errors: ${runtimeMetrics.networkErrors}`,
+						`Auth refresh failures: ${runtimeMetrics.authRefreshFailures}`,
+						`Account rotations: ${runtimeMetrics.accountRotations}`,
+						`Empty-response retries: ${runtimeMetrics.emptyResponseRetries}`,
+						`Last upstream request: ${lastRequest}`,
+					];
+
+					if (runtimeMetrics.lastError) {
+						lines.push(`Last error: ${runtimeMetrics.lastError}`);
+					}
+
+					return Promise.resolve(lines.join("\n"));
+				},
+			}),
 				"codex-health": tool({
 				description: "Check health of all Codex accounts by validating refresh tokens.",
 				args: {},

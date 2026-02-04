@@ -5,6 +5,7 @@ import type { SSEEventData } from "../types.js";
 const log = createLogger("response-handler");
 
 const MAX_SSE_SIZE = 10 * 1024 * 1024; // 10MB limit to prevent memory exhaustion
+const DEFAULT_STREAM_STALL_TIMEOUT_MS = 45_000;
 
 /**
 
@@ -46,18 +47,26 @@ function parseSseStream(sseText: string): unknown | null {
  * @param headers - Response headers
  * @returns Response with JSON body
  */
-export async function convertSseToJson(response: Response, headers: Headers): Promise<Response> {
+export async function convertSseToJson(
+	response: Response,
+	headers: Headers,
+	options?: { streamStallTimeoutMs?: number },
+): Promise<Response> {
 	if (!response.body) {
 		throw new Error('[openai-codex-plugin] Response has no body');
 	}
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
 	let fullText = '';
+	const streamStallTimeoutMs = Math.max(
+		1_000,
+		Math.floor(options?.streamStallTimeoutMs ?? DEFAULT_STREAM_STALL_TIMEOUT_MS),
+	);
 
 	try {
 		// Consume the entire stream
 		while (true) {
-			const { done, value } = await reader.read();
+			const { done, value } = await readWithTimeout(reader, streamStallTimeoutMs);
 			if (done) break;
 			fullText += decoder.decode(value, { stream: true });
 			if (fullText.length > MAX_SSE_SIZE) {
@@ -98,6 +107,9 @@ export async function convertSseToJson(response: Response, headers: Headers): Pr
 	} catch (error) {
 		log.error("Error converting stream", { error: String(error) });
 		logRequest("stream-error", { error: String(error) });
+		if (typeof reader.cancel === "function") {
+			await reader.cancel(String(error)).catch(() => {});
+		}
 		throw error;
 	} finally {
 		// Release the reader lock to prevent resource leaks
@@ -119,6 +131,31 @@ export function ensureContentType(headers: Headers): Headers {
 	}
 
 	return responseHeaders;
+}
+
+async function readWithTimeout(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	timeoutMs: number,
+): Promise<{ done: boolean; value?: Uint8Array }> {
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			reader.read(),
+			new Promise<never>((_, reject) => {
+				timeoutId = setTimeout(() => {
+					reject(
+						new Error(
+							`SSE stream stalled for ${timeoutMs}ms while waiting for response.done`,
+						),
+					);
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timeoutId !== undefined) {
+			clearTimeout(timeoutId);
+		}
+	}
 }
 
 /**

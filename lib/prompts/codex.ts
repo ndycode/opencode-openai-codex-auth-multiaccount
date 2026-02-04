@@ -338,4 +338,9 @@ Before file/plan modifications:
 
 If ANY answer is NO → STOP and correct before proceeding.
 </verification_checklist>
+
+<safety_rules priority="0">
+- Never run destructive git commands (\`git reset --hard\`, \`git checkout --\`) unless explicitly requested by the user.
+- Never call \`request_user_input\` unless collaboration mode is explicitly Plan mode.
+</safety_rules>
 </user_instructions>`;

@@ -133,6 +133,8 @@ Sandbox policies, approval mechanisms, final answer formatting, git commit proto
 - Assume workspace-write filesystem, network enabled, approval on-failure unless explicitly stated otherwise.
 - When a command fails due to sandboxing or permissions, retry with escalated permissions if allowed by policy, including a one-line justification.
 - Treat destructive commands (e.g., \`rm\`, \`git reset --hard\`) as requiring explicit user request or approval.
+- Never run \`git reset --hard\`, \`git checkout --\`, or force deletes unless the user explicitly asked for that exact action.
+- \`request_user_input\` is Plan-mode only; do not call it in Default mode.
 - When uncertain, prefer non-destructive verification first (e.g., confirm file existence with \`list\`, then delete with \`bash\`).`;
 
 export interface CodexOpenCodeBridgeMeta {

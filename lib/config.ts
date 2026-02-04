@@ -27,6 +27,8 @@ const DEFAULT_CONFIG: PluginConfig = {
 	emptyResponseMaxRetries: 2,
 	emptyResponseRetryDelayMs: 1_000,
 	pidOffsetEnabled: false,
+	fetchTimeoutMs: 60_000,
+	streamStallTimeoutMs: 45_000,
 };
 
 /**
@@ -227,5 +229,23 @@ export function getPidOffsetEnabled(pluginConfig: PluginConfig): boolean {
 		"CODEX_AUTH_PID_OFFSET_ENABLED",
 		pluginConfig.pidOffsetEnabled,
 		false,
+	);
+}
+
+export function getFetchTimeoutMs(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_FETCH_TIMEOUT_MS",
+		pluginConfig.fetchTimeoutMs,
+		60_000,
+		{ min: 1_000 },
+	);
+}
+
+export function getStreamStallTimeoutMs(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_STREAM_STALL_TIMEOUT_MS",
+		pluginConfig.streamStallTimeoutMs,
+		45_000,
+		{ min: 1_000 },
 	);
 }

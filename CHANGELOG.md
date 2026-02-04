@@ -2,6 +2,24 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [4.13.0] - 2026-02-04
+
+### added
+
+- **runtime metrics tool**: added `codex-metrics` to inspect live request/error/latency counters for the current plugin process.
+- **401 diagnostics payload**: normalized 401 errors now include `diagnostics` (for example `requestId`, `cfRay`, `correlationId`, `threadId`) to speed up debugging.
+- **stream watchdog controls**: new `fetchTimeoutMs` and `streamStallTimeoutMs` config options (and env overrides) for upstream timeout tuning.
+
+### changed
+
+- **request correlation**: each upstream fetch now sets a correlation id, reuses `CODEX_THREAD_ID`/`prompt_cache_key` when available, and clears scope after each request.
+- **plan-mode tool gating**: `request_user_input` is automatically stripped from tool definitions when collaboration mode is Default (kept in Plan mode).
+- **safety prompt hardening**: bridge/remap prompts now explicitly block destructive git commands unless the user asks for them.
+
+### fixed
+
+- **non-stream SSE hangs**: non-streaming SSE parsing now aborts stalled reads instead of waiting indefinitely.
+
 ## [4.12.5] - 2026-02-04
 
 ### changed

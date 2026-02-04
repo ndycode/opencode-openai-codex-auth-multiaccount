@@ -109,6 +109,10 @@ Failed to access Codex API
    date +%s000  # Compare to current timestamp
    ```
 
+4. **Collect diagnostics from the error payload:**
+   - Newer versions include `diagnostics` on 401 responses (for example `requestId` and `cfRay`).
+   - Share those IDs when filing an issue so upstream auth failures are easier to trace.
+
 </details>
 
 <details>

@@ -76,6 +76,19 @@ export interface ErrorHandlingResult {
         errorBody?: unknown;
 }
 
+export interface ErrorHandlingOptions {
+	requestCorrelationId?: string;
+	threadId?: string;
+}
+
+export interface ErrorDiagnostics {
+	requestId?: string;
+	cfRay?: string;
+	correlationId?: string;
+	threadId?: string;
+	httpStatus?: number;
+}
+
 /**
  * Determines if the current auth token needs to be refreshed
  * @param auth - Current authentication state
@@ -265,6 +278,7 @@ export function createCodexHeaders(
  */
 export async function handleErrorResponse(
         response: Response,
+        options?: ErrorHandlingOptions,
 ): Promise<ErrorHandlingResult> {
         const bodyText = await safeReadBody(response);
         const mapped = mapUsageLimit404WithBody(response, bodyText);
@@ -284,16 +298,24 @@ export async function handleErrorResponse(
                 errorBody = { message: bodyText };
         }
 
+        const diagnostics = extractErrorDiagnostics(finalResponse, options);
         const normalizedError = normalizeErrorPayload(
                 errorBody,
                 bodyText,
                 finalResponse.statusText,
+                finalResponse.status,
+                diagnostics,
         );
         const errorResponse = ensureJsonErrorResponse(finalResponse, normalizedError);
+
+        if (finalResponse.status === HTTP_STATUS.UNAUTHORIZED) {
+                logWarn("Codex upstream returned 401 Unauthorized", diagnostics);
+        }
 
         logRequest(LOG_STAGES.ERROR_RESPONSE, {
                 status: finalResponse.status,
                 statusText: finalResponse.statusText,
+                diagnostics,
         });
 
         return { response: errorResponse, rateLimit, errorBody: normalizedError };
@@ -310,6 +332,7 @@ export async function handleErrorResponse(
 export async function handleSuccessResponse(
     response: Response,
     isStreaming: boolean,
+    options?: { streamStallTimeoutMs?: number },
 ): Promise<Response> {
     // Check for deprecation headers (RFC 8594)
     const deprecation = response.headers.get("Deprecation");
@@ -322,7 +345,7 @@ export async function handleSuccessResponse(
 
 	// For non-streaming requests (generateText), convert SSE to JSON
 	if (!isStreaming) {
-		return await convertSseToJson(response, responseHeaders);
+		return await convertSseToJson(response, responseHeaders, options);
 	}
 
 	// For streaming requests (streamText), return stream as-is
@@ -431,6 +454,7 @@ type ErrorPayload = {
                 message: string;
                 type?: string;
                 code?: string | number;
+                diagnostics?: ErrorDiagnostics;
         };
 };
 
@@ -438,6 +462,8 @@ function normalizeErrorPayload(
         errorBody: unknown,
         bodyText: string,
         statusText: string,
+        status: number,
+        diagnostics?: ErrorDiagnostics,
 ): ErrorPayload {
         if (isRecord(errorBody)) {
                 const maybeError = errorBody.error;
@@ -453,24 +479,58 @@ function normalizeErrorPayload(
                         if (typeof maybeError.code === "string" || typeof maybeError.code === "number") {
                                 payload.error.code = maybeError.code;
                         }
+                        if (diagnostics && Object.keys(diagnostics).length > 0) {
+                                payload.error.diagnostics = diagnostics;
+                        }
+                        if (status === HTTP_STATUS.UNAUTHORIZED) {
+                                payload.error.message = `${payload.error.message} (run \`opencode auth login\` if this persists)`;
+                        }
                         return payload;
                 }
 
                 if (typeof errorBody.message === "string") {
-                        return { error: { message: errorBody.message } };
+                        const payload: ErrorPayload = { error: { message: errorBody.message } };
+                        if (diagnostics && Object.keys(diagnostics).length > 0) {
+                                payload.error.diagnostics = diagnostics;
+                        }
+                        if (status === HTTP_STATUS.UNAUTHORIZED) {
+                                payload.error.message = `${payload.error.message} (run \`opencode auth login\` if this persists)`;
+                        }
+                        return payload;
                 }
         }
 
         const trimmed = bodyText.trim();
         if (trimmed) {
-                return { error: { message: trimmed } };
+                const payload: ErrorPayload = { error: { message: trimmed } };
+                if (diagnostics && Object.keys(diagnostics).length > 0) {
+                        payload.error.diagnostics = diagnostics;
+                }
+                if (status === HTTP_STATUS.UNAUTHORIZED) {
+                        payload.error.message = `${payload.error.message} (run \`opencode auth login\` if this persists)`;
+                }
+                return payload;
         }
 
         if (statusText) {
-                return { error: { message: statusText } };
+                const payload: ErrorPayload = { error: { message: statusText } };
+                if (diagnostics && Object.keys(diagnostics).length > 0) {
+                        payload.error.diagnostics = diagnostics;
+                }
+                if (status === HTTP_STATUS.UNAUTHORIZED) {
+                        payload.error.message = `${payload.error.message} (run \`opencode auth login\` if this persists)`;
+                }
+                return payload;
         }
 
-        return { error: { message: "Request failed" } };
+        const payload: ErrorPayload = { error: { message: "Request failed" } };
+        if (diagnostics && Object.keys(diagnostics).length > 0) {
+                payload.error.diagnostics = diagnostics;
+        }
+        if (status === HTTP_STATUS.UNAUTHORIZED) {
+                payload.error.message = `${payload.error.message} (run \`opencode auth login\` if this persists)`;
+        }
+        return payload;
 }
 
 function ensureJsonErrorResponse(response: Response, payload: ErrorPayload): Response {
@@ -558,4 +618,33 @@ function toNumber(value: unknown): number | undefined {
         if (value === null || value === undefined) return undefined;
         const parsed = Number(value);
         return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function extractErrorDiagnostics(
+        response: Response,
+        options?: ErrorHandlingOptions,
+): ErrorDiagnostics | undefined {
+        const requestId =
+                response.headers.get("x-request-id") ??
+                response.headers.get("request-id") ??
+                response.headers.get("openai-request-id") ??
+                response.headers.get("x-openai-request-id") ??
+                undefined;
+        const cfRay = response.headers.get("cf-ray") ?? undefined;
+
+        const diagnostics: ErrorDiagnostics = {
+                httpStatus: response.status,
+                requestId,
+                cfRay,
+                correlationId: options?.requestCorrelationId,
+                threadId: options?.threadId,
+        };
+
+        for (const [key, value] of Object.entries(diagnostics)) {
+                if (value === undefined || value === "") {
+                        delete diagnostics[key as keyof ErrorDiagnostics];
+                }
+        }
+
+        return Object.keys(diagnostics).length > 0 ? diagnostics : undefined;
 }
