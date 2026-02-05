@@ -31,20 +31,21 @@ describe("Codex Prompts Module", () => {
 		global.fetch = originalFetch;
 	});
 
-	describe("MODEL_FAMILIES constant", () => {
-		it("should export all model families", () => {
-			expect(MODEL_FAMILIES).toContain("gpt-5.2-codex");
-			expect(MODEL_FAMILIES).toContain("codex-max");
-			expect(MODEL_FAMILIES).toContain("codex");
-			expect(MODEL_FAMILIES).toContain("gpt-5.2");
-			expect(MODEL_FAMILIES).toContain("gpt-5.1");
-		});
+		describe("MODEL_FAMILIES constant", () => {
+			it("should export all model families", () => {
+				expect(MODEL_FAMILIES).toContain("gpt-5.3-codex");
+				expect(MODEL_FAMILIES).toContain("gpt-5.2-codex");
+				expect(MODEL_FAMILIES).toContain("codex-max");
+				expect(MODEL_FAMILIES).toContain("codex");
+				expect(MODEL_FAMILIES).toContain("gpt-5.2");
+				expect(MODEL_FAMILIES).toContain("gpt-5.1");
+			});
 
-		it("should be a readonly array", () => {
-			expect(Array.isArray(MODEL_FAMILIES)).toBe(true);
-			expect(MODEL_FAMILIES.length).toBe(5);
+			it("should be a readonly array", () => {
+				expect(Array.isArray(MODEL_FAMILIES)).toBe(true);
+				expect(MODEL_FAMILIES.length).toBe(6);
+			});
 		});
-	});
 
 	describe("TOOL_REMAP_MESSAGE constant", () => {
 		it("should contain apply_patch replacement instruction", () => {
@@ -66,10 +67,14 @@ describe("Codex Prompts Module", () => {
 		});
 	});
 
-	describe("getModelFamily", () => {
-		it("should detect gpt-5.2-codex with space separator", () => {
-			expect(getModelFamily("gpt 5.2 codex")).toBe("gpt-5.2-codex");
-		});
+		describe("getModelFamily", () => {
+			it("should detect gpt-5.3-codex with space separator", () => {
+				expect(getModelFamily("gpt 5.3 codex")).toBe("gpt-5.3-codex");
+			});
+
+			it("should detect gpt-5.2-codex with space separator", () => {
+				expect(getModelFamily("gpt 5.2 codex")).toBe("gpt-5.2-codex");
+			});
 
 		it("should detect models starting with codex-", () => {
 			expect(getModelFamily("codex-mini")).toBe("codex");
@@ -377,8 +382,8 @@ describe("Codex Prompts Module", () => {
 			});
 		});
 
-		describe("Model family mapping", () => {
-			it("should use correct prompt file for each model family", async () => {
+			describe("Model family mapping", () => {
+				it("should use correct prompt file for each model family", async () => {
 				mockedReadFile.mockRejectedValue(new Error("ENOENT"));
 				mockFetch.mockResolvedValue({
 					ok: true,
@@ -395,8 +400,29 @@ describe("Codex Prompts Module", () => {
 				const rawGitHubCall = fetchCalls.find(call => 
 					typeof call[0] === "string" && call[0].includes("raw.githubusercontent.com")
 				);
-				expect(rawGitHubCall?.[0]).toContain("gpt-5.2-codex_prompt.md");
+					expect(rawGitHubCall?.[0]).toContain("gpt-5.2-codex_prompt.md");
+				});
+
+				it("should map gpt-5.3-codex prompts to the current codex prompt file", async () => {
+					mockedReadFile.mockRejectedValue(new Error("ENOENT"));
+					mockFetch.mockResolvedValue({
+						ok: true,
+						json: () => Promise.resolve({ tag_name: "rust-v0.98.0" }),
+						text: () => Promise.resolve("content"),
+						headers: { get: () => "etag" },
+					});
+					mockedMkdir.mockResolvedValue(undefined);
+					mockedWriteFile.mockResolvedValue(undefined);
+
+					await getCodexInstructions("gpt-5.3-codex");
+					const fetchCalls = mockFetch.mock.calls;
+					const rawGitHubCall = fetchCalls.find(
+						(call) =>
+							typeof call[0] === "string" &&
+							call[0].includes("raw.githubusercontent.com"),
+					);
+					expect(rawGitHubCall?.[0]).toContain("gpt-5.2-codex_prompt.md");
+				});
 			});
 		});
 	});
-});
