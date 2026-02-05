@@ -12,9 +12,18 @@
  * Value: The normalized model name to send to the API
  */
 export const MODEL_MAP: Record<string, string> = {
-// ============================================================================
-// GPT-5.1 Codex Models
-// ============================================================================
+	// ============================================================================
+	// GPT-5.3 Codex Models (low/medium/high/xhigh)
+	// ============================================================================
+	"gpt-5.3-codex": "gpt-5.3-codex",
+	"gpt-5.3-codex-low": "gpt-5.3-codex",
+	"gpt-5.3-codex-medium": "gpt-5.3-codex",
+	"gpt-5.3-codex-high": "gpt-5.3-codex",
+	"gpt-5.3-codex-xhigh": "gpt-5.3-codex",
+
+	// ============================================================================
+	// GPT-5.1 Codex Models
+	// ============================================================================
 	"gpt-5.1-codex": "gpt-5.1-codex",
 	"gpt-5.1-codex-low": "gpt-5.1-codex",
 	"gpt-5.1-codex-medium": "gpt-5.1-codex",

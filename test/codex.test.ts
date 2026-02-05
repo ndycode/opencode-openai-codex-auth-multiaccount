@@ -1,11 +1,29 @@
 import { describe, it, expect } from "vitest";
 import { getModelFamily } from "../lib/prompts/codex.js";
 
-describe("Codex Module", () => {
-	describe("getModelFamily", () => {
-		describe("GPT-5.2 Codex family", () => {
-			it("should return gpt-5.2-codex for gpt-5.2-codex", () => {
-				expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5.2-codex");
+	describe("Codex Module", () => {
+		describe("getModelFamily", () => {
+			describe("GPT-5.3 Codex family", () => {
+				it("should return gpt-5.3-codex for gpt-5.3-codex", () => {
+					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5.3-codex");
+				});
+
+				it("should return gpt-5.3-codex for gpt-5.3-codex-low", () => {
+					expect(getModelFamily("gpt-5.3-codex-low")).toBe("gpt-5.3-codex");
+				});
+
+				it("should return gpt-5.3-codex for gpt-5.3-codex-high", () => {
+					expect(getModelFamily("gpt-5.3-codex-high")).toBe("gpt-5.3-codex");
+				});
+
+				it("should return gpt-5.3-codex for gpt-5.3-codex-xhigh", () => {
+					expect(getModelFamily("gpt-5.3-codex-xhigh")).toBe("gpt-5.3-codex");
+				});
+			});
+
+			describe("GPT-5.2 Codex family", () => {
+				it("should return gpt-5.2-codex for gpt-5.2-codex", () => {
+					expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5.2-codex");
 			});
 
 			it("should return gpt-5.2-codex for gpt-5.2-codex-low", () => {
@@ -93,10 +111,14 @@ describe("Codex Module", () => {
 			});
 		});
 
-		describe("Priority order", () => {
-			it("should prioritize gpt-5.2-codex over gpt-5.2 general", () => {
-				// "gpt-5.2-codex" also contains the substring "gpt-5.2"
-				expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5.2-codex");
+			describe("Priority order", () => {
+				it("should prioritize gpt-5.3-codex over generic codex detection", () => {
+					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5.3-codex");
+				});
+
+				it("should prioritize gpt-5.2-codex over gpt-5.2 general", () => {
+					// "gpt-5.2-codex" also contains the substring "gpt-5.2"
+					expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5.2-codex");
 			});
 
 			it("should prioritize codex-max over codex", () => {

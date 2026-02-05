@@ -2,6 +2,19 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [4.14.0] - 2026-02-05
+
+### added
+
+- **gpt-5.3-codex model support**: added end-to-end normalization and routing for `gpt-5.3-codex` with `low`, `medium`, `high`, and `xhigh` variants.
+- **new codex family key**: account rotation/storage now tracks `gpt-5.3-codex` independently in `activeIndexByFamily`.
+
+### changed
+
+- **reasoning defaults**: `gpt-5.3-codex` now defaults to `xhigh` effort (matching the current codex-family behavior), and `none`/`minimal` are normalized to supported codex levels.
+- **prompt fetch/cache mapping**: prompt family detection now recognizes `gpt-5.3-codex`; cache files are keyed to `gpt-5.3-codex-instructions.md`.
+- **config templates + docs refreshed**: modern/legacy config examples and model reference docs now advertise `gpt-5.3-codex` instead of `gpt-5.2-codex`.
+
 ## [4.13.0] - 2026-02-04
 
 ### added

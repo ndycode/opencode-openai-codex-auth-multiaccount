@@ -5,14 +5,14 @@
 [![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5.2-codex`, and `gpt-5.1-codex-max`.
+OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5.3-codex`, and `gpt-5.1-codex-max`.
 
 > [!NOTE]
 > **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
 
 ## What You Get
 
-- **GPT-5.2, GPT-5.2 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
+- **GPT-5.2, GPT-5.3 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
 - **Multi-account support** — Add up to 20 ChatGPT accounts, health-aware rotation with automatic failover
 - **Per-project accounts** — Each project gets its own account storage (new in v4.10.0)
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
@@ -130,7 +130,7 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 | Model | Variants | Notes |
 |-------|----------|-------|
 | `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 with reasoning levels |
-| `gpt-5.2-codex` | low, medium, high, xhigh | GPT-5.2 Codex for code generation (default: xhigh) |
+| `gpt-5.3-codex` | low, medium, high, xhigh | Latest GPT-5.3 Codex for code generation (default: xhigh) |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
 | `gpt-5.1-codex-mini` | medium, high | Lightweight Codex |
@@ -176,8 +176,8 @@ Add this to your `~/.config/opencode/opencode.json`:
             "xhigh": { "reasoningEffort": "xhigh" }
           }
         },
-        "gpt-5.2-codex": {
-          "name": "GPT 5.2 Codex (OAuth)",
+        "gpt-5.3-codex": {
+          "name": "GPT 5.3 Codex (OAuth)",
           "limit": { "context": 272000, "output": 128000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {

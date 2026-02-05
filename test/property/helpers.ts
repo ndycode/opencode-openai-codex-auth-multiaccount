@@ -8,7 +8,13 @@ export const arbTimestamp = fc.integer({ min: 0, max: Date.now() + 86400000 });
 
 export const arbQuotaKey = fc.oneof(
   fc.constant(undefined),
-  fc.constantFrom("default", "gpt-5.2", "gpt-5.1-codex", "gpt-5.1-codex-max")
+  fc.constantFrom(
+    "default",
+    "gpt-5.2",
+    "gpt-5.3-codex",
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-max",
+  )
 );
 
 export const arbTokenBucketState = fc.record({
@@ -39,6 +45,7 @@ export const arbReasoningEffort = fc.constantFrom(
 
 export const arbModel = fc.constantFrom(
   "gpt-5.2",
+  "gpt-5.3-codex",
   "gpt-5.2-codex",
   "gpt-5.1",
   "gpt-5.1-codex",
