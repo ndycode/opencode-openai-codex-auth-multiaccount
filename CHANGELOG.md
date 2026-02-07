@@ -2,6 +2,21 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [4.14.1] - 2026-02-07
+
+### added
+
+- **fast session mode**: optional low-latency tuning (`fastSession`) with `hybrid`/`always` strategies and configurable history window (`fastSessionMaxInputItems`).
+
+### changed
+
+- **prompt caching**: codex + opencode bridge prompts now use stale-while-revalidate + in-memory caching; startup prewarms instruction caches to reduce first-turn latency.
+- **request parsing**: fetch pipeline now normalizes `Request` inputs and supports non-string bodies (Uint8Array/ArrayBuffer/Blob) without failing request transformations.
+
+### fixed
+
+- **trivial-turn overhead**: in fast session mode, trivial one-liners can omit tool definitions and compact instructions to reduce roundtrip time.
+
 ## [4.14.0] - 2026-02-05
 
 ### added

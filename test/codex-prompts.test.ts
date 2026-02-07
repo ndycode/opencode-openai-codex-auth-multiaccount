@@ -172,7 +172,7 @@ describe("Codex Prompts Module", () => {
 				expect(result).toBe("disk cached content");
 			});
 
-			it("should invalidate ETag cache when release tag changes", async () => {
+			it("should refresh stale cache in background when release tag changes", async () => {
 				const oldTimestamp = Date.now() - 20 * 60 * 1000;
 				mockedReadFile.mockImplementation((filePath) => {
 					if (typeof filePath === "string" && filePath.includes("-meta.json")) {
@@ -197,8 +197,11 @@ describe("Codex Prompts Module", () => {
 				mockedMkdir.mockResolvedValue(undefined);
 				mockedWriteFile.mockResolvedValue(undefined);
 
-				const result = await getCodexInstructions("gpt-5.1-codex");
-				expect(result).toBe("new version content");
+				const first = await getCodexInstructions("gpt-5.1-codex");
+				expect(first).toBe("old content");
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				const second = await getCodexInstructions("gpt-5.1-codex");
+				expect(second).toBe("new version content");
 			});
 		});
 

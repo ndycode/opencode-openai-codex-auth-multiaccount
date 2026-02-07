@@ -599,15 +599,48 @@ describe('Fetch Helpers Module', () => {
 			expect(result).toBeUndefined();
 		});
 
-		it('returns undefined when init.body is not a string (line 167 coverage)', async () => {
-			const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
-			const result = await transformRequestForCodex(
-				{ body: new Blob(['test']) as unknown as BodyInit },
+			it('returns undefined when init.body is not a string (line 167 coverage)', async () => {
+				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
+				const result = await transformRequestForCodex(
+					{ body: new Blob(['test']) as unknown as BodyInit },
 				'https://example.com',
 				{ global: {}, models: {} }
-			);
-			expect(result).toBeUndefined();
-		});
+				);
+				expect(result).toBeUndefined();
+			});
+
+			it('transforms request when parsedBody is provided even if init.body is not a string', async () => {
+				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
+				const parsedBody = {
+					model: 'gpt-5.3-codex',
+					input: [{ type: 'message', role: 'user', content: 'hi' }],
+				};
+				const result = await transformRequestForCodex(
+					{ body: new Blob(['ignored']) as unknown as BodyInit },
+					'https://example.com',
+					{ global: {}, models: {} },
+					true,
+					parsedBody,
+					{ fastSession: true, fastSessionStrategy: 'always', fastSessionMaxInputItems: 12 },
+				);
+
+				expect(result).toBeDefined();
+				expect(result?.body.model).toBe('gpt-5.3-codex');
+				expect(typeof result?.updatedInit.body).toBe('string');
+			});
+
+			it('returns undefined when parsedBody is empty object and init body is unavailable', async () => {
+				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
+				const result = await transformRequestForCodex(
+					{ body: new Blob(['ignored']) as unknown as BodyInit },
+					'https://example.com',
+					{ global: {}, models: {} },
+					true,
+					{},
+				);
+
+				expect(result).toBeUndefined();
+			});
 
 		it('returns undefined and logs error when JSON parsing fails (line 220-222 coverage)', async () => {
 			const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');

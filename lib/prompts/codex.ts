@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CacheMetadata, GitHubRelease } from "../types.js";
-import { logWarn, logError } from "../logger.js";
+import { logWarn, logError, logDebug } from "../logger.js";
 
 const GITHUB_API_RELEASES =
 	"https://api.github.com/repos/openai/codex/releases/latest";
@@ -17,6 +17,9 @@ const __dirname = dirname(__filename);
 
 const MAX_CACHE_SIZE = 50;
 const memoryCache = new Map<string, { content: string; timestamp: number }>();
+const refreshPromises = new Map<ModelFamily, Promise<void>>();
+const RELEASE_TAG_TTL_MS = 5 * 60 * 1000;
+let latestReleaseTagCache: { tag: string; checkedAt: number } | null = null;
 
 /**
  * Clear the memory cache - exposed for testing
@@ -24,6 +27,8 @@ const memoryCache = new Map<string, { content: string; timestamp: number }>();
  */
 export function __clearCacheForTesting(): void {
 	memoryCache.clear();
+	refreshPromises.clear();
+	latestReleaseTagCache = null;
 }
 
 function setCacheEntry(key: string, value: { content: string; timestamp: number }): void {
@@ -132,11 +137,22 @@ async function readFileOrNull(path: string): Promise<string | null> {
  * @returns Release tag name (e.g., "rust-v0.43.0")
  */
 async function getLatestReleaseTag(): Promise<string> {
+	if (
+		latestReleaseTagCache &&
+		Date.now() - latestReleaseTagCache.checkedAt < RELEASE_TAG_TTL_MS
+	) {
+		return latestReleaseTagCache.tag;
+	}
+
 	try {
 		const response = await fetch(GITHUB_API_RELEASES);
 		if (response.ok) {
 			const data = (await response.json()) as GitHubRelease;
 			if (data.tag_name) {
+				latestReleaseTagCache = {
+					tag: data.tag_name,
+					checkedAt: Date.now(),
+				};
 				return data.tag_name;
 			}
 		}
@@ -156,6 +172,10 @@ async function getLatestReleaseTag(): Promise<string> {
 		const parts = finalUrl.split("/tag/");
 		const last = parts[parts.length - 1];
 		if (last && !last.includes("/")) {
+			latestReleaseTagCache = {
+				tag: last,
+				checkedAt: Date.now(),
+			};
 			return last;
 		}
 	}
@@ -163,7 +183,12 @@ async function getLatestReleaseTag(): Promise<string> {
 	const html = await htmlResponse.text();
 	const match = html.match(/\/openai\/codex\/releases\/tag\/([^"]+)/);
 	if (match && match[1]) {
-		return match[1];
+		const tag = match[1];
+		latestReleaseTagCache = {
+			tag,
+			checkedAt: Date.now(),
+		};
+		return tag;
 	}
 
 	throw new Error("Failed to determine latest release tag from GitHub");
@@ -183,9 +208,9 @@ export async function getCodexInstructions(
 	normalizedModel = "gpt-5.1-codex",
 ): Promise<string> {
 	const modelFamily = getModelFamily(normalizedModel);
-	
+	const now = Date.now();
 	const cached = memoryCache.get(modelFamily);
-	if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+	if (cached && now - cached.timestamp < CACHE_TTL_MS) {
 		return cached.content;
 	}
 
@@ -196,91 +221,192 @@ export async function getCodexInstructions(
 		`${CACHE_FILES[modelFamily].replace(".md", "-meta.json")}`,
 	);
 
+	let cachedMetadata: CacheMetadata | null = null;
+	const [metaContent, diskContent] = await Promise.all([
+		readFileOrNull(cacheMetaFile),
+		readFileOrNull(cacheFile),
+	]);
+
+	if (metaContent) {
+		try {
+			cachedMetadata = JSON.parse(metaContent) as CacheMetadata;
+		} catch {
+			cachedMetadata = null;
+		}
+	}
+
+	if (diskContent && cachedMetadata?.lastChecked) {
+		if (now - cachedMetadata.lastChecked < CACHE_TTL_MS) {
+			setCacheEntry(modelFamily, { content: diskContent, timestamp: now });
+			return diskContent;
+		}
+		// Stale-while-revalidate: return stale cache immediately and refresh in background.
+		setCacheEntry(modelFamily, { content: diskContent, timestamp: now });
+		void refreshInstructionsInBackground(
+			modelFamily,
+			promptFile,
+			cacheFile,
+			cacheMetaFile,
+			cachedMetadata,
+		);
+		return diskContent;
+	}
+
+	if (cached && now - cached.timestamp >= CACHE_TTL_MS) {
+		// Keep session latency stable by serving stale memory cache while refreshing.
+		setCacheEntry(modelFamily, { content: cached.content, timestamp: now });
+		void refreshInstructionsInBackground(
+			modelFamily,
+			promptFile,
+			cacheFile,
+			cacheMetaFile,
+			cachedMetadata,
+		);
+		return cached.content;
+	}
+
 	try {
-		let cachedETag: string | null = null;
-		let cachedTag: string | null = null;
-		let cachedTimestamp: number | null = null;
-
-		const metaContent = await readFileOrNull(cacheMetaFile);
-		if (metaContent) {
-			const metadata = JSON.parse(metaContent) as CacheMetadata;
-			cachedETag = metadata.etag;
-			cachedTag = metadata.tag;
-			cachedTimestamp = metadata.lastChecked;
-		}
-
-		if (
-			cachedTimestamp &&
-			Date.now() - cachedTimestamp < CACHE_TTL_MS
-		) {
-			const diskContent = await readFileOrNull(cacheFile);
-			if (diskContent) {
-				setCacheEntry(modelFamily, { content: diskContent, timestamp: Date.now() });
-				return diskContent;
-			}
-		}
-
-		const latestTag = await getLatestReleaseTag();
-		const CODEX_INSTRUCTIONS_URL = `https://raw.githubusercontent.com/openai/codex/${latestTag}/codex-rs/core/${promptFile}`;
-
-		if (cachedTag !== latestTag) {
-			cachedETag = null;
-		}
-
-		const headers: Record<string, string> = {};
-		if (cachedETag) {
-			headers["If-None-Match"] = cachedETag;
-		}
-
-		const response = await fetch(CODEX_INSTRUCTIONS_URL, { headers });
-
-		if (response.status === 304) {
-			const diskContent = await readFileOrNull(cacheFile);
-			if (diskContent) {
-				setCacheEntry(modelFamily, { content: diskContent, timestamp: Date.now() });
-				return diskContent;
-			}
-		}
-
-		if (response.ok) {
-			const instructions = await response.text();
-			const newETag = response.headers.get("etag");
-
-			await fs.mkdir(CACHE_DIR, { recursive: true });
-			await fs.writeFile(cacheFile, instructions, "utf8");
-			await fs.writeFile(
-				cacheMetaFile,
-				JSON.stringify({
-					etag: newETag,
-					tag: latestTag,
-					lastChecked: Date.now(),
-					url: CODEX_INSTRUCTIONS_URL,
-				} satisfies CacheMetadata),
-				"utf8",
-			);
-
-			setCacheEntry(modelFamily, { content: instructions, timestamp: Date.now() });
-			return instructions;
-		}
-
-		throw new Error(`HTTP ${response.status}`);
+		return await fetchAndPersistInstructions(
+			modelFamily,
+			promptFile,
+			cacheFile,
+			cacheMetaFile,
+			cachedMetadata,
+		);
 	} catch (error) {
 		const err = error as Error;
 		logError(
 			`Failed to fetch ${modelFamily} instructions from GitHub: ${err.message}`,
 		);
 
-		const diskContent = await readFileOrNull(cacheFile);
 		if (diskContent) {
 			logWarn(`Using cached ${modelFamily} instructions`);
-			setCacheEntry(modelFamily, { content: diskContent, timestamp: Date.now() });
+			setCacheEntry(modelFamily, { content: diskContent, timestamp: now });
 			return diskContent;
 		}
 
 		logWarn(`Falling back to bundled instructions for ${modelFamily}`);
-		const bundled = await fs.readFile(join(__dirname, "codex-instructions.md"), "utf8");
-		setCacheEntry(modelFamily, { content: bundled, timestamp: Date.now() });
+		const bundled = await fs.readFile(
+			join(__dirname, "codex-instructions.md"),
+			"utf8",
+		);
+		setCacheEntry(modelFamily, { content: bundled, timestamp: now });
 		return bundled;
+	}
+}
+
+async function fetchAndPersistInstructions(
+	modelFamily: ModelFamily,
+	promptFile: string,
+	cacheFile: string,
+	cacheMetaFile: string,
+	cachedMetadata: CacheMetadata | null,
+): Promise<string> {
+	let cachedETag = cachedMetadata?.etag ?? null;
+	const cachedTag = cachedMetadata?.tag ?? null;
+	const latestTag = await getLatestReleaseTag();
+	const instructionsUrl = `https://raw.githubusercontent.com/openai/codex/${latestTag}/codex-rs/core/${promptFile}`;
+
+	if (cachedTag !== latestTag) {
+		cachedETag = null;
+	}
+
+	const headers: Record<string, string> = {};
+	if (cachedETag) {
+		headers["If-None-Match"] = cachedETag;
+	}
+
+	const response = await fetch(instructionsUrl, { headers });
+	if (response.status === 304) {
+		const diskContent = await readFileOrNull(cacheFile);
+		if (diskContent) {
+			setCacheEntry(modelFamily, { content: diskContent, timestamp: Date.now() });
+			await fs.mkdir(CACHE_DIR, { recursive: true });
+			await fs.writeFile(
+				cacheMetaFile,
+				JSON.stringify(
+					{
+						etag: cachedETag,
+						tag: latestTag,
+						lastChecked: Date.now(),
+						url: instructionsUrl,
+					} satisfies CacheMetadata,
+				),
+				"utf8",
+			);
+			return diskContent;
+		}
+	}
+
+	if (!response.ok) {
+		throw new Error(`HTTP ${response.status}`);
+	}
+
+	const instructions = await response.text();
+	const newETag = response.headers.get("etag");
+	await fs.mkdir(CACHE_DIR, { recursive: true });
+	await Promise.all([
+		fs.writeFile(cacheFile, instructions, "utf8"),
+		fs.writeFile(
+			cacheMetaFile,
+			JSON.stringify(
+				{
+					etag: newETag,
+					tag: latestTag,
+					lastChecked: Date.now(),
+					url: instructionsUrl,
+				} satisfies CacheMetadata,
+			),
+			"utf8",
+		),
+	]);
+	setCacheEntry(modelFamily, { content: instructions, timestamp: Date.now() });
+	return instructions;
+}
+
+function refreshInstructionsInBackground(
+	modelFamily: ModelFamily,
+	promptFile: string,
+	cacheFile: string,
+	cacheMetaFile: string,
+	cachedMetadata: CacheMetadata | null,
+): Promise<void> {
+	const existing = refreshPromises.get(modelFamily);
+	if (existing) return existing;
+
+	const refreshPromise = fetchAndPersistInstructions(
+		modelFamily,
+		promptFile,
+		cacheFile,
+		cacheMetaFile,
+		cachedMetadata,
+	)
+		.then(() => undefined)
+		.catch((error) => {
+			logDebug(`Background prompt refresh failed for ${modelFamily}`, {
+				error: String(error),
+			});
+		})
+		.finally(() => {
+			refreshPromises.delete(modelFamily);
+		});
+
+	refreshPromises.set(modelFamily, refreshPromise);
+	return refreshPromise;
+}
+
+/**
+ * Prewarm instruction caches for the provided models/families.
+ */
+export function prewarmCodexInstructions(models: string[] = []): void {
+	const candidates = models.length > 0 ? models : ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex"];
+	for (const model of candidates) {
+		void getCodexInstructions(model).catch((error) => {
+			logDebug("Codex instruction prewarm failed", {
+				model,
+				error: String(error),
+			});
+		});
 	}
 }
 

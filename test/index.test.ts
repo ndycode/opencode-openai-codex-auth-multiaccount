@@ -63,6 +63,9 @@ vi.mock("../lib/cli.js", () => ({
 
 vi.mock("../lib/config.js", () => ({
 	getCodexMode: () => true,
+	getFastSession: () => false,
+	getFastSessionStrategy: () => "hybrid",
+	getFastSessionMaxInputItems: () => 30,
 	getRateLimitToastDebounceMs: () => 5000,
 	getRetryAllAccountsMaxRetries: () => 3,
 	getRetryAllAccountsMaxWaitMs: () => 30000,
@@ -78,6 +81,10 @@ vi.mock("../lib/config.js", () => ({
 	getFetchTimeoutMs: () => 60000,
 	getStreamStallTimeoutMs: () => 45000,
 	loadPluginConfig: () => ({}),
+}));
+
+vi.mock("../lib/request/request-transformer.js", () => ({
+	applyFastSessionDefaults: <T>(config: T) => config,
 }));
 
 vi.mock("../lib/logger.js", () => ({
@@ -118,6 +125,11 @@ vi.mock("../lib/prompts/codex.js", () => ({
 		return "gpt-5.1";
 	},
 	MODEL_FAMILIES: ["codex-max", "codex", "gpt-5.1"] as const,
+	prewarmCodexInstructions: vi.fn(),
+}));
+
+vi.mock("../lib/prompts/opencode-codex.js", () => ({
+	prewarmOpenCodeCodexPrompt: vi.fn(),
 }));
 
 vi.mock("../lib/recovery.js", () => ({

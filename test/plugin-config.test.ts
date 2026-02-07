@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	loadPluginConfig,
 	getCodexMode,
+	getFastSession,
+	getFastSessionStrategy,
+	getFastSessionMaxInputItems,
 	getTokenRefreshSkewMs,
 	getRetryAllAccountsMaxRetries,
 	getFetchTimeoutMs,
@@ -35,18 +38,29 @@ vi.mock('../lib/logger.js', async () => {
 describe('Plugin Configuration', () => {
 	const mockExistsSync = vi.mocked(fs.existsSync);
 	const mockReadFileSync = vi.mocked(fs.readFileSync);
-	let originalEnv: string | undefined;
+	const envKeys = [
+		'CODEX_MODE',
+		'CODEX_AUTH_FAST_SESSION',
+		'CODEX_AUTH_FAST_SESSION_STRATEGY',
+		'CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS',
+	] as const;
+	const originalEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
 
 	beforeEach(() => {
-		originalEnv = process.env.CODEX_MODE;
+		for (const key of envKeys) {
+			originalEnv[key] = process.env[key];
+		}
 		vi.clearAllMocks();
 	});
 
 	afterEach(() => {
-		if (originalEnv === undefined) {
-			delete process.env.CODEX_MODE;
-		} else {
-			process.env.CODEX_MODE = originalEnv;
+		for (const key of envKeys) {
+			const value = originalEnv[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
 		}
 	});
 
@@ -58,6 +72,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
+				fastSession: false,
+				fastSessionStrategy: 'hybrid',
+				fastSessionMaxInputItems: 30,
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
@@ -88,6 +105,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: false,
+				fastSession: false,
+				fastSessionStrategy: 'hybrid',
+				fastSessionMaxInputItems: 30,
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
@@ -115,6 +135,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
+				fastSession: false,
+				fastSessionStrategy: 'hybrid',
+				fastSessionMaxInputItems: 30,
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
@@ -144,6 +167,9 @@ describe('Plugin Configuration', () => {
 
 	expect(config).toEqual({
 		codexMode: true,
+		fastSession: false,
+		fastSessionStrategy: 'hybrid',
+		fastSessionMaxInputItems: 30,
 		retryAllAccountsRateLimited: true,
 		retryAllAccountsMaxWaitMs: 0,
 		retryAllAccountsMaxRetries: Infinity,
@@ -176,6 +202,9 @@ describe('Plugin Configuration', () => {
 
 		expect(config).toEqual({
 			codexMode: true,
+			fastSession: false,
+			fastSessionStrategy: 'hybrid',
+			fastSessionMaxInputItems: 30,
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 0,
 			retryAllAccountsMaxRetries: Infinity,
@@ -250,6 +279,61 @@ describe('Plugin Configuration', () => {
 			const result = getCodexMode(config);
 
 			expect(result).toBe(true);
+		});
+	});
+
+	describe('getFastSession', () => {
+		it('should default to false', () => {
+			delete process.env.CODEX_AUTH_FAST_SESSION;
+			expect(getFastSession({})).toBe(false);
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_FAST_SESSION;
+			expect(getFastSession({ fastSession: true })).toBe(true);
+		});
+
+		it('should prioritize env var over config', () => {
+			process.env.CODEX_AUTH_FAST_SESSION = '0';
+			expect(getFastSession({ fastSession: true })).toBe(false);
+			process.env.CODEX_AUTH_FAST_SESSION = '1';
+			expect(getFastSession({ fastSession: false })).toBe(true);
+		});
+	});
+
+	describe('getFastSessionMaxInputItems', () => {
+		it('should default to 30', () => {
+			delete process.env.CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS;
+			expect(getFastSessionMaxInputItems({})).toBe(30);
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS;
+			expect(getFastSessionMaxInputItems({ fastSessionMaxInputItems: 18 })).toBe(18);
+		});
+
+		it('should clamp to minimum 8', () => {
+			process.env.CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS = '2';
+			expect(getFastSessionMaxInputItems({})).toBe(8);
+		});
+	});
+
+	describe('getFastSessionStrategy', () => {
+		it('should default to hybrid', () => {
+			delete process.env.CODEX_AUTH_FAST_SESSION_STRATEGY;
+			expect(getFastSessionStrategy({})).toBe('hybrid');
+		});
+
+		it('should use config value', () => {
+			delete process.env.CODEX_AUTH_FAST_SESSION_STRATEGY;
+			expect(getFastSessionStrategy({ fastSessionStrategy: 'always' })).toBe('always');
+		});
+
+		it('should prioritize env value', () => {
+			process.env.CODEX_AUTH_FAST_SESSION_STRATEGY = 'always';
+			expect(getFastSessionStrategy({ fastSessionStrategy: 'hybrid' })).toBe('always');
+			process.env.CODEX_AUTH_FAST_SESSION_STRATEGY = 'hybrid';
+			expect(getFastSessionStrategy({ fastSessionStrategy: 'always' })).toBe('hybrid');
 		});
 	});
 

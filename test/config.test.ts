@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { getModelConfig, getReasoningConfig } from '../lib/request/request-transformer.js';
+import {
+	applyFastSessionDefaults,
+	getModelConfig,
+	getReasoningConfig,
+} from '../lib/request/request-transformer.js';
 import type { UserConfig } from '../lib/types.js';
 
 describe('Configuration Parsing', () => {
@@ -49,6 +53,23 @@ describe('Configuration Parsing', () => {
 			const emptyConfig = getModelConfig('gpt-5-codex', { global: {}, models: {} });
 
 			expect(emptyConfig).toEqual({});
+		});
+	});
+
+	describe('applyFastSessionDefaults', () => {
+		it('should set low reasoning effort and verbosity when unset', () => {
+			const fast = applyFastSessionDefaults({ global: {}, models: {} });
+			expect(fast.global.reasoningEffort).toBe('low');
+			expect(fast.global.textVerbosity).toBe('low');
+		});
+
+		it('should not override explicit global settings', () => {
+			const fast = applyFastSessionDefaults({
+				global: { reasoningEffort: 'high', textVerbosity: 'high' },
+				models: {},
+			});
+			expect(fast.global.reasoningEffort).toBe('high');
+			expect(fast.global.textVerbosity).toBe('high');
 		});
 	});
 

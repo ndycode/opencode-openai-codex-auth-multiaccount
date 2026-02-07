@@ -671,6 +671,458 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.summary).toBe('auto');
 		});
 
+		it('should clamp reasoning/text for fast session on codex models', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5.3-codex',
+				input: [],
+				reasoning: { effort: 'xhigh', summary: 'detailed' },
+				text: { verbosity: 'high' },
+			};
+			const result = await transformRequestBody(
+				body,
+				codexInstructions,
+				undefined,
+				true,
+				true,
+			);
+
+			expect(result.reasoning?.effort).toBe('low');
+			expect(result.reasoning?.summary).toBe('off');
+			expect(result.text?.verbosity).toBe('low');
+		});
+
+		it('should allow none reasoning for fast session on gpt-5.1 general', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5.1',
+				input: [],
+				reasoning: { effort: 'high', summary: 'auto' },
+			};
+			const result = await transformRequestBody(
+				body,
+				codexInstructions,
+				undefined,
+				true,
+				true,
+			);
+
+			expect(result.reasoning?.effort).toBe('none');
+			expect(result.reasoning?.summary).toBe('off');
+			expect(result.text?.verbosity).toBe('low');
+		});
+
+			it('should keep full-depth settings for complex prompts in hybrid strategy', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{
+							type: 'message',
+							role: 'user',
+							content:
+								'Please handle this request in depth:\n1. Inspect auth flow state transitions.\n2. Compare retry and backoff behavior.\n3. Explain likely failure modes.\n4. Propose fixes with tradeoffs.',
+						},
+					],
+					tools: [{ type: 'function', function: { name: 'read_file' } }],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+			const result = await transformRequestBody(
+				body,
+				codexInstructions,
+				undefined,
+				true,
+				true,
+				'hybrid',
+			);
+
+			expect(result.reasoning?.effort).toBe('xhigh');
+				expect(result.reasoning?.summary).toBe('detailed');
+				expect(result.text?.verbosity).toBe('high');
+			});
+
+			it('should compact long instructions for trivial turns in hybrid strategy', async () => {
+				const longInstructions = 'RULES\n' + 'x'.repeat(5000);
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [{ type: 'message', role: 'user', content: 'hi' }],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+				};
+				const result = await transformRequestBody(
+					body,
+					longInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.instructions?.length ?? 0).toBeLessThan(longInstructions.length);
+				expect(result.instructions).toContain('Fast session mode');
+				expect(result.reasoning?.summary).toBe('off');
+			});
+
+			it('should keep long instructions for complex turns in hybrid strategy', async () => {
+				const longInstructions = 'RULES\n' + 'x'.repeat(5000);
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{
+							type: 'message',
+							role: 'user',
+							content:
+								'Please perform deep analysis:\n1. inspect auth flow\n2. inspect retries\n3. explain tradeoffs',
+						},
+					],
+				};
+				const result = await transformRequestBody(
+					body,
+					longInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.instructions).toBe(longInstructions);
+			});
+
+			it('should apply fast settings for simple prompts in hybrid strategy even with tools available', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{ type: 'message', role: 'user', content: 'hi' },
+					],
+					tools: [{ type: 'function', function: { name: 'read_file' } }],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.reasoning?.effort).toBe('low');
+				expect(result.reasoning?.summary).toBe('off');
+				expect(result.text?.verbosity).toBe('low');
+				expect(result.tools).toBeUndefined();
+			});
+
+			it('should keep fast settings for short multi-turn chat in hybrid strategy', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{ type: 'message', role: 'user', content: 'hi' },
+						{ type: 'message', role: 'assistant', content: 'hey' },
+						{ type: 'message', role: 'user', content: 'yo' },
+						{ type: 'message', role: 'assistant', content: 'sup' },
+						{ type: 'message', role: 'user', content: 'ok' },
+					],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.reasoning?.effort).toBe('low');
+				expect(result.reasoning?.summary).toBe('off');
+				expect(result.text?.verbosity).toBe('low');
+			});
+
+			it('should drop medium-length head scaffolds for trivial turns in fast mode', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{ type: 'message', role: 'developer', content: `HEAD ${'x'.repeat(700)}` },
+						{ type: 'message', role: 'user', content: 'hello' },
+					],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				const hasHeadScaffold = (result.input ?? []).some((item) => {
+					if (item.role !== 'developer') return false;
+					const content = item.content;
+					if (typeof content === 'string') return content.includes('HEAD');
+					if (Array.isArray(content)) {
+						return content.some((part) => {
+							if (!part || typeof part !== 'object') return false;
+							const textPart = (part as { text?: unknown }).text;
+							return typeof textPart === 'string' && textPart.includes('HEAD');
+						});
+					}
+					return false;
+				});
+
+				expect(hasHeadScaffold).toBe(false);
+				expect(result.reasoning?.summary).toBe('off');
+			});
+
+			it('should ultra-compact trivial turns in hybrid strategy across model variants', async () => {
+				const history = Array.from({ length: 18 }, (_v, i) => ({
+					type: 'message',
+					role: i % 2 === 0 ? 'assistant' : 'user',
+					content: `history-${i}`,
+				}));
+				const body: RequestBody = {
+					model: 'gpt-5.1',
+					input: [
+						{ type: 'message', role: 'developer', content: 'Small stable scaffold' },
+						...history,
+						{ type: 'message', role: 'user', content: 'yo' },
+					],
+					reasoning: { effort: 'high', summary: 'auto' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+					8,
+				);
+
+				expect(result.input?.length).toBeLessThanOrEqual(2);
+				const latestUser = [...(result.input ?? [])]
+					.reverse()
+					.find((item) => item.role === 'user');
+				expect(latestUser?.content).toBe('yo');
+				expect(result.reasoning?.summary).toBe('off');
+				expect(result.text?.verbosity).toBe('low');
+			});
+
+			it('should apply fast settings in hybrid strategy when developer scaffold is long but user prompt is simple', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{ type: 'message', role: 'developer', content: `SYSTEM ${'x'.repeat(4000)}` },
+						{ type: 'message', role: 'user', content: 'hi' },
+					],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.reasoning?.effort).toBe('low');
+				expect(result.reasoning?.summary).toBe('off');
+				expect(result.text?.verbosity).toBe('low');
+				const containsHugeScaffold = (result.input ?? []).some((item) => {
+					if (item.role !== 'developer') return false;
+					const content = item.content;
+					if (typeof content === 'string') return content.includes('SYSTEM xxxx');
+					if (Array.isArray(content)) {
+						return content.some((part) => {
+							if (!part || typeof part !== 'object') return false;
+							const textPart = (part as { text?: unknown }).text;
+							return typeof textPart === 'string' && textPart.includes('SYSTEM xxxx');
+						});
+					}
+					return false;
+				});
+				expect(containsHugeScaffold).toBe(false);
+			});
+
+			it('should apply fast settings in hybrid strategy when tool history is old but recent turn is simple', async () => {
+				const oldToolCall = { type: 'function_call_output', call_id: 'old_1', name: 'read_file', output: '{}' } as any;
+				const fillerMessages = Array.from({ length: 20 }, (_v, i) => ({
+					type: 'message',
+					role: i % 2 === 0 ? 'assistant' : 'user',
+					content: `filler-${i}`,
+				}));
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						oldToolCall,
+						...fillerMessages,
+						{ type: 'message', role: 'user', content: 'hi' },
+					],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.reasoning?.effort).toBe('low');
+				expect(result.reasoning?.summary).toBe('off');
+				expect(result.text?.verbosity).toBe('low');
+			});
+
+			it('should keep full-depth settings in hybrid strategy when recent tool-call history exists', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{ type: 'message', role: 'user', content: 'quick check' },
+						{ type: 'function_call_output', call_id: 'recent_1', name: 'read_file', output: '{}' } as any,
+					],
+					tools: [{ type: 'function', function: { name: 'read_file' } }],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.reasoning?.effort).toBe('xhigh');
+				expect(result.reasoning?.summary).toBe('detailed');
+				expect(result.text?.verbosity).toBe('high');
+				expect(result.tools).toEqual([{ type: 'function', function: { name: 'read_file' } }]);
+			});
+
+			it('should apply fast settings in hybrid strategy when latest user prompt is trivial even if previous user prompt was complex', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{
+							type: 'message',
+							role: 'user',
+							content:
+								'Please analyze this thoroughly:\n- identify failure paths\n- map dependencies\n- suggest mitigations\n- call out risks',
+						},
+						{ type: 'message', role: 'assistant', content: 'Understood.' },
+						{ type: 'message', role: 'user', content: 'hi' },
+					],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'hybrid',
+				);
+
+				expect(result.reasoning?.effort).toBe('low');
+				expect(result.reasoning?.summary).toBe('off');
+				expect(result.text?.verbosity).toBe('low');
+			});
+
+			it('should compact long context without overriding universal instructions in always strategy', async () => {
+				const history = Array.from({ length: 24 }, (_v, i) => ({
+					type: 'message',
+					role: i % 2 === 0 ? 'assistant' : 'user',
+					content: `history-${i}`,
+				}));
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+						{ type: 'message', role: 'developer', content: 'Core instruction scaffold' },
+						...history,
+						{ type: 'message', role: 'user', content: 'hi' },
+					],
+					reasoning: { effort: 'xhigh', summary: 'detailed' },
+					text: { verbosity: 'high' },
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					true,
+					'always',
+					12,
+				);
+
+				expect(result.input?.length).toBeLessThanOrEqual(12);
+				const lastUser = [...(result.input ?? [])]
+					.reverse()
+					.find((item) => item.role === 'user');
+				expect(lastUser?.content).toBe('hi');
+				expect(result.instructions).toBe(codexInstructions);
+				expect(result.reasoning?.effort).toBe('low');
+				expect(result.text?.verbosity).toBe('low');
+			});
+
+			it('should force fast settings for complex prompts in always strategy', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5.3-codex',
+					input: [
+					{
+						type: 'message',
+						role: 'user',
+						content:
+							'Please perform a full review:\n1. inspect account rotation\n2. inspect refresh queue\n3. inspect retry windows\n4. summarize issues and improvements',
+					},
+				],
+				tools: [{ type: 'function', function: { name: 'read_file' } }],
+				reasoning: { effort: 'xhigh', summary: 'detailed' },
+				text: { verbosity: 'high' },
+			};
+			const result = await transformRequestBody(
+				body,
+				codexInstructions,
+				undefined,
+				true,
+				true,
+				'always',
+			);
+
+			expect(result.reasoning?.effort).toBe('low');
+			expect(result.reasoning?.summary).toBe('off');
+			expect(result.text?.verbosity).toBe('low');
+			expect(result.tools).toEqual([{ type: 'function', function: { name: 'read_file' } }]);
+		});
+
+		it('should disable tools for trivial turns in always strategy', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5.3-codex',
+				input: [{ type: 'message', role: 'user', content: 'hi' }],
+				tools: [{ type: 'function', function: { name: 'read_file' } }],
+				reasoning: { effort: 'xhigh', summary: 'detailed' },
+				text: { verbosity: 'high' },
+			};
+			const result = await transformRequestBody(
+				body,
+				codexInstructions,
+				undefined,
+				true,
+				true,
+				'always',
+			);
+
+			expect(result.reasoning?.effort).toBe('low');
+			expect(result.reasoning?.summary).toBe('off');
+			expect(result.text?.verbosity).toBe('low');
+			expect(result.tools).toBeUndefined();
+		});
+
 		it('should apply user reasoning config', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',

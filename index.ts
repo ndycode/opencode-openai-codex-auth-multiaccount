@@ -38,6 +38,9 @@ import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
+	getFastSession,
+	getFastSessionStrategy,
+	getFastSessionMaxInputItems,
 	getRateLimitToastDebounceMs,
 	getRetryAllAccountsMaxRetries,
 	getRetryAllAccountsMaxWaitMs,
@@ -89,15 +92,16 @@ import {
 } from "./lib/accounts.js";
 import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, exportAccounts, importAccounts, StorageError, formatStorageErrorHint, type AccountStorageV3 } from "./lib/storage.js";
 import {
-        createCodexHeaders,
-        extractRequestUrl,
+	createCodexHeaders,
+	extractRequestUrl,
         handleErrorResponse,
         handleSuccessResponse,
         refreshAndUpdateToken,
         rewriteUrlForCodex,
-        shouldRefreshToken,
-        transformRequestForCodex,
+	shouldRefreshToken,
+	transformRequestForCodex,
 } from "./lib/request/fetch-helpers.js";
+import { applyFastSessionDefaults } from "./lib/request/request-transformer.js";
 import {
 	getRateLimitBackoff,
 	RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
@@ -106,7 +110,13 @@ import {
 import { isEmptyResponse } from "./lib/request/response-handler.js";
 import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
-import { getModelFamily, MODEL_FAMILIES, type ModelFamily } from "./lib/prompts/codex.js";
+import {
+	getModelFamily,
+	MODEL_FAMILIES,
+	prewarmCodexInstructions,
+	type ModelFamily,
+} from "./lib/prompts/codex.js";
+import { prewarmOpenCodeCodexPrompt } from "./lib/prompts/opencode-codex.js";
 import type { AccountIdSource, OAuthAuthDetails, TokenResult, UserConfig } from "./lib/types.js";
 import {
 	createSessionRecoveryHook,
@@ -137,6 +147,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let cachedAccountManager: AccountManager | null = null;
 	let accountManagerPromise: Promise<AccountManager> | null = null;
 	let loaderMutex: Promise<void> | null = null;
+	let startupPrewarmTriggered = false;
 	const MIN_BACKOFF_MS = 100;
 
 	type RuntimeMetrics = {
@@ -685,6 +696,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				// Priority: CODEX_MODE env var > config file > default (true)
 				const pluginConfig = loadPluginConfig();
 				const codexMode = getCodexMode(pluginConfig);
+				const fastSessionEnabled = getFastSession(pluginConfig);
+				const fastSessionStrategy = getFastSessionStrategy(pluginConfig);
+				const fastSessionMaxInputItems = getFastSessionMaxInputItems(pluginConfig);
 				const tokenRefreshSkewMs = getTokenRefreshSkewMs(pluginConfig);
 				const rateLimitToastDebounceMs = getRateLimitToastDebounceMs(pluginConfig);
 				const retryAllAccountsRateLimited = getRetryAllAccountsRateLimited(pluginConfig);
@@ -704,6 +718,32 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const emptyResponseMaxRetries = getEmptyResponseMaxRetries(pluginConfig);
 				const emptyResponseRetryDelayMs = getEmptyResponseRetryDelayMs(pluginConfig);
 				const pidOffsetEnabled = getPidOffsetEnabled(pluginConfig);
+				const effectiveUserConfig = fastSessionEnabled
+					? applyFastSessionDefaults(userConfig)
+					: userConfig;
+				if (fastSessionEnabled) {
+					logDebug("Fast session mode enabled", {
+						reasoningEffort: "none/low",
+						reasoningSummary: "off",
+						textVerbosity: "low",
+						fastSessionStrategy,
+						fastSessionMaxInputItems,
+					});
+				}
+
+				const prewarmEnabled =
+					process.env.CODEX_AUTH_PREWARM !== "0" &&
+					process.env.VITEST !== "true" &&
+					process.env.NODE_ENV !== "test";
+
+				if (!startupPrewarmTriggered && prewarmEnabled) {
+					startupPrewarmTriggered = true;
+					const configuredModels = Object.keys(userConfig.models ?? {});
+					prewarmCodexInstructions(configuredModels);
+					if (codexMode) {
+						prewarmOpenCodeCodexPrompt();
+					}
+				}
 
 				const recoveryHook = sessionRecoveryEnabled
 					? createSessionRecoveryHook(
@@ -751,36 +791,102 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							// Instructions are fetched per model family (codex-max, codex, gpt-5.1)
 							// Capture original stream value before transformation
 							// generateText() sends no stream field, streamText() sends stream=true
-							let originalBody: Record<string, unknown> = {};
-							if (init?.body) {
-								try {
-									originalBody = JSON.parse(init.body as string);
-								} catch {
-									logWarn("Failed to parse request body, using empty object");
-								}
-							}
-							const isStreaming = originalBody.stream === true;
+								const normalizeRequestInit = async (
+									requestInput: Request | string | URL,
+									requestInit: RequestInit | undefined,
+								): Promise<RequestInit | undefined> => {
+									if (requestInit) return requestInit;
+									if (!(requestInput instanceof Request)) return requestInit;
 
-							const transformation = await transformRequestForCodex(
-								init,
-								url,
-								userConfig,
-								codexMode,
-								originalBody,
-							);
-									const requestInit = transformation?.updatedInit ?? init;
-									const promptCacheKey = transformation?.body?.prompt_cache_key;
-																				const model = transformation?.body.model;
-																				const modelFamily = model ? getModelFamily(model) : "gpt-5.1";
-																				const quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
+									const method = requestInput.method || "GET";
+									const normalized: RequestInit = {
+										method,
+										headers: new Headers(requestInput.headers),
+									};
+
+									if (method !== "GET" && method !== "HEAD") {
+										try {
+											const bodyText = await requestInput.clone().text();
+											if (bodyText) {
+												normalized.body = bodyText;
+											}
+										} catch {
+											// Body may be unreadable; proceed without it.
+										}
+									}
+
+									return normalized;
+								};
+
+								const parseRequestBodyFromInit = async (
+									body: unknown,
+								): Promise<Record<string, unknown>> => {
+									if (!body) return {};
+
+									try {
+										if (typeof body === "string") {
+											return JSON.parse(body) as Record<string, unknown>;
+										}
+
+										if (body instanceof Uint8Array) {
+											return JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
+										}
+
+										if (body instanceof ArrayBuffer) {
+											return JSON.parse(new TextDecoder().decode(new Uint8Array(body))) as Record<string, unknown>;
+										}
+
+										if (ArrayBuffer.isView(body)) {
+											const view = new Uint8Array(
+												body.buffer,
+												body.byteOffset,
+												body.byteLength,
+											);
+											return JSON.parse(new TextDecoder().decode(view)) as Record<string, unknown>;
+										}
+
+										if (typeof Blob !== "undefined" && body instanceof Blob) {
+											return JSON.parse(await body.text()) as Record<string, unknown>;
+										}
+									} catch {
+										logWarn("Failed to parse request body, using empty object");
+									}
+
+									return {};
+								};
+
+								const baseInit = await normalizeRequestInit(input, init);
+								const originalBody = await parseRequestBodyFromInit(baseInit?.body);
+								const isStreaming = originalBody.stream === true;
+								const parsedBody =
+									Object.keys(originalBody).length > 0 ? originalBody : undefined;
+
+								const transformation = await transformRequestForCodex(
+									baseInit,
+									url,
+									effectiveUserConfig,
+									codexMode,
+									parsedBody,
+									{
+										fastSession: fastSessionEnabled,
+										fastSessionStrategy,
+										fastSessionMaxInputItems,
+									},
+								);
+										const requestInit = transformation?.updatedInit ?? baseInit;
+										const transformedBody = transformation?.body;
+										const promptCacheKey = transformedBody?.prompt_cache_key;
+																					const model = transformedBody?.model;
+																					const modelFamily = model ? getModelFamily(model) : "gpt-5.1";
+																					const quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
 						const threadIdCandidate =
 							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")
 								.toString()
 								.trim() || undefined;
-						const requestCorrelationId = setCorrelationId(
-							threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
-						);
-						runtimeMetrics.lastRequestAt = Date.now();
+							const requestCorrelationId = setCorrelationId(
+								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
+							);
+							runtimeMetrics.lastRequestAt = Date.now();
 
 					const abortSignal = requestInit?.signal ?? init?.signal ?? null;
 					const sleep = (ms: number): Promise<void> =>
@@ -1671,13 +1777,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 							? `${formatWaitTime(now - runtimeMetrics.lastRequestAt)} ago`
 							: "never";
 
-					const lines = [
-						"Codex Plugin Metrics:",
+						const lines = [
+							"Codex Plugin Metrics:",
 						"",
 						`Uptime: ${formatWaitTime(uptimeMs)}`,
 						`Total upstream requests: ${total}`,
-						`Successful responses: ${successful}`,
-						`Failed responses: ${runtimeMetrics.failedRequests}`,
+							`Successful responses: ${successful}`,
+							`Failed responses: ${runtimeMetrics.failedRequests}`,
 						`Success rate: ${successRate}%`,
 						`Average successful latency: ${avgLatencyMs}ms`,
 						`Rate-limited responses: ${runtimeMetrics.rateLimitedResponses}`,

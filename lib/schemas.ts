@@ -12,6 +12,9 @@ import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 
 export const PluginConfigSchema = z.object({
 	codexMode: z.boolean().optional(),
+	fastSession: z.boolean().optional(),
+	fastSessionStrategy: z.enum(["hybrid", "always"]).optional(),
+	fastSessionMaxInputItems: z.number().min(8).max(200).optional(),
 	retryAllAccountsRateLimited: z.boolean().optional(),
 	retryAllAccountsMaxWaitMs: z.number().min(0).optional(),
 	retryAllAccountsMaxRetries: z.number().min(0).optional(),

@@ -177,13 +177,28 @@ export async function transformRequestForCodex(
 	userConfig: UserConfig,
 	codexMode = true,
 	parsedBody?: Record<string, unknown>,
+	options?: {
+		fastSession?: boolean;
+		fastSessionStrategy?: "hybrid" | "always";
+		fastSessionMaxInputItems?: number;
+	},
 ): Promise<{ body: RequestBody; updatedInit: RequestInit } | undefined> {
-	if (!init?.body) return undefined;
-	if (typeof init.body !== 'string') return undefined;
+	const hasParsedBody =
+		parsedBody !== undefined &&
+		parsedBody !== null &&
+		typeof parsedBody === "object" &&
+		Object.keys(parsedBody).length > 0;
+	if (!init?.body && !hasParsedBody) return undefined;
 
 	try {
 		// Use pre-parsed body if provided, otherwise parse from init.body
-		const body = (parsedBody ?? JSON.parse(init.body)) as RequestBody;
+		let body: RequestBody;
+		if (hasParsedBody) {
+			body = parsedBody as RequestBody;
+		} else {
+			if (typeof init?.body !== "string") return undefined;
+			body = JSON.parse(init.body) as RequestBody;
+		}
 		const originalModel = body.model;
 
 		// Normalize model first to determine which instructions to fetch
@@ -212,6 +227,9 @@ export async function transformRequestForCodex(
 			codexInstructions,
 			userConfig,
 			codexMode,
+			options?.fastSession ?? false,
+			options?.fastSessionStrategy ?? "hybrid",
+			options?.fastSessionMaxInputItems ?? 30,
 		);
 
 		// Log transformed request
@@ -229,10 +247,10 @@ export async function transformRequestForCodex(
 			body: transformedBody as unknown as Record<string, unknown>,
 		});
 
-		return {
-			body: transformedBody,
-			updatedInit: { ...init, body: JSON.stringify(transformedBody) },
-		};
+			return {
+				body: transformedBody,
+				updatedInit: { ...(init ?? {}), body: JSON.stringify(transformedBody) },
+			};
 	} catch (e) {
 		logError(`${ERROR_MESSAGES.REQUEST_PARSE_ERROR}`, e);
 		return undefined;

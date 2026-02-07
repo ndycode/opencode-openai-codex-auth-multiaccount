@@ -90,6 +90,9 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 ```json
 {
   "codexMode": true,
+  "fastSession": false,
+  "fastSessionStrategy": "hybrid",
+  "fastSessionMaxInputItems": 30,
   "perProjectAccounts": true,
   "toastDurationMs": 5000,
   "retryAllAccountsRateLimited": true,
@@ -103,6 +106,9 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | option | default | what it does |
 |--------|---------|--------------|
 | `codexMode` | `true` | uses codex-opencode bridge prompt (synced with codex cli) |
+| `fastSession` | `false` | forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=off`, `textVerbosity=low`) |
+| `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns and keeps full-depth for complex prompts; `always` forces fast mode every turn |
+| `fastSessionMaxInputItems` | `30` | max input items kept when fast mode is applied |
 | `perProjectAccounts` | `true` | each project gets its own account storage |
 | `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
 | `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
@@ -125,6 +131,9 @@ override any config with env vars:
 | `ENABLE_PLUGIN_REQUEST_LOGGING=1` | log all api requests |
 | `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
 | `CODEX_MODE=0` | disable bridge prompt |
+| `CODEX_AUTH_FAST_SESSION=1` | enable fast-session defaults |
+| `CODEX_AUTH_FAST_SESSION_STRATEGY=always` | force fast mode on every prompt |
+| `CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24` | tune max retained input items in fast mode |
 | `CODEX_AUTH_PER_PROJECT_ACCOUNTS=0` | disable per-project accounts |
 | `CODEX_AUTH_TOAST_DURATION_MS=8000` | set toast duration |
 | `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | disable wait-and-retry |

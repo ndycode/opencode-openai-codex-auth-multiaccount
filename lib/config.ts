@@ -13,6 +13,9 @@ const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json"
  */
 const DEFAULT_CONFIG: PluginConfig = {
 	codexMode: true,
+	fastSession: false,
+	fastSessionStrategy: "hybrid",
+	fastSessionMaxInputItems: 30,
 	retryAllAccountsRateLimited: true,
 	retryAllAccountsMaxWaitMs: 0,
 	retryAllAccountsMaxRetries: Infinity,
@@ -110,6 +113,30 @@ function resolveNumberSetting(
 
 export function getCodexMode(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_MODE", pluginConfig.codexMode, true);
+}
+
+export function getFastSession(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_FAST_SESSION",
+		pluginConfig.fastSession,
+		false,
+	);
+}
+
+export function getFastSessionStrategy(pluginConfig: PluginConfig): "hybrid" | "always" {
+	const env = (process.env.CODEX_AUTH_FAST_SESSION_STRATEGY ?? "").trim().toLowerCase();
+	if (env === "always") return "always";
+	if (env === "hybrid") return "hybrid";
+	return pluginConfig.fastSessionStrategy === "always" ? "always" : "hybrid";
+}
+
+export function getFastSessionMaxInputItems(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS",
+		pluginConfig.fastSessionMaxInputItems,
+		30,
+		{ min: 8 },
+	);
 }
 
 export function getRetryAllAccountsRateLimited(pluginConfig: PluginConfig): boolean {

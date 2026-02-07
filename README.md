@@ -656,6 +656,9 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | Option | Default | What It Does |
 |--------|---------|--------------|
 | `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with latest Codex CLI) |
+| `fastSession` | `false` | Forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=off`, `textVerbosity=low`) |
+| `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns but keeps full-depth on complex prompts; `always` forces fast tuning on every turn |
+| `fastSessionMaxInputItems` | `30` | Max input items kept when fast tuning is applied |
 
 ### Account Settings (v4.10.0+)
 
@@ -681,6 +684,9 @@ DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log all API requests
 CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
+CODEX_AUTH_FAST_SESSION=1 opencode               # Enable faster response defaults
+CODEX_AUTH_FAST_SESSION_STRATEGY=always opencode # Force fast mode for all prompts
+CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24 opencode # Tune fast-mode history window
 CODEX_AUTH_FETCH_TIMEOUT_MS=120000 opencode      # Override request timeout
 CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000 opencode # Override SSE stall timeout
 ```

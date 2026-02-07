@@ -26,6 +26,7 @@ describe("PluginConfigSchema", () => {
 	it("accepts valid full config", () => {
 		const config = {
 			codexMode: true,
+			fastSession: true,
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 5000,
 			retryAllAccountsMaxRetries: 3,

@@ -27,6 +27,10 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 	handleSuccessResponse: async (response: Response) => response,
 }));
 
+vi.mock("../lib/request/request-transformer.js", () => ({
+	applyFastSessionDefaults: <T>(config: T) => config,
+}));
+
 vi.mock("../lib/accounts.js", () => {
 	class AccountManager {
 		private calls = 0;
@@ -131,6 +135,7 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		"CODEX_AUTH_RETRY_ALL_MAX_RETRIES",
 		"CODEX_AUTH_TOKEN_REFRESH_SKEW_MS",
 		"CODEX_AUTH_RATE_LIMIT_TOAST_DEBOUNCE_MS",
+		"CODEX_AUTH_PREWARM",
 	] as const;
 
 	const originalEnv: Record<string, string | undefined> = {};
@@ -144,6 +149,7 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		process.env.CODEX_AUTH_RETRY_ALL_MAX_RETRIES = "1";
 		process.env.CODEX_AUTH_TOKEN_REFRESH_SKEW_MS = "0";
 		process.env.CODEX_AUTH_RATE_LIMIT_TOAST_DEBOUNCE_MS = "0";
+		process.env.CODEX_AUTH_PREWARM = "0";
 
 		vi.useFakeTimers();
 		originalFetch = globalThis.fetch;

@@ -18,6 +18,7 @@ import type {
 } from "../types.js";
 
 type CollaborationMode = "plan" | "default" | "unknown";
+type FastSessionStrategy = "hybrid" | "always";
 
 const PLAN_MODE_ONLY_TOOLS = new Set(["request_user_input"]);
 
@@ -142,6 +143,24 @@ export function getModelConfig(
 
 	// Model-specific options override global options
 	return { ...globalOptions, ...modelOptions };
+}
+
+/**
+ * Apply fast-session defaults to reduce latency/cost for interactive sessions.
+ * Explicit user/model overrides still take precedence.
+ */
+export function applyFastSessionDefaults(
+	userConfig: UserConfig = { global: {}, models: {} },
+): UserConfig {
+	const global = userConfig.global ?? {};
+	return {
+		...userConfig,
+		global: {
+			...global,
+			reasoningEffort: global.reasoningEffort ?? "low",
+			textVerbosity: global.textVerbosity ?? "low",
+		},
+	};
 }
 
 function resolveReasoningConfig(
@@ -430,6 +449,171 @@ export function filterInput(
 }
 
 /**
+ * Trim long stateless histories for low-latency sessions.
+ * Keeps a small leading developer/system context plus the most recent items.
+ */
+export function trimInputForFastSession(
+	input: InputItem[] | undefined,
+	maxItems: number,
+	options?: { preferLatestUserOnly?: boolean },
+): InputItem[] | undefined {
+	if (!Array.isArray(input)) return input;
+	const MAX_HEAD_INSTRUCTION_CHARS = 1200;
+	const MAX_HEAD_INSTRUCTION_CHARS_TRIVIAL = 400;
+
+	if (options?.preferLatestUserOnly) {
+		const keepIndexes = new Set<number>();
+
+		for (let i = 0; i < input.length; i++) {
+			const item = input[i];
+			if (!item || typeof item !== "object") continue;
+			const role = typeof item?.role === "string" ? item.role : "";
+			if (role === "developer" || role === "system") {
+				const headText = extractMessageText(item.content);
+				if (headText.length <= MAX_HEAD_INSTRUCTION_CHARS_TRIVIAL) {
+					keepIndexes.add(i);
+				}
+				break;
+			}
+		}
+
+		for (let i = input.length - 1; i >= 0; i--) {
+			const item = input[i];
+			const role = typeof item?.role === "string" ? item.role.toLowerCase() : "";
+			if (role === "user") {
+				keepIndexes.add(i);
+				break;
+			}
+		}
+
+		const compacted = input.filter((_item, index) => keepIndexes.has(index));
+		if (compacted.length > 0) return compacted;
+	}
+
+	const safeMax = Math.max(8, Math.floor(maxItems));
+	const keepIndexes = new Set<number>();
+	const excludedHeadIndexes = new Set<number>();
+
+	let keptHead = 0;
+	for (let i = 0; i < input.length && keptHead < 2; i++) {
+		const item = input[i];
+		if (!item || typeof item !== "object") break;
+		const role = typeof item?.role === "string" ? item.role : "";
+		if (role === "developer" || role === "system") {
+			const headText = extractMessageText(item.content);
+			if (headText.length <= MAX_HEAD_INSTRUCTION_CHARS) {
+				keepIndexes.add(i);
+				keptHead++;
+			} else {
+				excludedHeadIndexes.add(i);
+			}
+			continue;
+		}
+		break;
+	}
+
+	for (let i = Math.max(0, input.length - safeMax); i < input.length; i++) {
+		if (excludedHeadIndexes.has(i)) continue;
+		keepIndexes.add(i);
+	}
+
+	const trimmed = input.filter((_item, index) => keepIndexes.has(index));
+	if (trimmed.length === 0) return input;
+	if (input.length <= maxItems && excludedHeadIndexes.size === 0) return input;
+	if (trimmed.length <= safeMax) return trimmed;
+	return trimmed.slice(trimmed.length - safeMax);
+}
+
+function isTrivialLatestPrompt(text: string): boolean {
+	const normalized = text.trim();
+	if (!normalized) return false;
+	if (normalized.length > 220) return false;
+	if (normalized.includes("\n")) return false;
+	if (normalized.includes("```")) return false;
+	if (/(^|\n)\s*(?:[-*]|\d+\.)\s+\S/m.test(normalized)) return false;
+	if (/https?:\/\//i.test(normalized)) return false;
+	if (/\|.+\|/.test(normalized)) return false;
+
+	return true;
+}
+
+function isStructurallyComplexPrompt(text: string): boolean {
+	const normalized = text.trim();
+	if (!normalized) return false;
+	if (normalized.includes("```")) return true;
+
+	const lineCount = normalized.split(/\r?\n/).filter(Boolean).length;
+	if (lineCount >= 3) return true;
+	if (/(^|\n)\s*(?:[-*]|\d+\.)\s+\S/m.test(normalized)) return true;
+	if (/\|.+\|/.test(normalized)) return true;
+	return false;
+}
+
+function isComplexFastSessionRequest(
+	body: RequestBody,
+	maxItems: number,
+): boolean {
+	const input = Array.isArray(body.input) ? body.input : [];
+	const lookbackWindow = Math.max(12, Math.floor(maxItems / 2));
+	const recentItems = input.slice(-lookbackWindow);
+
+	const userTexts: string[] = [];
+	for (const item of recentItems) {
+		if (!item || typeof item !== "object") continue;
+		if (item.type === "function_call" || item.type === "function_call_output") {
+			return true;
+		}
+		const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+		if (role !== "user") continue;
+		const text = extractMessageText(item.content);
+		if (!text) continue;
+		userTexts.push(text);
+	}
+
+	if (userTexts.length === 0) return false;
+
+	const latestUserText = userTexts[userTexts.length - 1];
+	if (latestUserText && isTrivialLatestPrompt(latestUserText)) {
+		return false;
+	}
+
+	const recentUserTexts = userTexts.slice(-3);
+	if (recentUserTexts.some(isStructurallyComplexPrompt)) return true;
+	return false;
+}
+
+function getLatestUserText(input: InputItem[] | undefined): string | undefined {
+	if (!Array.isArray(input)) return undefined;
+	for (let i = input.length - 1; i >= 0; i--) {
+		const item = input[i];
+		if (!item || typeof item !== "object") continue;
+		const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+		if (role !== "user") continue;
+		const text = extractMessageText(item.content);
+		if (text) return text;
+	}
+	return undefined;
+}
+
+function compactInstructionsForFastSession(
+	instructions: string,
+	isTrivialTurn = false,
+): string {
+	const normalized = instructions.trim();
+	if (!normalized) return instructions;
+
+	const MAX_FAST_INSTRUCTION_CHARS = isTrivialTurn ? 320 : 900;
+	if (normalized.length <= MAX_FAST_INSTRUCTION_CHARS) {
+		return instructions;
+	}
+
+	const splitIndex = normalized.lastIndexOf("\n", MAX_FAST_INSTRUCTION_CHARS);
+	const safeCutoff = splitIndex >= 180 ? splitIndex : MAX_FAST_INSTRUCTION_CHARS;
+	const compacted = normalized.slice(0, safeCutoff).trimEnd();
+	return `${compacted}\n\n[Fast session mode: keep answers concise, direct, and action-oriented. Do not output internal planning labels such as "Thinking:".]`;
+}
+
+/**
  * Filter out OpenCode system prompts from input
  * Used in CODEX_MODE to replace OpenCode prompts with Codex-OpenCode bridge
  * @param input - Input array
@@ -516,6 +700,7 @@ export function addToolRemapMessage(
  * @param codexInstructions - Codex system instructions
  * @param userConfig - User configuration from loader
  * @param codexMode - Enable CODEX_MODE (bridge prompt instead of tool remap) - defaults to true
+ * @param fastSession - Force low-latency output settings for faster responses
  * @returns Transformed request body
  */
 export async function transformRequestBody(
@@ -523,6 +708,9 @@ export async function transformRequestBody(
 	codexInstructions: string,
 	userConfig: UserConfig = { global: {}, models: {} },
 	codexMode = true,
+	fastSession = false,
+	fastSessionStrategy: FastSessionStrategy = "hybrid",
+	fastSessionMaxInputItems = 30,
 ): Promise<RequestBody> {
 	const originalModel = body.model;
 	const normalizedModel = normalizeModel(body.model);
@@ -543,6 +731,17 @@ export async function transformRequestBody(
 
 	// Normalize model name for API call
 	body.model = normalizedModel;
+	const shouldApplyFastSessionTuning =
+		fastSession &&
+		(fastSessionStrategy === "always" ||
+			!isComplexFastSessionRequest(body, fastSessionMaxInputItems));
+	const latestUserText = getLatestUserText(body.input);
+	const isTrivialTurn = isTrivialLatestPrompt(latestUserText ?? "");
+	const shouldDisableToolsForTrivialTurn =
+		shouldApplyFastSessionTuning &&
+		isTrivialTurn;
+	const shouldPreferLatestUserOnly =
+		shouldApplyFastSessionTuning && isTrivialTurn;
 
 	// Codex required fields
 	// ChatGPT backend REQUIRES store=false (confirmed via testing)
@@ -554,19 +753,35 @@ export async function transformRequestBody(
 	// Filters invalid required fields and ensures empty objects have placeholders
 	const collaborationMode = detectCollaborationMode(body);
 	if (body.tools) {
+		if (shouldDisableToolsForTrivialTurn) {
+			body.tools = undefined;
+		}
+	}
+	if (body.tools) {
 		body.tools = cleanupToolDefinitions(body.tools);
 		body.tools = sanitizePlanOnlyTools(body.tools, collaborationMode);
 	}
 
-	body.instructions = codexInstructions;
+	body.instructions = shouldApplyFastSessionTuning
+		? compactInstructionsForFastSession(codexInstructions, isTrivialTurn)
+		: codexInstructions;
 
 	// Prompt caching relies on the host providing a stable prompt_cache_key
 	// (OpenCode passes its session identifier). We no longer synthesize one here.
 
 	// Filter and transform input
 	if (body.input && Array.isArray(body.input)) {
+		let inputItems: InputItem[] = body.input;
+
+			if (shouldApplyFastSessionTuning) {
+				inputItems =
+					trimInputForFastSession(inputItems, fastSessionMaxInputItems, {
+						preferLatestUserOnly: shouldPreferLatestUserOnly,
+					}) ?? inputItems;
+			}
+
 		// Debug: Log original input message IDs before filtering
-		const originalIds = body.input
+		const originalIds = inputItems
 			.filter((item) => item.id)
 			.map((item) => item.id);
 		if (originalIds.length > 0) {
@@ -576,7 +791,8 @@ export async function transformRequestBody(
 			);
 		}
 
-		body.input = filterInput(body.input);
+		inputItems = filterInput(inputItems) ?? inputItems;
+		body.input = inputItems;
 
 		// istanbul ignore next -- filterInput always removes IDs; this is defensive debug code
 		const remainingIds = (body.input || [])
@@ -627,6 +843,23 @@ export async function transformRequestBody(
 		...body.text,
 		verbosity: resolveTextVerbosity(modelConfig, body),
 	};
+
+	if (shouldApplyFastSessionTuning) {
+		// In fast-session mode, prioritize speed by clamping to minimum reasoning + verbosity.
+		// getReasoningConfig normalizes unsupported values per model family.
+		const fastReasoning = getReasoningConfig(normalizedModel, {
+			reasoningEffort: "none",
+			reasoningSummary: "off",
+		});
+		body.reasoning = {
+			...body.reasoning,
+			...fastReasoning,
+		};
+		body.text = {
+			...body.text,
+			verbosity: "low",
+		};
+	}
 
 	// Add include for encrypted reasoning content
 	// Default: ["reasoning.encrypted_content"] (required for stateless operation with store=false)

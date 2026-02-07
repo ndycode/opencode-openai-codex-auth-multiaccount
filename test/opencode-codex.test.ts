@@ -82,7 +82,7 @@ describe("opencode-codex", () => {
       );
     });
 
-    it("updates cache when new content available", async () => {
+    it("serves stale content immediately and refreshes cache in background", async () => {
       const { getOpenCodeCodexPrompt } = await import("../lib/prompts/opencode-codex.js");
       
       vi.mocked(readFile)
@@ -99,9 +99,12 @@ describe("opencode-codex", () => {
         headers: new Map([["etag", '"new-etag"']]),
       });
 
-      const result = await getOpenCodeCodexPrompt();
+      const first = await getOpenCodeCodexPrompt();
       
-      expect(result).toBe("New content");
+      expect(first).toBe("Old cached content");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const second = await getOpenCodeCodexPrompt();
+      expect(second).toBe("New content");
       expect(writeFile).toHaveBeenCalledWith(
         expect.stringContaining("opencode-codex.txt"),
         "New content",
