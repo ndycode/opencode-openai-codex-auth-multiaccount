@@ -74,6 +74,40 @@ Update your `~/.config/opencode/opencode.json`:
 
 ---
 
+## Performance & Latency
+
+<details open>
+<summary><b>Slow first response / startup latency</b></summary>
+
+**What’s normal:**
+- The first request may fetch **Codex instructions** and/or the **OpenCode codex prompt** from GitHub.
+- v4.14.1+ uses **stale-while-revalidate caching** and a **startup prewarm** to reduce first-turn latency.
+
+**Tuning knobs:**
+1. Disable prewarm (if you prefer zero background fetches at startup):
+   ```bash
+   CODEX_AUTH_PREWARM=0 opencode
+   ```
+2. Enable fast-session mode (recommended: `hybrid`) to speed up trivial/interactive turns without changing defaults for complex prompts:
+   ```json
+   // ~/.opencode/openai-codex-auth-config.json
+   {
+     "fastSession": true,
+     "fastSessionStrategy": "hybrid",
+     "fastSessionMaxInputItems": 24
+   }
+   ```
+   Or via env:
+   ```bash
+   CODEX_AUTH_FAST_SESSION=1 opencode
+   ```
+
+**Note:** `fastSessionStrategy: "always"` forces fast tuning even on complex prompts and can reduce depth. Use `hybrid` unless you explicitly want maximum speed.
+
+</details>
+
+---
+
 ## Authentication Issues
 
 <details open>

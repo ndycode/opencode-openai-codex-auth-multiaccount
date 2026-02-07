@@ -140,6 +140,7 @@ Copy the relevant config to your `~/.config/opencode/opencode.json`.
 ```bash
 # Modern OpenCode (v1.0.210+)
 opencode run "write hello world to test.txt" --model=openai/gpt-5.2 --variant=medium
+opencode run "write hello world to test.txt" --model=openai/gpt-5.3-codex --variant=medium
 
 # Legacy OpenCode (v1.0.209 and below)
 opencode run "write hello world to test.txt" --model=openai/gpt-5.2-medium
@@ -157,7 +158,7 @@ You'll see all 22 GPT-5.x variants in the model selector!
 | Model | Variants | Notes |
 |-------|----------|-------|
 | `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 |
-| `gpt-5.2-codex` | low, medium, high, xhigh | Code-optimized |
+| `gpt-5.3-codex` | low, medium, high, xhigh | Latest Codex for code generation |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
 | `gpt-5.1-codex-mini` | medium, high | Lightweight |

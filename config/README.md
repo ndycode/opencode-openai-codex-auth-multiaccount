@@ -31,8 +31,8 @@ OpenCode v1.0.210+ introduced a **variants system** that allows defining reasoni
 
 | Config File | Model Families | Reasoning Variants | Total Models |
 |------------|----------------|-------------------|--------------|
-| `opencode-modern.json` | 6 | Built-in variants (low/medium/high/xhigh) | 6 base models with 19 total variants |
-| `opencode-legacy.json` | 6 | Separate model entries | 20 individual model definitions |
+| `opencode-modern.json` | 6 | Built-in variants (low/medium/high/xhigh) | 6 base models with 22 total variants |
+| `opencode-legacy.json` | 6 | Separate model entries | 22 individual model definitions |
 
 Both configs provide:
 - ✅ All supported GPT 5.3/5.2/5.1 variants: gpt-5.2, gpt-5.3-codex, gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini

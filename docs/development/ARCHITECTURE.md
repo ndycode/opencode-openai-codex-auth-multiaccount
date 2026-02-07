@@ -280,22 +280,27 @@ let include: Vec<String> = if reasoning.is_some() {
    ├─ Preserve OpenCode env + AGENTS instructions when concatenated
    └─ Add Codex-OpenCode bridge prompt
 
-6. Orphan Tool Output Handling
+6. Fast Session Tuning (optional)
+   ├─ Clamp reasoning + verbosity for low-latency turns
+   ├─ Trim long stateless histories to a small window
+   └─ For trivial turns: may omit tool definitions + compact instructions
+
+7. Orphan Tool Output Handling
    ├─ Match function_call_output to function_call OR local_shell_call
    ├─ Match custom_tool_call_output to custom_tool_call
    └─ Convert unmatched outputs to assistant messages (preserve context)
 
-7. Reasoning Configuration
-   ├─ Set reasoningEffort (minimal/low/medium/high)
+8. Reasoning Configuration
+   ├─ Set reasoningEffort (none/minimal/low/medium/high/xhigh)
    ├─ Set reasoningSummary (auto/detailed)
    └─ Based on model variant
 
-8. Prompt Caching & Session Headers
+9. Prompt Caching & Session Headers
    ├─ Preserve host-supplied prompt_cache_key (OpenCode session id)
    ├─ Add conversation + account headers for Codex debugging when cache key exists
    └─ Leave headers unset if host does not provide a cache key
 
-9. Final Body
+10. Final Body
    ├─ store: false
    ├─ stream: true
    ├─ instructions: Codex system prompt
@@ -303,7 +308,7 @@ let include: Vec<String> = if reasoning.is_some() {
    ├─ reasoning: { effort, summary }
    ├─ text: { verbosity }
    ├─ include: ["reasoning.encrypted_content"]
-   └─ prompt_cache_key: conversation-scoped UUID
+   └─ prompt_cache_key: preserved when provided by host (OpenCode session id)
 ```
 
 **Source**: `lib/request/request-transformer.ts:265-329`
@@ -321,8 +326,8 @@ let include: Vec<String> = if reasoning.is_some() {
 | **Message IDs** | Stripped in stateless | Stripped | ✅ |
 | **reasoning.encrypted_content** | ✅ Included | ✅ Included | ✅ |
 | **Model Normalization** | "gpt-5" / "gpt-5-codex" / "codex-mini-latest" | Same | ✅ |
-| **Reasoning Effort** | medium (default) | medium (default) | ✅ |
-| **Text Verbosity** | medium (codex), low (gpt-5) | Same | ✅ |
+| **Reasoning Effort** | medium (default) | opinionated defaults by model family (for example GPT-5.3/5.2 Codex prefer `xhigh`) | ⚠️ (intentional) |
+| **Text Verbosity** | model-dependent defaults | config-driven (default: medium) | ✅ |
 
 ### What We Add
 

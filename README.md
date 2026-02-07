@@ -684,6 +684,7 @@ DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log all API requests
 CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
+CODEX_AUTH_PREWARM=0 opencode                    # Disable startup prewarm (prompt/instruction cache warmup)
 CODEX_AUTH_FAST_SESSION=1 opencode               # Enable faster response defaults
 CODEX_AUTH_FAST_SESSION_STRATEGY=always opencode # Force fast mode for all prompts
 CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24 opencode # Tune fast-mode history window

@@ -35,6 +35,7 @@ controls how much thinking the model does.
 | model | supported values |
 |-------|------------------|
 | `gpt-5.2` | none, low, medium, high, xhigh |
+| `gpt-5.3-codex` | low, medium, high, xhigh (default: xhigh) |
 | `gpt-5.2-codex` | low, medium, high, xhigh (default: xhigh) |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh |
 | `gpt-5.1-codex` | low, medium, high |
@@ -131,6 +132,7 @@ override any config with env vars:
 | `ENABLE_PLUGIN_REQUEST_LOGGING=1` | log all api requests |
 | `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
 | `CODEX_MODE=0` | disable bridge prompt |
+| `CODEX_AUTH_PREWARM=0` | disable startup prewarm (prompt/instruction cache warmup) |
 | `CODEX_AUTH_FAST_SESSION=1` | enable fast-session defaults |
 | `CODEX_AUTH_FAST_SESSION_STRATEGY=always` | force fast mode on every prompt |
 | `CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24` | tune max retained input items in fast mode |
@@ -255,7 +257,7 @@ DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5.2
 
 look for:
 ```
-[openai-codex-plugin] Model config lookup: "gpt-5.2" → normalized to "gpt-5.2-codex" for API {
+[openai-codex-plugin] Model config lookup: "gpt-5.2" → normalized to "gpt-5.2" for API {
   hasModelSpecificConfig: true,
   resolvedConfig: { ... }
 }
@@ -264,6 +266,11 @@ look for:
 ### test per-model options
 
 ```bash
+# modern opencode (variants)
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2 --variant=low
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2 --variant=high
+
+# legacy presets (model names include the effort)
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-low
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-high
 

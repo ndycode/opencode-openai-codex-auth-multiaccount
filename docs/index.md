@@ -67,12 +67,13 @@ For detailed setup, see [Getting Started](getting-started.md).
 | Feature | Description |
 |---------|-------------|
 | **OAuth Authentication** | Secure ChatGPT Plus/Pro login |
-| **22 Model Presets** | GPT-5.2, 5.2-Codex, 5.1-Codex-Max, 5.1-Codex, 5.1-Codex-Mini, 5.1 |
+| **22 Model Presets** | GPT-5.2, 5.3-Codex, 5.1-Codex-Max, 5.1-Codex, 5.1-Codex-Mini, 5.1 |
 | **Variant System** | Works with OpenCode v1.0.210+ variants and legacy presets |
 | **Multi-Account** | Auto-rotation when rate-limited |
 | **Per-Model Config** | Different reasoning effort per model |
 | **Multi-Turn** | Full conversation history with stateless backend |
-| **Comprehensive Tests** | 330+ unit tests + integration tests |
+| **Fast Session Mode** | Optional low-latency tuning for quick interactive turns |
+| **Comprehensive Tests** | 1500+ tests (80% coverage threshold) + integration tests |
 
 ---
 

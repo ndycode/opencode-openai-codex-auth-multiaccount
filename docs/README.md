@@ -24,13 +24,13 @@ This plugin bridges two different systems with careful engineering:
 
 1. **AI SDK Compatibility** - Filters `item_reference` (AI SDK construct) for Codex API compatibility
 2. **Stateless Operation** - ChatGPT backend requires `store: false`, verified via testing
-3. **Full Context Preservation** - Sends complete message history (IDs stripped) for LLM context
-4. **15-Minute Caching** - Prevents GitHub API rate limit exhaustion
+3. **Full Context Preservation** - Sends complete message history (IDs stripped) for LLM context (with optional fast-session trimming)
+4. **Stale-While-Revalidate Caching** - Keeps prompt/instruction fetches fast while avoiding GitHub rate limits; optional startup prewarm for first-turn latency
 5. **Per-Model Configuration** - Enables quality presets with quick switching
+6. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults
 
-**Testing**: 1498 tests (89% coverage) + integration tests with actual API verification
+**Testing**: 1568 tests (80% coverage threshold) + integration tests
 
 ---
 
 **Quick Links**: [GitHub](https://github.com/ndycode/oc-chatgpt-multi-auth) • [npm](https://www.npmjs.com/package/oc-chatgpt-multi-auth) • [Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues)
-
