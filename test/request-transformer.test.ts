@@ -161,6 +161,39 @@ describe('Request Transformer Module', () => {
 				expect(result.textVerbosity).toBe('low');
 			});
 
+			it('should resolve provider-prefixed model ids to base model config', async () => {
+				const userConfig: UserConfig = {
+					global: { reasoningEffort: 'medium' },
+					models: {
+						'gpt-5.2-codex': {
+							options: { reasoningEffort: 'xhigh', reasoningSummary: 'detailed' },
+						},
+					},
+				};
+
+				const result = getModelConfig('openai/gpt-5.2-codex', userConfig);
+				expect(result.reasoningEffort).toBe('xhigh');
+				expect(result.reasoningSummary).toBe('detailed');
+			});
+
+			it('should apply variants from modern base-model config when variant suffix is used', async () => {
+				const userConfig: UserConfig = {
+					global: { reasoningEffort: 'medium', reasoningSummary: 'auto' },
+					models: {
+						'gpt-5.2-codex': {
+							options: { reasoningSummary: 'auto' },
+							variants: {
+								xhigh: { reasoningEffort: 'xhigh', reasoningSummary: 'detailed' },
+							},
+						},
+					},
+				};
+
+				const result = getModelConfig('openai/gpt-5.2-codex-xhigh', userConfig);
+				expect(result.reasoningEffort).toBe('xhigh');
+				expect(result.reasoningSummary).toBe('detailed');
+			});
+
 			it('should merge global and per-model options (per-model wins)', async () => {
 				const userConfig: UserConfig = {
 					global: {

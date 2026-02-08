@@ -2,6 +2,13 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [5.1.1] - 2026-02-08
+
+### fixed
+
+- **provider-prefixed model config resolution**: `openai/<model>` ids now correctly resolve to their base model config instead of falling back to global defaults.
+- **codex variant option merging**: variant suffixes like `-xhigh` now apply `models.<base>.variants.<variant>` options during request transformation.
+
 ## [5.1.0] - 2026-02-08
 
 ### changed

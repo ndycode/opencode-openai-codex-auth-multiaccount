@@ -138,11 +138,84 @@ export function getModelConfig(
 	modelName: string,
 	userConfig: UserConfig = { global: {}, models: {} },
 ): ConfigOptions {
-	const globalOptions = userConfig.global || {};
-	const modelOptions = userConfig.models?.[modelName]?.options || {};
+	const globalOptions = userConfig.global ?? {};
+	const modelMap = userConfig.models ?? {};
+
+	const stripProviderPrefix = (name: string): string =>
+		name.includes("/") ? (name.split("/").pop() ?? name) : name;
+
+	const getVariantFromModelName = (
+		name: string,
+	): ConfigOptions["reasoningEffort"] | undefined => {
+		const stripped = stripProviderPrefix(name).toLowerCase();
+		const match = stripped.match(/-(none|minimal|low|medium|high|xhigh)$/);
+		if (!match) return undefined;
+		const variant = match[1];
+		if (
+			variant === "none" ||
+			variant === "minimal" ||
+			variant === "low" ||
+			variant === "medium" ||
+			variant === "high" ||
+			variant === "xhigh"
+		) {
+			return variant;
+		}
+		return undefined;
+	};
+
+	const removeVariantSuffix = (name: string): string =>
+		stripProviderPrefix(name).replace(/-(none|minimal|low|medium|high|xhigh)$/i, "");
+
+	const findModelEntry = (
+		candidates: string[],
+	):
+		| {
+				key: string;
+				entry: UserConfig["models"][string];
+		  }
+		| undefined => {
+		for (const key of candidates) {
+			const entry = modelMap[key];
+			if (entry) return { key, entry };
+		}
+		return undefined;
+	};
+
+	const strippedModelName = stripProviderPrefix(modelName);
+	const normalizedModelName = normalizeModel(strippedModelName);
+	const normalizedBaseModelName = normalizeModel(removeVariantSuffix(strippedModelName));
+	const baseModelName = removeVariantSuffix(strippedModelName);
+	const requestedVariant = getVariantFromModelName(strippedModelName);
+
+	// 1) Honor exact per-model keys first (including variant-specific keys)
+	const directMatch = findModelEntry([modelName, strippedModelName]);
+	if (directMatch?.entry?.options) {
+		return { ...globalOptions, ...directMatch.entry.options };
+	}
+
+	// 2) Resolve to base model config (supports provider-prefixed names + aliases)
+	const baseMatch = findModelEntry([
+		baseModelName,
+		normalizedBaseModelName,
+		normalizedModelName,
+	]);
+	const baseOptions = baseMatch?.entry?.options ?? {};
+
+	// 3) If model requested a variant, merge variant options from base model config
+	const variantConfig =
+		requestedVariant && baseMatch?.entry?.variants
+			? baseMatch.entry.variants[requestedVariant]
+			: undefined;
+	let variantOptions: ConfigOptions = {};
+	if (variantConfig) {
+		const { disabled: _disabled, ...rest } = variantConfig;
+		void _disabled;
+		variantOptions = rest;
+	}
 
 	// Model-specific options override global options
-	return { ...globalOptions, ...modelOptions };
+	return { ...globalOptions, ...baseOptions, ...variantOptions };
 }
 
 /**
