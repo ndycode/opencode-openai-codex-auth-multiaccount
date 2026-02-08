@@ -6,6 +6,8 @@ import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
+const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
+const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 
 /**
  * Default plugin configuration
@@ -13,6 +15,9 @@ const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json"
  */
 const DEFAULT_CONFIG: PluginConfig = {
 	codexMode: true,
+	codexTuiV2: true,
+	codexTuiColorProfile: "truecolor",
+	codexTuiGlyphMode: "ascii",
 	fastSession: false,
 	fastSessionStrategy: "hybrid",
 	fastSessionMaxInputItems: 30,
@@ -86,6 +91,12 @@ function parseNumberEnv(value: string | undefined): number | undefined {
 	return parsed;
 }
 
+function parseStringEnv(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	const trimmed = value.trim().toLowerCase();
+	return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function resolveBooleanSetting(
 	envName: string,
 	configValue: boolean | undefined,
@@ -112,8 +123,50 @@ function resolveNumberSetting(
 	return candidate;
 }
 
+function resolveStringSetting<T extends string>(
+	envName: string,
+	configValue: T | undefined,
+	defaultValue: T,
+	allowedValues: ReadonlySet<string>,
+): T {
+	const envValue = parseStringEnv(process.env[envName]);
+	if (envValue && allowedValues.has(envValue)) {
+		return envValue as T;
+	}
+	if (configValue && allowedValues.has(configValue)) {
+		return configValue;
+	}
+	return defaultValue;
+}
+
 export function getCodexMode(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_MODE", pluginConfig.codexMode, true);
+}
+
+export function getCodexTuiV2(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting("CODEX_TUI_V2", pluginConfig.codexTuiV2, true);
+}
+
+export function getCodexTuiColorProfile(
+	pluginConfig: PluginConfig,
+): "truecolor" | "ansi16" | "ansi256" {
+	return resolveStringSetting(
+		"CODEX_TUI_COLOR_PROFILE",
+		pluginConfig.codexTuiColorProfile,
+		"truecolor",
+		TUI_COLOR_PROFILES,
+	);
+}
+
+export function getCodexTuiGlyphMode(
+	pluginConfig: PluginConfig,
+): "ascii" | "unicode" | "auto" {
+	return resolveStringSetting(
+		"CODEX_TUI_GLYPHS",
+		pluginConfig.codexTuiGlyphMode,
+		"ascii",
+		TUI_GLYPH_MODES,
+	);
 }
 
 export function getFastSession(pluginConfig: PluginConfig): boolean {

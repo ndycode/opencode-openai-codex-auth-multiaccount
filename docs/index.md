@@ -42,6 +42,7 @@
 | [Config System](development/CONFIG_FLOW.md) | Configuration loading and merging |
 | [Config Fields](development/CONFIG_FIELDS.md) | Understanding config keys and fields |
 | [Testing Guide](development/TESTING.md) | Test scenarios and verification |
+| [TUI Parity Checklist](development/TUI_PARITY_CHECKLIST.md) | Auth dashboard/UI parity requirements |
 
 ---
 
@@ -108,7 +109,7 @@ OpenCode SDK Request
 ChatGPT Codex Backend
 ```
 
-See [Architecture](development/ARCHITECTURE.md) for technical details.
+See [Architecture](development/ARCHITECTURE.md) and [TUI Parity Checklist](development/TUI_PARITY_CHECKLIST.md) for technical details and UI parity criteria.
 
 ---
 

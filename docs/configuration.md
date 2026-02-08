@@ -91,6 +91,9 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 ```json
 {
   "codexMode": true,
+  "codexTuiV2": true,
+  "codexTuiColorProfile": "truecolor",
+  "codexTuiGlyphMode": "ascii",
   "fastSession": false,
   "fastSessionStrategy": "hybrid",
   "fastSessionMaxInputItems": 30,
@@ -108,6 +111,9 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | option | default | what it does |
 |--------|---------|--------------|
 | `codexMode` | `true` | uses codex-opencode bridge prompt (synced with codex cli) |
+| `codexTuiV2` | `true` | enables codex-style terminal ui output (set `false` to keep legacy output) |
+| `codexTuiColorProfile` | `truecolor` | terminal color profile for codex ui (`truecolor`, `ansi256`, `ansi16`) |
+| `codexTuiGlyphMode` | `ascii` | glyph set for codex ui (`ascii`, `unicode`, `auto`) |
 | `fastSession` | `false` | forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=off`, `textVerbosity=low`) |
 | `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns and keeps full-depth for complex prompts; `always` forces fast mode every turn |
 | `fastSessionMaxInputItems` | `30` | max input items kept when fast mode is applied |
@@ -134,6 +140,9 @@ override any config with env vars:
 | `ENABLE_PLUGIN_REQUEST_LOGGING=1` | log all api requests |
 | `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
 | `CODEX_MODE=0` | disable bridge prompt |
+| `CODEX_TUI_V2=0` | disable codex-style ui (use legacy output) |
+| `CODEX_TUI_COLOR_PROFILE=ansi16` | force color profile for codex ui |
+| `CODEX_TUI_GLYPHS=unicode` | override glyph mode (`ascii`, `unicode`, `auto`) |
 | `CODEX_AUTH_PREWARM=0` | disable startup prewarm (prompt/instruction cache warmup) |
 | `CODEX_AUTH_FAST_SESSION=1` | enable fast-session defaults |
 | `CODEX_AUTH_FAST_SESSION_STRATEGY=always` | force fast mode on every prompt |

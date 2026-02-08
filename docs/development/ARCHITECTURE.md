@@ -10,6 +10,7 @@ This document explains the technical design decisions, architecture, and impleme
 - [Request Pipeline](#request-pipeline)
 - [Comparison with Codex CLI](#comparison-with-codex-cli)
 - [Design Rationale](#design-rationale)
+- [TUI Parity Checklist](./TUI_PARITY_CHECKLIST.md)
 
 ---
 
@@ -515,6 +516,21 @@ const tokens = await queue.queuedRefresh(refreshToken, async () => {
 4. **Test Coverage**: Unit tests for all transformation functions
 5. **Performance Metrics**: Log token usage and latency
 
+## Terminal UI Runtime (Codex TUI v2)
+
+The plugin now supports a Codex-style terminal presentation layer for both interactive menus and text tool outputs.
+
+- Default: enabled (`codexTuiV2: true`)
+- Opt-out: `codexTuiV2: false` or `CODEX_TUI_V2=0`
+- Color profile selection:
+  - `codexTuiColorProfile: "truecolor" | "ansi256" | "ansi16"`
+  - `CODEX_TUI_COLOR_PROFILE`
+- Glyph mode selection:
+  - `codexTuiGlyphMode: "ascii" | "unicode" | "auto"`
+  - `CODEX_TUI_GLYPHS`
+
+Legacy output remains unchanged when V2 is disabled.
+
 ### Breaking Changes to Watch
 
 1. **AI SDK Updates**: Changes to `.responses()` method
@@ -525,5 +541,6 @@ const tokens = await queue.queuedRefresh(refreshToken, async () => {
 
 ## See Also
 - [CONFIG_FLOW.md](./CONFIG_FLOW.md) - Configuration system guide
+- [TUI_PARITY_CHECKLIST.md](./TUI_PARITY_CHECKLIST.md) - Auth dashboard and interaction parity checklist
 - [Codex CLI Source](https://github.com/openai/codex) - Official implementation
 - [OpenCode Source](https://github.com/sst/opencode) - OpenCode implementation

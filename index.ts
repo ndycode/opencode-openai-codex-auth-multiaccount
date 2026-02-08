@@ -35,7 +35,7 @@ import {
 import { queuedRefresh } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { promptLoginMode } from "./lib/cli.js";
+import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getFastSession,
@@ -56,6 +56,9 @@ import {
 	getPidOffsetEnabled,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
+	getCodexTuiV2,
+	getCodexTuiColorProfile,
+	getCodexTuiGlyphMode,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -80,7 +83,7 @@ import {
 import { checkAndNotify } from "./lib/auto-update-checker.js";
 import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
-        AccountManager,
+	AccountManager,
         getAccountIdCandidates,
         extractAccountEmail,
         extractAccountId,
@@ -89,9 +92,24 @@ import {
         formatWaitTime,
         sanitizeEmail,
         shouldUpdateAccountIdFromToken,
-        parseRateLimitReason,
+	parseRateLimitReason,
 } from "./lib/accounts.js";
-import { getStoragePath, loadAccounts, saveAccounts, setStoragePath, exportAccounts, importAccounts, StorageError, formatStorageErrorHint, type AccountStorageV3 } from "./lib/storage.js";
+import {
+	getStoragePath,
+	loadAccounts,
+	saveAccounts,
+	clearAccounts,
+	setStoragePath,
+	exportAccounts,
+	importAccounts,
+	loadFlaggedAccounts,
+	saveFlaggedAccounts,
+	clearFlaggedAccounts,
+	StorageError,
+	formatStorageErrorHint,
+	type AccountStorageV3,
+	type FlaggedAccountMetadataV1,
+} from "./lib/storage.js";
 import {
 	createCodexHeaders,
 	extractRequestUrl,
@@ -112,6 +130,8 @@ import {
 import { isEmptyResponse } from "./lib/request/response-handler.js";
 import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
+import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
+import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
 import {
 	getModelFamily,
 	MODEL_FAMILIES,
@@ -590,6 +610,39 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return `resets in ${formatWaitTime(remaining)}`;
 		};
 
+		const applyUiRuntimeFromConfig = (
+			pluginConfig: ReturnType<typeof loadPluginConfig>,
+		): UiRuntimeOptions => {
+			return setUiRuntimeOptions({
+				v2Enabled: getCodexTuiV2(pluginConfig),
+				colorProfile: getCodexTuiColorProfile(pluginConfig),
+				glyphMode: getCodexTuiGlyphMode(pluginConfig),
+			});
+		};
+
+		const resolveUiRuntime = (): UiRuntimeOptions => {
+			return applyUiRuntimeFromConfig(loadPluginConfig());
+		};
+
+		const getStatusMarker = (
+			ui: UiRuntimeOptions,
+			status: "ok" | "warning" | "error",
+		): string => {
+			if (!ui.v2Enabled) {
+				if (status === "ok") return "✓";
+				if (status === "warning") return "!";
+				return "✗";
+			}
+			if (status === "ok") return ui.theme.glyphs.check;
+			if (status === "warning") return "!";
+			return ui.theme.glyphs.cross;
+		};
+
+		const invalidateAccountManagerCache = (): void => {
+			cachedAccountManager = null;
+			accountManagerPromise = null;
+		};
+
         // Event handler for session recovery and account selection
         const eventHandler = async (input: { event: { type: string; properties?: unknown } }) => {
           try {
@@ -623,6 +676,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 logDebug(`[${PLUGIN_NAME}] Event handler error: ${error instanceof Error ? error.message : String(error)}`);
           }
         };
+
+		// Initialize runtime UI settings once on plugin load; auth/tools refresh this dynamically.
+		resolveUiRuntime();
 
         return {
                 event: eventHandler,
@@ -703,6 +759,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				// Load plugin configuration and determine CODEX_MODE
 				// Priority: CODEX_MODE env var > config file > default (true)
 				const pluginConfig = loadPluginConfig();
+				applyUiRuntimeFromConfig(pluginConfig);
 				const codexMode = getCodexMode(pluginConfig);
 				const fastSessionEnabled = getFastSession(pluginConfig);
 				const fastSessionStrategy = getFastSessionStrategy(pluginConfig);
@@ -1356,259 +1413,559 @@ while (attempted.size < Math.max(1, accountCount)) {
                         },
 				methods: [
 					{
-					label: AUTH_LABELS.OAUTH,
-					type: "oauth" as const,
-					prompts: [
-						{
-							type: "select",
-							key: "loginMode",
-							message: "Account handling",
-							options: [
-								{
-									label: "Add to existing accounts",
-									value: "add",
-									hint: "Keep current accounts",
-								},
-								{
-									label: "Start fresh",
-									value: "fresh",
-									hint: "Replace existing accounts",
-								},
-							],
-						},
-						{
-							type: "text",
-							key: "accountCount",
-							message: "How many accounts to add? (1-5)",
-							placeholder: "1",
-							validate: (value) => {
-								const parsed = Number.parseInt(value, 10);
-								if (!Number.isFinite(parsed)) return "Enter a number";
-								if (parsed < 1) return "Minimum is 1";
-								if (parsed > ACCOUNT_LIMITS.MAX_ACCOUNTS) return `Maximum is ${ACCOUNT_LIMITS.MAX_ACCOUNTS}`;
-								return undefined;
-							},
-						},
-					],
-					/**
-					 * OAuth authorization flow
-					 *
-					 * Steps:
-					 * 1. Generate PKCE challenge and state for security
-					 * 2. Start local OAuth callback server on port 1455
-					 * 3. Open browser to OpenAI authorization page
-					 * 4. Wait for user to complete login
-					 * 5. Exchange authorization code for tokens
-					 *
-					 * @returns Authorization flow configuration
-					 */
-                                        authorize: async (inputs?: Record<string, string>) => {
-					// Initialize storage path based on config BEFORE any account operations
-					// This ensures accounts are saved to the correct location (per-project or global)
-					const authPluginConfig = loadPluginConfig();
-					const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
-					if (authPerProjectAccounts) {
-						setStoragePath(process.cwd());
-					}
+						label: AUTH_LABELS.OAUTH,
+						type: "oauth" as const,
+						authorize: async (inputs?: Record<string, string>) => {
+							const authPluginConfig = loadPluginConfig();
+							applyUiRuntimeFromConfig(authPluginConfig);
+							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
+							if (authPerProjectAccounts) {
+								setStoragePath(process.cwd());
+							}
 
-					// Always use the multi-account flow regardless of inputs
-					// The inputs parameter is only used for noBrowser flag, not for flow selection
-					const accounts: TokenSuccessWithAccount[] = [];
+							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =
 								inputs?.noBrowser === "true" ||
 								inputs?.["no-browser"] === "true";
 							const useManualMode = noBrowser;
-							const existingStorage = await hydrateEmails(await loadAccounts());
-							const existingCount = existingStorage?.accounts.length ?? 0;
+							const explicitLoginMode =
+								inputs?.loginMode === "fresh" || inputs?.loginMode === "add"
+									? inputs.loginMode
+									: null;
 
-							let startFresh = false;
-							if (existingCount > 0 && existingStorage) {
-								if (inputs?.loginMode) {
-									startFresh = inputs.loginMode === "fresh";
-								} else {
-									const existingAccounts = existingStorage.accounts.map(
-										(account, index) => ({
+							let startFresh = explicitLoginMode === "fresh";
+							let refreshAccountIndex: number | undefined;
+
+							const clampActiveIndices = (storage: AccountStorageV3): void => {
+								const count = storage.accounts.length;
+								if (count === 0) {
+									storage.activeIndex = 0;
+									storage.activeIndexByFamily = {};
+									return;
+								}
+								storage.activeIndex = Math.max(0, Math.min(storage.activeIndex, count - 1));
+								storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
+								for (const family of MODEL_FAMILIES) {
+									const raw = storage.activeIndexByFamily[family];
+									const candidate =
+										typeof raw === "number" && Number.isFinite(raw) ? raw : storage.activeIndex;
+									storage.activeIndexByFamily[family] = Math.max(0, Math.min(candidate, count - 1));
+								}
+							};
+
+							const isFlaggableFailure = (failure: Extract<TokenResult, { type: "failed" }>): boolean => {
+								if (failure.reason === "missing_refresh") return true;
+								if (failure.statusCode === 401) return true;
+								if (failure.statusCode !== 400) return false;
+								const message = (failure.message ?? "").toLowerCase();
+								return (
+									message.includes("invalid_grant") ||
+									message.includes("invalid refresh") ||
+									message.includes("token has been revoked")
+								);
+							};
+
+							const runAccountCheck = async (deepProbe: boolean): Promise<void> => {
+								const loadedStorage = await hydrateEmails(await loadAccounts());
+								const workingStorage = loadedStorage
+									? {
+										...loadedStorage,
+										accounts: loadedStorage.accounts.map((account) => ({ ...account })),
+										activeIndexByFamily: loadedStorage.activeIndexByFamily
+											? { ...loadedStorage.activeIndexByFamily }
+											: {},
+									}
+									: { version: 3 as const, accounts: [], activeIndex: 0, activeIndexByFamily: {} };
+
+								if (workingStorage.accounts.length === 0) {
+									console.log("\nNo accounts to check.\n");
+									return;
+								}
+
+								const flaggedStorage = await loadFlaggedAccounts();
+								let storageChanged = false;
+								let flaggedChanged = false;
+								const removeFromActive = new Set<string>();
+								const total = workingStorage.accounts.length;
+								let ok = 0;
+								let disabled = 0;
+								let errors = 0;
+
+								console.log(
+									`\nChecking ${deepProbe ? "full account health" : "quotas (fast refresh)"} for all accounts...\n`,
+								);
+
+								for (let i = 0; i < total; i += 1) {
+									const account = workingStorage.accounts[i];
+									if (!account) continue;
+									const label = account.email ?? account.accountLabel ?? `Account ${i + 1}`;
+									if (account.enabled === false) {
+										disabled += 1;
+										console.log(`[${i + 1}/${total}] ${label}: DISABLED`);
+										continue;
+									}
+
+									try {
+										const refreshResult = await queuedRefresh(account.refreshToken);
+										if (refreshResult.type !== "success") {
+											errors += 1;
+											const message = refreshResult.message ?? refreshResult.reason ?? "refresh failed";
+											console.log(`[${i + 1}/${total}] ${label}: ERROR (${message})`);
+											if (isFlaggableFailure(refreshResult)) {
+												const existingIndex = flaggedStorage.accounts.findIndex(
+													(flagged) => flagged.refreshToken === account.refreshToken,
+												);
+												const flaggedRecord: FlaggedAccountMetadataV1 = {
+													...account,
+													flaggedAt: Date.now(),
+													flaggedReason: "token-invalid",
+													lastError: message,
+												};
+												if (existingIndex >= 0) {
+													flaggedStorage.accounts[existingIndex] = flaggedRecord;
+												} else {
+													flaggedStorage.accounts.push(flaggedRecord);
+												}
+												removeFromActive.add(account.refreshToken);
+												flaggedChanged = true;
+											}
+											continue;
+										}
+
+										ok += 1;
+										if (refreshResult.refresh !== account.refreshToken) {
+											account.refreshToken = refreshResult.refresh;
+											storageChanged = true;
+										}
+										const hydratedEmail = sanitizeEmail(
+											extractAccountEmail(refreshResult.access, refreshResult.idToken),
+										);
+										if (hydratedEmail && hydratedEmail !== account.email) {
+											account.email = hydratedEmail;
+											storageChanged = true;
+										}
+										const tokenAccountId = extractAccountId(refreshResult.access);
+										if (
+											tokenAccountId &&
+											shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId) &&
+											tokenAccountId !== account.accountId
+										) {
+											account.accountId = tokenAccountId;
+											account.accountIdSource = "token";
+											storageChanged = true;
+										}
+
+										const deepProbeDetail =
+											deepProbe && tokenAccountId
+												? `OK (id:${tokenAccountId.slice(-6)})`
+												: "OK";
+										console.log(`[${i + 1}/${total}] ${label}: ${deepProbeDetail}`);
+									} catch (error) {
+										errors += 1;
+										const message = error instanceof Error ? error.message : String(error);
+										console.log(`[${i + 1}/${total}] ${label}: ERROR (${message.slice(0, 120)})`);
+									}
+								}
+
+								if (removeFromActive.size > 0) {
+									workingStorage.accounts = workingStorage.accounts.filter(
+										(account) => !removeFromActive.has(account.refreshToken),
+									);
+									clampActiveIndices(workingStorage);
+									storageChanged = true;
+								}
+
+								if (storageChanged) {
+									await saveAccounts(workingStorage);
+									invalidateAccountManagerCache();
+								}
+								if (flaggedChanged) {
+									await saveFlaggedAccounts(flaggedStorage);
+								}
+
+								console.log("");
+								console.log(`Results: ${ok} ok, ${errors} error, ${disabled} disabled`);
+								if (removeFromActive.size > 0) {
+									console.log(
+										`Moved ${removeFromActive.size} account(s) to flagged pool (invalid refresh token).`,
+									);
+								}
+								console.log("");
+							};
+
+							const verifyFlaggedAccounts = async (): Promise<void> => {
+								const flaggedStorage = await loadFlaggedAccounts();
+								if (flaggedStorage.accounts.length === 0) {
+									console.log("\nNo flagged accounts to verify.\n");
+									return;
+								}
+
+								console.log("\nVerifying flagged accounts...\n");
+								const remaining: FlaggedAccountMetadataV1[] = [];
+								const restored: TokenSuccessWithAccount[] = [];
+
+								for (let i = 0; i < flaggedStorage.accounts.length; i += 1) {
+									const flagged = flaggedStorage.accounts[i];
+									if (!flagged) continue;
+									const label = flagged.email ?? flagged.accountLabel ?? `Flagged ${i + 1}`;
+									try {
+										const refreshResult = await queuedRefresh(flagged.refreshToken);
+										if (refreshResult.type !== "success") {
+											console.log(
+												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: STILL FLAGGED (${refreshResult.message ?? refreshResult.reason ?? "refresh failed"})`,
+											);
+											remaining.push(flagged);
+											continue;
+										}
+
+										const resolved = resolveAccountSelection(refreshResult);
+										if (!resolved.accountIdOverride && flagged.accountId) {
+											resolved.accountIdOverride = flagged.accountId;
+											resolved.accountIdSource = flagged.accountIdSource ?? "manual";
+										}
+										if (!resolved.accountLabel && flagged.accountLabel) {
+											resolved.accountLabel = flagged.accountLabel;
+										}
+										restored.push(resolved);
+										console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
+									} catch (error) {
+										const message = error instanceof Error ? error.message : String(error);
+										console.log(
+											`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: ERROR (${message.slice(0, 120)})`,
+										);
+										remaining.push({
+											...flagged,
+											lastError: message,
+										});
+									}
+								}
+
+								if (restored.length > 0) {
+									await persistAccountPool(restored, false);
+									invalidateAccountManagerCache();
+								}
+
+								await saveFlaggedAccounts({
+									version: 1,
+									accounts: remaining,
+								});
+
+								console.log("");
+								console.log(`Results: ${restored.length} restored, ${remaining.length} still flagged`);
+								console.log("");
+							};
+
+							if (!explicitLoginMode) {
+								while (true) {
+									const loadedStorage = await hydrateEmails(await loadAccounts());
+									const workingStorage = loadedStorage
+										? {
+											...loadedStorage,
+											accounts: loadedStorage.accounts.map((account) => ({ ...account })),
+											activeIndexByFamily: loadedStorage.activeIndexByFamily
+												? { ...loadedStorage.activeIndexByFamily }
+												: {},
+										}
+										: { version: 3 as const, accounts: [], activeIndex: 0, activeIndexByFamily: {} };
+									const flaggedStorage = await loadFlaggedAccounts();
+
+									if (workingStorage.accounts.length === 0 && flaggedStorage.accounts.length === 0) {
+										break;
+									}
+
+									const now = Date.now();
+									const activeIndex = resolveActiveIndex(workingStorage, "codex");
+									const existingAccounts = workingStorage.accounts.map((account, index) => {
+										let status: "active" | "ok" | "rate-limited" | "cooldown" | "disabled";
+										if (account.enabled === false) {
+											status = "disabled";
+										} else if (
+											typeof account.coolingDownUntil === "number" &&
+											account.coolingDownUntil > now
+										) {
+											status = "cooldown";
+										} else if (formatRateLimitEntry(account, now)) {
+											status = "rate-limited";
+										} else if (index === activeIndex) {
+											status = "active";
+										} else {
+											status = "ok";
+										}
+										return {
 											accountId: account.accountId,
 											accountLabel: account.accountLabel,
 											email: account.email,
 											index,
-										}),
-									);
-									const loginMode = await promptLoginMode(existingAccounts);
-									startFresh = loginMode === "fresh";
-								}
+											addedAt: account.addedAt,
+											lastUsed: account.lastUsed,
+											status,
+											isCurrentAccount: index === activeIndex,
+											enabled: account.enabled !== false,
+										};
+									});
 
-								if (startFresh) {
-						logInfo(
-							"Starting fresh - existing accounts will be replaced.",
-						);
-					} else {
-						logInfo("Adding to existing accounts.");
-					}
+									const menuResult = await promptLoginMode(existingAccounts, {
+										flaggedCount: flaggedStorage.accounts.length,
+									});
+
+									if (menuResult.mode === "cancel") {
+										return {
+											url: "",
+											instructions: "Authentication cancelled",
+											method: "auto",
+											callback: () =>
+												Promise.resolve({
+													type: "failed" as const,
+												}),
+										};
+									}
+
+									if (menuResult.mode === "check") {
+										await runAccountCheck(false);
+										continue;
+									}
+									if (menuResult.mode === "deep-check") {
+										await runAccountCheck(true);
+										continue;
+									}
+									if (menuResult.mode === "verify-flagged") {
+										await verifyFlaggedAccounts();
+										continue;
+									}
+
+									if (menuResult.mode === "manage") {
+										if (typeof menuResult.deleteAccountIndex === "number") {
+											const target = workingStorage.accounts[menuResult.deleteAccountIndex];
+											if (target) {
+												workingStorage.accounts.splice(menuResult.deleteAccountIndex, 1);
+												clampActiveIndices(workingStorage);
+												await saveAccounts(workingStorage);
+												await saveFlaggedAccounts({
+													version: 1,
+													accounts: flaggedStorage.accounts.filter(
+														(flagged) => flagged.refreshToken !== target.refreshToken,
+													),
+												});
+												invalidateAccountManagerCache();
+												console.log(`\nDeleted ${target.email ?? `Account ${menuResult.deleteAccountIndex + 1}`}.\n`);
+											}
+											continue;
+										}
+
+										if (typeof menuResult.toggleAccountIndex === "number") {
+											const target = workingStorage.accounts[menuResult.toggleAccountIndex];
+											if (target) {
+												target.enabled = target.enabled === false ? true : false;
+												await saveAccounts(workingStorage);
+												invalidateAccountManagerCache();
+												console.log(
+													`\n${target.email ?? `Account ${menuResult.toggleAccountIndex + 1}`} ${target.enabled === false ? "disabled" : "enabled"}.\n`,
+												);
+											}
+											continue;
+										}
+
+										if (typeof menuResult.refreshAccountIndex === "number") {
+											refreshAccountIndex = menuResult.refreshAccountIndex;
+											startFresh = false;
+											break;
+										}
+
+										continue;
+									}
+
+									if (menuResult.mode === "fresh") {
+										startFresh = true;
+										if (menuResult.deleteAll) {
+											await clearAccounts();
+											await clearFlaggedAccounts();
+											invalidateAccountManagerCache();
+											console.log("\nDeleted all accounts. Starting fresh.\n");
+										}
+										break;
+									}
+
+									startFresh = false;
+									break;
+								}
 							}
 
-							const requestedCount = Number.parseInt(
-								inputs?.accountCount ?? "1",
-								10,
-							);
-							const normalizedRequested = Number.isFinite(requestedCount)
-								? requestedCount
-								: 1;
-							const availableSlots = startFresh
-								? ACCOUNT_LIMITS.MAX_ACCOUNTS
-								: ACCOUNT_LIMITS.MAX_ACCOUNTS - existingCount;
-							const targetCount = Math.max(
-								1,
-								Math.min(normalizedRequested, availableSlots),
-							);
+							const latestStorage = await loadAccounts();
+							const existingCount = latestStorage?.accounts.length ?? 0;
+							const requestedCount = Number.parseInt(inputs?.accountCount ?? "1", 10);
+							const normalizedRequested = Number.isFinite(requestedCount) ? requestedCount : 1;
+							const availableSlots =
+								refreshAccountIndex !== undefined
+									? 1
+									: startFresh
+										? ACCOUNT_LIMITS.MAX_ACCOUNTS
+										: ACCOUNT_LIMITS.MAX_ACCOUNTS - existingCount;
 
 							if (availableSlots <= 0) {
 								return {
 									url: "",
-									instructions:
-										"Account limit reached. Remove an account or start fresh.",
+									instructions: "Account limit reached. Remove an account or start fresh.",
 									method: "auto",
-								callback: () => Promise.resolve({
-									type: "failed" as const,
-								}),
+									callback: () =>
+										Promise.resolve({
+											type: "failed" as const,
+										}),
 								};
 							}
 
-					if (useManualMode) {
-						const { pkce, url } = await createAuthorizationFlow();
-						return buildManualOAuthFlow(pkce, url, async (tokens) => {
-					try {
-							await persistAccountPool([tokens], startFresh);
-						} catch (err) {
-							const storagePath = getStoragePath();
-							const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
-							const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
-							logError(`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`);
-							await showToast(
-								hint,
-								"error",
-								{ title: "Account Persistence Failed", duration: 10000 },
-							);
-						}
-						});
-					}
+							let targetCount = Math.max(1, Math.min(normalizedRequested, availableSlots));
+							if (refreshAccountIndex !== undefined) {
+								targetCount = 1;
+							}
+							if (useManualMode) {
+								targetCount = 1;
+							}
+
+							if (useManualMode) {
+								const { pkce, url } = await createAuthorizationFlow();
+								return buildManualOAuthFlow(pkce, url, async (tokens) => {
+									try {
+										await persistAccountPool([tokens], startFresh);
+										invalidateAccountManagerCache();
+									} catch (err) {
+										const storagePath = getStoragePath();
+										const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
+										const hint =
+											err instanceof StorageError
+												? err.hint
+												: formatStorageErrorHint(err, storagePath);
+										logError(
+											`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`,
+										);
+										await showToast(hint, "error", {
+											title: "Account Persistence Failed",
+											duration: 10000,
+										});
+									}
+								});
+							}
+
+							const explicitCountProvided =
+								typeof inputs?.accountCount === "string" && inputs.accountCount.trim().length > 0;
 
 							while (accounts.length < targetCount) {
-						logInfo(
-							`=== OpenAI OAuth (Account ${accounts.length + 1}) ===`,
-						);
-
-								const forceNewLogin = accounts.length > 0;
+								logInfo(`=== OpenAI OAuth (Account ${accounts.length + 1}) ===`);
+								const forceNewLogin = accounts.length > 0 || refreshAccountIndex !== undefined;
 								const result = await runOAuthFlow(forceNewLogin);
 
 								let resolved: TokenSuccessWithAccount | null = null;
-				if (result.type === "success") {
-					resolved = resolveAccountSelection(result);
-					const email = extractAccountEmail(resolved.access, resolved.idToken);
-					const accountId =
-						resolved.accountIdOverride ?? extractAccountId(resolved.access);
-					const label = resolved.accountLabel ?? email ?? accountId ?? "Unknown account";
-						logInfo(`Authenticated as: ${label}`);
+								if (result.type === "success") {
+									resolved = resolveAccountSelection(result);
+									const email = extractAccountEmail(resolved.access, resolved.idToken);
+									const accountId = resolved.accountIdOverride ?? extractAccountId(resolved.access);
+									const label = resolved.accountLabel ?? email ?? accountId ?? "Unknown account";
+									logInfo(`Authenticated as: ${label}`);
 
-					const isDuplicate = accounts.some(
-						(acc) =>
-							(accountId &&
-								(acc.accountIdOverride ?? extractAccountId(acc.access)) === accountId) ||
-							(email && extractAccountEmail(acc.access, acc.idToken) === email),
-					);
+									const isDuplicate = accounts.some(
+										(account) =>
+											(accountId &&
+												(account.accountIdOverride ?? extractAccountId(account.access)) === accountId) ||
+											(email && extractAccountEmail(account.access, account.idToken) === email),
+									);
 
-						if (isDuplicate) {
-							logWarn(
-								`\n⚠️  WARNING: You authenticated with an account that is already in the list (${label}).`,
-							);
-							logWarn(
-								"This usually happens if you didn't log out or use a different browser profile.",
-							);
-							logWarn("The duplicate will update the existing entry.");
-						}
-					}
+									if (isDuplicate) {
+										logWarn(`WARNING: duplicate account login detected (${label}). Existing entry will be updated.`);
+									}
+								}
 
-					if (result.type === "failed") {
-                                                                        if (accounts.length === 0) {
-                                                                                return {
-                                                                                        url: "",
-                                                                                        instructions:
-                                                                                                "Authentication failed.",
-                                                                                        method: "auto",
-                                                                                        callback: () => Promise.resolve(result),
-                                                                                };
-                                                                        }
-							logWarn(
-								`[${PLUGIN_NAME}] Skipping failed account ${
-									accounts.length + 1
-								}`,
-							);
-                                                                        break;
-                                                                }
+								if (result.type === "failed") {
+									if (accounts.length === 0) {
+										return {
+											url: "",
+											instructions: "Authentication failed.",
+											method: "auto",
+											callback: () => Promise.resolve(result),
+										};
+									}
+									logWarn(`[${PLUGIN_NAME}] Skipping failed account ${accounts.length + 1}`);
+									break;
+								}
 
-                                                                if (!resolved) {
-                                                                        continue;
-                                                                }
+								if (!resolved) {
+									continue;
+								}
 
-                                                                accounts.push(resolved);
-                                                                await showToast(
-                                                                        `Account ${accounts.length} authenticated`,
-                                                                        "success",
-                                                                );
+								accounts.push(resolved);
+								await showToast(`Account ${accounts.length} authenticated`, "success");
 
-                                                                try {
-                                                                        const isFirstAccount = accounts.length === 1;
-                                                                        await persistAccountPool(
-                                                                                [resolved],
-                                                                                isFirstAccount && startFresh,
-                                                                        );
-                                                                } catch (err) {
-                                                                        const storagePath = getStoragePath();
-                                                                        const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
-                                                                        const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
-                                                                        logError(`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`);
-                                                                        await showToast(
-                                                                                hint,
-                                                                                "error",
-                                                                                { title: "Account Persistence Failed", duration: 10000 },
-                                                                        );
-                                                                }
+								try {
+									const isFirstAccount = accounts.length === 1;
+									await persistAccountPool([resolved], isFirstAccount && startFresh);
+									invalidateAccountManagerCache();
+								} catch (err) {
+									const storagePath = getStoragePath();
+									const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
+									const hint =
+										err instanceof StorageError
+											? err.hint
+											: formatStorageErrorHint(err, storagePath);
+									logError(
+										`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`,
+									);
+									await showToast(hint, "error", {
+										title: "Account Persistence Failed",
+										duration: 10000,
+									});
+								}
 
 								if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
 									break;
 								}
-                                                        }
 
-                                                        const primary = accounts[0];
-                                                        if (!primary) {
-                                                                return {
-                                                                        url: "",
-                                                                        instructions: "Authentication cancelled",
-                                                                        method: "auto",
-                                                                        callback: () => Promise.resolve({
-                                                                                type: "failed" as const,
-                                                                        }),
-                                                                };
-                                                        }
+								if (
+									!explicitCountProvided &&
+									refreshAccountIndex === undefined &&
+									accounts.length < availableSlots &&
+									accounts.length >= targetCount
+								) {
+									const addMore = await promptAddAnotherAccount(accounts.length);
+									if (addMore) {
+										targetCount = Math.min(targetCount + 1, availableSlots);
+										continue;
+									}
+									break;
+								}
+							}
 
-                                                        let actualAccountCount = accounts.length;
-                                                        try {
-                                                                const finalStorage = await loadAccounts();
-                                                                if (finalStorage) {
-                                                                        actualAccountCount = finalStorage.accounts.length;
-                                                                }
-								} catch (err) {
-									logWarn(`[${PLUGIN_NAME}] Failed to load final account count: ${(err as Error)?.message ?? String(err)}`);
-                                                        }
+							const primary = accounts[0];
+							if (!primary) {
+								return {
+									url: "",
+									instructions: "Authentication cancelled",
+									method: "auto",
+									callback: () =>
+										Promise.resolve({
+											type: "failed" as const,
+										}),
+								};
+							}
 
-                                                        return {
-                                                                url: "",
-                                                                instructions: `Multi-account setup complete (${actualAccountCount} account(s)).`,
-                                                                method: "auto",
-                                                                callback: () => Promise.resolve(primary),
-                                                        };
-                                        },
+							let actualAccountCount = accounts.length;
+							try {
+								const finalStorage = await loadAccounts();
+								if (finalStorage) {
+									actualAccountCount = finalStorage.accounts.length;
+								}
+							} catch (err) {
+								logWarn(
+									`[${PLUGIN_NAME}] Failed to load final account count: ${(err as Error)?.message ?? String(err)}`,
+								);
+							}
+
+							return {
+								url: "",
+								instructions: `Multi-account setup complete (${actualAccountCount} account(s)).`,
+								method: "auto",
+								callback: () => Promise.resolve(primary),
+							};
+						},
 					},
+
 				{
 					label: AUTH_LABELS.OAUTH_MANUAL,
 					type: "oauth" as const,
@@ -1616,6 +1973,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         // Initialize storage path for manual OAuth flow
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
                                                         const manualPluginConfig = loadPluginConfig();
+							applyUiRuntimeFromConfig(manualPluginConfig);
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
                                                         if (manualPerProjectAccounts) {
                                                                 setStoragePath(process.cwd());
@@ -1647,10 +2005,20 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         "List all Codex OAuth accounts and the current active index.",
                                 args: {},
                                 async execute() {
+					const ui = resolveUiRuntime();
                                         const storage = await loadAccounts();
                                         const storePath = getStoragePath();
 
                                         if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Codex accounts"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+								formatUiKeyValue(ui, "Storage", storePath, "muted"),
+							].join("\n");
+						}
                                                 return [
                                                         "No Codex accounts configured.",
                                                         "",
@@ -1663,6 +2031,46 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					const now = Date.now();
 					const activeIndex = resolveActiveIndex(storage, "codex");
+					if (ui.v2Enabled) {
+						const lines: string[] = [
+							...formatUiHeader(ui, "Codex accounts"),
+							formatUiKeyValue(ui, "Total", String(storage.accounts.length)),
+							formatUiKeyValue(ui, "Storage", storePath, "muted"),
+							"",
+							...formatUiSection(ui, "Accounts"),
+						];
+
+						storage.accounts.forEach((account, index) => {
+							const label = formatAccountLabel(account, index);
+							const badges: string[] = [];
+							if (index === activeIndex) badges.push(formatUiBadge(ui, "current", "accent"));
+							if (account.enabled === false) badges.push(formatUiBadge(ui, "disabled", "danger"));
+							const rateLimit = formatRateLimitEntry(account, now);
+							if (rateLimit) badges.push(formatUiBadge(ui, "rate-limited", "warning"));
+							if (
+								typeof account.coolingDownUntil === "number" &&
+								account.coolingDownUntil > now
+							) {
+								badges.push(formatUiBadge(ui, "cooldown", "warning"));
+							}
+							if (badges.length === 0) {
+								badges.push(formatUiBadge(ui, "ok", "success"));
+							}
+
+							lines.push(formatUiItem(ui, `${index + 1}. ${label} ${badges.join(" ")}`.trim()));
+							if (rateLimit) {
+								lines.push(`  ${paintUiText(ui, `rate limit: ${rateLimit}`, "muted")}`);
+							}
+						});
+
+						lines.push("");
+						lines.push(...formatUiSection(ui, "Commands"));
+						lines.push(formatUiItem(ui, "Add account: opencode auth login", "accent"));
+						lines.push(formatUiItem(ui, "Switch account: codex-switch <index>"));
+						lines.push(formatUiItem(ui, "Detailed status: codex-status"));
+						lines.push(formatUiItem(ui, "Runtime metrics: codex-metrics"));
+						return lines.join("\n");
+					}
 					
 					const listTableOptions: TableOptions = {
 						columns: [
@@ -1718,8 +2126,17 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         ),
                                 },
                                 async execute({ index }) {
+					const ui = resolveUiRuntime();
                                         const storage = await loadAccounts();
                                         if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Switch account"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
                                                 return "No Codex accounts configured. Run: opencode auth login";
                                         }
 
@@ -1729,6 +2146,14 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                 targetIndex < 0 ||
                                                 targetIndex >= storage.accounts.length
                                         ) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Switch account"),
+								"",
+								formatUiItem(ui, `Invalid account number: ${index}`, "danger"),
+								formatUiKeyValue(ui, "Valid range", `1-${storage.accounts.length}`, "muted"),
+							].join("\n");
+						}
                                                 return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}`;
                                         }
 
@@ -1748,6 +2173,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 						await saveAccounts(storage);
 					} catch (saveError) {
 						logWarn("Failed to save account switch", { error: String(saveError) });
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Switch account"),
+								"",
+								formatUiItem(ui, `Switched to ${formatAccountLabel(account, targetIndex)}`, "warning"),
+								formatUiItem(ui, "Failed to persist change. It may be lost on restart.", "danger"),
+							].join("\n");
+						}
 						return `Switched to ${formatAccountLabel(account, targetIndex)} but failed to persist. Changes may be lost on restart.`;
 					}
 
@@ -1757,6 +2190,13 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         }
 
                                         const label = formatAccountLabel(account, targetIndex);
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Switch account"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Switched to ${label}`, "success"),
+						].join("\n");
+					}
                                         return `Switched to account: ${label}`;
                                 },
                         }),
@@ -1764,13 +2204,68 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Show detailed status of Codex accounts and rate limits.",
 				args: {},
 				async execute() {
+					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Account status"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
 						return "No Codex accounts configured. Run: opencode auth login";
 					}
 
 				const now = Date.now();
 				const activeIndex = resolveActiveIndex(storage, "codex");
+				if (ui.v2Enabled) {
+					const lines: string[] = [
+						...formatUiHeader(ui, "Account status"),
+						formatUiKeyValue(ui, "Total", String(storage.accounts.length)),
+						"",
+						...formatUiSection(ui, "Accounts"),
+					];
+
+					storage.accounts.forEach((account, index) => {
+						const label = formatAccountLabel(account, index);
+						const badges: string[] = [];
+						if (index === activeIndex) badges.push(formatUiBadge(ui, "active", "accent"));
+						if (account.enabled === false) badges.push(formatUiBadge(ui, "disabled", "danger"));
+						const rateLimit = formatRateLimitEntry(account, now) ?? "none";
+						const cooldown = formatCooldown(account, now) ?? "none";
+						if (rateLimit !== "none") badges.push(formatUiBadge(ui, "rate-limited", "warning"));
+						if (cooldown !== "none") badges.push(formatUiBadge(ui, "cooldown", "warning"));
+						if (badges.length === 0) badges.push(formatUiBadge(ui, "ok", "success"));
+
+						lines.push(formatUiItem(ui, `${index + 1}. ${label} ${badges.join(" ")}`.trim()));
+						lines.push(`  ${formatUiKeyValue(ui, "rate limit", rateLimit, rateLimit === "none" ? "muted" : "warning")}`);
+						lines.push(`  ${formatUiKeyValue(ui, "cooldown", cooldown, cooldown === "none" ? "muted" : "warning")}`);
+					});
+
+					lines.push("");
+					lines.push(...formatUiSection(ui, "Active index by model family"));
+					for (const family of MODEL_FAMILIES) {
+						const idx = storage.activeIndexByFamily?.[family];
+						const familyIndexLabel =
+							typeof idx === "number" && Number.isFinite(idx) ? String(idx + 1) : "-";
+						lines.push(formatUiItem(ui, `${family}: ${familyIndexLabel}`));
+					}
+
+					lines.push("");
+					lines.push(...formatUiSection(ui, "Rate limits by model family (per account)"));
+					storage.accounts.forEach((account, index) => {
+						const statuses = MODEL_FAMILIES.map((family) => {
+							const resetAt = getRateLimitResetTimeForFamily(account, now, family);
+							if (typeof resetAt !== "number") return `${family}=ok`;
+							return `${family}=${formatWaitTime(resetAt - now)}`;
+						});
+						lines.push(formatUiItem(ui, `Account ${index + 1}: ${statuses.join(" | ")}`));
+					});
+
+					return lines.join("\n");
+				}
 
 				const statusTableOptions: TableOptions = {
 					columns: [
@@ -1829,6 +2324,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Show runtime request metrics for this plugin process.",
 				args: {},
 				execute() {
+					const ui = resolveUiRuntime();
 					const now = Date.now();
 					const uptimeMs = Math.max(0, now - runtimeMetrics.startedAt);
 					const total = runtimeMetrics.totalRequests;
@@ -1865,6 +2361,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push(`Last error: ${runtimeMetrics.lastError}`);
 					}
 
+					if (ui.v2Enabled) {
+						const styled: string[] = [
+							...formatUiHeader(ui, "Codex plugin metrics"),
+							formatUiKeyValue(ui, "Uptime", formatWaitTime(uptimeMs)),
+							formatUiKeyValue(ui, "Total upstream requests", String(total)),
+							formatUiKeyValue(ui, "Successful responses", String(successful), "success"),
+							formatUiKeyValue(ui, "Failed responses", String(runtimeMetrics.failedRequests), "danger"),
+							formatUiKeyValue(ui, "Success rate", `${successRate}%`, "accent"),
+							formatUiKeyValue(ui, "Average successful latency", `${avgLatencyMs}ms`),
+							formatUiKeyValue(ui, "Rate-limited responses", String(runtimeMetrics.rateLimitedResponses), "warning"),
+							formatUiKeyValue(ui, "Server errors (5xx)", String(runtimeMetrics.serverErrors), "danger"),
+							formatUiKeyValue(ui, "Network errors", String(runtimeMetrics.networkErrors), "danger"),
+							formatUiKeyValue(ui, "Auth refresh failures", String(runtimeMetrics.authRefreshFailures), "warning"),
+							formatUiKeyValue(ui, "Account rotations", String(runtimeMetrics.accountRotations), "accent"),
+							formatUiKeyValue(ui, "Empty-response retries", String(runtimeMetrics.emptyResponseRetries), "warning"),
+							formatUiKeyValue(ui, "Last upstream request", lastRequest, "muted"),
+						];
+						if (runtimeMetrics.lastError) {
+							styled.push(formatUiKeyValue(ui, "Last error", runtimeMetrics.lastError, "danger"));
+						}
+						return Promise.resolve(styled.join("\n"));
+					}
+
 					return Promise.resolve(lines.join("\n"));
 				},
 			}),
@@ -1872,15 +2391,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Check health of all Codex accounts by validating refresh tokens.",
 				args: {},
 				async execute() {
+					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Health check"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
 						return "No Codex accounts configured. Run: opencode auth login";
 					}
 
-					const results: string[] = [
-						`Health Check (${storage.accounts.length} accounts):`,
-						"",
-					];
+					const results: string[] = ui.v2Enabled
+						? []
+						: [`Health Check (${storage.accounts.length} accounts):`, ""];
 
 					let healthyCount = 0;
 					let unhealthyCount = 0;
@@ -1893,21 +2420,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 						try {
 				const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
-								results.push(`  ✓ ${label}: Healthy`);
+								results.push(`  ${getStatusMarker(ui, "ok")} ${label}: Healthy`);
 								healthyCount++;
 							} else {
-								results.push(`  ✗ ${label}: Token refresh failed`);
+								results.push(`  ${getStatusMarker(ui, "error")} ${label}: Token refresh failed`);
 								unhealthyCount++;
 							}
 						} catch (error) {
 							const errorMsg = error instanceof Error ? error.message : String(error);
-							results.push(`  ✗ ${label}: Error - ${errorMsg.slice(0, 120)}`);
+							results.push(`  ${getStatusMarker(ui, "error")} ${label}: Error - ${errorMsg.slice(0, 120)}`);
 							unhealthyCount++;
 						}
 					}
 
 					results.push("");
 					results.push(`Summary: ${healthyCount} healthy, ${unhealthyCount} unhealthy`);
+
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Health check"),
+							"",
+							...results.map((line) => paintUiText(ui, line, "normal")),
+						].join("\n");
+					}
 
 					return results.join("\n");
 				},
@@ -1920,8 +2455,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 					),
 				},
 				async execute({ index }) {
+					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Remove account"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+							].join("\n");
+						}
 						return "No Codex accounts configured. Nothing to remove.";
 					}
 
@@ -1931,6 +2474,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 						targetIndex < 0 ||
 						targetIndex >= storage.accounts.length
 					) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Remove account"),
+								"",
+								formatUiItem(ui, `Invalid account number: ${index}`, "danger"),
+								formatUiKeyValue(ui, "Valid range", `1-${storage.accounts.length}`, "muted"),
+								formatUiItem(ui, "Use codex-list to list all accounts.", "accent"),
+							].join("\n");
+						}
 						return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}\n\nUse codex-list to list all accounts.`;
 					}
 
@@ -1971,6 +2523,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 					await saveAccounts(storage);
 				} catch (saveError) {
 					logWarn("Failed to save account removal", { error: String(saveError) });
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Remove account"),
+							"",
+							formatUiItem(ui, `Removed ${formatAccountLabel(account, targetIndex)} from memory`, "warning"),
+							formatUiItem(ui, "Failed to persist. Change may be lost on restart.", "danger"),
+						].join("\n");
+					}
 					return `Removed ${formatAccountLabel(account, targetIndex)} from memory but failed to persist. Changes may be lost on restart.`;
 				}
 
@@ -1986,6 +2546,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					const remaining = storage.accounts.length;
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Remove account"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Removed: ${label}`, "success"),
+							remaining > 0
+								? formatUiKeyValue(ui, "Remaining accounts", String(remaining))
+								: formatUiItem(ui, "No accounts remaining. Run: opencode auth login", "warning"),
+						].join("\n");
+					}
 					return [
 						`Removed: ${label}`,
 						"",
@@ -2000,15 +2570,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Manually refresh OAuth tokens for all accounts to verify they're still valid.",
 				args: {},
 				async execute() {
+					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Refresh accounts"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
 						return "No Codex accounts configured. Run: opencode auth login";
 					}
 
-					const results: string[] = [
-						`Refreshing ${storage.accounts.length} account(s):`,
-						"",
-					];
+					const results: string[] = ui.v2Enabled
+						? []
+						: [`Refreshing ${storage.accounts.length} account(s):`, ""];
 
 					let refreshedCount = 0;
 					let failedCount = 0;
@@ -2022,15 +2600,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
 								account.refreshToken = refreshResult.refresh;
-								results.push(`  ✓ ${label}: Refreshed`);
+								results.push(`  ${getStatusMarker(ui, "ok")} ${label}: Refreshed`);
 								refreshedCount++;
 							} else {
-								results.push(`  ✗ ${label}: Failed - ${refreshResult.message ?? refreshResult.reason}`);
+								results.push(`  ${getStatusMarker(ui, "error")} ${label}: Failed - ${refreshResult.message ?? refreshResult.reason}`);
 								failedCount++;
 							}
 						} catch (error) {
 							const errorMsg = error instanceof Error ? error.message : String(error);
-							results.push(`  ✗ ${label}: Error - ${errorMsg.slice(0, 120)}`);
+							results.push(`  ${getStatusMarker(ui, "error")} ${label}: Error - ${errorMsg.slice(0, 120)}`);
 							failedCount++;
 						}
 					}
@@ -2038,6 +2616,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 				await saveAccounts(storage);
 				results.push("");
 				results.push(`Summary: ${refreshedCount} refreshed, ${failedCount} failed`);
+				if (ui.v2Enabled) {
+					return [
+						...formatUiHeader(ui, "Refresh accounts"),
+						"",
+						...results.map((line) => paintUiText(ui, line, "normal")),
+					].join("\n");
+				}
 				return results.join("\n");
 			},
 		}),
@@ -2053,13 +2638,30 @@ while (attempted.size < Math.max(1, accountCount)) {
 				),
 			},
 			async execute({ path: filePath, force }) {
+				const ui = resolveUiRuntime();
 				try {
 					await exportAccounts(filePath, force ?? true);
 					const storage = await loadAccounts();
 					const count = storage?.accounts.length ?? 0;
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Export accounts"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Exported ${count} account(s)`, "success"),
+							formatUiKeyValue(ui, "Path", filePath, "muted"),
+						].join("\n");
+					}
 					return `Exported ${count} account(s) to: ${filePath}`;
 				} catch (error) {
 					const msg = error instanceof Error ? error.message : String(error);
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Export accounts"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "error")} Export failed`, "danger"),
+							formatUiKeyValue(ui, "Error", msg, "danger"),
+						].join("\n");
+					}
 					return `Export failed: ${msg}`;
 				}
 			},
@@ -2073,9 +2675,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 				),
 			},
 			async execute({ path: filePath }) {
+				const ui = resolveUiRuntime();
 				try {
 					const result = await importAccounts(filePath);
-					cachedAccountManager = null;
+					invalidateAccountManagerCache();
 					const lines = [`Import complete.`, ``];
 					if (result.imported > 0) {
 						lines.push(`New accounts: ${result.imported}`);
@@ -2084,9 +2687,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push(`Duplicates skipped: ${result.skipped}`);
 					}
 					lines.push(`Total accounts: ${result.total}`);
+					if (ui.v2Enabled) {
+						const styled = [
+							...formatUiHeader(ui, "Import accounts"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Import complete`, "success"),
+							formatUiKeyValue(ui, "Path", filePath, "muted"),
+							formatUiKeyValue(ui, "New accounts", String(result.imported), result.imported > 0 ? "success" : "muted"),
+							formatUiKeyValue(ui, "Duplicates skipped", String(result.skipped), result.skipped > 0 ? "warning" : "muted"),
+							formatUiKeyValue(ui, "Total accounts", String(result.total), "accent"),
+						];
+						return styled.join("\n");
+					}
 					return lines.join("\n");
 				} catch (error) {
 					const msg = error instanceof Error ? error.message : String(error);
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Import accounts"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "error")} Import failed`, "danger"),
+							formatUiKeyValue(ui, "Error", msg, "danger"),
+						].join("\n");
+					}
 					return `Import failed: ${msg}`;
 				}
 			},

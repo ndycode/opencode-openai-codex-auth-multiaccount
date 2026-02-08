@@ -58,7 +58,8 @@ vi.mock("../lib/auth/server.js", () => ({
 }));
 
 vi.mock("../lib/cli.js", () => ({
-	promptLoginMode: vi.fn(async () => "add"),
+	promptLoginMode: vi.fn(async () => ({ mode: "add" })),
+	promptAddAnotherAccount: vi.fn(async () => false),
 }));
 
 vi.mock("../lib/config.js", () => ({
@@ -81,6 +82,9 @@ vi.mock("../lib/config.js", () => ({
 	getPidOffsetEnabled: () => false,
 	getFetchTimeoutMs: () => 60000,
 	getStreamStallTimeoutMs: () => 45000,
+	getCodexTuiV2: () => false,
+	getCodexTuiColorProfile: () => "ansi16",
+	getCodexTuiGlyphMode: () => "ascii",
 	loadPluginConfig: () => ({}),
 }));
 
@@ -183,9 +187,13 @@ vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "/mock/path/accounts.json",
 	loadAccounts: vi.fn(async () => mockStorage),
 	saveAccounts: vi.fn(async () => {}),
+	clearAccounts: vi.fn(async () => {}),
 	setStoragePath: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
 	importAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
+	loadFlaggedAccounts: vi.fn(async () => ({ version: 1, accounts: [] })),
+	saveFlaggedAccounts: vi.fn(async () => {}),
+	clearFlaggedAccounts: vi.fn(async () => {}),
 	StorageError: class StorageError extends Error {
 		hint: string;
 		constructor(message: string, hint: string) {

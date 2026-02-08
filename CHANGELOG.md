@@ -2,6 +2,25 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [5.0.0] - 2026-02-08
+
+### breaking
+
+- **auth login interaction redesigned**: `opencode auth login` now defaults to the Codex-style dashboard flow (actions/accounts/danger zone) instead of the legacy add/fresh-only prompt.
+- **styled codex tool output default**: `codex-list`, `codex-status`, `codex-health`, `codex-switch`, `codex-remove`, `codex-refresh`, `codex-export`, and `codex-import` now default to the new Codex TUI formatting; scripts parsing legacy plain output should update or set `codexTuiV2: false`.
+
+### added
+
+- **codex tui runtime controls**: new config + env options for UI behavior: `codexTuiV2`, `codexTuiColorProfile`, `codexTuiGlyphMode`, `CODEX_TUI_V2`, `CODEX_TUI_COLOR_PROFILE`, and `CODEX_TUI_GLYPHS`.
+- **full account dashboard actions**: interactive login now supports add/check/deep-check/verify-flagged/start-fresh, plus account-level actions (enable/disable, refresh, delete).
+- **dedicated flagged storage**: introduced `openai-codex-flagged-accounts.json` with automatic migration from legacy `openai-codex-blocked-accounts.json`.
+- **ui architecture + coverage**: added shared terminal UI runtime/theme/format modules and parity documentation (`TUI_PARITY_CHECKLIST.md`) with focused tests.
+
+### fixed
+
+- **disabled account safety**: disabled accounts are now excluded from active/current selection and rotation paths.
+- **enabled-flag migration**: `enabled` account state now survives v1->v3 storage migration and persists reliably across save/load cycles.
+
 ## [4.14.2] - 2026-02-08
 
 ### changed
