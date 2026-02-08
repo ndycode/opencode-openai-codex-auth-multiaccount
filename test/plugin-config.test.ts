@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	loadPluginConfig,
 	getCodexMode,
+	getCodexTuiV2,
+	getCodexTuiColorProfile,
+	getCodexTuiGlyphMode,
 	getFastSession,
 	getFastSessionStrategy,
 	getFastSessionMaxInputItems,
@@ -41,6 +44,9 @@ describe('Plugin Configuration', () => {
 	const mockReadFileSync = vi.mocked(fs.readFileSync);
 	const envKeys = [
 		'CODEX_MODE',
+		'CODEX_TUI_V2',
+		'CODEX_TUI_COLOR_PROFILE',
+		'CODEX_TUI_GLYPHS',
 		'CODEX_AUTH_FAST_SESSION',
 		'CODEX_AUTH_FAST_SESSION_STRATEGY',
 		'CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS',
@@ -74,6 +80,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
+				codexTuiV2: true,
+				codexTuiColorProfile: 'truecolor',
+				codexTuiGlyphMode: 'ascii',
 				fastSession: false,
 				fastSessionStrategy: 'hybrid',
 				fastSessionMaxInputItems: 30,
@@ -108,6 +117,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: false,
+				codexTuiV2: true,
+				codexTuiColorProfile: 'truecolor',
+				codexTuiGlyphMode: 'ascii',
 				fastSession: false,
 				fastSessionStrategy: 'hybrid',
 				fastSessionMaxInputItems: 30,
@@ -139,6 +151,9 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
+				codexTuiV2: true,
+				codexTuiColorProfile: 'truecolor',
+				codexTuiGlyphMode: 'ascii',
 				fastSession: false,
 				fastSessionStrategy: 'hybrid',
 				fastSessionMaxInputItems: 30,
@@ -172,6 +187,9 @@ describe('Plugin Configuration', () => {
 
 	expect(config).toEqual({
 		codexMode: true,
+		codexTuiV2: true,
+		codexTuiColorProfile: 'truecolor',
+		codexTuiGlyphMode: 'ascii',
 		fastSession: false,
 		fastSessionStrategy: 'hybrid',
 		fastSessionMaxInputItems: 30,
@@ -208,6 +226,9 @@ describe('Plugin Configuration', () => {
 
 		expect(config).toEqual({
 			codexMode: true,
+			codexTuiV2: true,
+			codexTuiColorProfile: 'truecolor',
+			codexTuiGlyphMode: 'ascii',
 			fastSession: false,
 			fastSessionStrategy: 'hybrid',
 			fastSessionMaxInputItems: 30,
@@ -286,6 +307,71 @@ describe('Plugin Configuration', () => {
 			const result = getCodexMode(config);
 
 			expect(result).toBe(true);
+		});
+	});
+
+	describe('getCodexTuiV2', () => {
+		it('should default to true', () => {
+			delete process.env.CODEX_TUI_V2;
+			expect(getCodexTuiV2({})).toBe(true);
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_TUI_V2;
+			expect(getCodexTuiV2({ codexTuiV2: false })).toBe(false);
+		});
+
+		it('should prioritize env value over config', () => {
+			process.env.CODEX_TUI_V2 = '0';
+			expect(getCodexTuiV2({ codexTuiV2: true })).toBe(false);
+			process.env.CODEX_TUI_V2 = '1';
+			expect(getCodexTuiV2({ codexTuiV2: false })).toBe(true);
+		});
+	});
+
+	describe('getCodexTuiColorProfile', () => {
+		it('should default to truecolor', () => {
+			delete process.env.CODEX_TUI_COLOR_PROFILE;
+			expect(getCodexTuiColorProfile({})).toBe('truecolor');
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_TUI_COLOR_PROFILE;
+			expect(getCodexTuiColorProfile({ codexTuiColorProfile: 'ansi16' })).toBe('ansi16');
+		});
+
+		it('should prioritize valid env value over config', () => {
+			process.env.CODEX_TUI_COLOR_PROFILE = 'ansi256';
+			expect(getCodexTuiColorProfile({ codexTuiColorProfile: 'ansi16' })).toBe('ansi256');
+		});
+
+		it('should ignore invalid env value and fallback to config/default', () => {
+			process.env.CODEX_TUI_COLOR_PROFILE = 'invalid-profile';
+			expect(getCodexTuiColorProfile({ codexTuiColorProfile: 'ansi16' })).toBe('ansi16');
+			expect(getCodexTuiColorProfile({})).toBe('truecolor');
+		});
+	});
+
+	describe('getCodexTuiGlyphMode', () => {
+		it('should default to ascii', () => {
+			delete process.env.CODEX_TUI_GLYPHS;
+			expect(getCodexTuiGlyphMode({})).toBe('ascii');
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_TUI_GLYPHS;
+			expect(getCodexTuiGlyphMode({ codexTuiGlyphMode: 'unicode' })).toBe('unicode');
+		});
+
+		it('should prioritize valid env value over config', () => {
+			process.env.CODEX_TUI_GLYPHS = 'auto';
+			expect(getCodexTuiGlyphMode({ codexTuiGlyphMode: 'ascii' })).toBe('auto');
+		});
+
+		it('should ignore invalid env value and fallback to config/default', () => {
+			process.env.CODEX_TUI_GLYPHS = 'invalid';
+			expect(getCodexTuiGlyphMode({ codexTuiGlyphMode: 'unicode' })).toBe('unicode');
+			expect(getCodexTuiGlyphMode({})).toBe('ascii');
 		});
 	});
 

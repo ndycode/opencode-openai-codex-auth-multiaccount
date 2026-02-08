@@ -19,6 +19,19 @@ export type { CooldownReason, RateLimitStateV3, AccountMetadataV1, AccountStorag
 
 const log = createLogger("storage");
 const ACCOUNTS_FILE_NAME = "openai-codex-accounts.json";
+const FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-flagged-accounts.json";
+const LEGACY_FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-blocked-accounts.json";
+
+export interface FlaggedAccountMetadataV1 extends AccountMetadataV3 {
+	flaggedAt: number;
+	flaggedReason?: string;
+	lastError?: string;
+}
+
+export interface FlaggedAccountStorageV1 {
+	version: 1;
+	accounts: FlaggedAccountMetadataV1[];
+}
 
 /**
  * Custom error class for storage operations with platform-aware hints.
@@ -147,6 +160,14 @@ export function getStoragePath(): string {
     return currentStoragePath;
   }
   return join(getConfigDir(), ACCOUNTS_FILE_NAME);
+}
+
+export function getFlaggedAccountsPath(): string {
+	return join(dirname(getStoragePath()), FLAGGED_ACCOUNTS_FILE_NAME);
+}
+
+function getLegacyFlaggedAccountsPath(): string {
+	return join(dirname(getStoragePath()), LEGACY_FLAGGED_ACCOUNTS_FILE_NAME);
 }
 
 async function migrateLegacyProjectStorageIfNeeded(): Promise<AccountStorageV3 | null> {
@@ -560,6 +581,167 @@ export async function clearAccounts(): Promise<void> {
       }
     }
   });
+}
+
+function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
+	if (!isRecord(data) || data.version !== 1 || !Array.isArray(data.accounts)) {
+		return { version: 1, accounts: [] };
+	}
+
+	const byRefreshToken = new Map<string, FlaggedAccountMetadataV1>();
+	for (const rawAccount of data.accounts) {
+		if (!isRecord(rawAccount)) continue;
+		const refreshToken =
+			typeof rawAccount.refreshToken === "string" ? rawAccount.refreshToken.trim() : "";
+		if (!refreshToken) continue;
+
+		const flaggedAt = typeof rawAccount.flaggedAt === "number" ? rawAccount.flaggedAt : Date.now();
+		const isAccountIdSource = (
+			value: unknown,
+		): value is AccountMetadataV3["accountIdSource"] =>
+			value === "token" || value === "id_token" || value === "org" || value === "manual";
+		const isSwitchReason = (
+			value: unknown,
+		): value is AccountMetadataV3["lastSwitchReason"] =>
+			value === "rate-limit" || value === "initial" || value === "rotation";
+		const isCooldownReason = (
+			value: unknown,
+		): value is AccountMetadataV3["cooldownReason"] =>
+			value === "auth-failure" || value === "network-error";
+
+		let rateLimitResetTimes: AccountMetadataV3["rateLimitResetTimes"] | undefined;
+		if (isRecord(rawAccount.rateLimitResetTimes)) {
+			const normalizedRateLimits: Record<string, number | undefined> = {};
+			for (const [key, value] of Object.entries(rawAccount.rateLimitResetTimes)) {
+				if (typeof value === "number") {
+					normalizedRateLimits[key] = value;
+				}
+			}
+			if (Object.keys(normalizedRateLimits).length > 0) {
+				rateLimitResetTimes = normalizedRateLimits;
+			}
+		}
+
+		const accountIdSource = isAccountIdSource(rawAccount.accountIdSource)
+			? rawAccount.accountIdSource
+			: undefined;
+		const lastSwitchReason = isSwitchReason(rawAccount.lastSwitchReason)
+			? rawAccount.lastSwitchReason
+			: undefined;
+		const cooldownReason = isCooldownReason(rawAccount.cooldownReason)
+			? rawAccount.cooldownReason
+			: undefined;
+
+		const normalized: FlaggedAccountMetadataV1 = {
+			refreshToken,
+			addedAt: typeof rawAccount.addedAt === "number" ? rawAccount.addedAt : flaggedAt,
+			lastUsed: typeof rawAccount.lastUsed === "number" ? rawAccount.lastUsed : flaggedAt,
+			accountId: typeof rawAccount.accountId === "string" ? rawAccount.accountId : undefined,
+			accountIdSource,
+			accountLabel: typeof rawAccount.accountLabel === "string" ? rawAccount.accountLabel : undefined,
+			email: typeof rawAccount.email === "string" ? rawAccount.email : undefined,
+			enabled: typeof rawAccount.enabled === "boolean" ? rawAccount.enabled : undefined,
+			lastSwitchReason,
+			rateLimitResetTimes,
+			coolingDownUntil:
+				typeof rawAccount.coolingDownUntil === "number" ? rawAccount.coolingDownUntil : undefined,
+			cooldownReason,
+			flaggedAt,
+			flaggedReason: typeof rawAccount.flaggedReason === "string" ? rawAccount.flaggedReason : undefined,
+			lastError: typeof rawAccount.lastError === "string" ? rawAccount.lastError : undefined,
+		};
+		byRefreshToken.set(refreshToken, normalized);
+	}
+
+	return {
+		version: 1,
+		accounts: Array.from(byRefreshToken.values()),
+	};
+}
+
+export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+	const path = getFlaggedAccountsPath();
+	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
+
+	try {
+		const content = await fs.readFile(path, "utf-8");
+		const data = JSON.parse(content) as unknown;
+		return normalizeFlaggedStorage(data);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT") {
+			log.error("Failed to load flagged account storage", { path, error: String(error) });
+			return empty;
+		}
+	}
+
+	const legacyPath = getLegacyFlaggedAccountsPath();
+	if (!existsSync(legacyPath)) {
+		return empty;
+	}
+
+	try {
+		const legacyContent = await fs.readFile(legacyPath, "utf-8");
+		const legacyData = JSON.parse(legacyContent) as unknown;
+		const migrated = normalizeFlaggedStorage(legacyData);
+		if (migrated.accounts.length > 0) {
+			await saveFlaggedAccounts(migrated);
+		}
+		try {
+			await fs.unlink(legacyPath);
+		} catch {
+			// Best effort cleanup.
+		}
+		log.info("Migrated legacy flagged account storage", {
+			from: legacyPath,
+			to: path,
+			accounts: migrated.accounts.length,
+		});
+		return migrated;
+	} catch (error) {
+		log.error("Failed to migrate legacy flagged account storage", {
+			from: legacyPath,
+			to: path,
+			error: String(error),
+		});
+		return empty;
+	}
+}
+
+export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
+	return withStorageLock(async () => {
+		const path = getFlaggedAccountsPath();
+		const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+		const tempPath = `${path}.${uniqueSuffix}.tmp`;
+
+		try {
+			await fs.mkdir(dirname(path), { recursive: true });
+			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
+			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+			await fs.rename(tempPath, path);
+		} catch (error) {
+			try {
+				await fs.unlink(tempPath);
+			} catch {
+				// Ignore cleanup failures.
+			}
+			log.error("Failed to save flagged account storage", { path, error: String(error) });
+			throw error;
+		}
+	});
+}
+
+export async function clearFlaggedAccounts(): Promise<void> {
+	return withStorageLock(async () => {
+		try {
+			await fs.unlink(getFlaggedAccountsPath());
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT") {
+				log.error("Failed to clear flagged account storage", { error: String(error) });
+			}
+		}
+	});
 }
 
 /**

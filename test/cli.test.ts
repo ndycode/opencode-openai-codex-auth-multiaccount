@@ -111,7 +111,7 @@ describe("CLI Module", () => {
         { index: 0, email: "test@example.com" },
       ]);
       
-      expect(result).toBe("add");
+      expect(result).toEqual({ mode: "add" });
       expect(mockRl.close).toHaveBeenCalled();
     });
 
@@ -121,7 +121,7 @@ describe("CLI Module", () => {
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
       
-      expect(result).toBe("add");
+      expect(result).toEqual({ mode: "add" });
     });
 
     it("returns 'fresh' for 'f' input", async () => {
@@ -130,7 +130,7 @@ describe("CLI Module", () => {
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
       
-      expect(result).toBe("fresh");
+      expect(result).toEqual({ mode: "fresh", deleteAll: true });
     });
 
     it("returns 'fresh' for 'fresh' input", async () => {
@@ -139,7 +139,7 @@ describe("CLI Module", () => {
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
       
-      expect(result).toBe("fresh");
+      expect(result).toEqual({ mode: "fresh", deleteAll: true });
     });
 
     it("is case insensitive", async () => {
@@ -148,7 +148,7 @@ describe("CLI Module", () => {
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
       
-      expect(result).toBe("add");
+      expect(result).toEqual({ mode: "add" });
     });
 
     it("re-prompts on invalid input then accepts valid", async () => {
@@ -160,7 +160,7 @@ describe("CLI Module", () => {
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
       
-      expect(result).toBe("add");
+      expect(result).toEqual({ mode: "add" });
       expect(mockRl.question).toHaveBeenCalledTimes(3);
     });
 
@@ -424,7 +424,7 @@ describe("CLI Module", () => {
 		it("promptLoginMode returns add in non-interactive mode", async () => {
 			const { promptLoginMode } = await import("../lib/cli.js");
 			const result = await promptLoginMode([{ index: 0 }]);
-			expect(result).toBe("add");
+			expect(result).toEqual({ mode: "add" });
 		});
 
 		it("promptAccountSelection returns default in non-interactive mode", async () => {

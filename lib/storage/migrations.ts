@@ -18,6 +18,7 @@ export interface AccountMetadataV1 {
 	accountLabel?: string;
 	email?: string;
 	refreshToken: string;
+	enabled?: boolean;
 	addedAt: number;
 	lastUsed: number;
 	lastSwitchReason?: "rate-limit" | "initial" | "rotation";
@@ -38,6 +39,7 @@ export interface AccountMetadataV3 {
 	accountLabel?: string;
 	email?: string;
 	refreshToken: string;
+	enabled?: boolean;
 	addedAt: number;
 	lastUsed: number;
 	lastSwitchReason?: "rate-limit" | "initial" | "rotation";
@@ -74,6 +76,7 @@ export function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
 				accountLabel: account.accountLabel,
 				email: account.email,
 				refreshToken: account.refreshToken,
+				enabled: account.enabled,
 				addedAt: account.addedAt,
 				lastUsed: account.lastUsed,
 				lastSwitchReason: account.lastSwitchReason,

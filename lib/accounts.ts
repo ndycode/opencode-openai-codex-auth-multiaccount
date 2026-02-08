@@ -66,6 +66,7 @@ export interface ManagedAccount {
 	accountLabel?: string;
 	email?: string;
 	refreshToken: string;
+	enabled?: boolean;
 	access?: string;
 	expires?: number;
 	addedAt: number;
@@ -138,6 +139,7 @@ export class AccountManager {
 							? sanitizeEmail(fallbackAccountEmail) ?? sanitizeEmail(account.email)
 							: sanitizeEmail(account.email),
 						refreshToken,
+						enabled: account.enabled !== false,
 						access: matchesFallback && authFallback ? authFallback.access : undefined,
 						expires: matchesFallback && authFallback ? authFallback.expires : undefined,
 						addedAt: clampNonNegativeInt(account.addedAt, baseNow),
@@ -166,6 +168,7 @@ export class AccountManager {
 					accountIdSource: fallbackAccountId ? "token" : undefined,
 					email: sanitizeEmail(fallbackAccountEmail),
 					refreshToken: authFallback.refresh,
+					enabled: true,
 					access: authFallback.access,
 					expires: authFallback.expires,
 					addedAt: now,
@@ -197,6 +200,7 @@ export class AccountManager {
 					accountIdSource: fallbackAccountId ? "token" : undefined,
 					email: sanitizeEmail(fallbackAccountEmail),
 					refreshToken: authFallback.refresh,
+					enabled: true,
 					access: authFallback.access,
 					expires: authFallback.expires,
 					addedAt: now,
@@ -240,6 +244,7 @@ export class AccountManager {
 		if (index < 0 || index >= this.accounts.length) return null;
 		const account = this.accounts[index];
 		if (!account) return null;
+		if (account.enabled === false) return null;
 
 		for (const family of MODEL_FAMILIES) {
 			this.currentAccountIndexByFamily[family] = index;
@@ -260,7 +265,11 @@ export class AccountManager {
 		if (index < 0 || index >= this.accounts.length) {
 			return null;
 		}
-		return this.accounts[index] ?? null;
+		const account = this.accounts[index];
+		if (!account || account.enabled === false) {
+			return null;
+		}
+		return account;
 	}
 
 	getCurrentOrNext(): ManagedAccount | null {
@@ -277,6 +286,7 @@ export class AccountManager {
 			const idx = (cursor + i) % count;
 			const account = this.accounts[idx];
 			if (!account) continue;
+			if (account.enabled === false) continue;
 			
 			clearExpiredRateLimits(account);
 			if (isRateLimitedForFamily(account, family, model) || this.isAccountCoolingDown(account)) {
@@ -302,6 +312,7 @@ export class AccountManager {
 			const idx = (cursor + i) % count;
 			const account = this.accounts[idx];
 			if (!account) continue;
+			if (account.enabled === false) continue;
 			
 			clearExpiredRateLimits(account);
 			if (isRateLimitedForFamily(account, family, model) || this.isAccountCoolingDown(account)) {
@@ -324,6 +335,9 @@ export class AccountManager {
 		if (currentIndex >= 0 && currentIndex < count) {
 			const currentAccount = this.accounts[currentIndex];
 			if (currentAccount) {
+				if (currentAccount.enabled === false) {
+					// Fall through to hybrid selection.
+				} else {
 				clearExpiredRateLimits(currentAccount);
 				if (
 					!isRateLimitedForFamily(currentAccount, family, model) &&
@@ -331,6 +345,7 @@ export class AccountManager {
 				) {
 					currentAccount.lastUsed = nowMs();
 					return currentAccount;
+				}
 				}
 			}
 		}
@@ -342,6 +357,7 @@ export class AccountManager {
 		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
 			.map((account): AccountWithMetrics | null => {
 				if (!account) return null;
+				if (account.enabled === false) return null;
 				clearExpiredRateLimits(account);
 				const isAvailable =
 					!isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
@@ -504,17 +520,19 @@ export class AccountManager {
 
 	getMinWaitTimeForFamily(family: ModelFamily, model?: string | null): number {
 		const now = nowMs();
-		const available = this.accounts.filter((account) => {
+		const enabledAccounts = this.accounts.filter((account) => account.enabled !== false);
+		const available = enabledAccounts.filter((account) => {
 			clearExpiredRateLimits(account);
 			return !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
 		});
 		if (available.length > 0) return 0;
+		if (enabledAccounts.length === 0) return 0;
 
 		const waitTimes: number[] = [];
 		const baseKey = getQuotaKey(family);
 		const modelKey = model ? getQuotaKey(family, model) : null;
 
-		for (const account of this.accounts) {
+		for (const account of enabledAccounts) {
 			const baseResetAt = account.rateLimitResetTimes[baseKey];
 			if (typeof baseResetAt === "number") {
 				waitTimes.push(Math.max(0, baseResetAt - now));
@@ -575,6 +593,23 @@ export class AccountManager {
 		return true;
 	}
 
+	removeAccountByIndex(index: number): boolean {
+		if (!Number.isFinite(index)) return false;
+		if (index < 0 || index >= this.accounts.length) return false;
+		const account = this.accounts[index];
+		if (!account) return false;
+		return this.removeAccount(account);
+	}
+
+	setAccountEnabled(index: number, enabled: boolean): ManagedAccount | null {
+		if (!Number.isFinite(index)) return null;
+		if (index < 0 || index >= this.accounts.length) return null;
+		const account = this.accounts[index];
+		if (!account) return null;
+		account.enabled = enabled;
+		return account;
+	}
+
 	async saveToDisk(): Promise<void> {
 		const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
 		for (const family of MODEL_FAMILIES) {
@@ -592,6 +627,7 @@ export class AccountManager {
 				accountLabel: account.accountLabel,
 				email: account.email,
 				refreshToken: account.refreshToken,
+				enabled: account.enabled === false ? false : undefined,
 				addedAt: account.addedAt,
 				lastUsed: account.lastUsed,
 				lastSwitchReason: account.lastSwitchReason,
