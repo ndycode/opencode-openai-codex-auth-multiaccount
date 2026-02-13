@@ -8,6 +8,9 @@ import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
 const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
+const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
+
+export type UnsupportedCodexPolicy = "strict" | "fallback";
 
 /**
  * Default plugin configuration
@@ -24,7 +27,10 @@ const DEFAULT_CONFIG: PluginConfig = {
 	retryAllAccountsRateLimited: true,
 	retryAllAccountsMaxWaitMs: 0,
 	retryAllAccountsMaxRetries: Infinity,
+	unsupportedCodexPolicy: "strict",
+	fallbackOnUnsupportedCodexModel: false,
 	fallbackToGpt52OnUnsupportedGpt53: true,
+	unsupportedCodexFallbackChain: {},
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
 	toastDurationMs: 5_000,
@@ -53,7 +59,24 @@ export function loadPluginConfig(): PluginConfig {
 		}
 
 		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
-		const userConfig = JSON.parse(fileContent) as unknown;
+		const normalizedFileContent = stripUtf8Bom(fileContent);
+		const userConfig = JSON.parse(normalizedFileContent) as unknown;
+		const hasFallbackEnvOverride =
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL !== undefined ||
+			process.env.CODEX_AUTH_FALLBACK_GPT53_TO_GPT52 !== undefined;
+		if (isRecord(userConfig)) {
+			const hasPolicyKey = Object.hasOwn(userConfig, "unsupportedCodexPolicy");
+			const hasLegacyFallbackKey =
+				Object.hasOwn(userConfig, "fallbackOnUnsupportedCodexModel") ||
+				Object.hasOwn(userConfig, "fallbackToGpt52OnUnsupportedGpt53") ||
+				Object.hasOwn(userConfig, "unsupportedCodexFallbackChain");
+			if (!hasPolicyKey && (hasLegacyFallbackKey || hasFallbackEnvOverride)) {
+				logWarn(
+					"Legacy unsupported-model fallback settings detected without unsupportedCodexPolicy. " +
+						'Using backward-compat behavior; prefer unsupportedCodexPolicy: "strict" | "fallback".',
+				);
+			}
+		}
 
 		const schemaErrors = getValidationErrors(PluginConfigSchema, userConfig);
 		if (schemaErrors.length > 0) {
@@ -70,6 +93,14 @@ export function loadPluginConfig(): PluginConfig {
 		);
 		return DEFAULT_CONFIG;
 	}
+}
+
+function stripUtf8Bom(content: string): string {
+	return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object";
 }
 
 /**
@@ -219,12 +250,83 @@ export function getRetryAllAccountsMaxRetries(pluginConfig: PluginConfig): numbe
 	);
 }
 
+export function getUnsupportedCodexPolicy(
+	pluginConfig: PluginConfig,
+): UnsupportedCodexPolicy {
+	const envPolicy = parseStringEnv(process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY);
+	if (envPolicy && UNSUPPORTED_CODEX_POLICIES.has(envPolicy)) {
+		return envPolicy as UnsupportedCodexPolicy;
+	}
+
+	const configPolicy =
+		typeof pluginConfig.unsupportedCodexPolicy === "string"
+			? pluginConfig.unsupportedCodexPolicy.toLowerCase()
+			: undefined;
+	if (configPolicy && UNSUPPORTED_CODEX_POLICIES.has(configPolicy)) {
+		return configPolicy as UnsupportedCodexPolicy;
+	}
+
+	const legacyEnvFallback = parseBooleanEnv(
+		process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL,
+	);
+	if (legacyEnvFallback !== undefined) {
+		return legacyEnvFallback ? "fallback" : "strict";
+	}
+
+	if (typeof pluginConfig.fallbackOnUnsupportedCodexModel === "boolean") {
+		return pluginConfig.fallbackOnUnsupportedCodexModel
+			? "fallback"
+			: "strict";
+	}
+
+	return "strict";
+}
+
+export function getFallbackOnUnsupportedCodexModel(pluginConfig: PluginConfig): boolean {
+	return getUnsupportedCodexPolicy(pluginConfig) === "fallback";
+}
+
 export function getFallbackToGpt52OnUnsupportedGpt53(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting(
 		"CODEX_AUTH_FALLBACK_GPT53_TO_GPT52",
 		pluginConfig.fallbackToGpt52OnUnsupportedGpt53,
 		true,
 	);
+}
+
+export function getUnsupportedCodexFallbackChain(
+	pluginConfig: PluginConfig,
+): Record<string, string[]> {
+	const chain = pluginConfig.unsupportedCodexFallbackChain;
+	if (!chain || typeof chain !== "object") {
+		return {};
+	}
+
+	const normalizeModel = (value: string): string => {
+		const trimmed = value.trim().toLowerCase();
+		if (!trimmed) return "";
+		const stripped = trimmed.includes("/")
+			? (trimmed.split("/").pop() ?? trimmed)
+			: trimmed;
+		return stripped.replace(/-(none|minimal|low|medium|high|xhigh)$/i, "");
+	};
+
+	const normalized: Record<string, string[]> = {};
+	for (const [key, value] of Object.entries(chain)) {
+		if (typeof key !== "string" || !Array.isArray(value)) continue;
+		const normalizedKey = normalizeModel(key);
+		if (!normalizedKey) continue;
+
+		const targets = value
+			.map((target) => (typeof target === "string" ? normalizeModel(target) : ""))
+			.filter((target) => target.length > 0);
+
+		if (targets.length > 0) {
+			normalized[normalizedKey] = targets;
+		}
+	}
+
+	return normalized;
 }
 
 export function getTokenRefreshSkewMs(pluginConfig: PluginConfig): number {

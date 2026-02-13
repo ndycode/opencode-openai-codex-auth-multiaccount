@@ -24,6 +24,7 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 	refreshAndUpdateToken: async (auth: any) => auth,
 	createCodexHeaders: () => new Headers(),
 	handleErrorResponse: async (response: Response) => ({ response }),
+	resolveUnsupportedCodexFallbackModel: () => undefined,
 	shouldFallbackToGpt52OnUnsupportedGpt53: () => false,
 	handleSuccessResponse: async (response: Response) => response,
 }));

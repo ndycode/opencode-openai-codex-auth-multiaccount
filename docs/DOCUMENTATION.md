@@ -1,81 +1,42 @@
 # Documentation Structure
 
-This document explains the organization of documentation in this repository.
+This file describes how docs are organized in this repository.
 
-## Structure Overview
+## Repository-level docs
 
+- `README.md` - Main entry point for users
+- `CHANGELOG.md` - Release history
+- `CONTRIBUTING.md` - Contribution workflow
+- `SECURITY.md` - Security reporting policy
+- `AGENTS.md` - AI agent instructions for this codebase
+
+## docs/ (site + user/developer guides)
+
+```text
+docs/
+  index.md                     # documentation landing page
+  README.md                    # docs portal / navigation
+  getting-started.md           # install + first-run guide
+  configuration.md             # full config reference
+  troubleshooting.md           # operational debugging guide
+  privacy.md                   # data handling notes
+  development/
+    ARCHITECTURE.md            # technical design
+    CONFIG_FLOW.md             # config resolution internals
+    CONFIG_FIELDS.md           # config field semantics
+    TESTING.md                 # testing strategy and commands
+    TUI_PARITY_CHECKLIST.md    # auth dashboard UI parity checks
 ```
-├── README.md                      # Main entry point (users)
-├── CHANGELOG.md                   # Release history
-├── AGENTS.md                      # AI agent guidance
-├── docs/
-│   ├── index.md                   # GitHub Pages home
-│   ├── README.md                  # Documentation portal
-│   ├── _config.yml                # GitHub Pages config
-│   └── development/               # Developer documentation
-│       ├── ARCHITECTURE.md        # Technical design
-│       ├── CONFIG_FLOW.md         # Config system internals
-│       ├── CONFIG_FIELDS.md       # Config field reference
-│       └── TESTING.md             # Test procedures
-├── config/
-│   ├── README.md                  # Example configs guide
-│   ├── opencode-legacy.json       # Legacy full config example (v1.0.209 and below)
-│   ├── opencode-modern.json       # Variant config example (v1.0.210+)
-│   └── minimal-opencode.json      # Minimal config example
-└── tmp/release-notes/             # Detailed release artifacts
-    ├── CHANGES.md                 # Detailed v2.1.2 changes
-    ├── BUGS_FIXED.md              # Bug analysis
-    ├── IMPLEMENTATION_SUMMARY.md  # Implementation details
-    └── VERIFICATION.md            # Verification matrix
-```
 
-## Document Purposes
+## config/ (copy-paste templates)
 
-### Top Level (Users)
-- **README.md** - Quick start, configuration basics, common usage
-- **CHANGELOG.md** - Version history, what's new
-- **AGENTS.md** - Guidance for AI coding agents
+- `config/opencode-modern.json` - OpenCode v1.0.210+ variant-based template
+- `config/opencode-legacy.json` - OpenCode v1.0.209 and below template
+- `config/minimal-opencode.json` - minimal debug template
+- `config/README.md` - template-selection guide
 
-### docs/ (GitHub Pages)
-- **index.md** - Landing page with quick links to user and dev docs
-- **README.md** - Documentation portal overview
-- **development/** - Technical deep dives for developers
+## Notes
 
-### tmp/release-notes/ (Release Artifacts)
-- Detailed bug analysis and implementation notes
-- Used for preparing release announcements
-- Not part of main documentation (too detailed for users)
-
-##  GitHub Pages
-
-Enable GitHub Pages in repository settings:
-- **Source**: `main` branch, `/docs` folder
-- **URL**: `https://your-username.github.io/opencode-codex-plugin/`
-
-The site automatically serves:
-- `docs/index.md` as homepage
-- All docs in `docs/` directory
-- Development docs prominently featured
-
-## For Users
-
-Start with **[README.md](../README.md)** for:
-- Installation steps
-- Basic configuration
-- Quick examples
-- Troubleshooting
-
-## For Developers
-
-Start with **[docs/development/ARCHITECTURE.md](development/ARCHITECTURE.md)** for:
-- Technical design decisions
-- Request transformation pipeline
-- AI SDK compatibility layer
-- Testing methodology
-
-## Contributing
-
-See development docs for:
-- Code architecture
-- Testing procedures
-- Configuration system internals
+- `dist/` is build output and not a documentation source of truth.
+- `tmp*` files are release scratch artifacts and not part of user docs.
+- For user-facing guidance, start with `README.md` or `docs/getting-started.md`.

@@ -1,110 +1,84 @@
 # Configuration
 
-This directory contains the official opencode configuration files for the OpenAI Codex OAuth plugin.
+This directory contains the official OpenCode config templates for the ChatGPT Codex OAuth plugin.
 
-## ⚠️ REQUIRED: Choose the Right Configuration
+## Required: choose the right config file
 
-**Two configuration files are available based on your OpenCode version:**
-
-| File | OpenCode Version | Description |
+| File | OpenCode version | Description |
 |------|------------------|-------------|
-| [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+ (Jan 2026+)** | Compact config using variants system - 6 models with built-in reasoning level variants |
-| [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Extended config with separate model entries for each reasoning level - 20+ individual model definitions |
+| [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+** | Variant-based config: 6 base models with 22 total presets |
+| [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Legacy explicit entries: 22 individual model definitions |
 
-### Which one should I use?
+## Quick pick
 
-**If you have OpenCode v1.0.210 or newer** (check with `opencode --version`):
+If your OpenCode version is v1.0.210 or newer:
+
 ```bash
 cp config/opencode-modern.json ~/.config/opencode/opencode.json
 ```
 
-**If you have OpenCode v1.0.209 or older**:
+If your OpenCode version is v1.0.209 or older:
+
 ```bash
 cp config/opencode-legacy.json ~/.config/opencode/opencode.json
 ```
 
-### Why two configs?
+Check your version with:
 
-OpenCode v1.0.210+ introduced a **variants system** that allows defining reasoning effort levels as variants under a single model. This reduces config size from 572 lines to ~150 lines while maintaining the same functionality.
+```bash
+opencode --version
+```
 
-**What you get:**
+## Why there are two templates
 
-| Config File | Model Families | Reasoning Variants | Total Models |
-|------------|----------------|-------------------|--------------|
-| `opencode-modern.json` | 6 | Built-in variants (low/medium/high/xhigh) | 6 base models with 22 total variants |
-| `opencode-legacy.json` | 6 | Separate model entries | 22 individual model definitions |
+OpenCode v1.0.210+ added model `variants`, so one model entry can expose multiple reasoning levels. That keeps modern config much smaller while preserving the same effective presets.
 
-Both configs provide:
-- ✅ All supported GPT 5.3/5.2/5.1 variants: gpt-5.2, gpt-5.3-codex, gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini
-- ✅ Proper reasoning effort settings for each variant (including `xhigh` for Codex Max/5.2)
-- ✅ Context limits (272k context / 128k output for all Codex families)
-- ✅ Required options: `store: false`, `include: ["reasoning.encrypted_content"]`
-- ✅ Image input support for all models
-- ✅ All required metadata for OpenCode features
+Both templates include:
+- GPT-5.2, GPT-5.3 Codex, GPT-5.1, GPT-5.1 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex Mini
+- Reasoning variants per model family
+- `store: false` and `include: ["reasoning.encrypted_content"]`
+- Context metadata (272k context / 128k output)
 
-### Modern Config Benefits (v1.0.210+)
+## Spark model note
 
-- **74% smaller**: 150 lines vs 572 lines
-- **DRY**: Common options defined once at provider level
-- **Variant cycling**: Built-in support for `Ctrl+T` to switch reasoning levels
-- **Easier maintenance**: Add new variants without copying model definitions
+The templates intentionally do **not** include `gpt-5.3-codex-spark` by default. Spark is often entitlement-gated at the account/workspace level, so shipping it by default causes avoidable startup failures for many users.
 
-## Usage
+If your workspace is entitled, you can add Spark model IDs manually.
 
-1. **Check your OpenCode version**:
-   ```bash
-   opencode --version
-   ```
+## Usage examples
 
-2. **Copy the appropriate config** based on your version:
-   ```bash
-   # For v1.0.210+ (recommended):
-   cp config/opencode-modern.json ~/.config/opencode/opencode.json
+Modern template (v1.0.210+):
 
-   # For older versions:
-   cp config/opencode-legacy.json ~/.config/opencode/opencode.json
-   ```
+```bash
+opencode run "task" --model=openai/gpt-5.2 --variant=medium
+opencode run "task" --model=openai/gpt-5.3-codex --variant=high
+```
 
-3. **Run opencode**:
-   ```bash
-   # Modern config (v1.0.210+):
-   opencode run "task" --model=openai/gpt-5.2 --variant=medium
-   opencode run "task" --model=openai/gpt-5.2 --variant=high
+Legacy template (v1.0.209 and below):
 
-   # Legacy config:
-   opencode run "task" --model=openai/gpt-5.2-medium
-   opencode run "task" --model=openai/gpt-5.2-high
-   ```
+```bash
+opencode run "task" --model=openai/gpt-5.2-medium
+opencode run "task" --model=openai/gpt-5.3-codex-high
+```
 
-> **⚠️ Important**: Use the config file appropriate for your OpenCode version. Using the modern config with an older OpenCode version (v1.0.209 or below) will not work correctly.
+## Minimal config (advanced)
 
-> **Note**: The config templates use an **unversioned** plugin entry (`oc-chatgpt-multi-auth`) so the installer can always pull the latest release. If you need reproducibility, pin a specific version manually.
+A barebones debug template is available at [`minimal-opencode.json`](./minimal-opencode.json). It omits the full preset catalog.
 
-### Minimal config (advanced)
+## Unsupported-model behavior
 
-A barebones example is available at [`minimal-opencode.json`](./minimal-opencode.json). It’s intended for debugging and does not include the full GPT‑5.x/Codex preset/variant definitions.
+Current defaults are strict entitlement handling:
+- `unsupportedCodexPolicy: "strict"` returns entitlement errors directly
+- set `unsupportedCodexPolicy: "fallback"` (or `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback`) to enable automatic fallback retries
+- `fallbackToGpt52OnUnsupportedGpt53: true` keeps the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge inside fallback mode
+- `unsupportedCodexFallbackChain` lets you override fallback order per model
 
-For normal usage, prefer `opencode-modern.json` (v1.0.210+) or `opencode-legacy.json` (v1.0.209 and below).
+Default fallback chain (when policy is `fallback`):
+- `gpt-5.3-codex -> gpt-5.2-codex`
+- `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (only relevant if Spark IDs are added manually)
 
-## Available Models
+## Additional docs
 
-
-Both configs provide access to the same model families:
-
-- **gpt-5.2** (none/low/medium/high/xhigh) - Latest GPT 5.2 model with full reasoning support
-- **gpt-5.3-codex** (low/medium/high/xhigh) - Latest GPT 5.3 Codex presets
-- **gpt-5.1-codex-max** (low/medium/high/xhigh) - Codex Max presets
-- **gpt-5.1-codex** (low/medium/high) - Codex model presets
-- **gpt-5.1-codex-mini** (medium/high) - Codex mini tier presets
-- **gpt-5.1** (none/low/medium/high) - General-purpose reasoning presets
-
-All appear in the opencode model selector as "GPT 5.1 Codex Low (OAuth)", "GPT 5.1 High (OAuth)", etc.
-
-## Configuration Options
-
-See the main [README.md](../README.md#configuration) for detailed documentation of all configuration options.
-
-## Version History
-
-- **January 2026 (v1.0.210+)**: Introduced variant system support. Use `opencode-modern.json`
-- **December 2025 and earlier**: Use `opencode-legacy.json`
+- Main config reference: [`docs/configuration.md`](../docs/configuration.md)
+- Getting started: [`docs/getting-started.md`](../docs/getting-started.md)
+- Troubleshooting: [`docs/troubleshooting.md`](../docs/troubleshooting.md)

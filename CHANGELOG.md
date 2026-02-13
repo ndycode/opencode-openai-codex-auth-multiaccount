@@ -2,6 +2,23 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
+## [unreleased]
+
+## [5.2.0] - 2026-02-13
+
+### added
+
+- **gpt-5.3-codex-spark normalization + routing**: added internal model mapping/family support for `gpt-5.3-codex-spark` and Spark reasoning variants.
+- **generic unsupported-model fallback engine**: entitlement rejections now support configurable per-model fallback chains via `fallbackOnUnsupportedCodexModel` and `unsupportedCodexFallbackChain`.
+
+### changed
+
+- **unsupported-model policy defaults**: introduced `unsupportedCodexPolicy` (`strict`/`fallback`) with strict mode as default; legacy `fallbackOnUnsupportedCodexModel` now maps to policy behavior.
+- **entitlement handling flow**: on unsupported-model errors, plugin now tries remaining accounts/workspaces before model fallback, improving Spark entitlement discovery across multi-account setups.
+- **fast-session reasoning summary**: fast mode now uses `reasoning.summary = "auto"` (invalid/legacy summary values sanitize to `auto`).
+- **legacy fallback compatibility**: `fallbackToGpt52OnUnsupportedGpt53` / `CODEX_AUTH_FALLBACK_GPT53_TO_GPT52` now act as a legacy edge toggle inside the generic fallback flow.
+- **documentation refresh**: README, configuration, getting-started, troubleshooting, and config template docs now describe strict/fallback controls, Spark entitlement gating, and optional manual Spark template additions.
+
 ## [5.1.1] - 2026-02-08
 
 ### fixed

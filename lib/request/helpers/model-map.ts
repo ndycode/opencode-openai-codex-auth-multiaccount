@@ -13,6 +13,15 @@
  */
 export const MODEL_MAP: Record<string, string> = {
 	// ============================================================================
+	// GPT-5.3 Codex Spark Models (low/medium/high/xhigh)
+	// ============================================================================
+	"gpt-5.3-codex-spark": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-low": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-medium": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-high": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-xhigh": "gpt-5.3-codex-spark",
+
+	// ============================================================================
 	// GPT-5.3 Codex Models (low/medium/high/xhigh)
 	// ============================================================================
 	"gpt-5.3-codex": "gpt-5.3-codex",

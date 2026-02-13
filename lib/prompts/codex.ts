@@ -45,6 +45,7 @@ function setCacheEntry(key: string, value: { content: string; timestamp: number 
  * Maps to different system prompts in the Codex CLI
  */
 export type ModelFamily =
+	| "gpt-5.3-codex-spark"
 	| "gpt-5.3-codex"
 	| "gpt-5.2-codex"
 	| "codex-max"
@@ -57,6 +58,7 @@ export type ModelFamily =
  * Used for per-family account rotation and rate limit tracking
  */
 export const MODEL_FAMILIES: readonly ModelFamily[] = [
+	"gpt-5.3-codex-spark",
 	"gpt-5.3-codex",
 	"gpt-5.2-codex",
 	"codex-max",
@@ -70,6 +72,8 @@ export const MODEL_FAMILIES: readonly ModelFamily[] = [
  * Based on codex-rs/core/src/model_family.rs logic
  */
 const PROMPT_FILES: Record<ModelFamily, string> = {
+	// Upstream Spark currently shares the 5.2 codex prompt file.
+	"gpt-5.3-codex-spark": "gpt-5.2-codex_prompt.md",
 	// Upstream currently shares the 5.2 codex prompt file for 5.3 codex.
 	"gpt-5.3-codex": "gpt-5.2-codex_prompt.md",
 	"gpt-5.2-codex": "gpt-5.2-codex_prompt.md",
@@ -83,6 +87,7 @@ const PROMPT_FILES: Record<ModelFamily, string> = {
  * Cache file mapping for each model family
  */
 const CACHE_FILES: Record<ModelFamily, string> = {
+	"gpt-5.3-codex-spark": "gpt-5.3-codex-spark-instructions.md",
 	"gpt-5.3-codex": "gpt-5.3-codex-instructions.md",
 	"gpt-5.2-codex": "gpt-5.2-codex-instructions.md",
 	"codex-max": "codex-max-instructions.md",
@@ -97,6 +102,12 @@ const CACHE_FILES: Record<ModelFamily, string> = {
  * @returns The model family for prompt selection
  */
 export function getModelFamily(normalizedModel: string): ModelFamily {
+	if (
+		normalizedModel.includes("gpt-5.3-codex-spark") ||
+		normalizedModel.includes("gpt 5.3 codex spark")
+	) {
+		return "gpt-5.3-codex-spark";
+	}
 	if (
 		normalizedModel.includes("gpt-5.3-codex") ||
 		normalizedModel.includes("gpt 5.3 codex")

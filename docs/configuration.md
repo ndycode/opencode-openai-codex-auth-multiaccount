@@ -36,18 +36,21 @@ controls how much thinking the model does.
 |-------|------------------|
 | `gpt-5.2` | none, low, medium, high, xhigh |
 | `gpt-5.3-codex` | low, medium, high, xhigh (default: xhigh) |
+| `gpt-5.3-codex-spark` | low, medium, high, xhigh (entitlement-gated; add manually) |
 | `gpt-5.2-codex` | low, medium, high, xhigh (default: xhigh) |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh |
 | `gpt-5.1-codex` | low, medium, high |
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
+the shipped config templates include 22 presets and do not add Spark by default. add `gpt-5.3-codex-spark` manually only for entitled workspaces.
+
 what they mean:
 - `none` - no reasoning phase (base models only, auto-converts to `low` for codex)
 - `low` - light reasoning, fastest
 - `medium` - balanced (default)
 - `high` - deep reasoning
-- `xhigh` - max depth for complex tasks (downgrades to `high` on unsupported models)
+- `xhigh` - max depth for complex tasks (default for codex families)
 
 ### reasoningSummary
 
@@ -56,8 +59,8 @@ what they mean:
 | `auto` | adapts automatically (default) |
 | `concise` | short summaries |
 | `detailed` | verbose summaries |
-| `off` | disable (codex max only) |
-| `on` | force enable (codex max only) |
+
+legacy `off`/`on` values are accepted from old configs but normalized to `auto` at request time.
 
 ### textVerbosity
 
@@ -101,8 +104,12 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "toastDurationMs": 5000,
   "retryAllAccountsRateLimited": true,
   "retryAllAccountsMaxWaitMs": 0,
-  "retryAllAccountsMaxRetries": null,
-  "fallbackToGpt52OnUnsupportedGpt53": true
+  "unsupportedCodexPolicy": "strict",
+  "fallbackOnUnsupportedCodexModel": false,
+  "fallbackToGpt52OnUnsupportedGpt53": true,
+  "unsupportedCodexFallbackChain": {
+    "gpt-5.3-codex": ["gpt-5.2-codex"]
+  }
 }
 ```
 
@@ -114,21 +121,52 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | `codexTuiV2` | `true` | enables codex-style terminal ui output (set `false` to keep legacy output) |
 | `codexTuiColorProfile` | `truecolor` | terminal color profile for codex ui (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | glyph set for codex ui (`ascii`, `unicode`, `auto`) |
-| `fastSession` | `false` | forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=off`, `textVerbosity=low`) |
+| `fastSession` | `false` | forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=auto`, `textVerbosity=low`) |
 | `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns and keeps full-depth for complex prompts; `always` forces fast mode every turn |
 | `fastSessionMaxInputItems` | `30` | max input items kept when fast mode is applied |
 | `perProjectAccounts` | `true` | each project gets its own account storage |
 | `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
 | `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
 | `retryAllAccountsMaxWaitMs` | `0` | max wait time in ms (0 = unlimited) |
-| `retryAllAccountsMaxRetries` | `Infinity` | max retry attempts |
-| `fallbackToGpt52OnUnsupportedGpt53` | `true` | automatically retry once with `gpt-5.2-codex` when `gpt-5.3-codex` is rejected for ChatGPT entitlement |
+| `retryAllAccountsMaxRetries` | `Infinity` | max retry attempts (omit this key for unlimited retries) |
+| `unsupportedCodexPolicy` | `strict` | unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry with configured fallback chain) |
+| `fallbackOnUnsupportedCodexModel` | `false` | legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
+| `fallbackToGpt52OnUnsupportedGpt53` | `true` | legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
+| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`) |
 | `sessionRecovery` | `true` | auto-recover from common api errors |
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
 | `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
 | `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
 | `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
+
+### unsupported-model behavior + fallback chain
+
+by default the plugin is strict (`unsupportedCodexPolicy: "strict"`). it returns entitlement errors directly for unsupported models.
+
+set `unsupportedCodexPolicy: "fallback"` to enable model fallback after account/workspace attempts are exhausted.
+
+defaults when fallback policy is enabled and `unsupportedCodexFallbackChain` is empty:
+- `gpt-5.3-codex -> gpt-5.2-codex`
+- `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
+
+note: the TUI can continue showing your originally selected model while fallback is applied internally. use request logs to verify the effective upstream model (`request-*-after-transform.json`).
+
+custom chain example:
+```json
+{
+  "unsupportedCodexPolicy": "fallback",
+  "fallbackOnUnsupportedCodexModel": true,
+  "unsupportedCodexFallbackChain": {
+    "gpt-5.3-codex": ["gpt-5.2-codex"],
+    "gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"]
+  }
+}
+```
+
+legacy toggle compatibility:
+- `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1` maps to fallback mode
+- `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=0` maps to strict mode
 
 ### environment variables
 
@@ -152,7 +190,9 @@ override any config with env vars:
 | `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | disable wait-and-retry |
 | `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | set max wait time |
 | `CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1` | set max retries |
-| `CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0` | disable fallback and keep strict `gpt-5.3-codex` behavior |
+| `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback` | enable generic unsupported-model fallback policy |
+| `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1` | legacy fallback toggle (prefer policy variable above) |
+| `CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0` | disable only the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge |
 | `CODEX_AUTH_ACCOUNT_ID=acc_xxx` | force specific workspace id |
 | `CODEX_AUTH_FETCH_TIMEOUT_MS=120000` | override fetch timeout |
 | `CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000` | override SSE stall timeout |

@@ -5,7 +5,7 @@
 [![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5.3-codex`, and `gpt-5.1-codex-max`.
+OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5.3-codex`, and `gpt-5.1-codex-max` (plus optional `gpt-5.3-codex-spark` IDs when entitled).
 
 > [!NOTE]
 > **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
@@ -18,7 +18,7 @@ OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with mo
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
 - **Strict tool validation** — Automatically cleans schemas for compatibility with strict models
 - **Auto-update notifications** — Get notified when a new version is available
-- **22 model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
+- **22 template model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
 - **Prompt caching** — Session-based caching for faster multi-turn conversations
 - **Usage-aware errors** — Friendly messages with rate limit reset timing
 - **Plugin compatible** — Works alongside other OpenCode plugins (oh-my-opencode, dcp, etc.)
@@ -131,10 +131,13 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 |-------|----------|-------|
 | `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 with reasoning levels |
 | `gpt-5.3-codex` | low, medium, high, xhigh | Latest GPT-5.3 Codex for code generation (default: xhigh) |
+| `gpt-5.3-codex-spark` | low, medium, high, xhigh | Spark IDs are supported by the plugin, but access is entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
 | `gpt-5.1-codex-mini` | medium, high | Lightweight Codex |
 | `gpt-5.1` | none, low, medium, high | GPT-5.1 base model |
+
+Config templates intentionally omit Spark model IDs by default to reduce entitlement failures on unsupported accounts. Add Spark manually only if your workspace is entitled.
 
 **Using variants:**
 ```bash
@@ -234,6 +237,21 @@ Add this to your `~/.config/opencode/opencode.json`:
         }
       }
     }
+  }
+}
+```
+
+Optional Spark model block (manual add only when entitled):
+```json
+"gpt-5.3-codex-spark": {
+  "name": "GPT 5.3 Codex Spark (OAuth)",
+  "limit": { "context": 272000, "output": 128000 },
+  "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+  "variants": {
+    "low": { "reasoningEffort": "low" },
+    "medium": { "reasoningEffort": "medium" },
+    "high": { "reasoningEffort": "high" },
+    "xhigh": { "reasoningEffort": "xhigh" }
   }
 }
 ```
@@ -558,6 +576,42 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 </details>
 
 <details>
+<summary><b>Unsupported Codex Model for ChatGPT Account</b></summary>
+
+**Error example:** `Bad Request: {"detail":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}`
+
+**Cause:** Active workspace/account is not entitled for the requested Codex model.
+
+**Solutions:**
+1. Re-auth to refresh workspace selection (most common Spark fix):
+   ```bash
+   opencode auth login
+   ```
+2. Add another entitled account/workspace. The plugin will try remaining accounts/workspaces before model fallback.
+3. Enable automatic fallback only if you want degraded-model retries when Spark is not entitled:
+   ```bash
+   CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode
+   ```
+4. Use custom fallback chain in `~/.opencode/openai-codex-auth-config.json`:
+   ```json
+   {
+     "unsupportedCodexPolicy": "fallback",
+     "fallbackOnUnsupportedCodexModel": true,
+     "unsupportedCodexFallbackChain": {
+       "gpt-5.3-codex": ["gpt-5.2-codex"],
+       "gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"]
+     }
+   }
+   ```
+5. Verify effective upstream model when needed:
+   ```bash
+   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.3-codex-spark
+   ```
+   The UI can keep showing your selected model while fallback is applied internally.
+
+</details>
+
+<details>
 <summary><b>Rate Limit Exceeded</b></summary>
 
 **Cause:** ChatGPT subscription usage limit reached.
@@ -659,7 +713,7 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `codexTuiV2` | `true` | Enables Codex-style terminal UI output (set `false` for legacy output) |
 | `codexTuiColorProfile` | `truecolor` | Terminal color profile for Codex UI (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | Glyph mode for Codex UI (`ascii`, `unicode`, `auto`) |
-| `fastSession` | `false` | Forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=off`, `textVerbosity=low`) |
+| `fastSession` | `false` | Forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=auto`, `textVerbosity=low`) |
 | `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns but keeps full-depth on complex prompts; `always` forces fast tuning on every turn |
 | `fastSessionMaxInputItems` | `30` | Max input items kept when fast tuning is applied |
 
@@ -677,9 +731,16 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
 | `retryAllAccountsMaxWaitMs` | `0` | Max wait time (0 = unlimited) |
 | `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts |
-| `fallbackToGpt52OnUnsupportedGpt53` | `true` | Automatically retry once with `gpt-5.2-codex` when `gpt-5.3-codex` is rejected for ChatGPT Codex OAuth entitlement |
+| `unsupportedCodexPolicy` | `strict` | Unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry next model in fallback chain) |
+| `fallbackOnUnsupportedCodexModel` | `false` | Legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
+| `fallbackToGpt52OnUnsupportedGpt53` | `true` | Legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
+| `unsupportedCodexFallbackChain` | `{}` | Optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`) |
 | `fetchTimeoutMs` | `60000` | Request timeout to Codex backend (ms) |
 | `streamStallTimeoutMs` | `45000` | Abort non-stream parsing if SSE stalls (ms) |
+
+Default unsupported-model fallback chain (used when `unsupportedCodexPolicy` is `fallback`):
+- `gpt-5.3-codex -> gpt-5.2-codex`
+- `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
 
 ### Environment Variables
 
@@ -695,7 +756,9 @@ CODEX_AUTH_PREWARM=0 opencode                    # Disable startup prewarm (prom
 CODEX_AUTH_FAST_SESSION=1 opencode               # Enable faster response defaults
 CODEX_AUTH_FAST_SESSION_STRATEGY=always opencode # Force fast mode for all prompts
 CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24 opencode # Tune fast-mode history window
-CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode    # Disable gpt-5.3 -> gpt-5.2 fallback (strict mode)
+CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode # Enable generic unsupported-model fallback
+CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 opencode # Legacy fallback toggle (prefer policy var above)
+CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode    # Disable only the legacy gpt-5.3 -> gpt-5.2 edge
 CODEX_AUTH_FETCH_TIMEOUT_MS=120000 opencode      # Override request timeout
 CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000 opencode # Override SSE stall timeout
 ```

@@ -19,6 +19,7 @@ import type {
 
 type CollaborationMode = "plan" | "default" | "unknown";
 type FastSessionStrategy = "hybrid" | "always";
+type SupportedReasoningSummary = "auto" | "concise" | "detailed";
 
 const PLAN_MODE_ONLY_TOOLS = new Set(["request_user_input"]);
 
@@ -54,7 +55,15 @@ export function normalizeModel(model: string | undefined): string {
 	const normalized = modelId.toLowerCase();
 
 	// Priority order for pattern matching (most specific first):
-	// 1. GPT-5.3 Codex (newest codex model)
+	// 1. GPT-5.3 Codex Spark (must be checked before generic 5.3 codex)
+	if (
+		normalized.includes("gpt-5.3-codex-spark") ||
+		normalized.includes("gpt 5.3 codex spark")
+	) {
+		return "gpt-5.3-codex-spark";
+	}
+
+	// 2. GPT-5.3 Codex (newest codex model)
 	if (
 		normalized.includes("gpt-5.3-codex") ||
 		normalized.includes("gpt 5.3 codex")
@@ -62,7 +71,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.3-codex";
 	}
 
-	// 2. GPT-5.2 Codex
+	// 3. GPT-5.2 Codex
 	if (
 		normalized.includes("gpt-5.2-codex") ||
 		normalized.includes("gpt 5.2 codex")
@@ -70,12 +79,12 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.2-codex";
 	}
 
-	// 3. GPT-5.2 (general purpose)
+	// 4. GPT-5.2 (general purpose)
 	if (normalized.includes("gpt-5.2") || normalized.includes("gpt 5.2")) {
 		return "gpt-5.2";
 	}
 
-	// 4. GPT-5.1 Codex Max
+	// 5. GPT-5.1 Codex Max
 	if (
 		normalized.includes("gpt-5.1-codex-max") ||
 		normalized.includes("gpt 5.1 codex max")
@@ -83,7 +92,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex-max";
 	}
 
-	// 5. GPT-5.1 Codex Mini
+	// 6. GPT-5.1 Codex Mini
 	if (
 		normalized.includes("gpt-5.1-codex-mini") ||
 		normalized.includes("gpt 5.1 codex mini")
@@ -91,7 +100,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex-mini";
 	}
 
-	// 6. Legacy Codex Mini
+	// 7. Legacy Codex Mini
 	if (
 		normalized.includes("codex-mini-latest") ||
 		normalized.includes("gpt-5-codex-mini") ||
@@ -100,7 +109,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "codex-mini-latest";
 	}
 
-	// 7. GPT-5.1 Codex
+	// 8. GPT-5.1 Codex
 	if (
 		normalized.includes("gpt-5.1-codex") ||
 		normalized.includes("gpt 5.1 codex")
@@ -108,17 +117,17 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex";
 	}
 
-	// 8. GPT-5.1 (general-purpose)
+	// 9. GPT-5.1 (general-purpose)
 	if (normalized.includes("gpt-5.1") || normalized.includes("gpt 5.1")) {
 		return "gpt-5.1";
 	}
 
-	// 9. GPT-5 Codex family (any variant with "codex")
+	// 10. GPT-5 Codex family (any variant with "codex")
 	if (normalized.includes("codex")) {
 		return "gpt-5.1-codex";
 	}
 
-	// 10. GPT-5 family (any variant) - default to 5.1 as 5 is being phased out
+	// 11. GPT-5 family (any variant) - default to 5.1 as 5 is being phased out
 	if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
 		return "gpt-5.1";
 	}
@@ -469,10 +478,23 @@ export function getReasoningConfig(
 		effort = "low";
 	}
 
+	const summary = sanitizeReasoningSummary(userConfig.reasoningSummary);
+
 	return {
 		effort,
-		summary: userConfig.reasoningSummary || "auto", // Changed from "detailed" to match Codex CLI
+		summary,
 	};
+}
+
+function sanitizeReasoningSummary(
+	summary: ConfigOptions["reasoningSummary"],
+): SupportedReasoningSummary {
+	if (!summary) return "auto";
+	const normalized = summary.toLowerCase();
+	if (normalized === "concise" || normalized === "detailed" || normalized === "auto") {
+		return normalized;
+	}
+	return "auto";
 }
 
 /**
@@ -922,7 +944,7 @@ export async function transformRequestBody(
 		// getReasoningConfig normalizes unsupported values per model family.
 		const fastReasoning = getReasoningConfig(normalizedModel, {
 			reasoningEffort: "none",
-			reasoningSummary: "off",
+			reasoningSummary: "auto",
 		});
 		body.reasoning = {
 			...body.reasoning,

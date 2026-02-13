@@ -30,7 +30,12 @@ describe("PluginConfigSchema", () => {
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 5000,
 			retryAllAccountsMaxRetries: 3,
+			unsupportedCodexPolicy: "strict",
+			fallbackOnUnsupportedCodexModel: true,
 			fallbackToGpt52OnUnsupportedGpt53: false,
+			unsupportedCodexFallbackChain: {
+				"gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"],
+			},
 			tokenRefreshSkewMs: 60000,
 			rateLimitToastDebounceMs: 30000,
 			toastDurationMs: 5000,
@@ -63,6 +68,11 @@ describe("PluginConfigSchema", () => {
 
 	it("rejects wrong types", () => {
 		const result = PluginConfigSchema.safeParse({ codexMode: "yes" });
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects invalid unsupportedCodexPolicy", () => {
+		const result = PluginConfigSchema.safeParse({ unsupportedCodexPolicy: "invalid" });
 		expect(result.success).toBe(false);
 	});
 });

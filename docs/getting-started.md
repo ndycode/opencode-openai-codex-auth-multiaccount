@@ -126,6 +126,8 @@ Use one of the provided config files:
 
 Copy the relevant config to your `~/.config/opencode/opencode.json`.
 
+The shipped templates include 22 presets and intentionally omit Spark IDs. Add `gpt-5.3-codex-spark` manually only when your workspace is entitled.
+
 <details>
 <summary><b>Why use the full config?</b></summary>
 
@@ -151,6 +153,10 @@ opencode
 
 You'll see all 22 GPT-5.x variants in the model selector!
 
+If `gpt-5.3-codex` or `gpt-5.3-codex-spark` returns an unsupported-model entitlement error, re-auth with `opencode auth login` or add another entitled account/workspace first. The plugin tries remaining accounts/workspaces before model fallback. See [Configuration](configuration.md) for strict vs fallback policy controls.
+
+If you manually add Spark IDs and want to confirm effective upstream routing, run with `ENABLE_PLUGIN_REQUEST_LOGGING=1` and inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json`.
+
 ---
 
 ## Available Models
@@ -159,12 +165,13 @@ You'll see all 22 GPT-5.x variants in the model selector!
 |-------|----------|-------|
 | `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 |
 | `gpt-5.3-codex` | low, medium, high, xhigh | Latest Codex for code generation |
+| `gpt-5.3-codex-spark` | low, medium, high, xhigh | Optional manual model; entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
 | `gpt-5.1-codex-mini` | medium, high | Lightweight |
 | `gpt-5.1` | none, low, medium, high | Base model |
 
-**Total: 22 model presets** with 272k context / 128k output.
+**Total: 22 template presets** with 272k context / 128k output (+ optional Spark IDs when entitled).
 
 ---
 

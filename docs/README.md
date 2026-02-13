@@ -4,9 +4,9 @@ Welcome to the OpenCode OpenAI Codex Auth Plugin documentation!
 
 ## For Users
 
-- **[Getting Started](../README.md)** - Installation, configuration, and quick start
-- **[Configuration Guide](../README.md#configuration)** - Complete config reference
-- **[Troubleshooting](../README.md#troubleshooting)** - Common issues and debugging
+- **[Getting Started](getting-started.md)** - Installation, configuration, and quick start
+- **[Configuration Guide](configuration.md)** - Complete config reference
+- **[Troubleshooting](troubleshooting.md)** - Common issues and debugging
 - **[Changelog](../CHANGELOG.md)** - Version history and release notes
 
 ## For Developers
@@ -29,9 +29,10 @@ This plugin bridges two different systems with careful engineering:
 4. **Stale-While-Revalidate Caching** - Keeps prompt/instruction fetches fast while avoiding GitHub rate limits; optional startup prewarm for first-turn latency
 5. **Per-Model Configuration** - Enables quality presets with quick switching
 6. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults
+7. **Entitlement-Aware Fallback Flow** - Unsupported models try remaining accounts/workspaces first, then optional fallback chain if enabled
 
-**Testing**: 1568 tests (80% coverage threshold) + integration tests
+**Testing**: 1500+ tests (80% coverage threshold) plus integration coverage
 
 ---
 
-**Quick Links**: [GitHub](https://github.com/ndycode/oc-chatgpt-multi-auth) • [npm](https://www.npmjs.com/package/oc-chatgpt-multi-auth) • [Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues)
+**Quick Links**: [GitHub](https://github.com/ndycode/oc-chatgpt-multi-auth) | [npm](https://www.npmjs.com/package/oc-chatgpt-multi-auth) | [Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues)

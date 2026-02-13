@@ -8,9 +8,12 @@ import {
 	getFastSession,
 	getFastSessionStrategy,
 	getFastSessionMaxInputItems,
+	getUnsupportedCodexPolicy,
+	getFallbackOnUnsupportedCodexModel,
 	getTokenRefreshSkewMs,
 	getRetryAllAccountsMaxRetries,
 	getFallbackToGpt52OnUnsupportedGpt53,
+	getUnsupportedCodexFallbackChain,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
 } from '../lib/config.js';
@@ -50,6 +53,8 @@ describe('Plugin Configuration', () => {
 		'CODEX_AUTH_FAST_SESSION',
 		'CODEX_AUTH_FAST_SESSION_STRATEGY',
 		'CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS',
+		'CODEX_AUTH_UNSUPPORTED_MODEL_POLICY',
+		'CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL',
 		'CODEX_AUTH_FALLBACK_GPT53_TO_GPT52',
 	] as const;
 	const originalEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
@@ -89,7 +94,10 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
+				unsupportedCodexPolicy: 'strict',
+				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
+				unsupportedCodexFallbackChain: {},
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -126,7 +134,10 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
+				unsupportedCodexPolicy: 'strict',
+				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
+				unsupportedCodexFallbackChain: {},
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -160,7 +171,10 @@ describe('Plugin Configuration', () => {
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
+				unsupportedCodexPolicy: 'strict',
+				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
+				unsupportedCodexFallbackChain: {},
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -175,6 +189,15 @@ describe('Plugin Configuration', () => {
 				fetchTimeoutMs: 60_000,
 				streamStallTimeoutMs: 45_000,
 			});
+		});
+
+		it('should parse UTF-8 BOM-prefixed config files', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('\ufeff{"codexMode":false}');
+
+			const config = loadPluginConfig();
+
+			expect(config.codexMode).toBe(false);
 		});
 
 	it('should handle invalid JSON gracefully', () => {
@@ -196,7 +219,10 @@ describe('Plugin Configuration', () => {
 		retryAllAccountsRateLimited: true,
 		retryAllAccountsMaxWaitMs: 0,
 		retryAllAccountsMaxRetries: Infinity,
+		unsupportedCodexPolicy: 'strict',
+		fallbackOnUnsupportedCodexModel: false,
 		fallbackToGpt52OnUnsupportedGpt53: true,
+		unsupportedCodexFallbackChain: {},
 		tokenRefreshSkewMs: 60_000,
 		rateLimitToastDebounceMs: 60_000,
 		toastDurationMs: 5_000,
@@ -235,7 +261,10 @@ describe('Plugin Configuration', () => {
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 0,
 			retryAllAccountsMaxRetries: Infinity,
+			unsupportedCodexPolicy: 'strict',
+			fallbackOnUnsupportedCodexModel: false,
 			fallbackToGpt52OnUnsupportedGpt53: true,
+			unsupportedCodexFallbackChain: {},
 			tokenRefreshSkewMs: 60_000,
 			rateLimitToastDebounceMs: 60_000,
 			toastDurationMs: 5_000,
@@ -422,6 +451,96 @@ describe('Plugin Configuration', () => {
 					fallbackToGpt52OnUnsupportedGpt53: false,
 				}),
 			).toBe(true);
+		});
+	});
+
+	describe('getUnsupportedCodexPolicy', () => {
+		it('should default to strict', () => {
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			delete process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL;
+			expect(getUnsupportedCodexPolicy({})).toBe('strict');
+		});
+
+		it('should use config policy when set', () => {
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			expect(getUnsupportedCodexPolicy({ unsupportedCodexPolicy: 'fallback' })).toBe('fallback');
+		});
+
+		it('should prioritize env policy over config', () => {
+			process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY = 'strict';
+			expect(getUnsupportedCodexPolicy({ unsupportedCodexPolicy: 'fallback' })).toBe('strict');
+			process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY = 'fallback';
+			expect(getUnsupportedCodexPolicy({ unsupportedCodexPolicy: 'strict' })).toBe('fallback');
+		});
+
+		it('should map legacy fallback flag to fallback policy when policy key missing', () => {
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			expect(getUnsupportedCodexPolicy({ fallbackOnUnsupportedCodexModel: true })).toBe('fallback');
+		});
+
+		it('should map legacy env fallback toggle when policy env is unset', () => {
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL = '1';
+			expect(getUnsupportedCodexPolicy({})).toBe('fallback');
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL = '0';
+			expect(getUnsupportedCodexPolicy({})).toBe('strict');
+		});
+	});
+
+	describe('getFallbackOnUnsupportedCodexModel', () => {
+		it('should default to false (strict policy)', () => {
+			delete process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL;
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			expect(getFallbackOnUnsupportedCodexModel({})).toBe(false);
+		});
+
+		it('should use explicit policy when set', () => {
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			delete process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL;
+			expect(getFallbackOnUnsupportedCodexModel({ unsupportedCodexPolicy: 'fallback' })).toBe(true);
+			expect(getFallbackOnUnsupportedCodexModel({ unsupportedCodexPolicy: 'strict' })).toBe(false);
+		});
+
+		it('should still support legacy env toggle', () => {
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL = '0';
+			delete process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY;
+			expect(getFallbackOnUnsupportedCodexModel({})).toBe(false);
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL = '1';
+			expect(getFallbackOnUnsupportedCodexModel({})).toBe(true);
+		});
+
+		it('policy env overrides legacy toggles', () => {
+			process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY = 'strict';
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL = '1';
+			expect(getFallbackOnUnsupportedCodexModel({ unsupportedCodexPolicy: 'fallback' })).toBe(false);
+			process.env.CODEX_AUTH_UNSUPPORTED_MODEL_POLICY = 'fallback';
+			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL = '0';
+			expect(getFallbackOnUnsupportedCodexModel({ unsupportedCodexPolicy: 'strict' })).toBe(true);
+		});
+	});
+
+	describe('getUnsupportedCodexFallbackChain', () => {
+		it('returns normalized fallback chain entries', () => {
+			const result = getUnsupportedCodexFallbackChain({
+				unsupportedCodexFallbackChain: {
+					'OpenAI/GPT-5.3-CODEX-SPARK': [' gpt-5.3-codex ', 'gpt-5.2-codex'],
+				},
+			});
+
+			expect(result).toEqual({
+				'gpt-5.3-codex-spark': ['gpt-5.3-codex', 'gpt-5.2-codex'],
+			});
+		});
+
+		it('returns empty object for missing/invalid chain', () => {
+			expect(getUnsupportedCodexFallbackChain({})).toEqual({});
+			expect(
+				getUnsupportedCodexFallbackChain({
+					unsupportedCodexFallbackChain: {
+						'': ['   '],
+					},
+				}),
+			).toEqual({});
 		});
 	});
 

@@ -220,6 +220,36 @@ Failed to access Codex API
 
 </details>
 
+<details>
+<summary><b>"All N account(s) failed (server errors or auth issues)"</b></summary>
+
+**Symptoms:**
+- Request loop ends with `All 14 account(s) failed ...` (count varies)
+- Frequent retries, then hard failure
+
+**Common causes:**
+1. Most accounts in the pool have expired/invalid refresh tokens
+2. Account pool contains duplicate stale accounts
+3. Temporary upstream/server failures across all available accounts
+
+**Solutions:**
+1. Re-auth at least one known-good account first:
+   ```bash
+   opencode auth login
+   ```
+2. Check account storage health (global and project-scoped):
+   - `~/.opencode/openai-codex-accounts.json`
+   - `~/.opencode/projects/<project-key>/openai-codex-accounts.json`
+   - `~/.opencode/openai-codex-flagged-accounts.json`
+3. Remove obviously stale/duplicate entries and keep only verified accounts.
+4. Re-run with logging and inspect per-account failures:
+   ```bash
+   DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.3-codex
+   ```
+5. If you only need personal Plus/Pro usage, ensure login selected the intended personal workspace/account id.
+
+</details>
+
 ---
 
 ## Model Issues
@@ -273,6 +303,59 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
 1. Model name in CLI doesn't match config key
 2. Typo in config file
 3. Wrong config file location
+
+</details>
+
+<details>
+<summary><b>"Model is not supported when using Codex with a ChatGPT account"</b></summary>
+
+**Symptoms:**
+- Request fails with an entitlement-style 400/403 mentioning model support for ChatGPT Codex OAuth
+- Common after switching workspaces or selecting a model your workspace is not currently entitled to
+
+**Cause:** The selected model is currently not entitled for the active ChatGPT account/workspace.
+
+**Solutions:**
+1. Re-auth/login to refresh workspace selection:
+   ```bash
+   opencode auth login
+   ```
+2. Add another entitled account/workspace. The plugin tries remaining accounts/workspaces before model fallback.
+3. Enable fallback policy only if you want automatic model downgrades:
+   ```bash
+   CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode
+   ```
+4. Default fallback chain (when policy is `fallback` and not overridden):
+   - `gpt-5.3-codex -> gpt-5.2-codex`
+   - `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (if Spark IDs are selected manually)
+5. Configure a custom fallback chain in `~/.opencode/openai-codex-auth-config.json`:
+   ```json
+   {
+     "unsupportedCodexPolicy": "fallback",
+     "fallbackOnUnsupportedCodexModel": true,
+     "unsupportedCodexFallbackChain": {
+       "gpt-5.3-codex": ["gpt-5.2-codex"],
+       "gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"]
+     }
+   }
+   ```
+6. Use strict mode (no model fallback) for explicit entitlement failures:
+   ```bash
+   CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=strict opencode
+   ```
+7. Legacy compatibility toggle (only controls `gpt-5.3-codex -> gpt-5.2-codex`):
+   ```bash
+   CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode
+   ```
+8. Legacy generic fallback toggle compatibility:
+   ```bash
+   CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 opencode
+   ```
+9. Verify effective upstream model when debugging Spark/fallback behavior:
+   ```bash
+   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.3-codex-spark
+   ```
+   Then inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json` (`.body.model`). The TUI can keep showing the selected label while fallback is applied internally.
 
 </details>
 

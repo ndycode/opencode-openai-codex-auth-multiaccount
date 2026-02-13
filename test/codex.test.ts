@@ -3,6 +3,16 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 
 	describe("Codex Module", () => {
 		describe("getModelFamily", () => {
+			describe("GPT-5.3 Codex Spark family", () => {
+				it("should return gpt-5.3-codex-spark for gpt-5.3-codex-spark", () => {
+					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5.3-codex-spark");
+				});
+
+				it("should return gpt-5.3-codex-spark for gpt-5.3-codex-spark-high", () => {
+					expect(getModelFamily("gpt-5.3-codex-spark-high")).toBe("gpt-5.3-codex-spark");
+				});
+			});
+
 			describe("GPT-5.3 Codex family", () => {
 				it("should return gpt-5.3-codex for gpt-5.3-codex", () => {
 					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5.3-codex");
@@ -112,6 +122,10 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 		});
 
 			describe("Priority order", () => {
+				it("should prioritize gpt-5.3-codex-spark over gpt-5.3-codex detection", () => {
+					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5.3-codex-spark");
+				});
+
 				it("should prioritize gpt-5.3-codex over generic codex detection", () => {
 					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5.3-codex");
 				});
