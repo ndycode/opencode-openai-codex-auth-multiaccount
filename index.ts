@@ -46,6 +46,8 @@ import {
 	getRetryAllAccountsMaxWaitMs,
 	getRetryAllAccountsRateLimited,
 	getFallbackToGpt52OnUnsupportedGpt53,
+	getUnsupportedCodexPolicy,
+	getUnsupportedCodexFallbackChain,
 	getTokenRefreshSkewMs,
 	getSessionRecovery,
 	getAutoResume,
@@ -117,7 +119,8 @@ import {
 	extractRequestUrl,
         handleErrorResponse,
         handleSuccessResponse,
-	shouldFallbackToGpt52OnUnsupportedGpt53,
+	getUnsupportedCodexModelInfo,
+	resolveUnsupportedCodexFallbackModel,
         refreshAndUpdateToken,
         rewriteUrlForCodex,
 	shouldRefreshToken,
@@ -692,12 +695,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return {};
 			}
 
-			// Only handle multi-account auth (identified by multiAccount flag)
-			// If auth was created by built-in plugin, let built-in handle it
+			// Prefer multi-account auth metadata when available, but still handle
+			// plain OAuth credentials (for OpenCode versions that inject internal
+			// Codex auth first and omit the multiAccount marker).
 			const authWithMulti = auth as typeof auth & { multiAccount?: boolean };
 			if (!authWithMulti.multiAccount) {
-				logDebug(`[${PLUGIN_NAME}] Auth is not multi-account, skipping loader`);
-				return {};
+				logDebug(
+					`[${PLUGIN_NAME}] Auth is missing multiAccount marker; continuing with single-account compatibility mode`,
+				);
 			}
 
 				// Acquire mutex for thread-safe initialization
@@ -755,8 +760,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const retryAllAccountsRateLimited = getRetryAllAccountsRateLimited(pluginConfig);
 				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
 				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
+				const unsupportedCodexPolicy = getUnsupportedCodexPolicy(pluginConfig);
+				const fallbackOnUnsupportedCodexModel = unsupportedCodexPolicy === "fallback";
 				const fallbackToGpt52OnUnsupportedGpt53 =
 					getFallbackToGpt52OnUnsupportedGpt53(pluginConfig);
+				const unsupportedCodexFallbackChain =
+					getUnsupportedCodexFallbackChain(pluginConfig);
 				const toastDurationMs = getToastDurationMs(pluginConfig);
 				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
 				const fetchTimeoutMs = getFetchTimeoutMs(pluginConfig);
@@ -777,7 +786,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				if (fastSessionEnabled) {
 					logDebug("Fast session mode enabled", {
 						reasoningEffort: "none/low",
-						reasoningSummary: "off",
+						reasoningSummary: "auto",
 						textVerbosity: "low",
 						fastSessionStrategy,
 						fastSessionMaxInputItems,
@@ -999,7 +1008,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 							let allRateLimitedRetries = 0;
 							let emptyResponseRetries = 0;
-							let attemptedGpt53Fallback = false;
+							const attemptedUnsupportedFallbackModels = new Set<string>();
+							if (model) {
+								attemptedUnsupportedFallbackModels.add(model);
+							}
 
 							while (true) {
 										const accountCount = accountManager.getAccountCount();
@@ -1175,17 +1187,48 @@ while (attempted.size < Math.max(1, accountCount)) {
 											threadId: threadIdCandidate,
 										});
 
-			if (
-				fallbackToGpt52OnUnsupportedGpt53 &&
-				!attemptedGpt53Fallback &&
-				shouldFallbackToGpt52OnUnsupportedGpt53(model, errorBody)
-			) {
+			const unsupportedModelInfo = getUnsupportedCodexModelInfo(errorBody);
+			const hasRemainingAccounts = attempted.size < Math.max(1, accountCount);
+
+			// Entitlements can differ by account/workspace, so try remaining
+			// accounts before degrading the model via fallback.
+			if (unsupportedModelInfo.isUnsupported && hasRemainingAccounts) {
+				const blockedModel =
+					unsupportedModelInfo.unsupportedModel ?? model ?? "requested model";
+				accountManager.refundToken(account, modelFamily, model);
+				accountManager.recordFailure(account, modelFamily, model);
+				account.lastSwitchReason = "rotation";
+				runtimeMetrics.lastError = `Unsupported model on account ${account.index + 1}: ${blockedModel}`;
+				logWarn(
+					`Model ${blockedModel} is unsupported for account ${account.index + 1}. Trying next account/workspace before fallback.`,
+					{
+						unsupportedCodexPolicy,
+						requestedModel: blockedModel,
+						effectiveModel: blockedModel,
+						fallbackApplied: false,
+						fallbackReason: "unsupported-model-entitlement",
+					},
+				);
+				break;
+			}
+
+			const fallbackModel = resolveUnsupportedCodexFallbackModel({
+				requestedModel: model,
+				errorBody,
+				attemptedModels: attemptedUnsupportedFallbackModels,
+				fallbackOnUnsupportedCodexModel,
+				fallbackToGpt52OnUnsupportedGpt53,
+				customChain: unsupportedCodexFallbackChain,
+			});
+
+			if (fallbackModel) {
 				const previousModel = model ?? "gpt-5.3-codex";
 				const previousModelFamily = modelFamily;
-				attemptedGpt53Fallback = true;
+				attemptedUnsupportedFallbackModels.add(previousModel);
+				attemptedUnsupportedFallbackModels.add(fallbackModel);
 				accountManager.refundToken(account, previousModelFamily, previousModel);
 
-				model = "gpt-5.2-codex";
+				model = fallbackModel;
 				modelFamily = getModelFamily(model);
 				quotaKey = `${modelFamily}:${model}`;
 
@@ -1221,6 +1264,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 				runtimeMetrics.lastError = `Model fallback: ${previousModel} -> ${model}`;
 				logWarn(
 					`Model ${previousModel} is unsupported for this ChatGPT account. Falling back to ${model}.`,
+					{
+						unsupportedCodexPolicy,
+						requestedModel: previousModel,
+						effectiveModel: model,
+						fallbackApplied: true,
+						fallbackReason: "unsupported-model-entitlement",
+					},
 				);
 				await showToast(
 					`Model ${previousModel} is not available for this account. Retrying with ${model}.`,
@@ -1228,6 +1278,27 @@ while (attempted.size < Math.max(1, accountCount)) {
 					{ duration: toastDurationMs },
 				);
 				continue;
+			}
+
+			if (unsupportedModelInfo.isUnsupported && !fallbackOnUnsupportedCodexModel) {
+				const blockedModel =
+					unsupportedModelInfo.unsupportedModel ?? model ?? "requested model";
+				runtimeMetrics.lastError = `Unsupported model (strict): ${blockedModel}`;
+				logWarn(
+					`Model ${blockedModel} is unsupported for this ChatGPT account. Strict policy blocks automatic fallback.`,
+					{
+						unsupportedCodexPolicy,
+						requestedModel: blockedModel,
+						effectiveModel: blockedModel,
+						fallbackApplied: false,
+						fallbackReason: "unsupported-model-entitlement",
+					},
+				);
+				await showToast(
+					`Model ${blockedModel} is not available for this account. Strict policy blocked automatic fallback.`,
+					"warning",
+					{ duration: toastDurationMs },
+				);
 			}
 
 			if (recoveryHook && errorBody && isRecoverableError(errorBody)) {

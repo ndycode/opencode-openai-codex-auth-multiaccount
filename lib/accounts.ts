@@ -84,6 +84,7 @@ export interface ManagedAccount {
 export class AccountManager {
 	private accounts: ManagedAccount[] = [];
 	private cursorByFamily: Record<ModelFamily, number> = {
+		"gpt-5.3-codex-spark": 0,
 		"gpt-5.3-codex": 0,
 		"gpt-5.2-codex": 0,
 		"codex-max": 0,
@@ -92,6 +93,7 @@ export class AccountManager {
 		"gpt-5.1": 0,
 	};
 	private currentAccountIndexByFamily: Record<ModelFamily, number> = {
+		"gpt-5.3-codex-spark": -1,
 		"gpt-5.3-codex": -1,
 		"gpt-5.2-codex": -1,
 		"codex-max": -1,

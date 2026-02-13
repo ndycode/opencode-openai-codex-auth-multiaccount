@@ -21,7 +21,13 @@ export const PluginConfigSchema = z.object({
 	retryAllAccountsRateLimited: z.boolean().optional(),
 	retryAllAccountsMaxWaitMs: z.number().min(0).optional(),
 	retryAllAccountsMaxRetries: z.number().min(0).optional(),
+	unsupportedCodexPolicy: z.enum(["strict", "fallback"]).optional(),
+	fallbackOnUnsupportedCodexModel: z.boolean().optional(),
 	fallbackToGpt52OnUnsupportedGpt53: z.boolean().optional(),
+	unsupportedCodexFallbackChain: z.record(
+		z.string(),
+		z.array(z.string().min(1)),
+	).optional(),
 	tokenRefreshSkewMs: z.number().min(0).optional(),
 	rateLimitToastDebounceMs: z.number().min(0).optional(),
 	toastDurationMs: z.number().min(1000).optional(),

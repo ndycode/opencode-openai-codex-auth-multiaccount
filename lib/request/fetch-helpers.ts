@@ -35,18 +35,158 @@ export interface EntitlementError {
 const CHATGPT_CODEX_UNSUPPORTED_MODEL_CODE = "model_not_supported_with_chatgpt_account";
 const CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN =
 	/model is not supported when using codex with a chatgpt account/i;
+const NORMALIZED_UNSUPPORTED_MODEL_PATTERN =
+	/the model ['"]([^'"]+)['"] is not currently available for this chatgpt account/i;
 
-function extractUnsupportedCodexModel(bodyText: string): string | undefined {
-	const match = bodyText.match(
+export const DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN: Record<string, string[]> = {
+	"gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"],
+	"gpt-5.3-codex": ["gpt-5.2-codex"],
+};
+
+export interface UnsupportedCodexModelInfo {
+	isUnsupported: boolean;
+	code?: string;
+	message?: string;
+	unsupportedModel?: string;
+}
+
+export interface ResolveUnsupportedCodexFallbackOptions {
+	requestedModel: string | undefined;
+	errorBody: unknown;
+	attemptedModels?: Iterable<string>;
+	fallbackOnUnsupportedCodexModel: boolean;
+	fallbackToGpt52OnUnsupportedGpt53: boolean;
+	customChain?: Record<string, string[]>;
+}
+
+function canonicalizeModelName(model: string | undefined): string | undefined {
+	if (!model) return undefined;
+	const trimmed = model.trim().toLowerCase();
+	if (!trimmed) return undefined;
+	const stripped = trimmed.includes("/")
+		? (trimmed.split("/").pop() ?? trimmed)
+		: trimmed;
+	return stripped.replace(/-(none|minimal|low|medium|high|xhigh)$/i, "");
+}
+
+function normalizeFallbackChain(
+	customChain: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+	const normalized: Record<string, string[]> = {};
+	for (const [key, values] of Object.entries(DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN)) {
+		const normalizedKey = canonicalizeModelName(key);
+		if (!normalizedKey) continue;
+		normalized[normalizedKey] = values
+			.map((value) => canonicalizeModelName(value))
+			.filter((value): value is string => !!value);
+	}
+
+	if (!customChain) {
+		return normalized;
+	}
+
+	for (const [key, values] of Object.entries(customChain)) {
+		const normalizedKey = canonicalizeModelName(key);
+		if (!normalizedKey || !Array.isArray(values)) continue;
+		const normalizedValues = values
+			.map((value) => canonicalizeModelName(value))
+			.filter((value): value is string => !!value);
+		if (normalizedValues.length > 0) {
+			normalized[normalizedKey] = normalizedValues;
+		}
+	}
+
+	return normalized;
+}
+
+export function extractUnsupportedCodexModelFromText(bodyText: string): string | undefined {
+	const directMatch = bodyText.match(
 		/['"]([^'"]+)['"]\s+model is not supported when using codex with a chatgpt account/i,
 	);
-	return match?.[1];
+	if (directMatch?.[1]) {
+		return canonicalizeModelName(directMatch[1]);
+	}
+	const normalizedMatch = bodyText.match(NORMALIZED_UNSUPPORTED_MODEL_PATTERN);
+	if (normalizedMatch?.[1]) {
+		return canonicalizeModelName(normalizedMatch[1]);
+	}
+	return undefined;
 }
 
 function isUnsupportedCodexModelForChatGpt(status: number, bodyText: string): boolean {
 	if (status !== HTTP_STATUS.BAD_REQUEST) return false;
 	if (!bodyText) return false;
 	return CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN.test(bodyText);
+}
+
+export function getUnsupportedCodexModelInfo(
+	errorBody: unknown,
+): UnsupportedCodexModelInfo {
+	if (!isRecord(errorBody)) {
+		return { isUnsupported: false };
+	}
+
+	const maybeError = errorBody.error;
+	if (!isRecord(maybeError)) {
+		return { isUnsupported: false };
+	}
+
+	const code = typeof maybeError.code === "string" ? maybeError.code : undefined;
+	const message =
+		typeof maybeError.message === "string" ? maybeError.message : undefined;
+	const unsupportedModelFromPayload =
+		typeof maybeError.unsupported_model === "string"
+			? maybeError.unsupported_model
+			: undefined;
+	const unsupportedModel = unsupportedModelFromPayload
+		? canonicalizeModelName(unsupportedModelFromPayload)
+		: extractUnsupportedCodexModelFromText(message ?? "");
+	const isUnsupported =
+		code === CHATGPT_CODEX_UNSUPPORTED_MODEL_CODE ||
+		(message ? CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN.test(message) : false);
+
+	return {
+		isUnsupported,
+		code,
+		message,
+		unsupportedModel: unsupportedModel ?? undefined,
+	};
+}
+
+export function resolveUnsupportedCodexFallbackModel(
+	options: ResolveUnsupportedCodexFallbackOptions,
+): string | undefined {
+	if (!options.fallbackOnUnsupportedCodexModel) return undefined;
+
+	const unsupported = getUnsupportedCodexModelInfo(options.errorBody);
+	if (!unsupported.isUnsupported) return undefined;
+
+	const requestedModel = canonicalizeModelName(options.requestedModel);
+	const currentModel = requestedModel ?? unsupported.unsupportedModel;
+	if (!currentModel) return undefined;
+
+	const attempted = new Set<string>();
+	for (const model of options.attemptedModels ?? []) {
+		const normalized = canonicalizeModelName(model);
+		if (normalized) attempted.add(normalized);
+	}
+
+	const chain = normalizeFallbackChain(options.customChain);
+	const targets = chain[currentModel] ?? [];
+	if (targets.length === 0) return undefined;
+
+	for (const target of targets) {
+		if (!options.fallbackToGpt52OnUnsupportedGpt53 &&
+			currentModel === "gpt-5.3-codex" &&
+			target === "gpt-5.2-codex") {
+			continue;
+		}
+		if (target === currentModel) continue;
+		if (attempted.has(target)) continue;
+		return target;
+	}
+
+	return undefined;
 }
 
 /**
@@ -56,18 +196,17 @@ export function shouldFallbackToGpt52OnUnsupportedGpt53(
 	requestedModel: string | undefined,
 	errorBody: unknown,
 ): boolean {
-	if (requestedModel !== "gpt-5.3-codex") return false;
-	if (!isRecord(errorBody)) return false;
-
-	const maybeError = errorBody.error;
-	if (!isRecord(maybeError)) return false;
-
-	const code = typeof maybeError.code === "string" ? maybeError.code : "";
-	const message = typeof maybeError.message === "string" ? maybeError.message : "";
+	if (canonicalizeModelName(requestedModel) !== "gpt-5.3-codex") {
+		return false;
+	}
 
 	return (
-		code === CHATGPT_CODEX_UNSUPPORTED_MODEL_CODE ||
-		CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN.test(message)
+		resolveUnsupportedCodexFallbackModel({
+			requestedModel,
+			errorBody,
+			fallbackOnUnsupportedCodexModel: true,
+			fallbackToGpt52OnUnsupportedGpt53: true,
+		}) === "gpt-5.2-codex"
 	);
 }
 
@@ -511,6 +650,7 @@ type ErrorPayload = {
                 message: string;
                 type?: string;
                 code?: string | number;
+                unsupported_model?: string;
                 diagnostics?: ErrorDiagnostics;
         };
 };
@@ -523,18 +663,21 @@ function normalizeErrorPayload(
         diagnostics?: ErrorDiagnostics,
 ): ErrorPayload {
         if (isUnsupportedCodexModelForChatGpt(status, bodyText)) {
-                const unsupportedModel = extractUnsupportedCodexModel(bodyText) ?? "requested model";
-                const payload: ErrorPayload = {
-                        error: {
-                                message:
-                                        `The model '${unsupportedModel}' is not currently available for this ChatGPT account when using Codex OAuth. ` +
-                                        "This is an account/workspace entitlement gate, not a temporary rate limit. " +
-                                        "Try 'gpt-5.2-codex' or enable automatic fallback via CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=1 " +
-                                        "(or fallbackToGpt52OnUnsupportedGpt53 in ~/.opencode/openai-codex-auth-config.json).",
-                                type: "entitlement_error",
-                                code: CHATGPT_CODEX_UNSUPPORTED_MODEL_CODE,
-                        },
-                };
+                const unsupportedModel =
+			extractUnsupportedCodexModelFromText(bodyText) ?? "requested model";
+				const payload: ErrorPayload = {
+						error: {
+								message:
+										`The model '${unsupportedModel}' is not currently available for this ChatGPT account when using Codex OAuth. ` +
+										"This is an account/workspace entitlement gate, not a temporary rate limit. " +
+										"Try 'gpt-5.3-codex' or 'gpt-5.2-codex', or enable automatic fallback via " +
+										'unsupportedCodexPolicy: "fallback" (or CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback). ' +
+										"(Legacy: CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 or fallbackOnUnsupportedCodexModel).",
+								type: "entitlement_error",
+								code: CHATGPT_CODEX_UNSUPPORTED_MODEL_CODE,
+								unsupported_model: unsupportedModel,
+						},
+				};
                 if (diagnostics && Object.keys(diagnostics).length > 0) {
                         payload.error.diagnostics = diagnostics;
                 }

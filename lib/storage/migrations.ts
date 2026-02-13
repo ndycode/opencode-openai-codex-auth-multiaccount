@@ -87,6 +87,7 @@ export function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
 		}),
 		activeIndex: v1.activeIndex,
 		activeIndexByFamily: {
+			"gpt-5.3-codex-spark": v1.activeIndex,
 			"gpt-5.3-codex": v1.activeIndex,
 			"gpt-5.2-codex": v1.activeIndex,
 			"codex-max": v1.activeIndex,
