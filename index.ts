@@ -97,6 +97,7 @@ import {
         shouldUpdateAccountIdFromToken,
         resolveRequestAccountId,
         parseRateLimitReason,
+	lookupCodexCliTokensByEmail,
 } from "./lib/accounts.js";
 import {
 	getStoragePath,
@@ -139,6 +140,7 @@ import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js"
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
 import {
 	getModelFamily,
+	getCodexInstructions,
 	MODEL_FAMILIES,
 	prewarmCodexInstructions,
 	type ModelFamily,
@@ -397,6 +399,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         accountLabel,
                                         email: accountEmail,
                                         refreshToken: result.refresh,
+					accessToken: result.access,
+					expiresAt: result.expires,
                                         addedAt: now,
                                         lastUsed: now,
                                 });
@@ -427,6 +431,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								accountLabel: nextAccountLabel,
 								email: nextEmail,
 								refreshToken: result.refresh,
+								accessToken: result.access,
+								expiresAt: result.expires,
 								lastUsed: now,
 						};
 						if (oldToken !== result.refresh) {
@@ -548,6 +554,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 account.email = email;
                                                 changed = true;
                                         }
+					if (refreshed.access && refreshed.access !== account.accessToken) {
+						account.accessToken = refreshed.access;
+						changed = true;
+					}
+					if (typeof refreshed.expires === "number" && refreshed.expires !== account.expiresAt) {
+						account.expiresAt = refreshed.expires;
+						changed = true;
+					}
                                         if (refreshed.refresh && refreshed.refresh !== account.refreshToken) {
                                                 account.refreshToken = refreshed.refresh;
                                                 changed = true;
@@ -649,16 +663,35 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         }
 
                         const index = props.index ?? props.accountIndex;
-                        if (typeof index === "number" && cachedAccountManager) {
-                                // Convert 1-based index (UI) to 0-based index (internal) if needed,
-                                // or handle 0-based directly. Usually UI lists are 0-based in code but 1-based in display.
-                                // AccountManager.setActiveIndex expects 0-based index.
-                                // Assuming the event passes the raw index from the list.
-                                const account = cachedAccountManager.setActiveIndex(index);
-                                if (account) {
-                                        await cachedAccountManager.saveToDisk();
-                                        await showToast(`Switched to account ${index + 1}`, "info");
+                        if (typeof index === "number") {
+                                const storage = await loadAccounts();
+                                if (!storage || index < 0 || index >= storage.accounts.length) {
+                                        return;
                                 }
+
+                                const now = Date.now();
+                                const account = storage.accounts[index];
+                                if (account) {
+                                        account.lastUsed = now;
+                                        account.lastSwitchReason = "rotation";
+                                }
+                                storage.activeIndex = index;
+                                storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
+                                for (const family of MODEL_FAMILIES) {
+                                        storage.activeIndexByFamily[family] = index;
+                                }
+
+                                await saveAccounts(storage);
+
+                                // Reload manager from disk so we don't overwrite newer rotated
+                                // refresh tokens with stale in-memory state.
+                                if (cachedAccountManager) {
+                                        const reloadedManager = await AccountManager.loadFromDisk();
+                                        cachedAccountManager = reloadedManager;
+                                        accountManagerPromise = Promise.resolve(reloadedManager);
+                                }
+
+                                await showToast(`Switched to account ${index + 1}`, "info");
                         }
                 }
           } catch (error) {
@@ -689,6 +722,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			 */
 		async loader(getAuth: () => Promise<Auth>, provider: unknown) {
 			const auth = await getAuth();
+			const pluginConfig = loadPluginConfig();
+			applyUiRuntimeFromConfig(pluginConfig);
+			const perProjectAccounts = getPerProjectAccounts(pluginConfig);
+			setStoragePath(perProjectAccounts ? process.cwd() : null);
 
 			// Only handle OAuth auth type, skip API key auth
 			if (auth.type !== "oauth") {
@@ -721,7 +758,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							auth as OAuthAuthDetails,
 						);
 					}
-					const accountManager = await accountManagerPromise;
+					let accountManager = await accountManagerPromise;
 					cachedAccountManager = accountManager;
 					const refreshToken =
 						auth.type === "oauth" ? auth.refresh : "";
@@ -749,8 +786,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 				// Load plugin configuration and determine CODEX_MODE
 				// Priority: CODEX_MODE env var > config file > default (true)
-				const pluginConfig = loadPluginConfig();
-				applyUiRuntimeFromConfig(pluginConfig);
 				const codexMode = getCodexMode(pluginConfig);
 				const fastSessionEnabled = getFastSession(pluginConfig);
 				const fastSessionStrategy = getFastSessionStrategy(pluginConfig);
@@ -767,13 +802,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const unsupportedCodexFallbackChain =
 					getUnsupportedCodexFallbackChain(pluginConfig);
 				const toastDurationMs = getToastDurationMs(pluginConfig);
-				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
 				const fetchTimeoutMs = getFetchTimeoutMs(pluginConfig);
 				const streamStallTimeoutMs = getStreamStallTimeoutMs(pluginConfig);
-
-				if (perProjectAccounts) {
-					setStoragePath(process.cwd());
-				}
 
 				const sessionRecoveryEnabled = getSessionRecovery(pluginConfig);
 				const autoResumeEnabled = getAutoResume(pluginConfig);
@@ -845,6 +875,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						init?: RequestInit,
 					): Promise<Response> {
 						try {
+							if (cachedAccountManager && cachedAccountManager !== accountManager) {
+								accountManager = cachedAccountManager;
+							}
+
                                                 // Step 1: Extract and rewrite URL for Codex backend
                                                 const originalUrl = extractRequestUrl(input);
                                                 const url = rewriteUrlForCodex(originalUrl);
@@ -1479,9 +1513,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const authPluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(authPluginConfig);
 							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
-							if (authPerProjectAccounts) {
-								setStoragePath(process.cwd());
-							}
+							setStoragePath(authPerProjectAccounts ? process.cwd() : null);
 
 							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =
@@ -1525,6 +1557,249 @@ while (attempted.size < Math.max(1, accountCount)) {
 								);
 							};
 
+							type CodexQuotaWindow = {
+								usedPercent?: number;
+								windowMinutes?: number;
+								resetAtMs?: number;
+							};
+
+							type CodexQuotaSnapshot = {
+								status: number;
+								planType?: string;
+								activeLimit?: number;
+								primary: CodexQuotaWindow;
+								secondary: CodexQuotaWindow;
+							};
+
+							const parseFiniteNumberHeader = (headers: Headers, name: string): number | undefined => {
+								const raw = headers.get(name);
+								if (!raw) return undefined;
+								const parsed = Number(raw);
+								return Number.isFinite(parsed) ? parsed : undefined;
+							};
+
+							const parseFiniteIntHeader = (headers: Headers, name: string): number | undefined => {
+								const raw = headers.get(name);
+								if (!raw) return undefined;
+								const parsed = Number.parseInt(raw, 10);
+								return Number.isFinite(parsed) ? parsed : undefined;
+							};
+
+							const parseResetAtMs = (headers: Headers, prefix: string): number | undefined => {
+								const resetAfterSeconds = parseFiniteIntHeader(
+									headers,
+									`${prefix}-reset-after-seconds`,
+								);
+								if (
+									typeof resetAfterSeconds === "number" &&
+									Number.isFinite(resetAfterSeconds) &&
+									resetAfterSeconds > 0
+								) {
+									return Date.now() + resetAfterSeconds * 1000;
+								}
+
+								const resetAtRaw = headers.get(`${prefix}-reset-at`);
+								if (!resetAtRaw) return undefined;
+
+								const trimmed = resetAtRaw.trim();
+								if (/^\d+$/.test(trimmed)) {
+									const parsedNumber = Number.parseInt(trimmed, 10);
+									if (Number.isFinite(parsedNumber) && parsedNumber > 0) {
+										// Upstream sometimes returns seconds since epoch.
+										return parsedNumber < 10_000_000_000 ? parsedNumber * 1000 : parsedNumber;
+									}
+								}
+
+								const parsedDate = Date.parse(trimmed);
+								return Number.isFinite(parsedDate) ? parsedDate : undefined;
+							};
+
+							const hasCodexQuotaHeaders = (headers: Headers): boolean => {
+								const keys = [
+									"x-codex-primary-used-percent",
+									"x-codex-primary-window-minutes",
+									"x-codex-primary-reset-at",
+									"x-codex-primary-reset-after-seconds",
+									"x-codex-secondary-used-percent",
+									"x-codex-secondary-window-minutes",
+									"x-codex-secondary-reset-at",
+									"x-codex-secondary-reset-after-seconds",
+								];
+								return keys.some((key) => headers.get(key) !== null);
+							};
+
+							const parseCodexQuotaSnapshot = (headers: Headers, status: number): CodexQuotaSnapshot | null => {
+								if (!hasCodexQuotaHeaders(headers)) return null;
+
+								const primaryPrefix = "x-codex-primary";
+								const secondaryPrefix = "x-codex-secondary";
+								const primary: CodexQuotaWindow = {
+									usedPercent: parseFiniteNumberHeader(headers, `${primaryPrefix}-used-percent`),
+									windowMinutes: parseFiniteIntHeader(headers, `${primaryPrefix}-window-minutes`),
+									resetAtMs: parseResetAtMs(headers, primaryPrefix),
+								};
+								const secondary: CodexQuotaWindow = {
+									usedPercent: parseFiniteNumberHeader(headers, `${secondaryPrefix}-used-percent`),
+									windowMinutes: parseFiniteIntHeader(headers, `${secondaryPrefix}-window-minutes`),
+									resetAtMs: parseResetAtMs(headers, secondaryPrefix),
+								};
+
+								const planTypeRaw = headers.get("x-codex-plan-type");
+								const planType = planTypeRaw && planTypeRaw.trim() ? planTypeRaw.trim() : undefined;
+								const activeLimit = parseFiniteIntHeader(headers, "x-codex-active-limit");
+
+								return { status, planType, activeLimit, primary, secondary };
+							};
+
+							const formatQuotaWindowLabel = (windowMinutes: number | undefined): string => {
+								if (!windowMinutes || !Number.isFinite(windowMinutes) || windowMinutes <= 0) {
+									return "quota";
+								}
+								if (windowMinutes % 1440 === 0) return `${windowMinutes / 1440}d`;
+								if (windowMinutes % 60 === 0) return `${windowMinutes / 60}h`;
+								return `${windowMinutes}m`;
+							};
+
+							const formatResetAt = (resetAtMs: number | undefined): string | undefined => {
+								if (!resetAtMs || !Number.isFinite(resetAtMs) || resetAtMs <= 0) return undefined;
+								const date = new Date(resetAtMs);
+								if (!Number.isFinite(date.getTime())) return undefined;
+
+								const now = new Date();
+								const sameDay =
+									now.getFullYear() === date.getFullYear() &&
+									now.getMonth() === date.getMonth() &&
+									now.getDate() === date.getDate();
+
+								const time = date.toLocaleTimeString(undefined, {
+									hour: "2-digit",
+									minute: "2-digit",
+									hour12: false,
+								});
+
+								if (sameDay) return time;
+								const day = date.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
+								return `${time} on ${day}`;
+							};
+
+							const formatCodexQuotaLine = (snapshot: CodexQuotaSnapshot): string => {
+								const summarizeWindow = (label: string, window: CodexQuotaWindow): string => {
+									const used = window.usedPercent;
+									const left =
+										typeof used === "number" && Number.isFinite(used)
+											? Math.max(0, Math.min(100, Math.round(100 - used)))
+											: undefined;
+									const reset = formatResetAt(window.resetAtMs);
+									let summary = label;
+									if (left !== undefined) summary = `${summary} ${left}% left`;
+									if (reset) summary = `${summary} (resets ${reset})`;
+									return summary;
+								};
+
+								const primaryLabel = formatQuotaWindowLabel(snapshot.primary.windowMinutes);
+								const secondaryLabel = formatQuotaWindowLabel(snapshot.secondary.windowMinutes);
+								const parts = [
+									summarizeWindow(primaryLabel, snapshot.primary),
+									summarizeWindow(secondaryLabel, snapshot.secondary),
+								];
+								if (snapshot.planType) parts.push(`plan:${snapshot.planType}`);
+								if (typeof snapshot.activeLimit === "number" && Number.isFinite(snapshot.activeLimit)) {
+									parts.push(`active:${snapshot.activeLimit}`);
+								}
+								if (snapshot.status === 429) parts.push("rate-limited");
+								return parts.join(", ");
+							};
+
+							const fetchCodexQuotaSnapshot = async (params: {
+								accountId: string;
+								accessToken: string;
+							}): Promise<CodexQuotaSnapshot> => {
+								const QUOTA_PROBE_MODELS = ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex"];
+								let lastError: Error | null = null;
+
+								for (const model of QUOTA_PROBE_MODELS) {
+									try {
+										const instructions = await getCodexInstructions(model);
+										const probeBody: RequestBody = {
+											model,
+											stream: true,
+											store: false,
+											include: ["reasoning.encrypted_content"],
+											instructions,
+											input: [
+												{
+													type: "message",
+													role: "user",
+													content: [{ type: "input_text", text: "quota ping" }],
+												},
+											],
+											reasoning: { effort: "none", summary: "auto" },
+											text: { verbosity: "low" },
+										};
+
+										const headers = createCodexHeaders(undefined, params.accountId, params.accessToken, {
+											model,
+										});
+										headers.set("content-type", "application/json; charset=utf-8");
+
+										const controller = new AbortController();
+										const timeout = setTimeout(() => controller.abort(), 15_000);
+										let response: Response;
+										try {
+											response = await fetch(`${CODEX_BASE_URL}/codex/responses`, {
+												method: "POST",
+												headers,
+												body: JSON.stringify(probeBody),
+												signal: controller.signal,
+											});
+										} finally {
+											clearTimeout(timeout);
+										}
+
+										const snapshot = parseCodexQuotaSnapshot(response.headers, response.status);
+										if (snapshot) {
+											// We only need headers; cancel the SSE stream immediately.
+											try {
+												await response.body?.cancel();
+											} catch {
+												// Ignore cancellation failures.
+											}
+											return snapshot;
+										}
+
+										if (!response.ok) {
+											const bodyText = await response.text().catch(() => "");
+											let errorBody: unknown = undefined;
+											try {
+												errorBody = bodyText ? (JSON.parse(bodyText) as unknown) : undefined;
+											} catch {
+												errorBody = { error: { message: bodyText } };
+											}
+
+											const unsupportedInfo = getUnsupportedCodexModelInfo(errorBody);
+											if (unsupportedInfo.isUnsupported) {
+												lastError = new Error(
+													unsupportedInfo.message ?? `Model '${model}' unsupported for this account`,
+												);
+												continue;
+											}
+
+											const message =
+												(typeof (errorBody as { error?: { message?: unknown } })?.error?.message === "string"
+													? (errorBody as { error?: { message?: string } }).error?.message
+													: bodyText) || `HTTP ${response.status}`;
+											throw new Error(message);
+										}
+
+										lastError = new Error("Codex response did not include quota headers");
+									} catch (error) {
+										lastError = error instanceof Error ? error : new Error(String(error));
+									}
+								}
+
+								throw lastError ?? new Error("Failed to fetch quotas");
+							};
+
 							const runAccountCheck = async (deepProbe: boolean): Promise<void> => {
 								const loadedStorage = await hydrateEmails(await loadAccounts());
 								const workingStorage = loadedStorage
@@ -1552,7 +1827,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								let errors = 0;
 
 								console.log(
-									`\nChecking ${deepProbe ? "full account health" : "quotas (fast refresh)"} for all accounts...\n`,
+									`\nChecking ${deepProbe ? "full account health" : "quotas"} for all accounts...\n`,
 								);
 
 								for (let i = 0; i < total; i += 1) {
@@ -1566,60 +1841,189 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 
 									try {
-										const refreshResult = await queuedRefresh(account.refreshToken);
-										if (refreshResult.type !== "success") {
-											errors += 1;
-											const message = refreshResult.message ?? refreshResult.reason ?? "refresh failed";
-											console.log(`[${i + 1}/${total}] ${label}: ERROR (${message})`);
-											if (isFlaggableFailure(refreshResult)) {
-												const existingIndex = flaggedStorage.accounts.findIndex(
-													(flagged) => flagged.refreshToken === account.refreshToken,
-												);
-												const flaggedRecord: FlaggedAccountMetadataV1 = {
-													...account,
-													flaggedAt: Date.now(),
-													flaggedReason: "token-invalid",
-													lastError: message,
-												};
-												if (existingIndex >= 0) {
-													flaggedStorage.accounts[existingIndex] = flaggedRecord;
-												} else {
-													flaggedStorage.accounts.push(flaggedRecord);
-												}
-												removeFromActive.add(account.refreshToken);
-												flaggedChanged = true;
+										// If we already have a valid cached access token, don't force-refresh.
+										// This avoids flagging accounts where the refresh token has been burned
+										// but the access token is still valid (same behavior as Codex CLI).
+										const nowMs = Date.now();
+										let accessToken: string | null = null;
+										let tokenAccountId: string | undefined = undefined;
+										let authDetail = "OK";
+										if (
+											account.accessToken &&
+											(typeof account.expiresAt !== "number" ||
+												!Number.isFinite(account.expiresAt) ||
+												account.expiresAt > nowMs)
+										) {
+											accessToken = account.accessToken;
+											authDetail = "OK (cached access)";
+
+											tokenAccountId = extractAccountId(account.accessToken);
+											if (
+												tokenAccountId &&
+												shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId) &&
+												tokenAccountId !== account.accountId
+											) {
+												account.accountId = tokenAccountId;
+												account.accountIdSource = "token";
+												storageChanged = true;
 											}
+
+										}
+
+										// If Codex CLI has a valid cached access token for this email, use it
+										// instead of forcing a refresh.
+										if (!accessToken) {
+											const cached = await lookupCodexCliTokensByEmail(account.email);
+											if (
+												cached &&
+												(typeof cached.expiresAt !== "number" ||
+													!Number.isFinite(cached.expiresAt) ||
+													cached.expiresAt > nowMs)
+											) {
+												accessToken = cached.accessToken;
+												authDetail = "OK (Codex CLI cache)";
+
+												if (cached.refreshToken && cached.refreshToken !== account.refreshToken) {
+													account.refreshToken = cached.refreshToken;
+													storageChanged = true;
+												}
+												if (cached.accessToken && cached.accessToken !== account.accessToken) {
+													account.accessToken = cached.accessToken;
+													storageChanged = true;
+												}
+												if (cached.expiresAt !== account.expiresAt) {
+													account.expiresAt = cached.expiresAt;
+													storageChanged = true;
+												}
+
+												const hydratedEmail = sanitizeEmail(
+													extractAccountEmail(cached.accessToken),
+												);
+												if (hydratedEmail && hydratedEmail !== account.email) {
+													account.email = hydratedEmail;
+													storageChanged = true;
+												}
+
+												tokenAccountId = extractAccountId(cached.accessToken);
+												if (
+													tokenAccountId &&
+													shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId) &&
+													tokenAccountId !== account.accountId
+												) {
+													account.accountId = tokenAccountId;
+													account.accountIdSource = "token";
+													storageChanged = true;
+												}
+											}
+										}
+
+										if (!accessToken) {
+											const refreshResult = await queuedRefresh(account.refreshToken);
+											if (refreshResult.type !== "success") {
+												errors += 1;
+												const message =
+													refreshResult.message ?? refreshResult.reason ?? "refresh failed";
+												console.log(`[${i + 1}/${total}] ${label}: ERROR (${message})`);
+												if (deepProbe && isFlaggableFailure(refreshResult)) {
+													const existingIndex = flaggedStorage.accounts.findIndex(
+														(flagged) => flagged.refreshToken === account.refreshToken,
+													);
+													const flaggedRecord: FlaggedAccountMetadataV1 = {
+														...account,
+														flaggedAt: Date.now(),
+														flaggedReason: "token-invalid",
+														lastError: message,
+													};
+													if (existingIndex >= 0) {
+														flaggedStorage.accounts[existingIndex] = flaggedRecord;
+													} else {
+														flaggedStorage.accounts.push(flaggedRecord);
+													}
+													removeFromActive.add(account.refreshToken);
+													flaggedChanged = true;
+												}
+												continue;
+											}
+
+											accessToken = refreshResult.access;
+											authDetail = "OK";
+											if (refreshResult.refresh !== account.refreshToken) {
+												account.refreshToken = refreshResult.refresh;
+												storageChanged = true;
+											}
+											if (refreshResult.access && refreshResult.access !== account.accessToken) {
+												account.accessToken = refreshResult.access;
+												storageChanged = true;
+											}
+											if (
+												typeof refreshResult.expires === "number" &&
+												refreshResult.expires !== account.expiresAt
+											) {
+												account.expiresAt = refreshResult.expires;
+												storageChanged = true;
+											}
+											const hydratedEmail = sanitizeEmail(
+												extractAccountEmail(refreshResult.access, refreshResult.idToken),
+											);
+											if (hydratedEmail && hydratedEmail !== account.email) {
+												account.email = hydratedEmail;
+												storageChanged = true;
+											}
+											tokenAccountId = extractAccountId(refreshResult.access);
+											if (
+												tokenAccountId &&
+												shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId) &&
+												tokenAccountId !== account.accountId
+											) {
+												account.accountId = tokenAccountId;
+												account.accountIdSource = "token";
+												storageChanged = true;
+											}
+										}
+
+										if (!accessToken) {
+											throw new Error("Missing access token after refresh");
+										}
+
+										if (deepProbe) {
+											ok += 1;
+											const detail =
+												tokenAccountId
+													? `${authDetail} (id:${tokenAccountId.slice(-6)})`
+													: authDetail;
+											console.log(`[${i + 1}/${total}] ${label}: ${detail}`);
 											continue;
 										}
 
-										ok += 1;
-										if (refreshResult.refresh !== account.refreshToken) {
-											account.refreshToken = refreshResult.refresh;
-											storageChanged = true;
-										}
-										const hydratedEmail = sanitizeEmail(
-											extractAccountEmail(refreshResult.access, refreshResult.idToken),
-										);
-										if (hydratedEmail && hydratedEmail !== account.email) {
-											account.email = hydratedEmail;
-											storageChanged = true;
-										}
-										const tokenAccountId = extractAccountId(refreshResult.access);
-										if (
-											tokenAccountId &&
-											shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId) &&
-											tokenAccountId !== account.accountId
-										) {
-											account.accountId = tokenAccountId;
-											account.accountIdSource = "token";
-											storageChanged = true;
-										}
+										try {
+											const requestAccountId =
+												resolveRequestAccountId(
+													account.accountId,
+													account.accountIdSource,
+													tokenAccountId,
+												) ??
+												tokenAccountId ??
+												account.accountId;
 
-										const deepProbeDetail =
-											deepProbe && tokenAccountId
-												? `OK (id:${tokenAccountId.slice(-6)})`
-												: "OK";
-										console.log(`[${i + 1}/${total}] ${label}: ${deepProbeDetail}`);
+											if (!requestAccountId) {
+												throw new Error("Missing accountId for quota probe");
+											}
+
+											const snapshot = await fetchCodexQuotaSnapshot({
+												accountId: requestAccountId,
+												accessToken,
+											});
+											ok += 1;
+											console.log(
+												`[${i + 1}/${total}] ${label}: ${formatCodexQuotaLine(snapshot)}`,
+											);
+										} catch (error) {
+											errors += 1;
+											const message = error instanceof Error ? error.message : String(error);
+											console.log(
+												`[${i + 1}/${total}] ${label}: ERROR (${message.slice(0, 160)})`,
+											);
+										}
 									} catch (error) {
 										errors += 1;
 										const message = error instanceof Error ? error.message : String(error);
@@ -1669,6 +2073,39 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (!flagged) continue;
 									const label = flagged.email ?? flagged.accountLabel ?? `Flagged ${i + 1}`;
 									try {
+										const cached = await lookupCodexCliTokensByEmail(flagged.email);
+										const now = Date.now();
+										if (
+											cached &&
+											typeof cached.expiresAt === "number" &&
+											Number.isFinite(cached.expiresAt) &&
+											cached.expiresAt > now
+										) {
+											const refreshToken =
+												typeof cached.refreshToken === "string" && cached.refreshToken.trim()
+													? cached.refreshToken.trim()
+													: flagged.refreshToken;
+											const resolved = resolveAccountSelection({
+												type: "success",
+												access: cached.accessToken,
+												refresh: refreshToken,
+												expires: cached.expiresAt,
+												multiAccount: true,
+											});
+											if (!resolved.accountIdOverride && flagged.accountId) {
+												resolved.accountIdOverride = flagged.accountId;
+												resolved.accountIdSource = flagged.accountIdSource ?? "manual";
+											}
+											if (!resolved.accountLabel && flagged.accountLabel) {
+												resolved.accountLabel = flagged.accountLabel;
+											}
+											restored.push(resolved);
+											console.log(
+												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED (Codex CLI cache)`,
+											);
+											continue;
+										}
+
 										const refreshResult = await queuedRefresh(flagged.refreshToken);
 										if (refreshResult.type !== "success") {
 											console.log(
@@ -2035,9 +2472,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         const manualPluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(manualPluginConfig);
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
-                                                        if (manualPerProjectAccounts) {
-                                                                setStoragePath(process.cwd());
-                                                        }
+							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 
                                                         const { pkce, url } = await createAuthorizationFlow();
                                                         return buildManualOAuthFlow(pkce, url, async (tokens) => {
@@ -2245,8 +2680,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
                                         if (cachedAccountManager) {
-                                                cachedAccountManager.setActiveIndex(targetIndex);
-                                                await cachedAccountManager.saveToDisk();
+						const reloadedManager = await AccountManager.loadFromDisk();
+						cachedAccountManager = reloadedManager;
+						accountManagerPromise = Promise.resolve(reloadedManager);
                                         }
 
                                         const label = formatAccountLabel(account, targetIndex);
@@ -2595,14 +3031,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 				}
 
 					if (cachedAccountManager) {
-						const managedAccounts = cachedAccountManager.getAccountsSnapshot();
-						const managedAccount = managedAccounts.find(
-							(acc) => acc.refreshToken === account.refreshToken
-						);
-						if (managedAccount) {
-							cachedAccountManager.removeAccount(managedAccount);
-							await cachedAccountManager.saveToDisk();
-						}
+						const reloadedManager = await AccountManager.loadFromDisk();
+						cachedAccountManager = reloadedManager;
+						accountManagerPromise = Promise.resolve(reloadedManager);
 					}
 
 					const remaining = storage.accounts.length;
@@ -2660,6 +3091,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
 								account.refreshToken = refreshResult.refresh;
+								account.accessToken = refreshResult.access;
+								account.expiresAt = refreshResult.expires;
 								results.push(`  ${getStatusMarker(ui, "ok")} ${label}: Refreshed`);
 								refreshedCount++;
 							} else {
@@ -2674,6 +3107,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 				await saveAccounts(storage);
+				if (cachedAccountManager) {
+					const reloadedManager = await AccountManager.loadFromDisk();
+					cachedAccountManager = reloadedManager;
+					accountManagerPromise = Promise.resolve(reloadedManager);
+				}
 				results.push("");
 				results.push(`Summary: ${refreshedCount} refreshed, ${failedCount} failed`);
 				if (ui.v2Enabled) {

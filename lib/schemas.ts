@@ -86,6 +86,8 @@ export const AccountMetadataV3Schema = z.object({
 	accountLabel: z.string().optional(),
 	email: z.string().optional(),
 	refreshToken: z.string().min(1), // Required, non-empty
+	accessToken: z.string().optional(),
+	expiresAt: z.number().optional(),
 	enabled: z.boolean().optional(),
 	addedAt: z.number(),
 	lastUsed: z.number(),
@@ -128,6 +130,8 @@ export const AccountMetadataV1Schema = z.object({
 	accountLabel: z.string().optional(),
 	email: z.string().optional(),
 	refreshToken: z.string().min(1),
+	accessToken: z.string().optional(),
+	expiresAt: z.number().optional(),
 	enabled: z.boolean().optional(),
 	addedAt: z.number(),
 	lastUsed: z.number(),

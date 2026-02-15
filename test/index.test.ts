@@ -132,6 +132,7 @@ vi.mock("../lib/prompts/codex.js", () => ({
 		if (model.includes("codex")) return "codex";
 		return "gpt-5.1";
 	},
+	getCodexInstructions: vi.fn(async () => "test instructions"),
 	MODEL_FAMILIES: ["codex-max", "codex", "gpt-5.1"] as const,
 	prewarmCodexInstructions: vi.fn(),
 }));
@@ -298,6 +299,7 @@ vi.mock("../lib/accounts.js", () => {
 		sanitizeEmail: (email: string) => email,
 		shouldUpdateAccountIdFromToken: () => true,
 		parseRateLimitReason: () => "unknown",
+		lookupCodexCliTokensByEmail: vi.fn(async () => null),
 	};
 });
 
@@ -502,6 +504,29 @@ describe("OpenAIOAuthPlugin", () => {
 			];
 			const result = await plugin.tool["codex-switch"].execute({ index: 2 });
 			expect(result).toContain("Switched to account");
+		});
+
+		it("reloads account manager from disk when cached manager exists", async () => {
+			const { AccountManager } = await import("../lib/accounts.js");
+			const loadFromDiskSpy = vi.spyOn(AccountManager, "loadFromDisk");
+			const getAuth = async () => ({
+				type: "oauth" as const,
+				access: "access-token",
+				refresh: "refresh-token",
+				expires: Date.now() + 60_000,
+				multiAccount: true,
+			});
+
+			mockStorage.accounts = [
+				{ refreshToken: "r1", email: "user1@example.com" },
+				{ refreshToken: "r2", email: "user2@example.com" },
+			];
+
+			await plugin.auth.loader(getAuth, { options: {}, models: {} });
+			loadFromDiskSpy.mockClear();
+
+			await plugin.tool["codex-switch"].execute({ index: 2 });
+			expect(loadFromDiskSpy).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -1203,6 +1228,31 @@ describe("OpenAIOAuthPlugin event handler edge cases", () => {
 		await plugin.event({
 			event: { type: "account.select", properties: { accountIndex: 1 } },
 		});
+	});
+
+	it("reloads account manager from disk when handling account.select", async () => {
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const { AccountManager } = await import("../lib/accounts.js");
+		const loadFromDiskSpy = vi.spyOn(AccountManager, "loadFromDisk");
+
+		const getAuth = async () => ({
+			type: "oauth" as const,
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			multiAccount: true,
+		});
+
+		await plugin.auth.loader(getAuth, { options: {}, models: {} });
+		loadFromDiskSpy.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(loadFromDiskSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("handles openai.account.select with openai provider", async () => {

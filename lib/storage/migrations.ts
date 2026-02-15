@@ -18,6 +18,10 @@ export interface AccountMetadataV1 {
 	accountLabel?: string;
 	email?: string;
 	refreshToken: string;
+	/** Optional cached access token (Codex CLI parity). */
+	accessToken?: string;
+	/** Optional access token expiry timestamp (ms since epoch). */
+	expiresAt?: number;
 	enabled?: boolean;
 	addedAt: number;
 	lastUsed: number;
@@ -39,6 +43,10 @@ export interface AccountMetadataV3 {
 	accountLabel?: string;
 	email?: string;
 	refreshToken: string;
+	/** Optional cached access token (Codex CLI parity). */
+	accessToken?: string;
+	/** Optional access token expiry timestamp (ms since epoch). */
+	expiresAt?: number;
 	enabled?: boolean;
 	addedAt: number;
 	lastUsed: number;
@@ -76,6 +84,8 @@ export function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
 				accountLabel: account.accountLabel,
 				email: account.email,
 				refreshToken: account.refreshToken,
+				accessToken: account.accessToken,
+				expiresAt: account.expiresAt,
 				enabled: account.enabled,
 				addedAt: account.addedAt,
 				lastUsed: account.lastUsed,

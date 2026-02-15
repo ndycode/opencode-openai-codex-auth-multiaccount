@@ -114,6 +114,7 @@ vi.mock("../lib/accounts.js", () => {
 		formatWaitTime: (ms: number) => `${ms}ms`,
 		sanitizeEmail: (email: string) => email,
 		parseRateLimitReason: () => "unknown",
+		lookupCodexCliTokensByEmail: vi.fn(async () => null),
 	};
 });
 

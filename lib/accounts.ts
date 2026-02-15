@@ -1,3 +1,6 @@
+import { existsSync, promises as fs } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Auth } from "@opencode-ai/sdk";
 import { createLogger } from "./logger.js";
 import {
@@ -16,7 +19,8 @@ import {
 	type AccountWithMetrics,
 	type HybridSelectionOptions,
 } from "./rotation.js";
-import { nowMs } from "./utils.js";
+import { isRecord, nowMs } from "./utils.js";
+import { decodeJWT } from "./auth/auth.js";
 
 export {
 	extractAccountId,
@@ -60,6 +64,105 @@ import {
 } from "./accounts/rate-limits.js";
 
 const log = createLogger("accounts");
+
+export type CodexCliTokenCacheEntry = {
+	accessToken: string;
+	expiresAt?: number;
+	refreshToken?: string;
+	accountId?: string;
+};
+
+const CODEX_CLI_ACCOUNTS_PATH = join(homedir(), ".codex", "accounts.json");
+const CODEX_CLI_CACHE_TTL_MS = 5_000;
+let codexCliTokenCache: Map<string, CodexCliTokenCacheEntry> | null = null;
+let codexCliTokenCacheLoadedAt = 0;
+
+function extractExpiresAtFromAccessToken(accessToken: string): number | undefined {
+	const decoded = decodeJWT(accessToken);
+	const exp = decoded?.exp;
+	if (typeof exp === "number" && Number.isFinite(exp)) {
+		// JWT exp is in seconds since epoch.
+		return exp * 1000;
+	}
+	return undefined;
+}
+
+async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEntry> | null> {
+	const syncEnabled = process.env.CODEX_AUTH_SYNC_CODEX_CLI !== "0";
+	const skip =
+		!syncEnabled ||
+		process.env.VITEST_WORKER_ID !== undefined ||
+		process.env.NODE_ENV === "test";
+	if (skip) return null;
+
+	const now = nowMs();
+	if (codexCliTokenCache && now - codexCliTokenCacheLoadedAt < CODEX_CLI_CACHE_TTL_MS) {
+		return codexCliTokenCache;
+	}
+	codexCliTokenCacheLoadedAt = now;
+
+	if (!existsSync(CODEX_CLI_ACCOUNTS_PATH)) {
+		codexCliTokenCache = null;
+		return null;
+	}
+
+	try {
+		const raw = await fs.readFile(CODEX_CLI_ACCOUNTS_PATH, "utf-8");
+		const parsed = JSON.parse(raw) as unknown;
+		if (!isRecord(parsed) || !Array.isArray(parsed.accounts)) {
+			codexCliTokenCache = null;
+			return null;
+		}
+
+		const next = new Map<string, CodexCliTokenCacheEntry>();
+		for (const entry of parsed.accounts) {
+			if (!isRecord(entry)) continue;
+
+			const email = sanitizeEmail(typeof entry.email === "string" ? entry.email : undefined);
+			if (!email) continue;
+
+			const accountId =
+				typeof entry.accountId === "string" && entry.accountId.trim() ? entry.accountId.trim() : undefined;
+
+			const auth = entry.auth;
+			const tokens = isRecord(auth) ? auth.tokens : undefined;
+			const accessToken =
+				isRecord(tokens) && typeof tokens.access_token === "string" && tokens.access_token.trim()
+					? tokens.access_token.trim()
+					: undefined;
+			const refreshToken =
+				isRecord(tokens) && typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()
+					? tokens.refresh_token.trim()
+					: undefined;
+
+			if (!accessToken) continue;
+
+			next.set(email, {
+				accessToken,
+				expiresAt: extractExpiresAtFromAccessToken(accessToken),
+				refreshToken,
+				accountId,
+			});
+		}
+
+		codexCliTokenCache = next;
+		return codexCliTokenCache;
+	} catch (error) {
+		log.debug("Failed to read Codex CLI accounts cache", { error: String(error) });
+		codexCliTokenCache = null;
+		return null;
+	}
+}
+
+export async function lookupCodexCliTokensByEmail(
+	email: string | undefined,
+): Promise<CodexCliTokenCacheEntry | null> {
+	const normalized = sanitizeEmail(email);
+	if (!normalized) return null;
+	const cache = await getCodexCliTokenCache();
+	const cached = cache?.get(normalized);
+	return cached ? { ...cached } : null;
+}
 
 export interface ManagedAccount {
 	index: number;
@@ -108,16 +211,66 @@ export class AccountManager {
 
 	static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
 		const stored = await loadAccounts();
-		return new AccountManager(authFallback, stored);
+		const manager = new AccountManager(authFallback, stored);
+		await manager.hydrateFromCodexCli();
+		return manager;
 	}
 
 	hasRefreshToken(refreshToken: string): boolean {
 		return this.accounts.some((account) => account.refreshToken === refreshToken);
 	}
 
+	private async hydrateFromCodexCli(): Promise<void> {
+		const cache = await getCodexCliTokenCache();
+		if (!cache || cache.size === 0) return;
+
+		const now = nowMs();
+		let changed = false;
+
+		for (const account of this.accounts) {
+			const email = sanitizeEmail(account.email);
+			if (!email) continue;
+
+			const cached = cache.get(email);
+			if (!cached) continue;
+
+			if (typeof cached.expiresAt === "number" && cached.expiresAt <= now) {
+				continue;
+			}
+
+			const missingOrExpired =
+				!account.access || account.expires === undefined || account.expires <= now;
+			if (missingOrExpired) {
+				account.access = cached.accessToken;
+				if (typeof cached.expiresAt === "number") {
+					account.expires = cached.expiresAt;
+				}
+				changed = true;
+			}
+
+			if (
+				!account.accountId &&
+				cached.accountId &&
+				shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId)
+			) {
+				account.accountId = cached.accountId;
+				account.accountIdSource = account.accountIdSource ?? "token";
+				changed = true;
+			}
+		}
+
+		if (!changed) return;
+
+		try {
+			await this.saveToDisk();
+		} catch (error) {
+			log.debug("Failed to persist Codex CLI cache hydration", { error: String(error) });
+		}
+	}
+
 	constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
 		const fallbackAccountId = extractAccountId(authFallback?.access);
-		const fallbackAccountEmail = extractAccountEmail(authFallback?.access);
+		const fallbackAccountEmail = sanitizeEmail(extractAccountEmail(authFallback?.access));
 
 		if (stored && stored.accounts.length > 0) {
 			const baseNow = nowMs();
@@ -130,7 +283,9 @@ export class AccountManager {
 					const matchesFallback =
 						!!authFallback &&
 						((fallbackAccountId && account.accountId === fallbackAccountId) ||
-							account.refreshToken === authFallback.refresh);
+							account.refreshToken === authFallback.refresh ||
+							(!!fallbackAccountEmail &&
+								sanitizeEmail(account.email) === fallbackAccountEmail));
 
 					const refreshToken = matchesFallback && authFallback ? authFallback.refresh : account.refreshToken;
  
@@ -140,12 +295,12 @@ export class AccountManager {
 						accountIdSource: account.accountIdSource,
 						accountLabel: account.accountLabel,
 						email: matchesFallback
-							? sanitizeEmail(fallbackAccountEmail) ?? sanitizeEmail(account.email)
+							? fallbackAccountEmail ?? sanitizeEmail(account.email)
 							: sanitizeEmail(account.email),
 						refreshToken,
 						enabled: account.enabled !== false,
-						access: matchesFallback && authFallback ? authFallback.access : undefined,
-						expires: matchesFallback && authFallback ? authFallback.expires : undefined,
+						access: matchesFallback && authFallback ? authFallback.access : account.accessToken,
+						expires: matchesFallback && authFallback ? authFallback.expires : account.expiresAt,
 						addedAt: clampNonNegativeInt(account.addedAt, baseNow),
 						lastUsed: clampNonNegativeInt(account.lastUsed, 0),
 						lastSwitchReason: account.lastSwitchReason,
@@ -161,7 +316,8 @@ export class AccountManager {
 				this.accounts.some(
 					(account) =>
 						account.refreshToken === authFallback.refresh ||
-						(fallbackAccountId && account.accountId === fallbackAccountId),
+						(fallbackAccountId && account.accountId === fallbackAccountId) ||
+						(!!fallbackAccountEmail && account.email === fallbackAccountEmail),
 				);
 
 			if (authFallback && !hasMatchingFallback) {
@@ -170,7 +326,7 @@ export class AccountManager {
 					index: this.accounts.length,
 					accountId: fallbackAccountId,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
-					email: sanitizeEmail(fallbackAccountEmail),
+					email: fallbackAccountEmail,
 					refreshToken: authFallback.refresh,
 					enabled: true,
 					access: authFallback.access,
@@ -202,7 +358,7 @@ export class AccountManager {
 					index: 0,
 					accountId: fallbackAccountId,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
-					email: sanitizeEmail(fallbackAccountEmail),
+					email: fallbackAccountEmail,
 					refreshToken: authFallback.refresh,
 					enabled: true,
 					access: authFallback.access,
@@ -631,6 +787,8 @@ export class AccountManager {
 				accountLabel: account.accountLabel,
 				email: account.email,
 				refreshToken: account.refreshToken,
+				accessToken: account.access,
+				expiresAt: account.expires,
 				enabled: account.enabled === false ? false : undefined,
 				addedAt: account.addedAt,
 				lastUsed: account.lastUsed,

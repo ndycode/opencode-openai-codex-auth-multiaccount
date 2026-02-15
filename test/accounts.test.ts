@@ -1136,6 +1136,74 @@ describe("AccountManager", () => {
       expect(account?.access).toBe(accessToken);
     });
 
+    it("merges fallback auth when matching by email", () => {
+      const now = Date.now();
+      const payload = {
+        email: "fallback@example.com",
+      };
+      const accessToken = `header.${Buffer.from(JSON.stringify(payload)).toString("base64")}.signature`;
+
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "stored-token",
+            email: "fallback@example.com",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const auth: OAuthAuthDetails = {
+        type: "oauth",
+        access: accessToken,
+        refresh: "new-refresh-token",
+        expires: now + 60_000,
+      };
+
+      const manager = new AccountManager(auth, stored);
+      expect(manager.getAccountCount()).toBe(1);
+      const account = manager.getCurrentAccount();
+      expect(account?.refreshToken).toBe("new-refresh-token");
+      expect(account?.access).toBe(accessToken);
+      expect(account?.email).toBe("fallback@example.com");
+    });
+
+    it("does not add fallback as duplicate when matching stored email", () => {
+      const now = Date.now();
+      const payload = {
+        email: "fallback@example.com",
+      };
+      const accessToken = `header.${Buffer.from(JSON.stringify(payload)).toString("base64")}.signature`;
+
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "stored-token",
+            email: "fallback@example.com",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const auth: OAuthAuthDetails = {
+        type: "oauth",
+        access: accessToken,
+        refresh: "different-refresh-token",
+        expires: now + 60_000,
+      };
+
+      const manager = new AccountManager(auth, stored);
+      expect(manager.getAccountCount()).toBe(1);
+      const account = manager.getCurrentAccount();
+      expect(account?.refreshToken).toBe("different-refresh-token");
+    });
+
     it("adds fallback as new account when no match found", () => {
       const now = Date.now();
       const stored = {
