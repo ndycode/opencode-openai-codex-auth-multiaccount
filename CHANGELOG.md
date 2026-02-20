@@ -4,6 +4,18 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ## [unreleased]
 
+## [5.2.1] - 2026-02-20
+
+### fixed
+
+- **tool mapping conflicts in codex bridge/remap prompts**: removed contradictory guidance that treated `patch` as forbidden and aligned instructions so `apply_patch` intent maps to `patch` (preferred) or `edit` for targeted replacements.
+- **OpenCode codex prompt source brittleness**: prompt fetch now retries across multiple upstream source URLs instead of relying on a single path that could return 404.
+
+### changed
+
+- **prompt fetch configurability**: added `OPENCODE_CODEX_PROMPT_URL` override support and source-aware cache metadata so ETag conditional requests stay bound to the same source.
+- **regression coverage + docs wording**: updated prompt assertions/tests for the new `patch`+`edit` policy and refreshed architecture documentation text to match.
+
 ## [5.2.0] - 2026-02-13
 
 ### added

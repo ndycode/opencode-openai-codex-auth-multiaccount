@@ -1,6 +1,6 @@
 {
   "name": "oc-chatgpt-multi-auth",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "Multi-account rotation plugin for ChatGPT Plus/Pro (OAuth / Codex backend)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
