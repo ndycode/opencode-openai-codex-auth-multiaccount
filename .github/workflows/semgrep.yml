@@ -1,0 +1,39 @@
+name: Semgrep
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  semgrep:
+    name: Analyze with Semgrep
+    runs-on: ubuntu-latest
+    if: (github.actor != 'dependabot[bot]')
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Semgrep ci (managed mode)
+        if: ${{ secrets.SEMGREP_APP_TOKEN != '' }}
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: semgrep ci --sarif > semgrep.sarif
+
+      - name: Semgrep scan (community mode)
+        if: ${{ secrets.SEMGREP_APP_TOKEN == '' }}
+        run: semgrep scan --config auto --sarif > semgrep.sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
