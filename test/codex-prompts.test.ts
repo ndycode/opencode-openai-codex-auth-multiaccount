@@ -50,7 +50,8 @@ describe("Codex Prompts Module", () => {
 
 	describe("TOOL_REMAP_MESSAGE constant", () => {
 		it("should contain apply_patch replacement instruction", () => {
-			expect(TOOL_REMAP_MESSAGE).toContain("APPLY_PATCH DOES NOT EXIST");
+			expect(TOOL_REMAP_MESSAGE).toContain("apply_patch/applyPatch are Codex names");
+			expect(TOOL_REMAP_MESSAGE).toContain("patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("edit");
 		});
 

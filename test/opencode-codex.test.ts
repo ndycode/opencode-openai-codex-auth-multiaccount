@@ -18,6 +18,7 @@ describe("opencode-codex", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   describe("getOpenCodeCodexPrompt", () => {
@@ -82,6 +83,78 @@ describe("opencode-codex", () => {
       );
     });
 
+    it("sends conditional request to cached source when sourceUrl is known", async () => {
+      const { getOpenCodeCodexPrompt } = await import("../lib/prompts/opencode-codex.js");
+
+      vi.mocked(readFile)
+        .mockResolvedValueOnce("Cached content")
+        .mockResolvedValueOnce(JSON.stringify({
+          etag: '"old-etag"',
+          sourceUrl: "https://example.com/prompt.txt",
+          lastChecked: Date.now() - 20 * 60 * 1000,
+        }));
+
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 304,
+        headers: new Map(),
+      });
+
+      const result = await getOpenCodeCodexPrompt();
+
+      expect(result).toBe("Cached content");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://example.com/prompt.txt",
+        expect.objectContaining({
+          headers: { "If-None-Match": '"old-etag"' },
+        }),
+      );
+    });
+
+    it("falls back to next source when first source returns 404", async () => {
+      const { getOpenCodeCodexPrompt } = await import("../lib/prompts/opencode-codex.js");
+
+      vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          headers: new Map(),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("Prompt from fallback source"),
+          headers: new Map([["etag", '"fallback-etag"']]),
+        });
+
+      const result = await getOpenCodeCodexPrompt();
+
+      expect(result).toBe("Prompt from fallback source");
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls[0]?.[0]).not.toBe(mockFetch.mock.calls[1]?.[0]);
+      expect(writeFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("uses OPENCODE_CODEX_PROMPT_URL override before default sources", async () => {
+      const { getOpenCodeCodexPrompt } = await import("../lib/prompts/opencode-codex.js");
+
+      vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+      vi.stubEnv("OPENCODE_CODEX_PROMPT_URL", "https://example.com/custom-codex.txt");
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("Prompt from env override"),
+        headers: new Map([["etag", '"env-etag"']]),
+      });
+
+      const result = await getOpenCodeCodexPrompt();
+
+      expect(result).toBe("Prompt from env override");
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch.mock.calls[0]?.[0]).toBe("https://example.com/custom-codex.txt");
+    });
+
     it("serves stale content immediately and refreshes cache in background", async () => {
       const { getOpenCodeCodexPrompt } = await import("../lib/prompts/opencode-codex.js");
       
@@ -138,6 +211,7 @@ describe("opencode-codex", () => {
       await expect(getOpenCodeCodexPrompt()).rejects.toThrow(
         "Failed to fetch OpenCode codex.txt and no cache available"
       );
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
     });
 
     it("falls back to cache on non-OK response", async () => {

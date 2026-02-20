@@ -384,7 +384,7 @@ let include: Vec<String> = if reasoning.is_some() {
 **Solution**: Replace OpenCode prompts with Codex-specific instructions.
 
 **Benefits**:
-- ✅ Explains tool name differences (apply_patch → edit)
+- ✅ Explains tool name differences (apply_patch intent → patch/edit)
 - ✅ Documents available tools
 - ✅ Maintains OpenCode working style
 - ✅ Preserves Codex best practices

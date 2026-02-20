@@ -406,6 +406,7 @@ describe('Request Transformer Module', () => {
 			expect(result![0].role).toBe('developer');
 			expect(result![0].type).toBe('message');
 			expect((result![0].content as any)[0].text).toContain('apply_patch');
+			expect((result![0].content as any)[0].text).toContain('patch (preferred)');
 		});
 
 		it('should not modify input when tools not present', async () => {
@@ -1817,6 +1818,7 @@ describe('Request Transformer Module', () => {
 				expect(result.input).toHaveLength(2);
 				expect(result.input![0].role).toBe('developer');
 				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
+				expect((result.input![0].content as any)[0].text).toContain('patch (preferred)');
 			});
 
 			it('should not filter OpenCode prompts when codexMode=false', async () => {
@@ -1838,6 +1840,7 @@ describe('Request Transformer Module', () => {
 				expect(result.input).toHaveLength(3);
 				expect(result.input![0].role).toBe('developer');
 				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
+				expect((result.input![0].content as any)[0].text).toContain('patch (preferred)');
 				expect(result.input![1].role).toBe('developer');
 				expect(result.input![2].role).toBe('user');
 			});

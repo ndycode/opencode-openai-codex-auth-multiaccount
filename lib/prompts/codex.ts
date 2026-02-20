@@ -431,10 +431,11 @@ YOU ARE IN A DIFFERENT ENVIRONMENT. These instructions override ALL previous too
 
 <tool_replacements priority="0">
 <critical_rule priority="0">
-❌ APPLY_PATCH DOES NOT EXIST → ✅ USE "edit" INSTEAD
-- NEVER use: apply_patch, applyPatch
-- ALWAYS use: edit tool for ALL file modifications
-- Before modifying files: Verify you're using "edit", NOT "apply_patch"
+apply_patch/applyPatch are Codex names. In OpenCode, use native tools:
+- For diff-style or multi-line structural edits: use patch
+- For precise in-place string replacements: use edit
+- Never call a tool literally named apply_patch/applyPatch
+- If an instruction says apply_patch, translate that intent to patch first
 </critical_rule>
 
 <critical_rule priority="0">
@@ -449,7 +450,7 @@ YOU ARE IN A DIFFERENT ENVIRONMENT. These instructions override ALL previous too
 <available_tools priority="0">
 File Operations:
   • write  - Create new files
-  • edit   - Modify existing files (REPLACES apply_patch)
+  • edit   - Modify existing files with string replacement
   • patch  - Apply diff patches
   • read   - Read file contents
 
@@ -471,7 +472,7 @@ Task Management:
 
 <substitution_rules priority="0">
 Base instruction says:    You MUST use instead:
-apply_patch           →   edit
+apply_patch           →   patch (preferred), or edit for targeted replacements
 update_plan           →   todowrite
 read_plan             →   todoread
 absolute paths        →   relative paths
@@ -479,7 +480,7 @@ absolute paths        →   relative paths
 
 <verification_checklist priority="0">
 Before file/plan modifications:
-1. Am I using "edit" NOT "apply_patch"?
+1. Am I using patch or edit, never a tool named apply_patch?
 2. Am I using "todowrite" NOT "update_plan"?
 3. Is this tool in the approved list above?
 4. Am I using relative paths?

@@ -10,8 +10,17 @@ import { homedir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { logDebug } from "../logger.js";
 
-const OPENCODE_CODEX_URL =
-	"https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/opencode/src/session/prompt/codex.txt";
+const DEFAULT_OPENCODE_CODEX_URLS = [
+	"https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/opencode/src/session/prompt/codex.txt",
+	"https://raw.githubusercontent.com/sst/opencode/dev/packages/opencode/src/session/prompt/codex.txt",
+	"https://raw.githubusercontent.com/anomalyco/opencode/main/packages/opencode/src/session/prompt/codex.txt",
+	"https://raw.githubusercontent.com/sst/opencode/main/packages/opencode/src/session/prompt/codex.txt",
+	"https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/opencode/src/session/prompt/codex.md",
+	"https://raw.githubusercontent.com/sst/opencode/dev/packages/opencode/src/session/prompt/codex.md",
+	"https://raw.githubusercontent.com/anomalyco/opencode/main/packages/opencode/src/session/prompt/codex.md",
+	"https://raw.githubusercontent.com/sst/opencode/main/packages/opencode/src/session/prompt/codex.md",
+] as const;
+const OPENCODE_CODEX_URL_OVERRIDE_ENV = "OPENCODE_CODEX_PROMPT_URL";
 const CACHE_DIR = join(homedir(), ".opencode", "cache");
 const CACHE_FILE = join(CACHE_DIR, "opencode-codex.txt");
 const CACHE_META_FILE = join(CACHE_DIR, "opencode-codex-meta.json");
@@ -21,6 +30,7 @@ interface CacheMeta {
 	etag: string;
 	lastFetch?: string; // Legacy field for backwards compatibility
 	lastChecked: number; // Timestamp for rate limit protection
+	sourceUrl?: string;
 }
 
 interface CacheSnapshot {
@@ -33,6 +43,46 @@ let refreshPromise: Promise<void> | null = null;
 
 function isFresh(lastChecked: number): boolean {
 	return Date.now() - lastChecked < CACHE_TTL_MS;
+}
+
+function parseSourceUrl(source: string | undefined): string | undefined {
+	if (!source) return undefined;
+	const trimmed = source.trim();
+	if (!trimmed) return undefined;
+	try {
+		const parsed = new URL(trimmed);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			logDebug("Ignoring OpenCode codex prompt source override due to protocol", {
+				source: trimmed,
+			});
+			return undefined;
+		}
+		return trimmed;
+	} catch {
+		logDebug("Ignoring invalid OpenCode codex prompt source override", {
+			source: trimmed,
+		});
+		return undefined;
+	}
+}
+
+function resolvePromptSources(cachedMeta: CacheMeta | null): string[] {
+	const sources: string[] = [];
+	const seen = new Set<string>();
+
+	const add = (source: string | undefined) => {
+		const parsed = parseSourceUrl(source);
+		if (!parsed || seen.has(parsed)) return;
+		seen.add(parsed);
+		sources.push(parsed);
+	};
+
+	add(process.env[OPENCODE_CODEX_URL_OVERRIDE_ENV]);
+	add(cachedMeta?.sourceUrl);
+	for (const source of DEFAULT_OPENCODE_CODEX_URLS) {
+		add(source);
+	}
+	return sources;
 }
 
 async function readDiskCache(): Promise<CacheSnapshot | null> {
@@ -51,12 +101,17 @@ async function readDiskCache(): Promise<CacheSnapshot | null> {
 	}
 }
 
-async function saveDiskCache(content: string, etag: string): Promise<CacheMeta> {
+async function saveDiskCache(
+	content: string,
+	etag: string,
+	sourceUrl: string,
+): Promise<CacheMeta> {
 	await mkdir(CACHE_DIR, { recursive: true });
 	const meta: CacheMeta = {
 		etag,
 		lastFetch: new Date().toISOString(),
 		lastChecked: Date.now(),
+		sourceUrl,
 	};
 	await Promise.all([
 		writeFile(CACHE_FILE, content, "utf-8"),
@@ -69,34 +124,66 @@ async function refreshPrompt(
 	cachedMeta: CacheMeta | null,
 	cachedContent: string | null,
 ): Promise<string> {
-	const headers: Record<string, string> = {};
-	if (cachedMeta?.etag) {
-		headers["If-None-Match"] = cachedMeta.etag;
+	const sources = resolvePromptSources(cachedMeta);
+	let lastFailure: string | null = null;
+
+	for (const sourceUrl of sources) {
+		const headers: Record<string, string> = {};
+		const canUseConditionalRequest =
+			!!cachedMeta?.etag &&
+			(!cachedMeta.sourceUrl || cachedMeta.sourceUrl === sourceUrl);
+		if (canUseConditionalRequest) {
+			headers["If-None-Match"] = cachedMeta.etag;
+		}
+
+		let response: Response;
+		try {
+			response = await fetch(sourceUrl, { headers });
+		} catch (error) {
+			lastFailure = `${sourceUrl}: ${String(error)}`;
+			logDebug("OpenCode prompt source fetch failed", {
+				sourceUrl,
+				error: String(error),
+			});
+			continue;
+		}
+
+		if (response.status === 304 && cachedContent) {
+			const refreshedMeta: CacheMeta = {
+				etag: cachedMeta?.etag ?? "",
+				lastFetch: cachedMeta?.lastFetch ?? new Date().toISOString(),
+				lastChecked: Date.now(),
+				sourceUrl,
+			};
+			memoryCache = { content: cachedContent, meta: refreshedMeta };
+			await mkdir(CACHE_DIR, { recursive: true });
+			await writeFile(
+				CACHE_META_FILE,
+				JSON.stringify(refreshedMeta, null, 2),
+				"utf-8",
+			);
+			return cachedContent;
+		}
+
+		if (!response.ok) {
+			lastFailure = `${sourceUrl}: HTTP ${response.status}`;
+			logDebug("OpenCode prompt source returned non-OK response", {
+				sourceUrl,
+				status: response.status,
+			});
+			continue;
+		}
+
+		const content = await response.text();
+		const etag = response.headers.get("etag") || "";
+		const meta = await saveDiskCache(content, etag, sourceUrl);
+		memoryCache = { content, meta };
+		return content;
 	}
 
-	const response = await fetch(OPENCODE_CODEX_URL, { headers });
-
-	if (response.status === 304 && cachedContent) {
-		const refreshedMeta: CacheMeta = {
-			etag: cachedMeta?.etag ?? "",
-			lastFetch: cachedMeta?.lastFetch ?? new Date().toISOString(),
-			lastChecked: Date.now(),
-		};
-		memoryCache = { content: cachedContent, meta: refreshedMeta };
-		await mkdir(CACHE_DIR, { recursive: true });
-		await writeFile(CACHE_META_FILE, JSON.stringify(refreshedMeta, null, 2), "utf-8");
-		return cachedContent;
-	}
-
-	if (!response.ok) {
-		throw new Error(`Failed to fetch OpenCode codex.txt: ${response.status}`);
-	}
-
-	const content = await response.text();
-	const etag = response.headers.get("etag") || "";
-	const meta = await saveDiskCache(content, etag);
-	memoryCache = { content, meta };
-	return content;
+	throw new Error(
+		`Failed to fetch OpenCode codex prompt from all sources${lastFailure ? ` (${lastFailure})` : ""}`,
+	);
 }
 
 function scheduleRefresh(cachedMeta: CacheMeta | null, cachedContent: string | null): void {
