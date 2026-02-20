@@ -61,6 +61,54 @@ data: {"type":"response.completed","response":{"id":"resp_456","output":"done"}}
 			expect(body).toEqual({ id: 'resp_456', output: 'done' });
 		});
 
+		it('should convert SSE error events into JSON error responses', async () => {
+			const sseContent = `data: {"type":"error","error":{"message":"Tool call failed","code":"tool_failed"}}`;
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers);
+			const body = await result.json();
+
+			expect(result.status).toBe(502);
+			expect(result.headers.get('content-type')).toBe('application/json; charset=utf-8');
+			expect(body).toEqual({
+				error: {
+					message: 'Tool call failed',
+					type: 'stream_error',
+					code: 'tool_failed',
+				},
+			});
+		});
+
+		it('should convert response.failed terminal events into JSON error responses', async () => {
+			const sseContent = `data: {"type":"response.failed","response":{"id":"resp_fail","status":"failed","error":{"message":"Tool execution failed","code":"tool_error"}}}`;
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers);
+			const body = await result.json();
+
+			expect(result.status).toBe(502);
+			expect(body).toEqual({
+				error: {
+					message: 'Tool execution failed',
+					type: 'stream_error',
+					code: 'tool_error',
+				},
+			});
+		});
+
+		it('should parse data lines without trailing space after colon', async () => {
+			const sseContent = `data:{"type":"response.done","response":{"id":"resp_no_space","output":"ok"}}`;
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers);
+			const body = await result.json();
+
+			expect(body).toEqual({ id: 'resp_no_space', output: 'ok' });
+		});
+
 		it('should return original text if no final response found', async () => {
 			const sseContent = `data: {"type":"response.started"}
 data: {"type":"chunk","delta":"text"}

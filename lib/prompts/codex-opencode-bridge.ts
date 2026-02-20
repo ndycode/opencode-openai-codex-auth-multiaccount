@@ -45,18 +45,13 @@ Note: \`apply_patch\` is not an OpenCode tool name. Use \`patch\` or \`edit\`.
 **Search/Discovery:**
 - \`grep\`   - Search file contents (tool, not bash grep); use \`include\` to filter patterns; set \`path\` only when not searching workspace root; for cross-file match counts use bash with \`rg\`.
 - \`glob\`   - Find files by pattern; defaults to workspace cwd unless \`path\` is set.
-- \`list\`   - List directories (requires absolute paths)
+- \`list\`   - List directories
 
 **Execution:**
 - \`bash\`   - Run shell commands
-  - No workdir parameter; do not include it in tool calls.
-  - Always include a short description for the command.
-  - Do not use cd; use absolute paths in commands.
-  - Quote paths containing spaces with double quotes.
-  - Chain multiple commands with ';' or '&&'; avoid newlines.
-  - Use Grep/Glob tools for searches; only use bash with \`rg\` when you need counts or advanced features.
-  - Do not use \`ls\`/\`cat\` in bash; use \`list\`/\`read\` tools instead.
-  - For deletions (rm), verify by listing parent dir with \`list\`.
+  - Follow the current tool schema for required parameters and path format.
+  - Prefer Grep/Glob/List/Read/Edit/Patch tools over shell when possible.
+  - Use non-destructive checks before destructive commands.
 
 **Network:**
 - \`webfetch\` - Fetch web content
@@ -68,6 +63,13 @@ Note: \`apply_patch\` is not an OpenCode tool name. Use \`patch\` or \`edit\`.
 - \`todowrite\` - Manage tasks/plans (REPLACES update_plan)
 - \`todoread\`  - Read current plan
 
+## Tool-Call Guardrails
+
+- Call only tool names that appear in the current request's available tools.
+- Do not invent wrapper namespaces (for example \`functions.task\` or \`multi_tool_use.parallel\`) unless those exact tools are listed.
+- If no explicit parallel helper tool is listed, run calls sequentially.
+- When a tool call fails validation, adjust arguments to the listed schema and retry.
+
 ## Substitution Rules
 
 Base instruction says:    You MUST use instead:
@@ -76,10 +78,8 @@ update_plan           →   todowrite
 read_plan             →   todoread
 
 **Path Usage:** Use per-tool conventions to avoid conflicts:
-- Tool calls: \`read\`, \`edit\`, \`write\`, \`list\` require absolute paths.
-- Searches: \`grep\`/\`glob\` default to the workspace cwd; prefer relative include patterns; set \`path\` only when a different root is needed.
-- Presentation: In assistant messages, show workspace-relative paths; use absolute paths only inside tool calls.
-- Tool schema overrides general path preferences—do not convert required absolute paths to relative.
+- Follow the active tool schema exactly; do not assume absolute/relative conventions across environments.
+- In assistant messages, prefer workspace-relative paths unless the user requested absolute paths.
 
 ## Verification Checklist
 
@@ -108,24 +108,6 @@ If ANY answer is NO → STOP and correct before proceeding.
 **Testing:**
 - If tests exist: Start specific to your changes, then broader validation
 
-## Advanced Tools
-
-**Task Tool (Sub-Agents):**
-- Use the Task tool (functions.task) to launch sub-agents
-- Check the Task tool description for current agent types and their capabilities
-- Useful for complex analysis, specialized workflows, or tasks requiring isolated context
-- The agent list is dynamically generated - refer to tool schema for available agents
-
-**Parallelization:**
-- When multiple independent tool calls are needed, use multi_tool_use.parallel to run them concurrently.
-- Reserve sequential calls for ordered or data-dependent steps.
-
-**MCP Tools:**
-- Model Context Protocol servers provide additional capabilities
-- MCP tools are prefixed: \`mcp__<server-name>__<tool-name>\`
-- Check your available tools for MCP integrations
-- Use when the tool's functionality matches your task needs
-
 ## What Remains from Codex
  
 Sandbox policies, approval mechanisms, final answer formatting, git commit protocols, and file reference formats all follow Codex instructions. In approval policy "never", never request escalations.
@@ -153,8 +135,7 @@ export const CODEX_OPENCODE_BRIDGE_META: CodexOpenCodeBridgeMeta = {
 	protects: [
 		"Tool name confusion (update_plan)",
 		"Missing tool awareness",
-		"Task tool / sub-agent awareness",
-		"MCP tool awareness",
+		"Unknown tool-name hallucinations",
 		"Premature yielding to user",
 		"Over-modification of existing code",
 		"Environment confusion",

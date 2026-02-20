@@ -359,7 +359,31 @@ describe("SSE Parsing Edge Cases", () => {
 				'data: {"type":"error","error":{"message":"Something went wrong"}}\n\n';
 			const response = new Response(sseText, { status: 200 });
 			const result = await convertSseToJson(response, new Headers());
-			expect(result.status).toBe(200);
+			expect(result.status).toBe(502);
+			const body = await result.json();
+			expect(body).toEqual({
+				error: {
+					message: "Something went wrong",
+					type: "stream_error",
+					code: "stream_error",
+				},
+			});
+		});
+
+		it("handles response.failed terminal event type", async () => {
+			const sseText =
+				'data: {"type":"response.failed","response":{"id":"resp_fail","status":"failed","error":{"message":"Tool failed"}}}\n\n';
+			const response = new Response(sseText, { status: 200 });
+			const result = await convertSseToJson(response, new Headers());
+			expect(result.status).toBe(502);
+			const body = await result.json();
+			expect(body).toEqual({
+				error: {
+					message: "Tool failed",
+					type: "stream_error",
+					code: "stream_error",
+				},
+			});
 		});
 
 		it("handles multiple events, extracts last response.done", async () => {

@@ -6,6 +6,86 @@ const log = createLogger("response-handler");
 
 const MAX_SSE_SIZE = 10 * 1024 * 1024; // 10MB limit to prevent memory exhaustion
 const DEFAULT_STREAM_STALL_TIMEOUT_MS = 45_000;
+const STREAM_ERROR_CODE = "stream_error";
+
+type ParsedSseResult =
+	| {
+			kind: "response";
+			response: unknown;
+	  }
+	| {
+			kind: "error";
+			error: {
+				message: string;
+				type?: string;
+				code?: string | number;
+			};
+	  };
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+	if (value && typeof value === "object") {
+		return value as Record<string, unknown>;
+	}
+	return null;
+}
+
+function extractErrorFromRecord(errorRecord: Record<string, unknown> | null): {
+	message: string;
+	type?: string;
+	code?: string | number;
+} | null {
+	if (!errorRecord) return null;
+	const message =
+		typeof errorRecord.message === "string" ? errorRecord.message.trim() : "";
+	if (!message) return null;
+	const type = typeof errorRecord.type === "string" ? errorRecord.type : undefined;
+	const rawCode = errorRecord.code;
+	const code =
+		typeof rawCode === "string" || typeof rawCode === "number"
+			? rawCode
+			: undefined;
+
+	return { message, type, code };
+}
+
+function extractStreamError(event: SSEEventData): {
+	message: string;
+	type?: string;
+	code?: string | number;
+} {
+	const errorRecord = toRecord((event as { error?: unknown }).error);
+	const eventMessage = (event as { message?: unknown }).message;
+	const parsedError = extractErrorFromRecord(errorRecord);
+	if (parsedError) return parsedError;
+
+	const message =
+		(typeof eventMessage === "string" ? eventMessage.trim() : "") ||
+		"Codex stream emitted an error event";
+	return { message };
+}
+
+function extractResponseError(responseRecord: Record<string, unknown>): {
+	message: string;
+	type?: string;
+	code?: string | number;
+} | null {
+	const status = typeof responseRecord.status === "string" ? responseRecord.status : "";
+	const parsedError = extractErrorFromRecord(
+		toRecord((responseRecord as { error?: unknown }).error),
+	);
+	if (parsedError) return parsedError;
+	if (status === "failed" || status === "incomplete") {
+		return { message: `Codex stream ended with status: ${status}` };
+	}
+	return null;
+}
+
+function parseDataPayload(line: string): string | null {
+	if (!line.startsWith("data:")) return null;
+	const payload = line.slice(5).trimStart();
+	if (!payload || payload === "[DONE]") return null;
+	return payload;
+}
 
 /**
 
@@ -13,24 +93,46 @@ const DEFAULT_STREAM_STALL_TIMEOUT_MS = 45_000;
  * @param sseText - Complete SSE stream text
  * @returns Final response object or null if not found
  */
-function parseSseStream(sseText: string): unknown | null {
+function parseSseStream(sseText: string): ParsedSseResult | null {
 	const lines = sseText.split(/\r?\n/);
 
 	for (const line of lines) {
 		const trimmedLine = line.trim();
-		if (trimmedLine.startsWith('data: ')) {
-			const payload = trimmedLine.substring(6).trim();
-			if (!payload || payload === '[DONE]') continue;
+		const payload = parseDataPayload(trimmedLine);
+		if (payload) {
 			try {
 				const data = JSON.parse(payload) as SSEEventData;
+				const responseRecord = toRecord((data as { response?: unknown }).response);
 
-				if (data.type === 'error') {
-					log.error("SSE error event received", { error: data });
-					return null;
+				if (data.type === "error" || data.type === "response.error") {
+					const parsedError = extractStreamError(data);
+					log.error("SSE error event received", { error: parsedError });
+					return { kind: "error", error: parsedError };
 				}
 
-				if (data.type === 'response.done' || data.type === 'response.completed') {
-					return data.response;
+				if (data.type === "response.failed" || data.type === "response.incomplete") {
+					const parsedError =
+						(responseRecord && extractResponseError(responseRecord)) ??
+						extractStreamError(data);
+					log.error("SSE response terminal error event received", {
+						type: data.type,
+						error: parsedError,
+					});
+					return { kind: "error", error: parsedError };
+				}
+
+				if (data.type === "response.done" || data.type === "response.completed") {
+					if (responseRecord) {
+						const parsedError = extractResponseError(responseRecord);
+						if (parsedError) {
+							log.error("SSE response completed with terminal error", {
+								error: parsedError,
+								status: responseRecord.status,
+							});
+							return { kind: "error", error: parsedError };
+						}
+					}
+					return { kind: "response", response: data.response };
 				}
 			} catch {
 				// Skip malformed JSON
@@ -79,7 +181,36 @@ export async function convertSseToJson(
 		}
 
 		// Parse SSE events to extract the final response
-		const finalResponse = parseSseStream(fullText);
+		const parsedResult = parseSseStream(fullText);
+
+		if (parsedResult?.kind === "error") {
+			log.warn("SSE stream returned an error event", parsedResult.error);
+			logRequest("stream-error", {
+				error: parsedResult.error.message,
+				type: parsedResult.error.type,
+				code: parsedResult.error.code,
+			});
+
+			const jsonHeaders = new Headers(headers);
+			jsonHeaders.set("content-type", "application/json; charset=utf-8");
+			const status = response.status >= 400 ? response.status : 502;
+			const payload = {
+				error: {
+					message: parsedResult.error.message,
+					type: parsedResult.error.type ?? STREAM_ERROR_CODE,
+					code: parsedResult.error.code ?? STREAM_ERROR_CODE,
+				},
+			};
+
+			return new Response(JSON.stringify(payload), {
+				status,
+				statusText: status === 502 ? "Bad Gateway" : response.statusText,
+				headers: jsonHeaders,
+			});
+		}
+
+		const finalResponse =
+			parsedResult?.kind === "response" ? parsedResult.response : null;
 
 		if (!finalResponse) {
 			log.warn("Could not find final response in SSE stream");

@@ -1451,6 +1451,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						streamStallTimeoutMs,
 					});
 
+					if (!successResponse.ok) {
+						runtimeMetrics.failedRequests++;
+						runtimeMetrics.lastError = `HTTP ${successResponse.status}`;
+						return successResponse;
+					}
+
 					if (!isStreaming && emptyResponseMaxRetries > 0) {
 						const clonedResponse = successResponse.clone();
 						try {

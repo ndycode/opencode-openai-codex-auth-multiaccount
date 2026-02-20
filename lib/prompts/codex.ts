@@ -443,7 +443,7 @@ File Operations:
 Search/Discovery:
   • grep   - Search file contents
   • glob   - Find files by pattern
-  • list   - List directories (use relative paths)
+  • list   - List directories
 
 Execution:
   • bash   - Run shell commands
@@ -456,12 +456,17 @@ Task Management:
   • todoread  - Read current plan
 </available_tools>
 
+<tool_call_guardrails priority="0">
+- Call only tool names listed in the active tool schema.
+- Do not invent wrapper namespaces (for example functions.task or multi_tool_use.parallel) unless explicitly listed.
+- Follow each tool's required path format instead of forcing absolute or relative paths globally.
+</tool_call_guardrails>
+
 <substitution_rules priority="0">
 Base instruction says:    You MUST use instead:
 apply_patch           →   patch (preferred), or edit for targeted replacements
 update_plan           →   todowrite
 read_plan             →   todoread
-absolute paths        →   relative paths
 </substitution_rules>
 
 <verification_checklist priority="0">
@@ -469,7 +474,7 @@ Before file/plan modifications:
 1. Am I using patch or edit, never a tool named apply_patch?
 2. Am I using "todowrite" NOT "update_plan"?
 3. Is this tool in the approved list above?
-4. Am I using relative paths?
+4. Am I following the active tool schema (including path format)?
 
 If ANY answer is NO → STOP and correct before proceeding.
 </verification_checklist>
