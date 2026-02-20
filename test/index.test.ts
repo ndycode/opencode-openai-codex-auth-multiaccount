@@ -31,7 +31,11 @@ vi.mock("../lib/auth/auth.js", () => ({
 	})),
 	parseAuthorizationInput: vi.fn((input: string) => {
 		const codeMatch = input.match(/code=([^&]+)/);
-		return { code: codeMatch?.[1] ?? null };
+		const stateMatch = input.match(/state=([^&#]+)/);
+		return {
+			code: codeMatch?.[1],
+			state: stateMatch?.[1],
+		};
 	}),
 	REDIRECT_URI: "http://127.0.0.1:1455/auth/callback",
 }));
@@ -154,17 +158,17 @@ vi.mock("../lib/request/rate-limit-backoff.js", () => ({
 	resetRateLimitBackoff: vi.fn(),
 }));
 
-vi.mock("../lib/request/fetch-helpers.js", () => ({
-	extractRequestUrl: (input: unknown) => (typeof input === "string" ? input : String(input)),
-	rewriteUrlForCodex: (url: string) => url,
-	transformRequestForCodex: vi.fn(async (init: unknown) => ({
+	vi.mock("../lib/request/fetch-helpers.js", () => ({
+		extractRequestUrl: (input: unknown) => (typeof input === "string" ? input : String(input)),
+		rewriteUrlForCodex: (url: string) => url,
+		transformRequestForCodex: vi.fn(async (init: unknown) => ({
 		updatedInit: init,
 		body: { model: "gpt-5.1" },
 	})),
-	shouldRefreshToken: () => false,
-	refreshAndUpdateToken: vi.fn(async (auth: unknown) => auth),
-	createCodexHeaders: () => new Headers(),
-	handleErrorResponse: vi.fn(async (response: Response) => ({ response })),
+		shouldRefreshToken: () => false,
+		refreshAndUpdateToken: vi.fn(async (auth: unknown) => auth),
+		createCodexHeaders: vi.fn(() => new Headers()),
+		handleErrorResponse: vi.fn(async (response: Response) => ({ response })),
 	getUnsupportedCodexModelInfo: vi.fn(() => ({ isUnsupported: false })),
 	resolveUnsupportedCodexFallbackModel: vi.fn(() => undefined),
 	shouldFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
@@ -382,6 +386,25 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(plugin.auth.methods).toHaveLength(2);
 			expect(plugin.auth.methods[0].label).toBe("ChatGPT Plus/Pro MULTI (Codex Subscription)");
 			expect(plugin.auth.methods[1].label).toBe("ChatGPT Plus/Pro MULTI (Manual URL Paste)");
+		});
+
+		it("rejects manual OAuth callbacks with mismatched state", async () => {
+			const authModule = await import("../lib/auth/auth.js");
+			const manualMethod = plugin.auth.methods[1] as unknown as {
+				authorize: () => Promise<{
+					validate: (input: string) => string | undefined;
+					callback: (input: string) => Promise<{ type: string; reason?: string; message?: string }>;
+				}>;
+			};
+
+			const flow = await manualMethod.authorize();
+			const invalidInput = "http://127.0.0.1:1455/auth/callback?code=abc123&state=wrong-state";
+
+			expect(flow.validate(invalidInput)).toContain("state mismatch");
+			const result = await flow.callback(invalidInput);
+			expect(result.type).toBe("failed");
+			expect(result.reason).toBe("invalid_response");
+			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
 		});
 	});
 
@@ -884,6 +907,25 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(await response.text()).toContain("server errors or auth issues");
 	});
 
+	it("skips fetch when local token bucket is depleted", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
+		);
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(response.status).toBe(503);
+		expect(await response.text()).toContain("server errors or auth issues");
+		consumeSpy.mockRestore();
+	});
+
 	it("falls back from gpt-5.3-codex to gpt-5.2-codex when unsupported fallback is enabled", async () => {
 		const configModule = await import("../lib/config.js");
 		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
@@ -938,9 +980,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(JSON.parse(secondInit.body as string).model).toBe("gpt-5.2-codex");
 	});
 
-	it("cascades Spark fallback from gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex", async () => {
-		const configModule = await import("../lib/config.js");
-		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		it("cascades Spark fallback from gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex", async () => {
+			const configModule = await import("../lib/config.js");
+			const fetchHelpers = await import("../lib/request/fetch-helpers.js");
 
 		vi.mocked(configModule.getFallbackOnUnsupportedCodexModel).mockReturnValueOnce(true);
 		vi.mocked(configModule.getFallbackToGpt52OnUnsupportedGpt53).mockReturnValueOnce(true);
@@ -996,13 +1038,182 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const secondInit = vi.mocked(globalThis.fetch).mock.calls[1]?.[1] as RequestInit;
 		const thirdInit = vi.mocked(globalThis.fetch).mock.calls[2]?.[1] as RequestInit;
 		expect(JSON.parse(firstInit.body as string).model).toBe("gpt-5.3-codex-spark");
-		expect(JSON.parse(secondInit.body as string).model).toBe("gpt-5.3-codex");
-		expect(JSON.parse(thirdInit.body as string).model).toBe("gpt-5.2-codex");
-	});
+			expect(JSON.parse(secondInit.body as string).model).toBe("gpt-5.3-codex");
+			expect(JSON.parse(thirdInit.body as string).model).toBe("gpt-5.2-codex");
+		});
 
-	it("handles empty body in request", async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ content: "test" }), { status: 200 }),
+		it("restarts account traversal after fallback model switch", async () => {
+			const configModule = await import("../lib/config.js");
+			const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+			const { AccountManager } = await import("../lib/accounts.js");
+
+			const accountOne = {
+				index: 0,
+				accountId: "acc-1",
+				email: "user1@example.com",
+				refreshToken: "refresh-1",
+			};
+			const accountTwo = {
+				index: 1,
+				accountId: "acc-2",
+				email: "user2@example.com",
+				refreshToken: "refresh-2",
+			};
+
+			let legacySelection = 0;
+			let fallbackSelection = 0;
+			const customManager = {
+				getAccountCount: () => 2,
+				getCurrentOrNextForFamilyHybrid: (_family: string, currentModel?: string) => {
+					if (currentModel === "gpt-5-codex") {
+						if (fallbackSelection === 0) {
+							fallbackSelection++;
+							return accountOne;
+						}
+						if (fallbackSelection === 1) {
+							fallbackSelection++;
+							return accountTwo;
+						}
+						return null;
+					}
+					if (legacySelection === 0) {
+						legacySelection++;
+						return accountOne;
+					}
+					if (legacySelection === 1) {
+						legacySelection++;
+						return accountTwo;
+					}
+					return null;
+				},
+				toAuthDetails: (account: { accountId?: string }) => ({
+					type: "oauth" as const,
+					access: `access-${account.accountId ?? "unknown"}`,
+					refresh: "refresh-token",
+					expires: Date.now() + 60_000,
+				}),
+				hasRefreshToken: () => true,
+				saveToDiskDebounced: () => {},
+				updateFromAuth: () => {},
+				clearAuthFailures: () => {},
+				incrementAuthFailures: () => 1,
+				markAccountCoolingDown: () => {},
+				markRateLimitedWithReason: () => {},
+				recordRateLimit: () => {},
+				consumeToken: () => true,
+				refundToken: () => {},
+				markSwitched: () => {},
+				removeAccount: () => {},
+				recordFailure: () => {},
+				recordSuccess: () => {},
+				getMinWaitTimeForFamily: () => 0,
+				shouldShowAccountToast: () => false,
+				markToastShown: () => {},
+				setActiveIndex: () => accountOne,
+				getAccountsSnapshot: () => [accountOne, accountTwo],
+			};
+			vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+
+			vi.mocked(configModule.getFallbackOnUnsupportedCodexModel).mockReturnValueOnce(true);
+			vi.mocked(configModule.getFallbackToGpt52OnUnsupportedGpt53).mockReturnValueOnce(true);
+			vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+				updatedInit: {
+					method: "POST",
+					body: JSON.stringify({ model: "gpt-5.3-codex" }),
+				},
+				body: { model: "gpt-5.3-codex" },
+			});
+			vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+				(_init, _accountId, accessToken) =>
+					new Headers({ "x-test-access-token": String(accessToken) }),
+			);
+			vi.mocked(fetchHelpers.handleErrorResponse).mockImplementation(async (response) => {
+				const errorBody = await response.clone().json().catch(() => ({}));
+				return { response, rateLimit: undefined, errorBody };
+			});
+			vi.mocked(fetchHelpers.getUnsupportedCodexModelInfo).mockImplementation((errorBody: unknown) => {
+				const message = (errorBody as { error?: { message?: string } })?.error?.message ?? "";
+				if (!/not supported when using codex with a chatgpt account/i.test(message)) {
+					return { isUnsupported: false };
+				}
+				const match = message.match(/'([^']+)'/);
+				return {
+					isUnsupported: true,
+					unsupportedModel: match?.[1],
+					message,
+					code: "model_not_supported_with_chatgpt_account",
+				};
+			});
+			vi.mocked(fetchHelpers.resolveUnsupportedCodexFallbackModel).mockImplementation(({ requestedModel }) => {
+				return requestedModel === "gpt-5.3-codex" ? "gpt-5-codex" : undefined;
+			});
+
+			globalThis.fetch = vi.fn(async (_url, init) => {
+				const body =
+					init && typeof init.body === "string"
+						? (JSON.parse(init.body) as { model?: string })
+						: {};
+				const headers = new Headers(init?.headers);
+				const accessToken = headers.get("x-test-access-token");
+
+				if (body.model === "gpt-5.3-codex") {
+					return new Response(
+						JSON.stringify({
+							error: {
+								code: "model_not_supported_with_chatgpt_account",
+								message:
+									"The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
+							},
+						}),
+						{ status: 400 },
+					);
+				}
+
+				if (body.model === "gpt-5-codex" && accessToken === "access-account-1") {
+					return new Response(JSON.stringify({ content: "ok" }), { status: 200 });
+				}
+
+				return new Response(
+					JSON.stringify({
+						error: {
+							code: "model_not_supported_with_chatgpt_account",
+							message:
+								"The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account.",
+						},
+					}),
+					{ status: 400 },
+				);
+			});
+
+			const { sdk } = await setupPlugin();
+			const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.3-codex" }),
+			});
+
+			const fetchCalls = vi.mocked(globalThis.fetch).mock.calls.map((call) => {
+				const init = call[1] as RequestInit;
+				const body =
+					typeof init.body === "string"
+						? (JSON.parse(init.body) as { model?: string })
+						: {};
+				const headers = new Headers(init.headers);
+				return {
+					model: body.model,
+					accessToken: headers.get("x-test-access-token"),
+				};
+			});
+			expect(fetchCalls).toEqual([
+				{ model: "gpt-5.3-codex", accessToken: "access-acc-1" },
+				{ model: "gpt-5.3-codex", accessToken: "access-acc-2" },
+				{ model: "gpt-5-codex", accessToken: "access-account-1" },
+			]);
+			expect(response.status).toBe(200);
+		});
+
+		it("handles empty body in request", async () => {
+			globalThis.fetch = vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ content: "test" }), { status: 200 }),
 		);
 
 		const { sdk } = await setupPlugin();

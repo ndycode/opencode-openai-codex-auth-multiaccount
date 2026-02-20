@@ -35,22 +35,23 @@ controls how much thinking the model does.
 | model | supported values |
 |-------|------------------|
 | `gpt-5.2` | none, low, medium, high, xhigh |
-| `gpt-5.3-codex` | low, medium, high, xhigh (default: xhigh) |
-| `gpt-5.3-codex-spark` | low, medium, high, xhigh (entitlement-gated; add manually) |
-| `gpt-5.2-codex` | low, medium, high, xhigh (default: xhigh) |
+| `gpt-5-codex` | low, medium, high (default: high) |
+| `gpt-5.3-codex` | low, medium, high, xhigh (legacy alias to `gpt-5-codex`) |
+| `gpt-5.3-codex-spark` | low, medium, high, xhigh (entitlement-gated legacy alias; add manually) |
+| `gpt-5.2-codex` | low, medium, high, xhigh (legacy alias to `gpt-5-codex`) |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh |
 | `gpt-5.1-codex` | low, medium, high |
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-the shipped config templates include 22 presets and do not add Spark by default. add `gpt-5.3-codex-spark` manually only for entitled workspaces.
+the shipped config templates include 21 presets and do not add Spark by default. add `gpt-5.3-codex-spark` manually only for entitled workspaces.
 
 what they mean:
 - `none` - no reasoning phase (base models only, auto-converts to `low` for codex)
 - `low` - light reasoning, fastest
 - `medium` - balanced (default)
 - `high` - deep reasoning
-- `xhigh` - max depth for complex tasks (default for codex families)
+- `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`)
 
 ### reasoningSummary
 
@@ -108,7 +109,7 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "fallbackOnUnsupportedCodexModel": false,
   "fallbackToGpt52OnUnsupportedGpt53": true,
   "unsupportedCodexFallbackChain": {
-    "gpt-5.3-codex": ["gpt-5.2-codex"]
+    "gpt-5-codex": ["gpt-5.2-codex"]
   }
 }
 ```
@@ -147,10 +148,12 @@ by default the plugin is strict (`unsupportedCodexPolicy: "strict"`). it returns
 set `unsupportedCodexPolicy: "fallback"` to enable model fallback after account/workspace attempts are exhausted.
 
 defaults when fallback policy is enabled and `unsupportedCodexFallbackChain` is empty:
-- `gpt-5.3-codex -> gpt-5.2-codex`
-- `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
+- `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
+- `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
+- `gpt-5.2-codex -> gpt-5-codex`
+- `gpt-5.1-codex -> gpt-5-codex`
 
-note: the TUI can continue showing your originally selected model while fallback is applied internally. use request logs to verify the effective upstream model (`request-*-after-transform.json`).
+note: the TUI can continue showing your originally selected model while fallback is applied internally. use request logs to verify the effective upstream model (`request-*-after-transform.json`). set `CODEX_PLUGIN_LOG_BODIES=1` when you need to inspect raw `.body.*` fields.
 
 custom chain example:
 ```json
@@ -158,8 +161,9 @@ custom chain example:
   "unsupportedCodexPolicy": "fallback",
   "fallbackOnUnsupportedCodexModel": true,
   "unsupportedCodexFallbackChain": {
-    "gpt-5.3-codex": ["gpt-5.2-codex"],
-    "gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"]
+    "gpt-5-codex": ["gpt-5.2-codex"],
+    "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
+    "gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"]
   }
 }
 ```
@@ -175,7 +179,8 @@ override any config with env vars:
 | variable | what it does |
 |----------|--------------|
 | `DEBUG_CODEX_PLUGIN=1` | enable debug logging |
-| `ENABLE_PLUGIN_REQUEST_LOGGING=1` | log all api requests |
+| `ENABLE_PLUGIN_REQUEST_LOGGING=1` | log request metadata (no raw prompt/response bodies) |
+| `CODEX_PLUGIN_LOG_BODIES=1` | include raw request/response bodies in log files (sensitive) |
 | `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
 | `CODEX_MODE=0` | disable bridge prompt |
 | `CODEX_TUI_V2=0` | disable codex-style ui (use legacy output) |

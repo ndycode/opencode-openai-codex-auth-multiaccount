@@ -103,6 +103,7 @@ import {
 	getStoragePath,
 	loadAccounts,
 	saveAccounts,
+	withAccountStorageTransaction,
 	clearAccounts,
 	setStoragePath,
 	exportAccounts,
@@ -272,6 +273,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
         const buildManualOAuthFlow = (
                 pkce: { verifier: string },
                 url: string,
+                expectedState: string,
                 onSuccess?: (tokens: TokenSuccessWithAccount) => Promise<void>,
         ) => ({
                 url,
@@ -282,12 +284,29 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         if (!parsed.code) {
                                 return "No authorization code found. Paste the full callback URL (e.g., http://localhost:1455/auth/callback?code=...)";
                         }
+                        if (!parsed.state) {
+                                return "Missing OAuth state. Paste the full callback URL including both code and state parameters.";
+                        }
+                        if (parsed.state !== expectedState) {
+                                return "OAuth state mismatch. Restart login and paste the callback URL generated for this login attempt.";
+                        }
                         return undefined;
                 },
                 callback: async (input: string) => {
                         const parsed = parseAuthorizationInput(input);
-                        if (!parsed.code) {
-                                return { type: "failed" as const, reason: "invalid_response" as const, message: "No authorization code provided" };
+                        if (!parsed.code || !parsed.state) {
+                                return {
+                                        type: "failed" as const,
+                                        reason: "invalid_response" as const,
+                                        message: "Missing authorization code or OAuth state",
+                                };
+                        }
+                        if (parsed.state !== expectedState) {
+                                return {
+                                        type: "failed" as const,
+                                        reason: "invalid_response" as const,
+                                        message: "OAuth state mismatch. Restart login and try again.",
+                                };
                         }
                         const tokens = await exchangeAuthorizationCode(
                                 parsed.code,
@@ -345,24 +364,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 );
         };
 
-        const persistAccountPool = async (
-                results: TokenSuccessWithAccount[],
-                replaceAll: boolean = false,
-        ): Promise<void> => {
-                if (results.length === 0) return;
-                const now = Date.now();
-                const stored = replaceAll ? null : await loadAccounts();
-                const accounts = stored?.accounts ? [...stored.accounts] : [];
+	        const persistAccountPool = async (
+	                results: TokenSuccessWithAccount[],
+	                replaceAll: boolean = false,
+	        ): Promise<void> => {
+	                if (results.length === 0) return;
+				await withAccountStorageTransaction(async (loadedStorage, persist) => {
+					const now = Date.now();
+					const stored = replaceAll ? null : loadedStorage;
+					const accounts = stored?.accounts ? [...stored.accounts] : [];
 
-				const indexByRefreshToken = new Map<string, number>();
-				const indexByAccountId = new Map<string, number>();
-				const indexByEmail = new Map<string, number>();
-				for (let i = 0; i < accounts.length; i += 1) {
-                        const account = accounts[i];
-                        if (!account) continue;
-                        if (account.refreshToken) {
-                                indexByRefreshToken.set(account.refreshToken, i);
-                        }
+					const indexByRefreshToken = new Map<string, number>();
+					const indexByAccountId = new Map<string, number>();
+					const indexByEmail = new Map<string, number>();
+					for (let i = 0; i < accounts.length; i += 1) {
+						const account = accounts[i];
+						if (!account) continue;
+						if (account.refreshToken) {
+							indexByRefreshToken.set(account.refreshToken, i);
+						}
 						if (account.accountId) {
 							indexByAccountId.set(account.accountId, i);
 						}
@@ -371,115 +391,116 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						}
 					}
 
-			for (const result of results) {
-					const accountId = result.accountIdOverride ?? extractAccountId(result.access);
-					const accountIdSource =
+					for (const result of results) {
+						const accountId = result.accountIdOverride ?? extractAccountId(result.access);
+						const accountIdSource =
 							accountId
-									? result.accountIdSource ??
-										(result.accountIdOverride ? "manual" : "token")
-									: undefined;
-					const accountLabel = result.accountLabel;
-					const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
+								? result.accountIdSource ??
+								  (result.accountIdOverride ? "manual" : "token")
+								: undefined;
+						const accountLabel = result.accountLabel;
+						const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
 						const existingByEmail =
-								accountEmail && indexByEmail.has(accountEmail)
-										? indexByEmail.get(accountEmail)
-										: undefined;
+							accountEmail && indexByEmail.has(accountEmail)
+								? indexByEmail.get(accountEmail)
+								: undefined;
 						const existingById =
-								accountId && indexByAccountId.has(accountId)
-										? indexByAccountId.get(accountId)
-										: undefined;
+							accountId && indexByAccountId.has(accountId)
+								? indexByAccountId.get(accountId)
+								: undefined;
 						const existingByToken = indexByRefreshToken.get(result.refresh);
 						const existingIndex = existingById ?? existingByEmail ?? existingByToken;
 
-                        if (existingIndex === undefined) {
-                                const newIndex = accounts.length;
-                                accounts.push({
-                                        accountId,
-                                        accountIdSource,
-                                        accountLabel,
-                                        email: accountEmail,
-                                        refreshToken: result.refresh,
-					accessToken: result.access,
-					expiresAt: result.expires,
-                                        addedAt: now,
-                                        lastUsed: now,
-                                });
-								indexByRefreshToken.set(result.refresh, newIndex);
-								if (accountId) {
-									indexByAccountId.set(accountId, newIndex);
-								}
-								if (accountEmail) {
-									indexByEmail.set(accountEmail, newIndex);
-								}
-								continue;
-                        }
+						if (existingIndex === undefined) {
+							const newIndex = accounts.length;
+							accounts.push({
+								accountId,
+								accountIdSource,
+								accountLabel,
+								email: accountEmail,
+								refreshToken: result.refresh,
+								accessToken: result.access,
+								expiresAt: result.expires,
+								addedAt: now,
+								lastUsed: now,
+							});
+							indexByRefreshToken.set(result.refresh, newIndex);
+							if (accountId) {
+								indexByAccountId.set(accountId, newIndex);
+							}
+							if (accountEmail) {
+								indexByEmail.set(accountEmail, newIndex);
+							}
+							continue;
+						}
 
-                        const existing = accounts[existingIndex];
-                        if (!existing) continue;
+						const existing = accounts[existingIndex];
+						if (!existing) continue;
 
 						const oldToken = existing.refreshToken;
 						const oldEmail = existing.email;
 						const nextEmail = accountEmail ?? existing.email;
 						const nextAccountId = accountId ?? existing.accountId;
 						const nextAccountIdSource =
-								accountId ? accountIdSource ?? existing.accountIdSource : existing.accountIdSource;
+							accountId ? accountIdSource ?? existing.accountIdSource : existing.accountIdSource;
 						const nextAccountLabel = accountLabel ?? existing.accountLabel;
 						accounts[existingIndex] = {
-								...existing,
-								accountId: nextAccountId,
-								accountIdSource: nextAccountIdSource,
-								accountLabel: nextAccountLabel,
-								email: nextEmail,
-								refreshToken: result.refresh,
-								accessToken: result.access,
-								expiresAt: result.expires,
-								lastUsed: now,
+							...existing,
+							accountId: nextAccountId,
+							accountIdSource: nextAccountIdSource,
+							accountLabel: nextAccountLabel,
+							email: nextEmail,
+							refreshToken: result.refresh,
+							accessToken: result.access,
+							expiresAt: result.expires,
+							lastUsed: now,
 						};
 						if (oldToken !== result.refresh) {
-								indexByRefreshToken.delete(oldToken);
-								indexByRefreshToken.set(result.refresh, existingIndex);
+							indexByRefreshToken.delete(oldToken);
+							indexByRefreshToken.set(result.refresh, existingIndex);
 						}
 						if (accountId) {
-								indexByAccountId.set(accountId, existingIndex);
+							indexByAccountId.set(accountId, existingIndex);
 						}
 						if (oldEmail && oldEmail !== nextEmail) {
-								indexByEmail.delete(oldEmail);
+							indexByEmail.delete(oldEmail);
 						}
 						if (nextEmail) {
-								indexByEmail.set(nextEmail, existingIndex);
+							indexByEmail.set(nextEmail, existingIndex);
 						}
-                }
+					}
 
-                if (accounts.length === 0) return;
+					if (accounts.length === 0) return;
 
-                const activeIndex = replaceAll
-                        ? 0
-                        : typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex)
-                                ? stored.activeIndex
-                                : 0;
+					const activeIndex = replaceAll
+						? 0
+						: typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex)
+							? stored.activeIndex
+							: 0;
 
-				const clampedActiveIndex = Math.max(0, Math.min(activeIndex, accounts.length - 1));
-				const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
-				for (const family of MODEL_FAMILIES) {
+					const clampedActiveIndex = Math.max(0, Math.min(activeIndex, accounts.length - 1));
+					const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
+					for (const family of MODEL_FAMILIES) {
 						const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
 						const rawFamilyIndex = replaceAll
-								? 0
-								: typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex)
-										? storedFamilyIndex
-										: clampedActiveIndex;
+							? 0
+							: typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex)
+								? storedFamilyIndex
+								: clampedActiveIndex;
 						activeIndexByFamily[family] = Math.max(
-								0,
-								Math.min(Math.floor(rawFamilyIndex), accounts.length - 1),
+							0,
+							Math.min(Math.floor(rawFamilyIndex), accounts.length - 1),
 						);
-				}
+					}
 
-				await saveAccounts({
+					await persist({
 						version: 3,
 						accounts,
 						activeIndex: clampedActiveIndex,
 						activeIndexByFamily,
+					});
 				});
-        };
+	        };
 
         const showToast = async (
                 message: string,
@@ -1050,6 +1071,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							while (true) {
 										const accountCount = accountManager.getAccountCount();
 										const attempted = new Set<number>();
+										let restartAccountTraversalWithFallback = false;
 
 while (attempted.size < Math.max(1, accountCount)) {
 				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model, { pidOffsetEnabled });
@@ -1140,7 +1162,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 												accountManager.markToastShown(account.index);
 											}
 
-								let headers = createCodexHeaders(
+								const headers = createCodexHeaders(
 									requestInit,
 									accountId,
 									accountAuth.access,
@@ -1151,7 +1173,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 								);
 
 								// Consume a token before making the request for proactive rate limiting
-								accountManager.consumeToken(account, modelFamily, model);
+								const tokenConsumed = accountManager.consumeToken(account, modelFamily, model);
+								if (!tokenConsumed) {
+									accountManager.recordRateLimit(account, modelFamily, model);
+									runtimeMetrics.accountRotations++;
+									runtimeMetrics.lastError =
+										`Local token bucket depleted for account ${account.index + 1} (${modelFamily}${model ? `:${model}` : ""})`;
+									logWarn(
+										`Skipping account ${account.index + 1}: local token bucket depleted for ${modelFamily}${model ? `:${model}` : ""}`,
+									);
+									break;
+								}
 
 							while (true) {
 								let response: Response;
@@ -1256,7 +1288,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 			});
 
 			if (fallbackModel) {
-				const previousModel = model ?? "gpt-5.3-codex";
+				const previousModel = model ?? "gpt-5-codex";
 				const previousModelFamily = modelFamily;
 				attemptedUnsupportedFallbackModels.add(previousModel);
 				attemptedUnsupportedFallbackModels.add(fallbackModel);
@@ -1285,16 +1317,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 					...(requestInit ?? {}),
 					body: JSON.stringify(transformedBody),
 				};
-				headers = createCodexHeaders(
-					requestInit,
-					accountId,
-					accountAuth.access,
-					{
-						model,
-						promptCacheKey,
-					},
-				);
-				accountManager.consumeToken(account, modelFamily, model);
 				runtimeMetrics.lastError = `Model fallback: ${previousModel} -> ${model}`;
 				logWarn(
 					`Model ${previousModel} is unsupported for this ChatGPT account. Falling back to ${model}.`,
@@ -1311,7 +1333,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 					"warning",
 					{ duration: toastDurationMs },
 				);
-				continue;
+				restartAccountTraversalWithFallback = true;
+				break;
 			}
 
 			if (unsupportedModelInfo.isUnsupported && !fallbackOnUnsupportedCodexModel) {
@@ -1460,6 +1483,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 					runtimeMetrics.lastError = null;
 						return successResponse;
 																								}
+										if (restartAccountTraversalWithFallback) {
+											break;
+										}
+										}
+
+										if (restartAccountTraversalWithFallback) {
+											continue;
 										}
 
 										const waitMs = accountManager.getMinWaitTimeForFamily(modelFamily, model);
@@ -1714,7 +1744,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								accountId: string;
 								accessToken: string;
 							}): Promise<CodexQuotaSnapshot> => {
-								const QUOTA_PROBE_MODELS = ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex"];
+								const QUOTA_PROBE_MODELS = ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"];
 								let lastError: Error | null = null;
 
 								for (const model of QUOTA_PROBE_MODELS) {
@@ -2319,8 +2349,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 							}
 
 							if (useManualMode) {
-								const { pkce, url } = await createAuthorizationFlow();
-								return buildManualOAuthFlow(pkce, url, async (tokens) => {
+								const { pkce, state, url } = await createAuthorizationFlow();
+								return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
 									try {
 										await persistAccountPool([tokens], startFresh);
 										invalidateAccountManagerCache();
@@ -2474,8 +2504,8 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 
-                                                        const { pkce, url } = await createAuthorizationFlow();
-                                                        return buildManualOAuthFlow(pkce, url, async (tokens) => {
+                                                        const { pkce, state, url } = await createAuthorizationFlow();
+                                                        return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
                                                                 try {
                                                                         await persistAccountPool([tokens], false);
                                                                 } catch (err) {

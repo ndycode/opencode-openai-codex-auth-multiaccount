@@ -117,6 +117,7 @@ function parseLogLevel(value: string | undefined): LogLevel {
 }
 
 export const LOGGING_ENABLED = process.env.ENABLE_PLUGIN_REQUEST_LOGGING === "1";
+export const REQUEST_BODY_LOGGING_ENABLED = process.env.CODEX_PLUGIN_LOG_BODIES === "1";
 export const DEBUG_ENABLED = process.env.DEBUG_CODEX_PLUGIN === "1" || LOGGING_ENABLED;
 export const LOG_LEVEL = parseLogLevel(process.env.CODEX_PLUGIN_LOG_LEVEL);
 const CONSOLE_LOG_ENABLED = process.env.CODEX_CONSOLE_LOG === "1";
@@ -201,7 +202,9 @@ function logToConsole(level: LogLevel, message: string, data?: unknown): void {
 if (LOGGING_ENABLED) {
 	logToConsole(
 		"info",
-		`[${PLUGIN_NAME}] Request logging ENABLED - logs will be saved to: ${LOG_DIR}`,
+		REQUEST_BODY_LOGGING_ENABLED
+			? `[${PLUGIN_NAME}] Request logging ENABLED (raw payload capture ON) - logs will be saved to: ${LOG_DIR}`
+			: `[${PLUGIN_NAME}] Request logging ENABLED (metadata only; set CODEX_PLUGIN_LOG_BODIES=1 for raw payloads) - logs will be saved to: ${LOG_DIR}`,
 	);
 }
 if (DEBUG_ENABLED && !LOGGING_ENABLED) {
@@ -212,6 +215,27 @@ if (DEBUG_ENABLED && !LOGGING_ENABLED) {
 }
 
 let requestCounter = 0;
+
+function sanitizeRequestLogData(data: Record<string, unknown>): Record<string, unknown> {
+	if (REQUEST_BODY_LOGGING_ENABLED) {
+		return data;
+	}
+
+	let omittedPayloads = false;
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(data)) {
+		const normalizedKey = key.toLowerCase().replace(/[-_]/g, "");
+		if (normalizedKey === "body" || normalizedKey === "fullcontent") {
+			omittedPayloads = true;
+			continue;
+		}
+		sanitized[key] = value;
+	}
+	if (omittedPayloads) {
+		sanitized.payloadsOmitted = true;
+	}
+	return sanitized;
+}
 
 function shouldLog(level: LogLevel): boolean {
 	if (level === "error") return true;
@@ -238,7 +262,8 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 	const requestId = ++requestCounter;
 	const correlationId = currentCorrelationId;
 	const filename = join(LOG_DIR, `request-${requestId}-${stage}.json`);
-	const sanitizedData = sanitizeValue(data) as Record<string, unknown>;
+	const requestData = sanitizeRequestLogData(data);
+	const sanitizedData = sanitizeValue(requestData) as Record<string, unknown>;
 
 	try {
 		writeFileSync(

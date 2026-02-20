@@ -86,7 +86,7 @@ describe('Configuration Parsing', () => {
 			const emptyConfig = getModelConfig('gpt-5-codex', { global: {}, models: {} });
 			const defaultReasoning = getReasoningConfig('gpt-5-codex', emptyConfig);
 
-			expect(defaultReasoning.effort).toBe('medium');
+			expect(defaultReasoning.effort).toBe('high');
 			expect(defaultReasoning.summary).toBe('auto');
 		});
 

@@ -16,6 +16,7 @@ import {
   formatStorageErrorHint,
   exportAccounts,
   importAccounts,
+  withAccountStorageTransaction,
 } from "../lib/storage.js";
 
 // Mocking the behavior we're about to implement for TDD
@@ -156,6 +157,45 @@ describe("storage", () => {
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(2);
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
+    });
+
+    it("should serialize concurrent transactional updates without losing accounts", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [],
+      });
+
+      const addAccount = async (accountId: string, delayMs: number): Promise<void> => {
+        await withAccountStorageTransaction(async (current, persist) => {
+          const snapshot = current ?? {
+            version: 3 as const,
+            activeIndex: 0,
+            accounts: [],
+          };
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          await persist({
+            ...snapshot,
+            accounts: [
+              ...snapshot.accounts,
+              { accountId, refreshToken: `ref-${accountId}`, addedAt: Date.now(), lastUsed: Date.now() },
+            ],
+          });
+        });
+      };
+
+      await Promise.all([
+        addAccount("acct-a", 20),
+        addAccount("acct-b", 0),
+      ]);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+      expect(new Set(loaded?.accounts.map((account) => account.accountId))).toEqual(
+        new Set(["acct-a", "acct-b"]),
+      );
     });
 
     it("should enforce MAX_ACCOUNTS during import", async () => {
@@ -826,6 +866,8 @@ describe("storage", () => {
 
   describe("ensureGitignore edge cases", () => {
     const testWorkDir = join(tmpdir(), "codex-gitignore-" + Math.random().toString(36).slice(2));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     let testStoragePath: string;
 
     beforeEach(async () => {
@@ -834,7 +876,35 @@ describe("storage", () => {
 
     afterEach(async () => {
       setStoragePathDirect(null);
+      process.env.HOME = originalHome;
+      process.env.USERPROFILE = originalUserProfile;
       await fs.rm(testWorkDir, { recursive: true, force: true });
+    });
+
+    it("writes .gitignore in project root when storage path is externalized", async () => {
+      const fakeHome = join(testWorkDir, "home");
+      const projectDir = join(testWorkDir, "project-externalized");
+      const gitDir = join(projectDir, ".git");
+      const gitignorePath = join(projectDir, ".gitignore");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(gitDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      const storage = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "t1", accountId: "A", addedAt: Date.now(), lastUsed: Date.now() }],
+      };
+
+      await saveAccounts(storage);
+
+      expect(existsSync(gitignorePath)).toBe(true);
+      const gitignoreContent = await fs.readFile(gitignorePath, "utf-8");
+      expect(gitignoreContent).toContain(".opencode/");
+      expect(getStoragePath()).toContain(join(fakeHome, ".opencode", "projects"));
     });
 
     it("creates .gitignore when it does not exist but .git dir exists (line 99-100 false branch)", async () => {
@@ -885,6 +955,48 @@ describe("storage", () => {
 
       const gitignoreContent = await fs.readFile(gitignorePath, "utf-8");
       expect(gitignoreContent).toBe("node_modules\n.opencode/\n");
+    });
+  });
+
+  describe("legacy project storage migration", () => {
+    const testWorkDir = join(tmpdir(), "codex-legacy-migration-" + Math.random().toString(36).slice(2));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+
+    afterEach(async () => {
+      setStoragePathDirect(null);
+      process.env.HOME = originalHome;
+      process.env.USERPROFILE = originalUserProfile;
+      await fs.rm(testWorkDir, { recursive: true, force: true });
+    });
+
+    it("removes legacy project storage file after successful migration", async () => {
+      const fakeHome = join(testWorkDir, "home");
+      const projectDir = join(testWorkDir, "project");
+      const projectGitDir = join(projectDir, ".git");
+      const legacyProjectConfigDir = join(projectDir, ".opencode");
+      const legacyStoragePath = join(legacyProjectConfigDir, "openai-codex-accounts.json");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(projectGitDir, { recursive: true });
+      await fs.mkdir(legacyProjectConfigDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      const legacyStorage = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "legacy-refresh", accountId: "legacy-account", addedAt: 1, lastUsed: 1 }],
+      };
+      await fs.writeFile(legacyStoragePath, JSON.stringify(legacyStorage), "utf-8");
+
+      const migrated = await loadAccounts();
+
+      expect(migrated).not.toBeNull();
+      expect(migrated?.accounts).toHaveLength(1);
+      expect(existsSync(legacyStoragePath)).toBe(false);
+      expect(existsSync(getStoragePath())).toBe(true);
     });
   });
 

@@ -289,13 +289,13 @@ describe("URL Handling Edge Cases", () => {
 	describe("rewriteUrlForCodex", () => {
 		it("rewrites /responses to /codex/responses", () => {
 			expect(rewriteUrlForCodex("https://api.openai.com/v1/responses")).toBe(
-				"https://api.openai.com/v1/codex/responses",
+				"https://chatgpt.com/backend-api/v1/codex/responses",
 			);
 		});
 
-		it("preserves other URLs", () => {
+		it("forces codex origin for other URLs", () => {
 			expect(rewriteUrlForCodex("https://api.openai.com/v1/chat/completions")).toBe(
-				"https://api.openai.com/v1/chat/completions",
+				"https://chatgpt.com/backend-api/v1/chat/completions",
 			);
 		});
 	});

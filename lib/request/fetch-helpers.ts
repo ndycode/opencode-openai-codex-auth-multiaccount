@@ -13,6 +13,7 @@ import type { UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
 import { isRecord } from "../utils.js";
 import {
+        CODEX_BASE_URL,
         HTTP_STATUS,
         OPENAI_HEADERS,
         OPENAI_HEADER_VALUES,
@@ -32,6 +33,11 @@ export interface EntitlementError {
         message: string;
 }
 
+const CODEX_BASE_URL_OBJECT = new URL(CODEX_BASE_URL);
+const CODEX_BASE_PATH_PREFIX = CODEX_BASE_URL_OBJECT.pathname.endsWith("/")
+	? CODEX_BASE_URL_OBJECT.pathname.slice(0, -1)
+	: CODEX_BASE_URL_OBJECT.pathname;
+
 const CHATGPT_CODEX_UNSUPPORTED_MODEL_CODE = "model_not_supported_with_chatgpt_account";
 const CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN =
 	/model is not supported when using codex with a chatgpt account/i;
@@ -39,8 +45,10 @@ const NORMALIZED_UNSUPPORTED_MODEL_PATTERN =
 	/the model ['"]([^'"]+)['"] is not currently available for this chatgpt account/i;
 
 export const DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN: Record<string, string[]> = {
-	"gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"],
-	"gpt-5.3-codex": ["gpt-5.2-codex"],
+	"gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"],
+	"gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
+	"gpt-5.2-codex": ["gpt-5-codex"],
+	"gpt-5.1-codex": ["gpt-5-codex"],
 };
 
 export interface UnsupportedCodexModelInfo {
@@ -190,7 +198,7 @@ export function resolveUnsupportedCodexFallbackModel(
 }
 
 /**
- * Returns true when a `gpt-5.3-codex` request should fallback to `gpt-5.2-codex`.
+ * Returns true when the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge is available.
  */
 export function shouldFallbackToGpt52OnUnsupportedGpt53(
 	requestedModel: string | undefined,
@@ -204,6 +212,9 @@ export function shouldFallbackToGpt52OnUnsupportedGpt53(
 		resolveUnsupportedCodexFallbackModel({
 			requestedModel,
 			errorBody,
+			// Skip the canonical `gpt-5-codex` step and probe whether the legacy
+			// gpt-5.2 edge is still active under current policy/toggles.
+			attemptedModels: ["gpt-5-codex"],
 			fallbackOnUnsupportedCodexModel: true,
 			fallbackToGpt52OnUnsupportedGpt53: true,
 		}) === "gpt-5.2-codex"
@@ -335,7 +346,23 @@ export function extractRequestUrl(input: Request | string | URL): string {
  * @returns Rewritten URL for Codex backend
  */
 export function rewriteUrlForCodex(url: string): string {
-	return url.replace(URL_PATHS.RESPONSES, URL_PATHS.CODEX_RESPONSES);
+	const parsedUrl = new URL(url);
+	const rewrittenPath = parsedUrl.pathname.includes(URL_PATHS.RESPONSES)
+		? parsedUrl.pathname.replace(URL_PATHS.RESPONSES, URL_PATHS.CODEX_RESPONSES)
+		: parsedUrl.pathname;
+	const normalizedPath =
+		rewrittenPath === CODEX_BASE_PATH_PREFIX ||
+		rewrittenPath.startsWith(`${CODEX_BASE_PATH_PREFIX}/`)
+			? rewrittenPath
+			: `${CODEX_BASE_PATH_PREFIX}${rewrittenPath.startsWith("/") ? rewrittenPath : `/${rewrittenPath}`}`;
+
+	parsedUrl.protocol = CODEX_BASE_URL_OBJECT.protocol;
+	parsedUrl.username = "";
+	parsedUrl.password = "";
+	parsedUrl.host = CODEX_BASE_URL_OBJECT.host;
+	parsedUrl.pathname = normalizedPath;
+
+	return parsedUrl.toString();
 }
 
 /**
@@ -670,7 +697,7 @@ function normalizeErrorPayload(
 								message:
 										`The model '${unsupportedModel}' is not currently available for this ChatGPT account when using Codex OAuth. ` +
 										"This is an account/workspace entitlement gate, not a temporary rate limit. " +
-										"Try 'gpt-5.3-codex' or 'gpt-5.2-codex', or enable automatic fallback via " +
+										"Try 'gpt-5-codex' (canonical), or legacy aliases like 'gpt-5.3-codex'/'gpt-5.2-codex', or enable automatic fallback via " +
 										'unsupportedCodexPolicy: "fallback" (or CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback). ' +
 										"(Legacy: CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 or fallbackOnUnsupportedCodexModel).",
 								type: "entitlement_error",

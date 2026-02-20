@@ -96,14 +96,8 @@ export function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
 			};
 		}),
 		activeIndex: v1.activeIndex,
-		activeIndexByFamily: {
-			"gpt-5.3-codex-spark": v1.activeIndex,
-			"gpt-5.3-codex": v1.activeIndex,
-			"gpt-5.2-codex": v1.activeIndex,
-			"codex-max": v1.activeIndex,
-			codex: v1.activeIndex,
-			"gpt-5.2": v1.activeIndex,
-			"gpt-5.1": v1.activeIndex,
-		},
+		activeIndexByFamily: Object.fromEntries(
+			MODEL_FAMILIES.map((family) => [family, v1.activeIndex]),
+		) as Partial<Record<ModelFamily, number>>,
 	};
 }

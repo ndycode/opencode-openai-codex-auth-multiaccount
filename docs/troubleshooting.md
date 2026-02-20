@@ -244,7 +244,7 @@ Failed to access Codex API
 3. Remove obviously stale/duplicate entries and keep only verified accounts.
 4. Re-run with logging and inspect per-account failures:
    ```bash
-   DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.3-codex
+   DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5-codex
    ```
 5. If you only need personal Plus/Pro usage, ensure login selected the intended personal workspace/account id.
 
@@ -326,16 +326,19 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode
    ```
 4. Default fallback chain (when policy is `fallback` and not overridden):
-   - `gpt-5.3-codex -> gpt-5.2-codex`
-   - `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (if Spark IDs are selected manually)
+   - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
+   - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (if Spark IDs are selected manually)
+   - `gpt-5.2-codex -> gpt-5-codex`
+   - `gpt-5.1-codex -> gpt-5-codex`
 5. Configure a custom fallback chain in `~/.opencode/openai-codex-auth-config.json`:
    ```json
    {
      "unsupportedCodexPolicy": "fallback",
      "fallbackOnUnsupportedCodexModel": true,
      "unsupportedCodexFallbackChain": {
-       "gpt-5.3-codex": ["gpt-5.2-codex"],
-       "gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"]
+       "gpt-5-codex": ["gpt-5.2-codex"],
+       "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
+       "gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"]
      }
    }
    ```
@@ -353,7 +356,7 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    ```
 9. Verify effective upstream model when debugging Spark/fallback behavior:
    ```bash
-   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.3-codex-spark
+   ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "ping" --model=openai/gpt-5.3-codex-spark
    ```
    Then inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json` (`.body.model`). The TUI can keep showing the selected label while fallback is applied internally.
 
@@ -399,7 +402,7 @@ Should see: `Successfully removed all X message IDs`
 
 **Check logs:**
 ```bash
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode
+ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode
 > first message
 > second message
 ```
@@ -551,12 +554,13 @@ ssh -L 1455:localhost:1455 user@remote
 <summary><b>Enable Full Logging</b></summary>
 
 ```bash
-DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test"
+DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "test"
 ```
 
 **What you get:**
 - Console: Debug messages showing config resolution
-- Files: Complete request/response logs
+- Files: Request/response metadata logs
+- Files: Raw payloads included because `CODEX_PLUGIN_LOG_BODIES=1` is set (sensitive)
 
 **Log locations:**
 - `~/.opencode/logs/codex-plugin/request-*-before-transform.json`
@@ -569,7 +573,7 @@ DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test"
 <summary><b>Inspect Actual API Requests</b></summary>
 
 ```bash
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-low
+ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "test" --model=openai/gpt-5.2-low
 
 cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '{
   model: .body.model,

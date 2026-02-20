@@ -3,7 +3,7 @@ import tsparser from "@typescript-eslint/parser";
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "winston/**", "*.js", "*.cjs", "*.mjs", "scripts/**"],
+    ignores: ["dist/**", "node_modules/**", "winston/**", "*.cjs", "*.mjs"],
   },
   {
     files: ["index.ts", "lib/**/*.ts"],
@@ -33,6 +33,20 @@ export default [
       
       // General best practices
       "no-console": "off", // Allow console for CLI tool
+      "prefer-const": "error",
+      "no-var": "error",
+      "eqeqeq": ["error", "always"],
+      "no-duplicate-imports": "error",
+    },
+  },
+  {
+    files: ["scripts/**/*.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+    },
+    rules: {
+      "no-console": "off",
       "prefer-const": "error",
       "no-var": "error",
       "eqeqeq": ["error", "always"],

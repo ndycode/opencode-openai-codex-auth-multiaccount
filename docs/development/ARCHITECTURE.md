@@ -109,7 +109,7 @@ input: [
 - ✅ Full tool call history (LLM sees what it did)
 - ✅ `reasoning.encrypted_content` (preserves reasoning between turns)
 
-**Source**: Verified via `ENABLE_PLUGIN_REQUEST_LOGGING=1` logs
+**Source**: Verified via `ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1` logs
 
 ### Store Comparison
 

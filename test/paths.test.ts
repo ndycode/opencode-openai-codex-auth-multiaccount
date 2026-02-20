@@ -173,6 +173,29 @@ describe("Storage Paths Module", () => {
 			}
 		});
 
+		it("rejects lookalike prefix paths outside home directory", () => {
+			const home = homedir();
+			const parent = path.dirname(home);
+			const outsideLookalike = path.join(parent, `${path.basename(home)}-outside`, "file.json");
+			expect(() => resolvePath(outsideLookalike)).toThrow("Access denied");
+		});
+
+		it("rejects lookalike prefix paths outside current working directory", () => {
+			const cwd = process.cwd();
+			const parent = path.dirname(cwd);
+			const outsideLookalike = path.join(parent, `${path.basename(cwd)}-outside`, "file.json");
+			const home = homedir();
+			const tmp = tmpdir();
+			if (
+				outsideLookalike.startsWith(home) ||
+				outsideLookalike.startsWith(tmp) ||
+				outsideLookalike.startsWith(cwd)
+			) {
+				return;
+			}
+			expect(() => resolvePath(outsideLookalike)).toThrow("Access denied");
+		});
+
 		it("should handle tilde-only path", () => {
 			const result = resolvePath("~");
 			expect(result).toBe(homedir());

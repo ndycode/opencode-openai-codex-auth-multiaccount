@@ -15,11 +15,13 @@ import type {
   MessagePart,
   RecoveryErrorType,
   ResumeConfig,
+  ToolResultPart,
 } from "./recovery/types.js";
 
 export type { RecoveryErrorType, MessageInfo, MessageData, ResumeConfig };
 
 type PluginClient = PluginInput["client"];
+type SessionPromptArgs = Parameters<PluginClient["session"]["prompt"]>[0];
 
 const RECOVERY_RESUME_TEXT = "[session recovered - continuing previous task]";
 
@@ -99,6 +101,21 @@ function extractToolUseIds(parts: MessagePart[]): string[] {
     .map((p) => p.id as string);
 }
 
+async function sendToolResultsForRecovery(
+  client: PluginClient,
+  sessionID: string,
+  toolResultParts: ToolResultPart[],
+): Promise<void> {
+  const bodyWithParts = {
+    parts: toolResultParts,
+  } as SessionPromptArgs["body"] & { parts: ToolResultPart[] };
+
+  await client.session.prompt({
+    path: { id: sessionID },
+    body: bodyWithParts as SessionPromptArgs["body"],
+  });
+}
+
 async function recoverToolResultMissing(
   client: PluginClient,
   sessionID: string,
@@ -121,18 +138,14 @@ async function recoverToolResultMissing(
     return false;
   }
 
-  const toolResultParts = toolUseIds.map((id) => ({
+  const toolResultParts: ToolResultPart[] = toolUseIds.map((id) => ({
     type: "tool_result" as const,
     tool_use_id: id,
     content: "Operation cancelled by user (ESC pressed)",
   }));
 
   try {
-    await client.session.prompt({
-      path: { id: sessionID },
-      // @ts-expect-error - SDK types may not include tool_result parts
-      body: { parts: toolResultParts },
-    });
+    await sendToolResultsForRecovery(client, sessionID, toolResultParts);
 
     return true;
   } catch {

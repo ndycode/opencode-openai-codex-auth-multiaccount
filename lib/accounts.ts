@@ -164,6 +164,12 @@ export async function lookupCodexCliTokensByEmail(
 	return cached ? { ...cached } : null;
 }
 
+function initFamilyState(defaultValue: number): Record<ModelFamily, number> {
+	return Object.fromEntries(
+		MODEL_FAMILIES.map((family) => [family, defaultValue]),
+	) as Record<ModelFamily, number>;
+}
+
 export interface ManagedAccount {
 	index: number;
 	accountId?: string;
@@ -186,24 +192,8 @@ export interface ManagedAccount {
 
 export class AccountManager {
 	private accounts: ManagedAccount[] = [];
-	private cursorByFamily: Record<ModelFamily, number> = {
-		"gpt-5.3-codex-spark": 0,
-		"gpt-5.3-codex": 0,
-		"gpt-5.2-codex": 0,
-		"codex-max": 0,
-		codex: 0,
-		"gpt-5.2": 0,
-		"gpt-5.1": 0,
-	};
-	private currentAccountIndexByFamily: Record<ModelFamily, number> = {
-		"gpt-5.3-codex-spark": -1,
-		"gpt-5.3-codex": -1,
-		"gpt-5.2-codex": -1,
-		"codex-max": -1,
-		codex: -1,
-		"gpt-5.2": -1,
-		"gpt-5.1": -1,
-	};
+	private cursorByFamily: Record<ModelFamily, number> = initFamilyState(0);
+	private currentAccountIndexByFamily: Record<ModelFamily, number> = initFamilyState(-1);
 	private lastToastAccountIndex = -1;
 	private lastToastTime = 0;
 	private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;

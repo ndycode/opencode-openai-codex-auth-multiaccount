@@ -17,7 +17,7 @@ import {
 } from '../lib/request/fetch-helpers.js';
 import * as loggerModule from '../lib/logger.js';
 import type { Auth } from '../lib/types.js';
-import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES } from '../lib/constants.js';
+import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES, CODEX_BASE_URL } from '../lib/constants.js';
 
 describe('Fetch Helpers Module', () => {
 	afterEach(() => {
@@ -129,15 +129,25 @@ describe('Fetch Helpers Module', () => {
 			expect(rewriteUrlForCodex(url)).toBe('https://chatgpt.com/backend-api/codex/responses');
 		});
 
-		it('should not modify URL without /responses', () => {
+		it('should keep backend-api paths when URL is already on codex origin', () => {
 			const url = 'https://chatgpt.com/backend-api/other';
 			expect(rewriteUrlForCodex(url)).toBe(url);
 		});
 
-		it('should only replace first occurrence', () => {
-			const url = 'https://example.com/responses/responses';
+		it('should force codex origin and preserve query params', () => {
+			const url = 'https://example.com/backend-api/responses?foo=bar';
 			const result = rewriteUrlForCodex(url);
-			expect(result).toBe('https://example.com/codex/responses/responses');
+			expect(result).toBe('https://chatgpt.com/backend-api/codex/responses?foo=bar');
+		});
+
+		it('should prefix backend-api path when request path is outside backend-api', () => {
+			const url = 'https://chatgpt.com/v1/other';
+			const result = rewriteUrlForCodex(url);
+			expect(result).toBe(`${CODEX_BASE_URL}/v1/other`);
+		});
+
+		it('should throw for invalid URL input', () => {
+			expect(() => rewriteUrlForCodex('not-a-valid-url')).toThrow(TypeError);
 		});
 	});
 
@@ -334,7 +344,7 @@ describe('Fetch Helpers Module', () => {
 			expect(info.unsupportedModel).toBe('gpt-5.3-codex-spark');
 		});
 
-		it('resolves Spark fallback chain to gpt-5.3-codex then gpt-5.2-codex', () => {
+		it('resolves Spark fallback chain to canonical gpt-5-codex first', () => {
 			const errorBody = {
 				error: {
 					code: 'model_not_supported_with_chatgpt_account',
@@ -350,7 +360,7 @@ describe('Fetch Helpers Module', () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
-			expect(first).toBe('gpt-5.3-codex');
+			expect(first).toBe('gpt-5-codex');
 
 			const second = resolveUnsupportedCodexFallbackModel({
 				requestedModel: 'gpt-5.3-codex',
@@ -361,7 +371,7 @@ describe('Fetch Helpers Module', () => {
 							"The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
 					},
 				},
-				attemptedModels: ['gpt-5.3-codex-spark', 'gpt-5.3-codex'],
+				attemptedModels: ['gpt-5.3-codex-spark', 'gpt-5.3-codex', 'gpt-5-codex'],
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
@@ -369,7 +379,7 @@ describe('Fetch Helpers Module', () => {
 		});
 
 		it('respects legacy gpt-5.3 -> gpt-5.2 toggle when disabled', () => {
-			const fallback = resolveUnsupportedCodexFallbackModel({
+			const canonicalFallback = resolveUnsupportedCodexFallbackModel({
 				requestedModel: 'gpt-5.3-codex',
 				errorBody: {
 					error: {
@@ -382,7 +392,22 @@ describe('Fetch Helpers Module', () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: false,
 			});
-			expect(fallback).toBeUndefined();
+			expect(canonicalFallback).toBe('gpt-5-codex');
+
+			const legacyEdgeFallback = resolveUnsupportedCodexFallbackModel({
+				requestedModel: 'gpt-5.3-codex',
+				errorBody: {
+					error: {
+						code: 'model_not_supported_with_chatgpt_account',
+						message:
+							"The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
+					},
+				},
+				attemptedModels: ['gpt-5.3-codex', 'gpt-5-codex'],
+				fallbackOnUnsupportedCodexModel: true,
+				fallbackToGpt52OnUnsupportedGpt53: false,
+			});
+			expect(legacyEdgeFallback).toBeUndefined();
 		});
 	});
 
@@ -755,7 +780,7 @@ describe('Fetch Helpers Module', () => {
 				);
 
 				expect(result).toBeDefined();
-				expect(result?.body.model).toBe('gpt-5.3-codex');
+				expect(result?.body.model).toBe('gpt-5-codex');
 				expect(typeof result?.updatedInit.body).toBe('string');
 			});
 

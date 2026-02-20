@@ -13,30 +13,41 @@
  */
 export const MODEL_MAP: Record<string, string> = {
 	// ============================================================================
-	// GPT-5.3 Codex Spark Models (low/medium/high/xhigh)
+	// GPT-5 Codex Models (canonical stable family)
 	// ============================================================================
-	"gpt-5.3-codex-spark": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-low": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-medium": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-high": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-xhigh": "gpt-5.3-codex-spark",
+	"gpt-5-codex": "gpt-5-codex",
+	"gpt-5-codex-none": "gpt-5-codex",
+	"gpt-5-codex-minimal": "gpt-5-codex",
+	"gpt-5-codex-low": "gpt-5-codex",
+	"gpt-5-codex-medium": "gpt-5-codex",
+	"gpt-5-codex-high": "gpt-5-codex",
+	"gpt-5-codex-xhigh": "gpt-5-codex",
 
 	// ============================================================================
-	// GPT-5.3 Codex Models (low/medium/high/xhigh)
+	// GPT-5.3 Codex Spark Models (legacy aliases)
 	// ============================================================================
-	"gpt-5.3-codex": "gpt-5.3-codex",
-	"gpt-5.3-codex-low": "gpt-5.3-codex",
-	"gpt-5.3-codex-medium": "gpt-5.3-codex",
-	"gpt-5.3-codex-high": "gpt-5.3-codex",
-	"gpt-5.3-codex-xhigh": "gpt-5.3-codex",
+	"gpt-5.3-codex-spark": "gpt-5-codex",
+	"gpt-5.3-codex-spark-low": "gpt-5-codex",
+	"gpt-5.3-codex-spark-medium": "gpt-5-codex",
+	"gpt-5.3-codex-spark-high": "gpt-5-codex",
+	"gpt-5.3-codex-spark-xhigh": "gpt-5-codex",
 
 	// ============================================================================
-	// GPT-5.1 Codex Models
+	// GPT-5.3 Codex Models (legacy aliases)
 	// ============================================================================
-	"gpt-5.1-codex": "gpt-5.1-codex",
-	"gpt-5.1-codex-low": "gpt-5.1-codex",
-	"gpt-5.1-codex-medium": "gpt-5.1-codex",
-	"gpt-5.1-codex-high": "gpt-5.1-codex",
+	"gpt-5.3-codex": "gpt-5-codex",
+	"gpt-5.3-codex-low": "gpt-5-codex",
+	"gpt-5.3-codex-medium": "gpt-5-codex",
+	"gpt-5.3-codex-high": "gpt-5-codex",
+	"gpt-5.3-codex-xhigh": "gpt-5-codex",
+
+	// ============================================================================
+	// GPT-5.1 Codex Models (legacy aliases)
+	// ============================================================================
+	"gpt-5.1-codex": "gpt-5-codex",
+	"gpt-5.1-codex-low": "gpt-5-codex",
+	"gpt-5.1-codex-medium": "gpt-5-codex",
+	"gpt-5.1-codex-high": "gpt-5-codex",
 
 	// ============================================================================
 	// GPT-5.1 Codex Max Models
@@ -58,13 +69,13 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.2-xhigh": "gpt-5.2",
 
 	// ============================================================================
-	// GPT-5.2 Codex Models (low/medium/high/xhigh)
+	// GPT-5.2 Codex Models (legacy aliases)
 	// ============================================================================
-	"gpt-5.2-codex": "gpt-5.2-codex",
-	"gpt-5.2-codex-low": "gpt-5.2-codex",
-	"gpt-5.2-codex-medium": "gpt-5.2-codex",
-	"gpt-5.2-codex-high": "gpt-5.2-codex",
-	"gpt-5.2-codex-xhigh": "gpt-5.2-codex",
+	"gpt-5.2-codex": "gpt-5-codex",
+	"gpt-5.2-codex-low": "gpt-5-codex",
+	"gpt-5.2-codex-medium": "gpt-5-codex",
+	"gpt-5.2-codex-high": "gpt-5-codex",
+	"gpt-5.2-codex-xhigh": "gpt-5-codex",
 
 	// ============================================================================
 	// GPT-5.1 Codex Mini Models
@@ -84,9 +95,9 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.1-chat-latest": "gpt-5.1",
 
 	// ============================================================================
-	// GPT-5 Codex Models (LEGACY - maps to gpt-5.1-codex as gpt-5 is being phased out)
+	// GPT-5 Codex alias (legacy/case variants)
 	// ============================================================================
-	"gpt-5-codex": "gpt-5.1-codex",
+	"gpt_5_codex": "gpt-5-codex",
 
 	// ============================================================================
 	// GPT-5 Codex Mini Models (LEGACY - maps to gpt-5.1-codex-mini)

@@ -5,47 +5,47 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 		describe("getModelFamily", () => {
 			describe("GPT-5.3 Codex Spark family", () => {
 				it("should return gpt-5.3-codex-spark for gpt-5.3-codex-spark", () => {
-					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5.3-codex-spark");
+					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5-codex");
 				});
 
 				it("should return gpt-5.3-codex-spark for gpt-5.3-codex-spark-high", () => {
-					expect(getModelFamily("gpt-5.3-codex-spark-high")).toBe("gpt-5.3-codex-spark");
+					expect(getModelFamily("gpt-5.3-codex-spark-high")).toBe("gpt-5-codex");
 				});
 			});
 
 			describe("GPT-5.3 Codex family", () => {
 				it("should return gpt-5.3-codex for gpt-5.3-codex", () => {
-					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5.3-codex");
+					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5-codex");
 				});
 
 				it("should return gpt-5.3-codex for gpt-5.3-codex-low", () => {
-					expect(getModelFamily("gpt-5.3-codex-low")).toBe("gpt-5.3-codex");
+					expect(getModelFamily("gpt-5.3-codex-low")).toBe("gpt-5-codex");
 				});
 
 				it("should return gpt-5.3-codex for gpt-5.3-codex-high", () => {
-					expect(getModelFamily("gpt-5.3-codex-high")).toBe("gpt-5.3-codex");
+					expect(getModelFamily("gpt-5.3-codex-high")).toBe("gpt-5-codex");
 				});
 
 				it("should return gpt-5.3-codex for gpt-5.3-codex-xhigh", () => {
-					expect(getModelFamily("gpt-5.3-codex-xhigh")).toBe("gpt-5.3-codex");
+					expect(getModelFamily("gpt-5.3-codex-xhigh")).toBe("gpt-5-codex");
 				});
 			});
 
 			describe("GPT-5.2 Codex family", () => {
 				it("should return gpt-5.2-codex for gpt-5.2-codex", () => {
-					expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5.2-codex");
+					expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5-codex");
 			});
 
 			it("should return gpt-5.2-codex for gpt-5.2-codex-low", () => {
-				expect(getModelFamily("gpt-5.2-codex-low")).toBe("gpt-5.2-codex");
+				expect(getModelFamily("gpt-5.2-codex-low")).toBe("gpt-5-codex");
 			});
 
 			it("should return gpt-5.2-codex for gpt-5.2-codex-high", () => {
-				expect(getModelFamily("gpt-5.2-codex-high")).toBe("gpt-5.2-codex");
+				expect(getModelFamily("gpt-5.2-codex-high")).toBe("gpt-5-codex");
 			});
 
 			it("should return gpt-5.2-codex for gpt-5.2-codex-xhigh", () => {
-				expect(getModelFamily("gpt-5.2-codex-xhigh")).toBe("gpt-5.2-codex");
+				expect(getModelFamily("gpt-5.2-codex-xhigh")).toBe("gpt-5-codex");
 			});
 		});
 
@@ -69,19 +69,19 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 
 		describe("Codex family", () => {
 			it("should return codex for gpt-5.1-codex", () => {
-				expect(getModelFamily("gpt-5.1-codex")).toBe("codex");
+				expect(getModelFamily("gpt-5.1-codex")).toBe("gpt-5-codex");
 			});
 
 			it("should return codex for gpt-5.1-codex-low", () => {
-				expect(getModelFamily("gpt-5.1-codex-low")).toBe("codex");
+				expect(getModelFamily("gpt-5.1-codex-low")).toBe("gpt-5-codex");
 			});
 
 			it("should return codex for gpt-5.1-codex-mini", () => {
-				expect(getModelFamily("gpt-5.1-codex-mini")).toBe("codex");
+				expect(getModelFamily("gpt-5.1-codex-mini")).toBe("gpt-5-codex");
 			});
 
 			it("should return codex for gpt-5.1-codex-mini-high", () => {
-				expect(getModelFamily("gpt-5.1-codex-mini-high")).toBe("codex");
+				expect(getModelFamily("gpt-5.1-codex-mini-high")).toBe("gpt-5-codex");
 			});
 
 			it("should return codex for codex-mini-latest", () => {
@@ -123,16 +123,16 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 
 			describe("Priority order", () => {
 				it("should prioritize gpt-5.3-codex-spark over gpt-5.3-codex detection", () => {
-					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5.3-codex-spark");
+					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5-codex");
 				});
 
 				it("should prioritize gpt-5.3-codex over generic codex detection", () => {
-					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5.3-codex");
+					expect(getModelFamily("gpt-5.3-codex")).toBe("gpt-5-codex");
 				});
 
 				it("should prioritize gpt-5.2-codex over gpt-5.2 general", () => {
 					// "gpt-5.2-codex" also contains the substring "gpt-5.2"
-					expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5.2-codex");
+					expect(getModelFamily("gpt-5.2-codex")).toBe("gpt-5-codex");
 			});
 
 			it("should prioritize codex-max over codex", () => {
@@ -142,7 +142,7 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 
 			it("should prioritize codex over gpt-5.1", () => {
 				// Model contains both "codex" and potential gpt-5.1
-				expect(getModelFamily("gpt-5.1-codex")).toBe("codex");
+				expect(getModelFamily("gpt-5.1-codex")).toBe("gpt-5-codex");
 			});
 		});
 	});

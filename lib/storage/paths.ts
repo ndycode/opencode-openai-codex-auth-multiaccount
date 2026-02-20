@@ -5,7 +5,7 @@
 
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
 const PROJECT_MARKERS = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", ".opencode"];
@@ -75,6 +75,18 @@ export function findProjectRoot(startDir: string): string | null {
 	return root && isProjectDirectory(root) ? root : null;
 }
 
+function normalizePathForComparison(filePath: string): string {
+	const resolvedPath = resolve(filePath);
+	return process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+}
+
+function isWithinDirectory(baseDir: string, targetPath: string): boolean {
+	const normalizedBase = normalizePathForComparison(baseDir);
+	const normalizedTarget = normalizePathForComparison(targetPath);
+	const rel = relative(normalizedBase, normalizedTarget);
+	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 export function resolvePath(filePath: string): string {
 	let resolved: string;
 	if (filePath.startsWith("~")) {
@@ -86,7 +98,11 @@ export function resolvePath(filePath: string): string {
 	const home = homedir();
 	const cwd = process.cwd();
 	const tmp = tmpdir();
-	if (!resolved.startsWith(home) && !resolved.startsWith(cwd) && !resolved.startsWith(tmp)) {
+	if (
+		!isWithinDirectory(home, resolved) &&
+		!isWithinDirectory(cwd, resolved) &&
+		!isWithinDirectory(tmp, resolved)
+	) {
 		throw new Error(`Access denied: path must be within home directory, project directory, or temp directory`);
 	}
 

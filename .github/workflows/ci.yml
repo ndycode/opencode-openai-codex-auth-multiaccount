@@ -28,8 +28,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Security audit
-        run: npm audit --audit-level=high
+      - name: Security audit (CI policy)
+        run: npm run audit:ci
+
+      - name: Security audit (full dependency tree, non-blocking)
+        continue-on-error: true
+        run: npm run audit:all
 
       - name: Run type check
         run: npm run typecheck

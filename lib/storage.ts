@@ -102,11 +102,13 @@ async function ensureGitignore(storagePath: string): Promise<void> {
   if (!currentStoragePath) return;
 
   const configDir = dirname(storagePath);
-  const projectRoot = dirname(configDir);
-  const gitDir = join(projectRoot, ".git");
+  const inferredProjectRoot = dirname(configDir);
+  const candidateRoots = [currentProjectRoot, inferredProjectRoot].filter(
+    (root): root is string => typeof root === "string" && root.length > 0,
+  );
+  const projectRoot = candidateRoots.find((root) => existsSync(join(root, ".git")));
+  if (!projectRoot) return;
   const gitignorePath = join(projectRoot, ".gitignore");
-
-  if (!existsSync(gitDir)) return;
 
   try {
     let content = "";
@@ -128,27 +130,32 @@ async function ensureGitignore(storagePath: string): Promise<void> {
 
 let currentStoragePath: string | null = null;
 let currentLegacyProjectStoragePath: string | null = null;
+let currentProjectRoot: string | null = null;
 
 export function setStoragePath(projectPath: string | null): void {
   if (!projectPath) {
     currentStoragePath = null;
     currentLegacyProjectStoragePath = null;
+    currentProjectRoot = null;
     return;
   }
   
   const projectRoot = findProjectRoot(projectPath);
   if (projectRoot) {
+    currentProjectRoot = projectRoot;
     currentStoragePath = join(getProjectGlobalConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
     currentLegacyProjectStoragePath = join(getProjectConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
   } else {
     currentStoragePath = null;
     currentLegacyProjectStoragePath = null;
+    currentProjectRoot = null;
   }
 }
 
 export function setStoragePathDirect(path: string | null): void {
   currentStoragePath = path;
   currentLegacyProjectStoragePath = null;
+  currentProjectRoot = null;
 }
 
 /**
@@ -170,7 +177,9 @@ function getLegacyFlaggedAccountsPath(): string {
 	return join(dirname(getStoragePath()), LEGACY_FLAGGED_ACCOUNTS_FILE_NAME);
 }
 
-async function migrateLegacyProjectStorageIfNeeded(): Promise<AccountStorageV3 | null> {
+async function migrateLegacyProjectStorageIfNeeded(
+  persist: (storage: AccountStorageV3) => Promise<void> = saveAccounts,
+): Promise<AccountStorageV3 | null> {
   if (
     !currentStoragePath ||
     !currentLegacyProjectStoragePath ||
@@ -186,7 +195,21 @@ async function migrateLegacyProjectStorageIfNeeded(): Promise<AccountStorageV3 |
     const normalized = normalizeAccountStorage(legacyData);
     if (!normalized) return null;
 
-    await saveAccounts(normalized);
+    await persist(normalized);
+    try {
+      await fs.unlink(currentLegacyProjectStoragePath);
+      log.info("Removed legacy project account storage file after migration", {
+        path: currentLegacyProjectStoragePath,
+      });
+    } catch (unlinkError) {
+      const code = (unlinkError as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        log.warn("Failed to remove legacy project account storage file after migration", {
+          path: currentLegacyProjectStoragePath,
+          error: String(unlinkError),
+        });
+      }
+    }
     log.info("Migrated legacy project account storage", {
       from: currentLegacyProjectStoragePath,
       to: currentStoragePath,
@@ -459,6 +482,12 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
  * @returns AccountStorageV3 if file exists and is valid, null otherwise
  */
 export async function loadAccounts(): Promise<AccountStorageV3 | null> {
+  return loadAccountsInternal(saveAccounts);
+}
+
+async function loadAccountsInternal(
+  persistMigration: ((storage: AccountStorageV3) => Promise<void>) | null,
+): Promise<AccountStorageV3 | null> {
   try {
     const path = getStoragePath();
     const content = await fs.readFile(path, "utf-8");
@@ -474,10 +503,12 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
     const storedVersion = isRecord(data) ? (data as { version?: unknown }).version : undefined;
     if (normalized && storedVersion !== normalized.version) {
       log.info("Migrating account storage to v3", { from: storedVersion, to: normalized.version });
-      try {
-        await saveAccounts(normalized);
-      } catch (saveError) {
-        log.warn("Failed to persist migrated storage", { error: String(saveError) });
+      if (persistMigration) {
+        try {
+          await persistMigration(normalized);
+        } catch (saveError) {
+          log.warn("Failed to persist migrated storage", { error: String(saveError) });
+        }
       }
     }
 
@@ -485,13 +516,90 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      const migrated = await migrateLegacyProjectStorageIfNeeded();
+      const migrated = persistMigration
+        ? await migrateLegacyProjectStorageIfNeeded(persistMigration)
+        : null;
       if (migrated) return migrated;
       return null;
     }
     log.error("Failed to load account storage", { error: String(error) });
     return null;
   }
+}
+
+async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
+  const path = getStoragePath();
+  const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const tempPath = `${path}.${uniqueSuffix}.tmp`;
+
+  try {
+    await fs.mkdir(dirname(path), { recursive: true });
+    await ensureGitignore(path);
+
+    const content = JSON.stringify(storage, null, 2);
+    await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+
+    const stats = await fs.stat(tempPath);
+    if (stats.size === 0) {
+      const emptyError = Object.assign(new Error("File written but size is 0"), { code: "EEMPTY" });
+      throw emptyError;
+    }
+
+    // Retry rename with exponential backoff for Windows EPERM/EBUSY
+    let lastError: NodeJS.ErrnoException | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.rename(tempPath, path);
+        return;
+      } catch (renameError) {
+        const code = (renameError as NodeJS.ErrnoException).code;
+        if (code === "EPERM" || code === "EBUSY") {
+          lastError = renameError as NodeJS.ErrnoException;
+          await new Promise(r => setTimeout(r, 10 * Math.pow(2, attempt)));
+          continue;
+        }
+        throw renameError;
+      }
+    }
+    if (lastError) throw lastError;
+  } catch (error) {
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // Ignore cleanup failure.
+    }
+
+    const err = error as NodeJS.ErrnoException;
+    const code = err?.code || "UNKNOWN";
+    const hint = formatStorageErrorHint(error, path);
+
+    log.error("Failed to save accounts", {
+      path,
+      code,
+      message: err?.message,
+      hint,
+    });
+
+    throw new StorageError(
+      `Failed to save accounts: ${err?.message || "Unknown error"}`,
+      code,
+      path,
+      hint,
+      err instanceof Error ? err : undefined
+    );
+  }
+}
+
+export async function withAccountStorageTransaction<T>(
+  handler: (
+    current: AccountStorageV3 | null,
+    persist: (storage: AccountStorageV3) => Promise<void>,
+  ) => Promise<T>,
+): Promise<T> {
+  return withStorageLock(async () => {
+    const current = await loadAccountsInternal(saveAccountsUnlocked);
+    return handler(current, saveAccountsUnlocked);
+  });
 }
 
 /**
@@ -503,65 +611,7 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
  */
 export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   return withStorageLock(async () => {
-    const path = getStoragePath();
-    const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-    const tempPath = `${path}.${uniqueSuffix}.tmp`;
-
-    try {
-      await fs.mkdir(dirname(path), { recursive: true });
-      await ensureGitignore(path);
-
-      const content = JSON.stringify(storage, null, 2);
-      await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-
-      const stats = await fs.stat(tempPath);
-      if (stats.size === 0) {
-        const emptyError = Object.assign(new Error("File written but size is 0"), { code: "EEMPTY" });
-        throw emptyError;
-      }
-
-      // Retry rename with exponential backoff for Windows EPERM/EBUSY
-      let lastError: NodeJS.ErrnoException | null = null;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          await fs.rename(tempPath, path);
-          return;
-        } catch (renameError) {
-          const code = (renameError as NodeJS.ErrnoException).code;
-          if (code === "EPERM" || code === "EBUSY") {
-            lastError = renameError as NodeJS.ErrnoException;
-            await new Promise(r => setTimeout(r, 10 * Math.pow(2, attempt)));
-            continue;
-          }
-          throw renameError;
-        }
-      }
-      if (lastError) throw lastError;
-    } catch (error) {
-      try {
-        await fs.unlink(tempPath);
-      } catch {
-      }
-
-      const err = error as NodeJS.ErrnoException;
-      const code = err?.code || "UNKNOWN";
-      const hint = formatStorageErrorHint(error, path);
-
-      log.error("Failed to save accounts", {
-        path,
-        code,
-        message: err?.message,
-        hint,
-      });
-
-      throw new StorageError(
-        `Failed to save accounts: ${err?.message || "Unknown error"}`,
-        code,
-        path,
-        hint,
-        err instanceof Error ? err : undefined
-      );
-    }
+    await saveAccountsUnlocked(storage);
   });
 }
 
@@ -757,7 +807,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
     throw new Error(`File already exists: ${resolvedPath}`);
   }
   
-  const storage = await loadAccounts();
+  const storage = await withAccountStorageTransaction((current) => Promise.resolve(current));
   if (!storage || storage.accounts.length === 0) {
     throw new Error("No accounts to export");
   }
@@ -797,35 +847,39 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
     throw new Error("Invalid account storage format");
   }
   
-  const existing = await loadAccounts();
-  const existingAccounts = existing?.accounts ?? [];
-  const existingActiveIndex = existing?.activeIndex ?? 0;
-  
-  const merged = [...existingAccounts, ...normalized.accounts];
-  
-  if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-    const deduped = deduplicateAccountsByEmail(deduplicateAccounts(merged));
-    if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-      throw new Error(
-        `Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`
-      );
-    }
-  }
-  
-  const deduplicatedAccounts = deduplicateAccountsByEmail(deduplicateAccounts(merged));
-  
-  const newStorage: AccountStorageV3 = {
-    version: 3,
-    accounts: deduplicatedAccounts,
-    activeIndex: existingActiveIndex,
-    activeIndexByFamily: existing?.activeIndexByFamily,
-  };
-  
-  await saveAccounts(newStorage);
-  
-  const importedCount = deduplicatedAccounts.length - existingAccounts.length;
-  const skippedCount = normalized.accounts.length - importedCount;
-  log.info("Imported accounts", { path: resolvedPath, imported: importedCount, skipped: skippedCount, total: deduplicatedAccounts.length });
-  
-  return { imported: importedCount, total: deduplicatedAccounts.length, skipped: skippedCount };
+  const { imported: importedCount, total, skipped: skippedCount } =
+    await withAccountStorageTransaction(async (existing, persist) => {
+      const existingAccounts = existing?.accounts ?? [];
+      const existingActiveIndex = existing?.activeIndex ?? 0;
+
+      const merged = [...existingAccounts, ...normalized.accounts];
+
+      if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+        const deduped = deduplicateAccountsByEmail(deduplicateAccounts(merged));
+        if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+          throw new Error(
+            `Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`
+          );
+        }
+      }
+
+      const deduplicatedAccounts = deduplicateAccountsByEmail(deduplicateAccounts(merged));
+
+      const newStorage: AccountStorageV3 = {
+        version: 3,
+        accounts: deduplicatedAccounts,
+        activeIndex: existingActiveIndex,
+        activeIndexByFamily: existing?.activeIndexByFamily,
+      };
+
+      await persist(newStorage);
+
+      const imported = deduplicatedAccounts.length - existingAccounts.length;
+      const skipped = normalized.accounts.length - imported;
+      return { imported, total: deduplicatedAccounts.length, skipped };
+    });
+
+  log.info("Imported accounts", { path: resolvedPath, imported: importedCount, skipped: skippedCount, total });
+
+  return { imported: importedCount, total, skipped: skippedCount };
 }

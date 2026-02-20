@@ -741,6 +741,47 @@ describe('Logger Module', () => {
 			);
 		});
 
+		it('omits raw request and response payloads by default', async () => {
+			const { logRequest: logRequestEnabled } = await loadLoggerModule({
+				ENABLE_PLUGIN_REQUEST_LOGGING: '1',
+				CODEX_CONSOLE_LOG: '1',
+			});
+
+			logRequestEnabled('payload-stage', {
+				status: 200,
+				body: { prompt: 'top secret prompt' },
+				fullContent: 'top secret response',
+			});
+
+			expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+			const [, rawPayload] = mockWriteFileSync.mock.calls[0];
+			const parsed = JSON.parse(rawPayload as string) as Record<string, unknown>;
+			expect(parsed.body).toBeUndefined();
+			expect(parsed.fullContent).toBeUndefined();
+			expect(parsed.payloadsOmitted).toBe(true);
+		});
+
+		it('captures raw payloads only when CODEX_PLUGIN_LOG_BODIES=1', async () => {
+			const { logRequest: logRequestEnabled } = await loadLoggerModule({
+				ENABLE_PLUGIN_REQUEST_LOGGING: '1',
+				CODEX_PLUGIN_LOG_BODIES: '1',
+				CODEX_CONSOLE_LOG: '1',
+			});
+
+			logRequestEnabled('payload-stage', {
+				status: 200,
+				body: { prompt: 'top secret prompt' },
+				fullContent: 'top secret response',
+			});
+
+			expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+			const [, rawPayload] = mockWriteFileSync.mock.calls[0];
+			const parsed = JSON.parse(rawPayload as string) as Record<string, unknown>;
+			expect(parsed.body).toEqual({ prompt: 'top secret prompt' });
+			expect(parsed.fullContent).toBe('top secret response');
+			expect(parsed.payloadsOmitted).toBeUndefined();
+		});
+
 		it('handles write failures gracefully', async () => {
 			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 			mockExistsSync.mockReturnValue(true);

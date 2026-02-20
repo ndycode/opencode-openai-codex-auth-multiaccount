@@ -39,10 +39,10 @@ All data is stored **locally on your machine**:
 
 ### Debug Logs
 - **Location:** `~/.opencode/logs/codex-plugin/`
-- **Contents:** Request/response logs (only when `ENABLE_PLUGIN_REQUEST_LOGGING=1` is set)
+- **Contents:** Request/response metadata logs (only when `ENABLE_PLUGIN_REQUEST_LOGGING=1` is set)
 - **Includes:**
-  - API request bodies
-  - API response data
+  - Request metadata (model, flags, response status, timing)
+  - Raw request/response payloads only when `CODEX_PLUGIN_LOG_BODIES=1` is also set
   - Timestamps
   - Configuration used
 - **⚠️ Warning:** Logs may contain your prompts and model responses - handle with care

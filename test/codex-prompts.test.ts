@@ -33,9 +33,7 @@ describe("Codex Prompts Module", () => {
 
 		describe("MODEL_FAMILIES constant", () => {
 			it("should export all model families", () => {
-				expect(MODEL_FAMILIES).toContain("gpt-5.3-codex-spark");
-				expect(MODEL_FAMILIES).toContain("gpt-5.3-codex");
-				expect(MODEL_FAMILIES).toContain("gpt-5.2-codex");
+				expect(MODEL_FAMILIES).toContain("gpt-5-codex");
 				expect(MODEL_FAMILIES).toContain("codex-max");
 				expect(MODEL_FAMILIES).toContain("codex");
 				expect(MODEL_FAMILIES).toContain("gpt-5.2");
@@ -44,7 +42,7 @@ describe("Codex Prompts Module", () => {
 
 			it("should be a readonly array", () => {
 				expect(Array.isArray(MODEL_FAMILIES)).toBe(true);
-				expect(MODEL_FAMILIES.length).toBe(7);
+				expect(MODEL_FAMILIES.length).toBe(5);
 			});
 		});
 
@@ -71,15 +69,20 @@ describe("Codex Prompts Module", () => {
 
 		describe("getModelFamily", () => {
 			it("should detect gpt-5.3-codex-spark", () => {
-				expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5.3-codex-spark");
+				expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5-codex");
 			});
 
 			it("should detect gpt-5.3-codex with space separator", () => {
-				expect(getModelFamily("gpt 5.3 codex")).toBe("gpt-5.3-codex");
+				expect(getModelFamily("gpt 5.3 codex")).toBe("gpt-5-codex");
 			});
 
 			it("should detect gpt-5.2-codex with space separator", () => {
-				expect(getModelFamily("gpt 5.2 codex")).toBe("gpt-5.2-codex");
+				expect(getModelFamily("gpt 5.2 codex")).toBe("gpt-5-codex");
+			});
+
+			it("should classify gpt-5 codex mini aliases under gpt-5-codex family", () => {
+				expect(getModelFamily("gpt-5-codex-mini-low")).toBe("gpt-5-codex");
+				expect(getModelFamily("gpt-5.1-codex-mini-low")).toBe("gpt-5-codex");
 			});
 
 		it("should detect models starting with codex-", () => {
@@ -403,13 +406,13 @@ describe("Codex Prompts Module", () => {
 				mockedMkdir.mockResolvedValue(undefined);
 				mockedWriteFile.mockResolvedValue(undefined);
 
-				await getCodexInstructions("gpt-5.2-codex");
+				await getCodexInstructions("gpt-5-codex");
 				
 				const fetchCalls = mockFetch.mock.calls;
 				const rawGitHubCall = fetchCalls.find(call => 
 					typeof call[0] === "string" && call[0].includes("raw.githubusercontent.com")
 				);
-					expect(rawGitHubCall?.[0]).toContain("gpt-5.2-codex_prompt.md");
+					expect(rawGitHubCall?.[0]).toContain("gpt_5_codex_prompt.md");
 				});
 
 				it("should map gpt-5.3-codex prompts to the current codex prompt file", async () => {
@@ -430,7 +433,7 @@ describe("Codex Prompts Module", () => {
 							typeof call[0] === "string" &&
 							call[0].includes("raw.githubusercontent.com"),
 					);
-					expect(rawGitHubCall?.[0]).toContain("gpt-5.2-codex_prompt.md");
+					expect(rawGitHubCall?.[0]).toContain("gpt_5_codex_prompt.md");
 				});
 
 				it("should map gpt-5.3-codex-spark prompts to the current codex prompt file", async () => {
@@ -451,7 +454,7 @@ describe("Codex Prompts Module", () => {
 							typeof call[0] === "string" &&
 							call[0].includes("raw.githubusercontent.com"),
 					);
-					expect(rawGitHubCall?.[0]).toContain("gpt-5.2-codex_prompt.md");
+					expect(rawGitHubCall?.[0]).toContain("gpt_5_codex_prompt.md");
 				});
 			});
 		});

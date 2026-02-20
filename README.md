@@ -3,20 +3,20 @@
 [![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 
-OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.3-codex-spark` and `gpt-5.1-codex-max` (plus optional `gpt-5.3-codex-spark` IDs when entitled).
+OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5-codex`, and `gpt-5.1-codex-max` (plus optional entitlement-gated Spark IDs and legacy Codex aliases).
 
 > [!NOTE]
 > **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
 
 ## What You Get
 
-- **GPT-5.2, GPT-5.3 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
+- **GPT-5.2, GPT-5 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
 - **Multi-account support** — Add up to 20 ChatGPT accounts, health-aware rotation with automatic failover
 - **Per-project accounts** — Each project gets its own account storage (new in v4.10.0)
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
 - **Strict tool validation** — Automatically cleans schemas for compatibility with strict models
 - **Auto-update notifications** — Get notified when a new version is available
-- **22 template model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
+- **21 template model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
 - **Prompt caching** — Session-based caching for faster multi-turn conversations
 - **Usage-aware errors** — Friendly messages with rate limit reset timing
 - **Plugin compatible** — Works alongside other OpenCode plugins (oh-my-opencode, dcp, etc.)
@@ -128,7 +128,7 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 | Model | Variants | Notes |
 |-------|----------|-------|
 | `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 with reasoning levels |
-| `gpt-5.3-codex` | low, medium, high, xhigh | Latest GPT-5.3 Codex for code generation (default: xhigh) |
+| `gpt-5-codex` | low, medium, high | Canonical Codex model for code generation (default: high) |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Spark IDs are supported by the plugin, but access is entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
@@ -177,18 +177,17 @@ Add this to your `~/.config/opencode/opencode.json`:
             "xhigh": { "reasoningEffort": "xhigh" }
           }
         },
-        "gpt-5.3-codex": {
-          "name": "GPT 5.3 Codex (OAuth)",
+        "gpt-5-codex": {
+          "name": "GPT 5 Codex (OAuth)",
           "limit": { "context": 272000, "output": 128000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
             "low": { "reasoningEffort": "low" },
             "medium": { "reasoningEffort": "medium" },
-            "high": { "reasoningEffort": "high" },
-            "xhigh": { "reasoningEffort": "xhigh" }
+            "high": { "reasoningEffort": "high" }
           },
           "options": {
-            "reasoningEffort": "xhigh",
+            "reasoningEffort": "high",
             "reasoningSummary": "detailed"
           }
         },
@@ -596,14 +595,15 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
      "unsupportedCodexPolicy": "fallback",
      "fallbackOnUnsupportedCodexModel": true,
      "unsupportedCodexFallbackChain": {
-       "gpt-5.3-codex": ["gpt-5.2-codex"],
-       "gpt-5.3-codex-spark": ["gpt-5.3-codex", "gpt-5.2-codex"]
+       "gpt-5-codex": ["gpt-5.2-codex"],
+       "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
+       "gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"]
      }
    }
    ```
 5. Verify effective upstream model when needed:
    ```bash
-   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.3-codex-spark
+   ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "ping" --model=openai/gpt-5.3-codex-spark
    ```
    The UI can keep showing your selected model while fallback is applied internally.
 
@@ -737,14 +737,17 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `streamStallTimeoutMs` | `45000` | Abort non-stream parsing if SSE stalls (ms) |
 
 Default unsupported-model fallback chain (used when `unsupportedCodexPolicy` is `fallback`):
-- `gpt-5.3-codex -> gpt-5.2-codex`
-- `gpt-5.3-codex-spark -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
+- `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
+- `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
+- `gpt-5.2-codex -> gpt-5-codex`
+- `gpt-5.1-codex -> gpt-5-codex`
 
 ### Environment Variables
 
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log all API requests
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log request metadata
+CODEX_PLUGIN_LOG_BODIES=1 opencode               # Include raw request/response payloads in request logs (sensitive)
 CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
 CODEX_TUI_V2=0 opencode                          # Disable Codex-style UI (legacy output)
