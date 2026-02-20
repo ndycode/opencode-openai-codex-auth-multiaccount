@@ -44,7 +44,11 @@ controls how much thinking the model does.
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-the shipped config templates include 21 presets and do not add Spark by default. add `gpt-5.3-codex-spark` manually only for entitled workspaces.
+the shipped config templates include:
+- modern template (variants): 27 presets
+- legacy template (explicit model ids): 22 presets
+
+Spark is not added by default. add `gpt-5.3-codex-spark` manually only for entitled workspaces.
 
 what they mean:
 - `none` - no reasoning phase (base models only, auto-converts to `low` for codex)
@@ -144,6 +148,8 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 ### unsupported-model behavior + fallback chain
 
 by default the plugin is strict (`unsupportedCodexPolicy: "strict"`). it returns entitlement errors directly for unsupported models.
+
+Spark exception: `gpt-5.3-codex-spark` entitlement failures auto-fallback to the default chain even in strict mode, because Spark access is commonly limited to Pro/Business workspaces. This avoids long account-rotation stalls for non-entitled users.
 
 set `unsupportedCodexPolicy: "fallback"` to enable model fallback after account/workspace attempts are exhausted.
 

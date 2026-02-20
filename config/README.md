@@ -6,8 +6,8 @@ This directory contains the official OpenCode config templates for the ChatGPT C
 
 | File | OpenCode version | Description |
 |------|------------------|-------------|
-| [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+** | Variant-based config: 6 base models with 21 total presets |
-| [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Legacy explicit entries: 21 individual model definitions |
+| [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+** | Variant-based config: 6 base models with 27 total presets |
+| [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Legacy explicit entries: 22 individual model definitions |
 
 ## Quick pick
 
@@ -72,6 +72,7 @@ Current defaults are strict entitlement handling:
 - set `unsupportedCodexPolicy: "fallback"` (or `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback`) to enable automatic fallback retries
 - `fallbackToGpt52OnUnsupportedGpt53: true` keeps the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge inside fallback mode
 - `unsupportedCodexFallbackChain` lets you override fallback order per model
+- Spark entitlement failures (`gpt-5.3-codex-spark`) force fallback immediately, even with strict policy, to support non-entitled workspaces
 
 Default fallback chain (when policy is `fallback`):
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`

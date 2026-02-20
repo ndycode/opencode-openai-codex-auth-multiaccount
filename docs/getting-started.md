@@ -126,7 +126,7 @@ Use one of the provided config files:
 
 Copy the relevant config to your `~/.config/opencode/opencode.json`.
 
-The shipped templates include 21 presets and intentionally omit Spark IDs. Add `gpt-5.3-codex-spark` manually only when your workspace is entitled.
+The shipped templates include 27 presets in modern mode and 22 presets in legacy mode, and intentionally omit Spark IDs. Add `gpt-5.3-codex-spark` manually only when your workspace is entitled.
 
 <details>
 <summary><b>Why use the full config?</b></summary>
@@ -151,7 +151,7 @@ opencode run "write hello world to test.txt" --model=openai/gpt-5.2-medium
 opencode
 ```
 
-You'll see all 21 GPT-5.x variants in the model selector!
+You'll see all 27 GPT-5.x variants in the model selector!
 
 If `gpt-5-codex` or `gpt-5.3-codex-spark` returns an unsupported-model entitlement error, re-auth with `opencode auth login` or add another entitled account/workspace first. The plugin tries remaining accounts/workspaces before model fallback. See [Configuration](configuration.md) for strict vs fallback policy controls.
 
@@ -171,7 +171,7 @@ If you manually add Spark IDs and want to confirm effective upstream routing, ru
 | `gpt-5.1-codex-mini` | medium, high | Lightweight |
 | `gpt-5.1` | none, low, medium, high | Base model |
 
-**Total: 21 template presets** with 272k context / 128k output (+ optional Spark IDs when entitled).
+**Total: 27 template presets** with 272k context / 128k output (+ optional Spark IDs when entitled).
 
 ---
 

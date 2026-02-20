@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 const ALLOWED_HIGH_OR_CRITICAL_PACKAGES = new Set([
 	"eslint",
@@ -27,41 +27,55 @@ function summarizeVia(via) {
 		.slice(0, 5);
 }
 
-let rawAuditOutput = "";
-try {
-	rawAuditOutput = execSync("npm audit --json", {
-		encoding: "utf8",
-		stdio: ["ignore", "pipe", "pipe"],
-	}).trim();
-} catch (error) {
-	const execError = error;
-	const stdout =
-		execError &&
-		typeof execError === "object" &&
-		"stdout" in execError &&
-		typeof execError.stdout === "string"
-			? execError.stdout
-			: "";
-	const stderr =
-		execError &&
-		typeof execError === "object" &&
-		"stderr" in execError &&
-		typeof execError.stderr === "string"
-			? execError.stderr
-			: "";
-	rawAuditOutput = stdout.trim() || stderr.trim();
+const isWindows = process.platform === "win32";
+const command = isWindows ? process.env.ComSpec || "cmd.exe" : "npm";
+const commandArgs = isWindows
+	? ["/d", "/s", "/c", "npm audit --json"]
+	: ["audit", "--json"];
+const audit = spawnSync(command, commandArgs, {
+	encoding: "utf8",
+	stdio: ["ignore", "pipe", "pipe"],
+	env: {
+		...process.env,
+		// npm run -s can suppress child npm JSON output; force a readable level.
+		npm_config_loglevel:
+			process.env.npm_config_loglevel === "silent"
+				? "notice"
+				: process.env.npm_config_loglevel || "notice",
+	},
+});
+
+const stdout = (audit.stdout ?? "").trim();
+const stderr = (audit.stderr ?? "").trim();
+const combined = [stdout, stderr].filter(Boolean).join("\n");
+
+if (!combined) {
+	if ((audit.status ?? 1) === 0) {
+		console.log("No vulnerabilities found in npm audit output.");
+		process.exit(0);
+	}
+	console.error("Failed to read npm audit output.");
+	process.exit(1);
 }
 
-if (!rawAuditOutput) {
-	console.error("Failed to read npm audit JSON output.");
-	process.exit(1);
+// npm can emit human-readable success text (no JSON) on some versions/configs.
+if (!combined.includes("{") && /found 0 vulnerabilities/i.test(combined)) {
+	console.log("No vulnerabilities found in npm audit output.");
+	process.exit(0);
 }
 
 let auditJson;
 try {
-	auditJson = JSON.parse(rawAuditOutput.replace(/^\uFEFF/, ""));
+	const jsonCandidate =
+		(stdout.startsWith("{") ? stdout : "") ||
+		(stderr.startsWith("{") ? stderr : "") ||
+		combined.slice(combined.indexOf("{"));
+	auditJson = JSON.parse(jsonCandidate.replace(/^\uFEFF/, ""));
 } catch (error) {
 	console.error("Failed to parse npm audit JSON output.");
+	if (stderr) {
+		console.error(stderr);
+	}
 	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
 }

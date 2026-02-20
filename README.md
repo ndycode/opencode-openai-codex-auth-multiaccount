@@ -16,7 +16,7 @@ OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with mo
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
 - **Strict tool validation** — Automatically cleans schemas for compatibility with strict models
 - **Auto-update notifications** — Get notified when a new version is available
-- **21 template model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
+- **27 template model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
 - **Prompt caching** — Session-based caching for faster multi-turn conversations
 - **Usage-aware errors** — Friendly messages with rate limit reset timing
 - **Plugin compatible** — Works alongside other OpenCode plugins (oh-my-opencode, dcp, etc.)
