@@ -4,6 +4,18 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ## [unreleased]
 
+## [5.2.3] - 2026-02-21
+
+### fixed
+
+- **tool-call compatibility with current OpenCode runtime**: default request handling now preserves native OpenCode payload/tool definitions, avoiding bridge-side alias rewrites that could trigger invalid tool-call schemas.
+- **bridge/tool-name drift failures**: Codex bridge instructions now anchor on the runtime-provided tool manifest and explicitly avoid translating/inventing tool names.
+
+### changed
+
+- **request transform mode control**: added `requestTransformMode` (`native` default, `legacy` opt-in) plus `CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy` for compatibility fallback.
+- **legacy codex-mode scope**: Codex compatibility rewrites and bridge prompt shaping are now legacy-mode behavior; native mode keeps host request shape unchanged.
+
 ## [5.2.1] - 2026-02-20
 
 ### fixed

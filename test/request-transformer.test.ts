@@ -1776,6 +1776,37 @@ describe('Request Transformer Module', () => {
 				expect((result.input![0].content as any)[0].text).toContain('Codex Running in OpenCode');
 			});
 
+			it('should include an authoritative runtime tool manifest in bridge mode', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [
+						{
+							type: 'function',
+							function: {
+								name: 'apply_patch',
+								parameters: { type: 'object', properties: {} },
+							},
+						},
+						{
+							type: 'function',
+							function: {
+								name: 'bash',
+								parameters: { type: 'object', properties: {} },
+							},
+						},
+					] as unknown,
+				};
+
+				const result = await transformRequestBody(body, codexInstructions, undefined, true);
+				const bridgeText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+
+				expect(bridgeText).toContain('Runtime Tool Manifest');
+				expect(bridgeText).toContain('`apply_patch`');
+				expect(bridgeText).toContain('`bash`');
+				expect(bridgeText).toContain('Do not translate tool names');
+			});
+
 			it('should filter OpenCode prompts when codexMode=true', async () => {
 				const body: RequestBody = {
 					model: 'gpt-5',

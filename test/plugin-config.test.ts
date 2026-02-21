@@ -14,6 +14,7 @@ import {
 	getRetryAllAccountsMaxRetries,
 	getFallbackToGpt52OnUnsupportedGpt53,
 	getUnsupportedCodexFallbackChain,
+	getRequestTransformMode,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
 } from '../lib/config.js';
@@ -53,6 +54,7 @@ describe('Plugin Configuration', () => {
 		'CODEX_AUTH_FAST_SESSION',
 		'CODEX_AUTH_FAST_SESSION_STRATEGY',
 		'CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS',
+		'CODEX_AUTH_REQUEST_TRANSFORM_MODE',
 		'CODEX_AUTH_UNSUPPORTED_MODEL_POLICY',
 		'CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL',
 		'CODEX_AUTH_FALLBACK_GPT53_TO_GPT52',
@@ -85,6 +87,7 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
+				requestTransformMode: 'native',
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -125,6 +128,7 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: false,
+				requestTransformMode: 'native',
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -162,6 +166,7 @@ describe('Plugin Configuration', () => {
 
 			expect(config).toEqual({
 				codexMode: true,
+				requestTransformMode: 'native',
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -210,6 +215,7 @@ describe('Plugin Configuration', () => {
 
 	expect(config).toEqual({
 		codexMode: true,
+		requestTransformMode: 'native',
 		codexTuiV2: true,
 		codexTuiColorProfile: 'truecolor',
 		codexTuiGlyphMode: 'ascii',
@@ -252,6 +258,7 @@ describe('Plugin Configuration', () => {
 
 		expect(config).toEqual({
 			codexMode: true,
+			requestTransformMode: 'native',
 			codexTuiV2: true,
 			codexTuiColorProfile: 'truecolor',
 			codexTuiGlyphMode: 'ascii',
@@ -577,6 +584,25 @@ describe('Plugin Configuration', () => {
 			expect(getFastSessionStrategy({ fastSessionStrategy: 'hybrid' })).toBe('always');
 			process.env.CODEX_AUTH_FAST_SESSION_STRATEGY = 'hybrid';
 			expect(getFastSessionStrategy({ fastSessionStrategy: 'always' })).toBe('hybrid');
+		});
+	});
+
+	describe('getRequestTransformMode', () => {
+		it('should default to native', () => {
+			delete process.env.CODEX_AUTH_REQUEST_TRANSFORM_MODE;
+			expect(getRequestTransformMode({})).toBe('native');
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_REQUEST_TRANSFORM_MODE;
+			expect(getRequestTransformMode({ requestTransformMode: 'legacy' })).toBe('legacy');
+		});
+
+		it('should prioritize env value', () => {
+			process.env.CODEX_AUTH_REQUEST_TRANSFORM_MODE = 'legacy';
+			expect(getRequestTransformMode({ requestTransformMode: 'native' })).toBe('legacy');
+			process.env.CODEX_AUTH_REQUEST_TRANSFORM_MODE = 'native';
+			expect(getRequestTransformMode({ requestTransformMode: 'legacy' })).toBe('native');
 		});
 	});
 

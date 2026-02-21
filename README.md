@@ -707,7 +707,8 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 
 | Option | Default | What It Does |
 |--------|---------|--------------|
-| `codexMode` | `true` | Uses Codex-OpenCode bridge prompt (synced with latest Codex CLI) |
+| `requestTransformMode` | `native` | Request shaping mode: `native` keeps OpenCode payloads unchanged; `legacy` enables Codex compatibility rewrites |
+| `codexMode` | `true` | Legacy-only bridge prompt behavior (applies when `requestTransformMode=legacy`) |
 | `codexTuiV2` | `true` | Enables Codex-style terminal UI output (set `false` for legacy output) |
 | `codexTuiColorProfile` | `truecolor` | Terminal color profile for Codex UI (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | Glyph mode for Codex UI (`ascii`, `unicode`, `auto`) |
@@ -749,6 +750,7 @@ DEBUG_CODEX_PLUGIN=1 opencode                    # Enable debug logging
 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode         # Log request metadata
 CODEX_PLUGIN_LOG_BODIES=1 opencode               # Include raw request/response payloads in request logs (sensitive)
 CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
+CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy opencode # Re-enable legacy Codex request rewrites
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
 CODEX_TUI_V2=0 opencode                          # Disable Codex-style UI (legacy output)
 CODEX_TUI_COLOR_PROFILE=ansi16 opencode          # Force UI color profile

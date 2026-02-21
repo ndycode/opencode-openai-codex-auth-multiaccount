@@ -68,6 +68,7 @@ vi.mock("../lib/cli.js", () => ({
 
 vi.mock("../lib/config.js", () => ({
 	getCodexMode: () => true,
+	getRequestTransformMode: () => "native",
 	getFastSession: () => false,
 	getFastSessionStrategy: () => "hybrid",
 	getFastSessionMaxInputItems: () => 30,

@@ -15,6 +15,7 @@ import {
 	extractUnsupportedCodexModelFromText,
 	shouldFallbackToGpt52OnUnsupportedGpt53,
 } from '../lib/request/fetch-helpers.js';
+import * as codexPrompts from '../lib/prompts/codex.js';
 import * as loggerModule from '../lib/logger.js';
 import type { Auth } from '../lib/types.js';
 import { URL_PATHS, OPENAI_HEADERS, OPENAI_HEADER_VALUES, CODEX_BASE_URL } from '../lib/constants.js';
@@ -741,7 +742,31 @@ describe('Fetch Helpers Module', () => {
 		});
 	});
 
-	describe('transformRequestForCodex', () => {
+		describe('transformRequestForCodex', () => {
+			it('returns passthrough body in native mode without loading codex instructions', async () => {
+				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
+				const getInstructionsSpy = vi.spyOn(codexPrompts, 'getCodexInstructions');
+				const requestBody = {
+					model: 'gpt-5.3-codex',
+					input: [{ type: 'message', role: 'user', content: 'Hello' }],
+					tools: [{ name: 'apply_patch' }],
+				};
+
+				const result = await transformRequestForCodex(
+					{ body: JSON.stringify(requestBody) },
+					'https://example.com',
+					{ global: {}, models: {} },
+					true,
+					undefined,
+					{ requestTransformMode: 'native' } as any,
+				);
+
+				expect(result).toBeDefined();
+				expect(result?.body.model).toBe('gpt-5.3-codex');
+				expect(result?.body.tools).toEqual([{ name: 'apply_patch' }]);
+				expect(getInstructionsSpy).not.toHaveBeenCalled();
+			});
+
 		it('returns undefined when init is undefined (line 166 coverage)', async () => {
 			const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
 			const result = await transformRequestForCodex(undefined, 'https://example.com', { global: {}, models: {} });

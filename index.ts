@@ -38,6 +38,7 @@ import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
+	getRequestTransformMode,
 	getFastSession,
 	getFastSessionStrategy,
 	getFastSessionMaxInputItems,
@@ -808,6 +809,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				// Load plugin configuration and determine CODEX_MODE
 				// Priority: CODEX_MODE env var > config file > default (true)
 				const codexMode = getCodexMode(pluginConfig);
+				const requestTransformMode = getRequestTransformMode(pluginConfig);
+				const useLegacyRequestTransform = requestTransformMode === "legacy";
 				const fastSessionEnabled = getFastSession(pluginConfig);
 				const fastSessionStrategy = getFastSessionStrategy(pluginConfig);
 				const fastSessionMaxInputItems = getFastSessionMaxInputItems(pluginConfig);
@@ -849,7 +852,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					process.env.VITEST !== "true" &&
 					process.env.NODE_ENV !== "test";
 
-				if (!startupPrewarmTriggered && prewarmEnabled) {
+				if (!startupPrewarmTriggered && prewarmEnabled && useLegacyRequestTransform) {
 					startupPrewarmTriggered = true;
 					const configuredModels = Object.keys(userConfig.models ?? {});
 					prewarmCodexInstructions(configuredModels);
@@ -985,11 +988,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 									codexMode,
 									parsedBody,
 									{
-										fastSession: fastSessionEnabled,
-										fastSessionStrategy,
-										fastSessionMaxInputItems,
-									},
-								);
+									fastSession: fastSessionEnabled,
+									fastSessionStrategy,
+									fastSessionMaxInputItems,
+									requestTransformMode,
+								},
+							);
 										let requestInit = transformation?.updatedInit ?? baseInit;
 										let transformedBody: RequestBody | undefined = transformation?.body;
 										const promptCacheKey = transformedBody?.prompt_cache_key;
