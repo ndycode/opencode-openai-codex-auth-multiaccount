@@ -383,6 +383,7 @@ export async function transformRequestForCodex(
 	codexMode = true,
 	parsedBody?: Record<string, unknown>,
 	options?: {
+		requestTransformMode?: "native" | "legacy";
 		fastSession?: boolean;
 		fastSessionStrategy?: "hybrid" | "always";
 		fastSessionMaxInputItems?: number;
@@ -405,6 +406,36 @@ export async function transformRequestForCodex(
 			body = JSON.parse(init.body) as RequestBody;
 		}
 		const originalModel = body.model;
+		const requestTransformMode = options?.requestTransformMode ?? "legacy";
+
+		if (requestTransformMode === "native") {
+			logRequest(LOG_STAGES.BEFORE_TRANSFORM, {
+				url,
+				originalModel,
+				model: body.model,
+				hasTools: !!body.tools,
+				hasInput: !!body.input,
+				inputLength: body.input?.length,
+				requestTransformMode,
+				body: body as unknown as Record<string, unknown>,
+			});
+
+			logRequest(LOG_STAGES.AFTER_TRANSFORM, {
+				url,
+				originalModel,
+				normalizedModel: body.model,
+				hasTools: !!body.tools,
+				hasInput: !!body.input,
+				inputLength: body.input?.length,
+				requestTransformMode,
+				body: body as unknown as Record<string, unknown>,
+			});
+
+			return {
+				body,
+				updatedInit: { ...(init ?? {}), body: JSON.stringify(body) },
+			};
+		}
 
 		// Normalize model first to determine which instructions to fetch
 		// This ensures we get the correct model-specific prompt
@@ -420,6 +451,7 @@ export async function transformRequestForCodex(
 			hasInput: !!body.input,
 			inputLength: body.input?.length,
 			codexMode,
+			requestTransformMode,
 			body: body as unknown as Record<string, unknown>,
 		});
 
@@ -449,6 +481,7 @@ export async function transformRequestForCodex(
 			reasoning: transformedBody.reasoning as unknown,
 			textVerbosity: transformedBody.text?.verbosity,
 			include: transformedBody.include,
+			requestTransformMode,
 			body: transformedBody as unknown as Record<string, unknown>,
 		});
 

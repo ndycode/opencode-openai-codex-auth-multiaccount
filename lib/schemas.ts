@@ -12,6 +12,7 @@ import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 
 export const PluginConfigSchema = z.object({
 	codexMode: z.boolean().optional(),
+	requestTransformMode: z.enum(["native", "legacy"]).optional(),
 	codexTuiV2: z.boolean().optional(),
 	codexTuiColorProfile: z.enum(["truecolor", "ansi16", "ansi256"]).optional(),
 	codexTuiGlyphMode: z.enum(["ascii", "unicode", "auto"]).optional(),

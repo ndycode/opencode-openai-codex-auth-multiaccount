@@ -8,6 +8,7 @@ import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
 const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
+const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
@@ -18,6 +19,7 @@ export type UnsupportedCodexPolicy = "strict" | "fallback";
  */
 const DEFAULT_CONFIG: PluginConfig = {
 	codexMode: true,
+	requestTransformMode: "native",
 	codexTuiV2: true,
 	codexTuiColorProfile: "truecolor",
 	codexTuiGlyphMode: "ascii",
@@ -172,6 +174,15 @@ function resolveStringSetting<T extends string>(
 
 export function getCodexMode(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_MODE", pluginConfig.codexMode, true);
+}
+
+export function getRequestTransformMode(pluginConfig: PluginConfig): "native" | "legacy" {
+	return resolveStringSetting(
+		"CODEX_AUTH_REQUEST_TRANSFORM_MODE",
+		pluginConfig.requestTransformMode,
+		"native",
+		REQUEST_TRANSFORM_MODES,
+	);
 }
 
 export function getCodexTuiV2(pluginConfig: PluginConfig): boolean {

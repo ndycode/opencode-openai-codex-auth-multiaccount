@@ -1,6 +1,6 @@
 import { logDebug, logWarn } from "../logger.js";
 import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
-import { CODEX_OPENCODE_BRIDGE } from "../prompts/codex-opencode-bridge.js";
+import { renderCodexOpenCodeBridge } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
 import { getNormalizedModel } from "./helpers/model-map.js";
 import {
@@ -373,6 +373,30 @@ function sanitizePlanOnlyTools(tools: unknown, mode: CollaborationMode): unknown
 		);
 	}
 	return filtered;
+}
+
+function extractRuntimeToolNames(tools: unknown): string[] {
+	if (!Array.isArray(tools)) return [];
+
+	const names: string[] = [];
+	for (const tool of tools) {
+		if (!tool || typeof tool !== "object") continue;
+
+		const directName = (tool as { name?: unknown }).name;
+		if (typeof directName === "string" && directName.trim()) {
+			names.push(directName);
+			continue;
+		}
+
+		const functionDef = (tool as { function?: unknown }).function;
+		if (!functionDef || typeof functionDef !== "object") continue;
+		const functionName = (functionDef as { name?: unknown }).name;
+		if (typeof functionName === "string" && functionName.trim()) {
+			names.push(functionName);
+		}
+	}
+
+	return names;
 }
 
 /**
@@ -762,8 +786,10 @@ export async function filterOpenCodeSystemPrompts(
 export function addCodexBridgeMessage(
 	input: InputItem[] | undefined,
 	hasTools: boolean,
+	tools?: unknown,
 ): InputItem[] | undefined {
 	if (!hasTools || !Array.isArray(input)) return input;
+	const bridgeText = renderCodexOpenCodeBridge(extractRuntimeToolNames(tools));
 
 	const bridgeMessage: InputItem = {
 		type: "message",
@@ -771,7 +797,7 @@ export function addCodexBridgeMessage(
 		content: [
 			{
 				type: "input_text",
-				text: CODEX_OPENCODE_BRIDGE,
+				text: bridgeText,
 			},
 		],
 	};
@@ -928,7 +954,7 @@ export async function transformRequestBody(
 		if (codexMode) {
 			// CODEX_MODE: Remove OpenCode system prompt, add bridge prompt
 			body.input = await filterOpenCodeSystemPrompts(body.input);
-			body.input = addCodexBridgeMessage(body.input, !!body.tools);
+			body.input = addCodexBridgeMessage(body.input, !!body.tools, body.tools);
 		} else {
 			// DEFAULT MODE: Keep original behavior with tool remap message
 			body.input = addToolRemapMessage(body.input, !!body.tools);
