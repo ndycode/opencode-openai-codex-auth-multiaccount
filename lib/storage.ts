@@ -247,7 +247,7 @@ function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
   for (let i = 0; i < accounts.length; i += 1) {
     const account = accounts[i];
     if (!account) continue;
-    const key = account.accountId || account.refreshToken;
+    const key = toAccountIdentityKey(account);
     if (!key) continue;
 
     const existingIndex = keyToIndex.get(key);
@@ -288,8 +288,17 @@ export function deduplicateAccounts<T extends { accountId?: string; refreshToken
 }
 
 /**
+ * Applies storage deduplication semantics used by normalize/import paths.
+ * 1) Always dedupe by identity key first (accountId preferred, refreshToken fallback).
+ * 2) Then apply legacy email dedupe only for entries that still do not have accountId.
+ */
+function deduplicateAccountsForStorage<T extends AccountLike & { email?: string }>(accounts: T[]): T[] {
+  return deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts));
+}
+
+/**
  * Removes duplicate legacy accounts by email, keeping the most recently used entry.
- * Accounts with accountId are always preserved to avoid collapsing workspace variants.
+ * Accounts with accountId are never merged by email to avoid collapsing workspace variants.
  * Accounts without email are always preserved.
  * @param accounts - Array of accounts to deduplicate
  * @returns New array with email duplicates removed
@@ -367,23 +376,32 @@ function clampIndex(index: number, length: number): number {
 }
 
 function toAccountKey(account: Pick<AccountMetadataV3, "accountId" | "refreshToken">): string {
-  return account.accountId || account.refreshToken;
+  const key = toAccountIdentityKey(account);
+  return key || "";
+}
+
+function toAccountIdentityKey(account: Pick<AccountMetadataV3, "accountId" | "refreshToken">): string | undefined {
+  const accountId = typeof account.accountId === "string" ? account.accountId.trim() : "";
+  if (accountId) {
+    return `accountId:${accountId}`;
+  }
+
+  const refreshToken = typeof account.refreshToken === "string" ? account.refreshToken.trim() : "";
+  if (refreshToken) {
+    return `refreshToken:${refreshToken}`;
+  }
+
+  return undefined;
 }
 
 function extractActiveKey(accounts: unknown[], activeIndex: number): string | undefined {
   const candidate = accounts[activeIndex];
   if (!isRecord(candidate)) return undefined;
 
-  const accountId =
-    typeof candidate.accountId === "string" && candidate.accountId.trim()
-      ? candidate.accountId
-      : undefined;
-  const refreshToken =
-    typeof candidate.refreshToken === "string" && candidate.refreshToken.trim()
-      ? candidate.refreshToken
-      : undefined;
-
-  return accountId || refreshToken;
+  return toAccountIdentityKey({
+    accountId: typeof candidate.accountId === "string" ? candidate.accountId : undefined,
+    refreshToken: typeof candidate.refreshToken === "string" ? candidate.refreshToken : "",
+  });
 }
 
 /**
@@ -430,9 +448,7 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
   );
 
-  const deduplicatedAccounts = deduplicateAccountsByEmail(
-    deduplicateAccountsByKey(validAccounts),
-  );
+  const deduplicatedAccounts = deduplicateAccountsForStorage(validAccounts);
 
   const activeIndex = (() => {
     if (deduplicatedAccounts.length === 0) return 0;
@@ -828,7 +844,8 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 
 /**
  * Imports accounts from a JSON file, merging with existing accounts.
- * Deduplicates by accountId and legacy fallback keys (refresh/email for entries missing accountId).
+ * Deduplicates by identity key first (accountId, otherwise refreshToken),
+ * then applies legacy email dedupe only to entries without accountId.
  * @param filePath - Source file path
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */
@@ -865,7 +882,7 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
       const merged = [...existingAccounts, ...normalized.accounts];
 
       if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-        const deduped = deduplicateAccountsByEmail(deduplicateAccounts(merged));
+        const deduped = deduplicateAccountsForStorage(merged);
         if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
           throw new Error(
             `Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`
@@ -873,7 +890,7 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
         }
       }
 
-      const deduplicatedAccounts = deduplicateAccountsByEmail(deduplicateAccounts(merged));
+      const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
 
       const mappedActiveIndex = (() => {
         if (deduplicatedAccounts.length === 0) return 0;
