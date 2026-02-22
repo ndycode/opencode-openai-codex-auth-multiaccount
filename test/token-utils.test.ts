@@ -347,6 +347,42 @@ describe("Token Utils Module", () => {
 			]);
 		});
 
+		it("preserves explicit team organization IDs even when canonical org arrays are index-aligned", () => {
+			mockedDecodeJWT.mockImplementation((token) => {
+				if (token !== "id_token") return null;
+				return {
+					[JWT_CLAIM_PATH]: {
+						organizations: [
+							{ id: "org-a", account_id: "org-a-account", name: "Org A" },
+							{ id: "org-b", account_id: "org-b-account", name: "Org B" },
+						],
+						teams: [
+							{
+								team_id: "team-a-account",
+								organization_id: "team-org-b",
+								team_name: "Team A",
+							},
+							{
+								team_id: "team-b-account",
+								organization_id: "team-org-a",
+								team_name: "Team B",
+							},
+						],
+					},
+				};
+			});
+
+			const candidates = getAccountIdCandidates(undefined, "id_token");
+			const teamCandidates = candidates.filter((candidate) =>
+				candidate.accountId.startsWith("team-"),
+			);
+
+			expect(teamCandidates.map((candidate) => candidate.organizationId)).toEqual([
+				"team-org-b",
+				"team-org-a",
+			]);
+		});
+
 		it("skips canonical mapping for non-organization arrays when lengths are misaligned", () => {
 			mockedDecodeJWT.mockImplementation((token) => {
 				if (token !== "id_token") return null;

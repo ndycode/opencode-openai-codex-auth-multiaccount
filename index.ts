@@ -420,47 +420,97 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const stored = replaceAll ? null : loadedStorage;
 					const accounts = stored?.accounts ? [...stored.accounts] : [];
 
-					const buildIdentityIndexes = (): {
+					const pushIndex = (
+						map: Map<string, number[]>,
+						key: string,
+						index: number,
+					): void => {
+						const existing = map.get(key);
+						if (existing) {
+							existing.push(index);
+							return;
+						}
+						map.set(key, [index]);
+					};
+
+					const asUniqueIndex = (indices: number[] | undefined): number | undefined => {
+						if (!indices || indices.length !== 1) return undefined;
+						const [onlyIndex] = indices;
+						return typeof onlyIndex === "number" ? onlyIndex : undefined;
+					};
+
+					type IdentityIndexes = {
 						byOrganizationId: Map<string, number>;
-						byAccountId: Map<string, number>;
-						byRefreshTokenLegacy: Map<string, number>;
-						byEmailLegacy: Map<string, number>;
-					} => {
+						byAccountIdNoOrg: Map<string, number>;
+						byRefreshTokenNoOrg: Map<string, number>;
+						byEmailNoOrg: Map<string, number>;
+						byAccountIdOrgScoped: Map<string, number[]>;
+						byRefreshTokenOrgScoped: Map<string, number[]>;
+					};
+
+					const resolveUniqueOrgScopedMatch = (
+						indexes: IdentityIndexes,
+						accountId: string | undefined,
+						refreshToken: string,
+					): number | undefined => {
+						const byAccountId = accountId
+							? asUniqueIndex(indexes.byAccountIdOrgScoped.get(accountId))
+							: undefined;
+						if (byAccountId !== undefined) return byAccountId;
+
+						// Refresh-token-only fallback is allowed only when accountId is absent.
+						// This avoids collapsing distinct workspace variants that share refresh token.
+						if (accountId) return undefined;
+
+						return asUniqueIndex(indexes.byRefreshTokenOrgScoped.get(refreshToken));
+					};
+
+					const buildIdentityIndexes = (): IdentityIndexes => {
 						const byOrganizationId = new Map<string, number>();
-						const byAccountId = new Map<string, number>();
-						const byRefreshTokenLegacy = new Map<string, number>();
-						const byEmailLegacy = new Map<string, number>();
+						const byAccountIdNoOrg = new Map<string, number>();
+						const byRefreshTokenNoOrg = new Map<string, number>();
+						const byEmailNoOrg = new Map<string, number>();
+						const byAccountIdOrgScoped = new Map<string, number[]>();
+						const byRefreshTokenOrgScoped = new Map<string, number[]>();
 
 						for (let i = 0; i < accounts.length; i += 1) {
 							const account = accounts[i];
 							if (!account) continue;
 
 							const organizationId = account.organizationId?.trim();
+							const accountId = account.accountId?.trim();
+							const refreshToken = account.refreshToken?.trim();
+							const email = account.email?.trim();
+
 							if (organizationId) {
 								byOrganizationId.set(organizationId, i);
+								if (accountId) {
+									pushIndex(byAccountIdOrgScoped, accountId, i);
+								}
+								if (refreshToken) {
+									pushIndex(byRefreshTokenOrgScoped, refreshToken, i);
+								}
 								continue;
 							}
 
-							const accountId = account.accountId?.trim();
 							if (accountId) {
-								byAccountId.set(accountId, i);
+								byAccountIdNoOrg.set(accountId, i);
 							}
-
-							const refreshToken = account.refreshToken?.trim();
 							if (refreshToken) {
-								byRefreshTokenLegacy.set(refreshToken, i);
+								byRefreshTokenNoOrg.set(refreshToken, i);
 							}
-							const email = account.email?.trim();
 							if (email) {
-								byEmailLegacy.set(email, i);
+								byEmailNoOrg.set(email, i);
 							}
 						}
 
 						return {
 							byOrganizationId,
-							byAccountId,
-							byRefreshTokenLegacy,
-							byEmailLegacy,
+							byAccountIdNoOrg,
+							byRefreshTokenNoOrg,
+							byEmailNoOrg,
+							byAccountIdOrgScoped,
+							byRefreshTokenOrgScoped,
 						};
 					};
 
@@ -483,14 +533,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								return identityIndexes.byOrganizationId.get(organizationId);
 							}
 							if (normalizedAccountId) {
-								const byAccountId = identityIndexes.byAccountId.get(normalizedAccountId);
+								const byAccountId = identityIndexes.byAccountIdNoOrg.get(normalizedAccountId);
 								if (byAccountId !== undefined) {
 									return byAccountId;
 								}
 							}
-							return (
-								identityIndexes.byRefreshTokenLegacy.get(result.refresh) ??
-								(accountEmail ? identityIndexes.byEmailLegacy.get(accountEmail) : undefined)
+
+							const byRefreshToken = identityIndexes.byRefreshTokenNoOrg.get(result.refresh);
+							if (byRefreshToken !== undefined) {
+								return byRefreshToken;
+							}
+
+							if (accountEmail) {
+								const byEmail = identityIndexes.byEmailNoOrg.get(accountEmail);
+								if (byEmail !== undefined) {
+									return byEmail;
+								}
+							}
+
+							return resolveUniqueOrgScopedMatch(
+								identityIndexes,
+								normalizedAccountId,
+								result.refresh,
 							);
 						})();
 
