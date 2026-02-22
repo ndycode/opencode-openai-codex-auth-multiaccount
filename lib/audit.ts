@@ -1,4 +1,27 @@
-import { writeFileSync, mkdirSync, existsSync, statSync, renameSync, readdirSync, unlinkSync } from "node:fs";
+import { mkdirSync, existsSync, statSync, renameSync, readdirSync, unlinkSync, appendFileSync } from "node:fs";
+
+// Simple in-memory queue to prevent EBUSY locks during highly concurrent writes
+const logQueue: string[] = [];
+let isFlushing = false;
+
+function flushLogQueue(logPath: string): void {
+	if (isFlushing || logQueue.length === 0) return;
+	isFlushing = true;
+	
+	const itemsToFlush = logQueue.splice(0, logQueue.length);
+	const payload = itemsToFlush.join("");
+	
+	try {
+		appendFileSync(logPath, payload);
+	} catch (error) {
+		// If the file is locked by an external process (e.g. antivirus), 
+		// we unshift the items back to the front of the queue to try again later
+		logQueue.unshift(...itemsToFlush);
+		console.error("[AuditLog] Failed to flush queue, retaining items:", error);
+	} finally {
+		isFlushing = false;
+	}
+}
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getCorrelationId, maskEmail } from "./logger.js";
@@ -145,7 +168,8 @@ export function auditLog(
 		const logPath = getLogFilePath();
 		const line = JSON.stringify(entry) + "\n";
 		
-		writeFileSync(logPath, line, { flag: "a" });
+		logQueue.push(line);
+		flushLogQueue(logPath);
 	} catch {
 		// Audit logging should never break the application
 	}
