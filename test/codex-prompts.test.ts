@@ -74,6 +74,12 @@ describe("Codex Prompts Module", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("grep");
 		});
 
+		it("should require explicit run_in_background for task calls", () => {
+			expect(TOOL_REMAP_MESSAGE).toContain("run_in_background");
+			expect(TOOL_REMAP_MESSAGE).toContain("false");
+			expect(TOOL_REMAP_MESSAGE).toContain("parallel exploration");
+		});
+
 		it("should require literal oldString text for legacy edits", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("oldString must be literal text from the current file");
 			expect(TOOL_REMAP_MESSAGE).toContain("${TARGET_SNIPPET}");
@@ -123,6 +129,15 @@ describe("Codex Prompts Module", () => {
 			});
 			expect(remap).toContain("runtime_tool_alias_compat");
 			expect(remap).toContain("use `apply_patch` exactly as listed");
+		});
+
+		it("should add runtime task guidance when task tool is present", () => {
+			const remap = renderToolRemapMessage({
+				runtimeToolNames: ["task", "bash"],
+			});
+			expect(remap).toContain("runtime_tool_alias_compat");
+			expect(remap).toContain("run_in_background");
+			expect(remap).toContain("normal delegation");
 		});
 	});
 
