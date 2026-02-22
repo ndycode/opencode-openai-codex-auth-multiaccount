@@ -81,11 +81,20 @@ vi.mock("../lib/config.js", () => ({
 	getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
 	getUnsupportedCodexFallbackChain: () => ({}),
 	getHashlineBridgeHintsMode: () => "off",
+	getToolArgumentRecoveryMode: vi.fn(() => "safe"),
+	getModelCapabilitySyncMode: vi.fn(() => "off"),
+	getModelCapabilityCacheTtlMs: vi.fn(() => 600000),
+	getRetryPolicyMode: vi.fn(() => "legacy"),
+	getRerouteNoticeMode: vi.fn(() => "log"),
+	getJsonRepairMode: vi.fn(() => "safe"),
+	getConfigDoctorMode: vi.fn(() => "off"),
 	getHashlineBridgeHintsBeta: () => false,
 	getTokenRefreshSkewMs: () => 60000,
+	getTokenRefreshSkewMode: () => "static",
 	getSessionRecovery: () => false,
 	getAutoResume: () => false,
 	getToastDurationMs: () => 5000,
+	getAccountScopeMode: () => "global",
 	getPerProjectAccounts: () => false,
 	getEmptyResponseMaxRetries: () => 2,
 	getEmptyResponseRetryDelayMs: () => 1000,
@@ -95,10 +104,32 @@ vi.mock("../lib/config.js", () => ({
 	getCodexTuiV2: () => false,
 	getCodexTuiColorProfile: () => "ansi16",
 	getCodexTuiGlyphMode: () => "ascii",
+	collectConfigDoctorWarnings: vi.fn(() => []),
 	loadPluginConfig: () => ({}),
 }));
 
 vi.mock("../lib/request/request-transformer.js", () => ({
+	addToolUnavailableRecoveryMessage: vi.fn((input: unknown) => input),
+	addToolArgumentRecoveryMessage: vi.fn((input: unknown) => input),
+	extractRuntimeToolManifest: vi.fn(() => ({
+		names: [],
+		hasHashlineCapabilities: false,
+		requiredParametersByTool: {},
+		capabilities: {
+			hasHashlineToolName: false,
+			hasHashlineSignals: false,
+			hasHashlineCapabilities: false,
+			hasGenericEdit: false,
+			hasPatch: false,
+			hasApplyPatch: false,
+			hasReplace: false,
+			hasTaskDelegation: false,
+			supportsBackgroundDelegation: false,
+			hasUpdatePlan: false,
+			hasTodoWrite: false,
+			primaryEditStrategy: "none",
+		},
+	})),
 	applyFastSessionDefaults: <T>(config: T) => config,
 }));
 
@@ -176,7 +207,9 @@ vi.mock("../lib/request/rate-limit-backoff.js", () => ({
 	resolveUnsupportedCodexFallbackModel: vi.fn(() => undefined),
 	shouldFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
 	getToolUnavailableInfo: vi.fn(() => ({ isToolUnavailable: false })),
+	getToolArgumentIssueInfo: vi.fn(() => ({ isArgumentIssue: false, missingRequired: [] })),
 	classifyFailureRoute: vi.fn(() => "other"),
+	getModelRerouteInfoFromHeaders: vi.fn(() => undefined),
 	handleSuccessResponse: vi.fn(async (response: Response) => response),
 }));
 
@@ -204,6 +237,7 @@ vi.mock("../lib/storage.js", () => ({
 	saveAccounts: vi.fn(async () => {}),
 	clearAccounts: vi.fn(async () => {}),
 	setStoragePath: vi.fn(),
+	setStorageScopeMode: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
 	importAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
 	loadFlaggedAccounts: vi.fn(async () => ({ version: 1, accounts: [] })),
@@ -465,6 +499,26 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result.apiKey).toBeDefined();
 			expect(result.baseURL).toBeDefined();
 			expect(result.fetch).toBeDefined();
+		});
+
+		it("emits config-doctor warning for global xhigh reasoning effort", async () => {
+			const configModule = await import("../lib/config.js");
+			const loggerModule = await import("../lib/logger.js");
+			vi.mocked(configModule.getConfigDoctorMode).mockReturnValueOnce("warn");
+			vi.mocked(configModule.collectConfigDoctorWarnings).mockReturnValueOnce([]);
+
+			const getAuth = async () => ({
+				type: "oauth" as const,
+				access: "a",
+				refresh: "r",
+				expires: Date.now() + 60_000,
+				multiAccount: true,
+			});
+			await plugin.auth.loader(getAuth, { options: { reasoningEffort: "xhigh" }, models: {} });
+
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				expect.stringContaining('Global reasoningEffort="xhigh"'),
+			);
 		});
 	});
 
@@ -890,7 +944,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			new Response(JSON.stringify({ content: "test" }), { status: 200 }),
 		);
 
-		const { sdk } = await setupPlugin();
+		const { sdk, mockClient } = await setupPlugin();
 		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
 			method: "POST",
 			body: JSON.stringify({ model: "gpt-5.1" }),
@@ -902,7 +956,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	it("handles network errors and rotates to next account", async () => {
 		globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
 
-		const { sdk } = await setupPlugin();
+		const { sdk, mockClient } = await setupPlugin();
 		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
 			method: "POST",
 			body: JSON.stringify({ model: "gpt-5.1" }),
@@ -910,6 +964,278 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 		expect(response.status).toBe(503);
 		expect(await response.text()).toContain("server errors or auth issues");
+	});
+
+	it("retries once on the same account for transient network errors", async () => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		vi.mocked(fetchHelpers.classifyFailureRoute)
+			.mockReturnValueOnce("network_error")
+			.mockReturnValue("other");
+
+		globalThis.fetch = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("Temporary network flap"))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		expect(response.status).toBe(200);
+	});
+
+	it("retries once on the same account for transient network errors in route-matrix mode", async () => {
+		const configModule = await import("../lib/config.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+
+		vi.mocked(configModule.getRetryPolicyMode).mockReturnValueOnce("route-matrix");
+		vi.mocked(fetchHelpers.classifyFailureRoute)
+			.mockReturnValueOnce("network_error")
+			.mockReturnValue("other");
+
+		globalThis.fetch = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("Temporary network flap"))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ content: "ok" }), { status: 200 }),
+			);
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		expect(response.status).toBe(200);
+	});
+
+	it("shows reroute toast when rerouteNoticeMode is log+ui", async () => {
+		const configModule = await import("../lib/config.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+
+		vi.mocked(configModule.getRerouteNoticeMode).mockReturnValueOnce("log+ui");
+		vi.mocked(fetchHelpers.getModelRerouteInfoFromHeaders).mockReturnValueOnce({
+			requestedModel: "gpt-5.3-codex",
+			effectiveModel: "gpt-5.2-codex",
+			reroutedTo: "gpt-5.2-codex",
+		});
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValue(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+
+		const { sdk, mockClient } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.3-codex" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				body: expect.objectContaining({
+					variant: "warning",
+					message: expect.stringContaining("Model reroute observed"),
+				}),
+			}),
+		);
+	});
+
+	it("retries once when tool arguments are invalid and safe recovery is enabled", async () => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		vi.mocked(fetchHelpers.classifyFailureRoute).mockReturnValue("other");
+		vi.mocked(fetchHelpers.getToolArgumentIssueInfo)
+			.mockReturnValueOnce({
+				isArgumentIssue: true,
+				toolName: "delegate_task",
+				missingRequired: ["run_in_background"],
+				message:
+					"Invalid arguments: 'run_in_background' parameter is REQUIRED.",
+			})
+			.mockReturnValue({
+				isArgumentIssue: false,
+				missingRequired: [],
+			});
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+			updatedInit: {
+				method: "POST",
+				body: JSON.stringify({
+					model: "gpt-5.1",
+					input: [{ type: "message", role: "user", content: "hello" }],
+				}),
+			},
+			body: {
+				model: "gpt-5.1",
+				input: [{ type: "message", role: "user", content: "hello" }],
+			},
+		});
+		vi.mocked(fetchHelpers.handleErrorResponse).mockResolvedValueOnce({
+			response: new Response(
+				JSON.stringify({
+					error: { message: "Invalid arguments: run_in_background required" },
+				}),
+				{ status: 400 },
+			),
+			rateLimit: undefined,
+			errorBody: {
+				error: {
+					message:
+						"Invalid arguments: 'run_in_background' parameter is REQUIRED.",
+				},
+			},
+		});
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("bad", { status: 400 }))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ content: "ok" }), { status: 200 }),
+			);
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		expect(response.status).toBe(200);
+	});
+
+	it("uses runtime tool schema required params in schema-safe tool argument recovery", async () => {
+		const configModule = await import("../lib/config.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const requestTransformer = await import("../lib/request/request-transformer.js");
+
+		vi.mocked(configModule.getToolArgumentRecoveryMode).mockReturnValueOnce(
+			"schema-safe",
+		);
+		vi.mocked(fetchHelpers.classifyFailureRoute).mockReturnValue("other");
+		vi.mocked(fetchHelpers.getToolArgumentIssueInfo)
+			.mockReturnValueOnce({
+				isArgumentIssue: true,
+				toolName: "delegate_task",
+				missingRequired: ["run_in_background"],
+				message: "Invalid arguments: run_in_background is required",
+			})
+			.mockReturnValue({
+				isArgumentIssue: false,
+				missingRequired: [],
+			});
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+			updatedInit: {
+				method: "POST",
+				body: JSON.stringify({
+					model: "gpt-5.1",
+					input: [{ type: "message", role: "user", content: "hello" }],
+					tools: [{ function: { name: "delegate_task" } }],
+				}),
+			},
+			body: {
+				model: "gpt-5.1",
+				input: [{ type: "message", role: "user", content: "hello" }],
+				tools: [{ function: { name: "delegate_task" } }],
+			},
+		});
+		vi.mocked(fetchHelpers.handleErrorResponse).mockResolvedValueOnce({
+			response: new Response(
+				JSON.stringify({
+					error: { message: "Invalid arguments: run_in_background required" },
+				}),
+				{ status: 400 },
+			),
+			rateLimit: undefined,
+			errorBody: {
+				error: { message: "Invalid arguments: run_in_background required" },
+			},
+		});
+		vi.mocked(requestTransformer.extractRuntimeToolManifest).mockReturnValue({
+			names: ["delegate_task"],
+			hasHashlineCapabilities: false,
+			requiredParametersByTool: {
+				delegate_task: ["task", "run_in_background"],
+			},
+			capabilities: {
+				hasHashlineToolName: false,
+				hasHashlineSignals: false,
+				hasHashlineCapabilities: false,
+				hasGenericEdit: false,
+				hasPatch: false,
+				hasApplyPatch: false,
+				hasReplace: false,
+				hasTaskDelegation: true,
+				supportsBackgroundDelegation: true,
+				hasUpdatePlan: false,
+				hasTodoWrite: false,
+				primaryEditStrategy: "none",
+			},
+		});
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("bad", { status: 400 }))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ content: "ok" }), { status: 200 }),
+			);
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		expect(response.status).toBe(200);
+		expect(
+			vi.mocked(requestTransformer.addToolArgumentRecoveryMessage),
+		).toHaveBeenCalledWith(
+			expect.any(Array),
+			expect.objectContaining({
+				recoveryMode: "schema-safe",
+				toolName: "delegate_task",
+				missingRequired: ["run_in_background"],
+				runtimeRequired: ["task", "run_in_background"],
+			}),
+		);
+	});
+
+	it("returns approval/policy errors without rotating accounts", async () => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const accountsModule = await import("../lib/accounts.js");
+		const recordFailureSpy = vi.spyOn(
+			accountsModule.AccountManager.prototype,
+			"recordFailure",
+		);
+
+		vi.mocked(fetchHelpers.classifyFailureRoute).mockReturnValue(
+			"approval_or_policy",
+		);
+		vi.mocked(fetchHelpers.handleErrorResponse).mockResolvedValueOnce({
+			response: new Response(
+				JSON.stringify({ error: { message: "Command requires approval" } }),
+				{ status: 403 },
+			),
+			rateLimit: undefined,
+			errorBody: {
+				error: { message: "Command requires approval" },
+			},
+		});
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("blocked", { status: 403 }));
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(response.status).toBe(403);
+		expect(recordFailureSpy).not.toHaveBeenCalled();
 	});
 
 	it("skips fetch when local token bucket is depleted", async () => {

@@ -1,10 +1,10 @@
 import { promises as fs, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePathNative } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import { AnyAccountStorageSchema, getValidationErrors } from "./schemas.js";
-import { getConfigDir, getProjectConfigDir, getProjectGlobalConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
+import { getConfigDir, getProjectConfigDir, getProjectGlobalConfigDir, getWorktreeGlobalConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
 import {
   migrateV1ToV3,
   type CooldownReason,
@@ -21,6 +21,15 @@ const log = createLogger("storage");
 const ACCOUNTS_FILE_NAME = "openai-codex-accounts.json";
 const FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-flagged-accounts.json";
 const LEGACY_FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-blocked-accounts.json";
+
+export type StorageScopeMode = "global" | "project" | "worktree";
+
+export interface AccountStorageAdapter {
+	id: string;
+	load: (path: string) => Promise<AccountStorageV3 | null>;
+	save: (path: string, storage: AccountStorageV3) => Promise<void>;
+	clear: (path: string) => Promise<void>;
+}
 
 export interface FlaggedAccountMetadataV1 extends AccountMetadataV3 {
 	flaggedAt: number;
@@ -131,6 +140,17 @@ async function ensureGitignore(storagePath: string): Promise<void> {
 let currentStoragePath: string | null = null;
 let currentLegacyProjectStoragePath: string | null = null;
 let currentProjectRoot: string | null = null;
+let activeAccountStorageAdapter: AccountStorageAdapter | null = null;
+
+export function setAccountStorageAdapter(
+	adapter: AccountStorageAdapter | null,
+): void {
+	activeAccountStorageAdapter = adapter;
+}
+
+export function getAccountStorageAdapterId(): string {
+	return activeAccountStorageAdapter?.id ?? "json-file";
+}
 
 export function setStoragePath(projectPath: string | null): void {
   if (!projectPath) {
@@ -150,6 +170,23 @@ export function setStoragePath(projectPath: string | null): void {
     currentLegacyProjectStoragePath = null;
     currentProjectRoot = null;
   }
+}
+
+export function setStorageScopeMode(mode: StorageScopeMode, workingPath: string | null): void {
+	if (mode === "global" || !workingPath) {
+		setStoragePath(null);
+		return;
+	}
+
+	if (mode === "project") {
+		setStoragePath(workingPath);
+		return;
+	}
+
+	const root = findProjectRoot(workingPath) ?? resolvePathNative(workingPath);
+	currentProjectRoot = root;
+	currentStoragePath = join(getWorktreeGlobalConfigDir(root), ACCOUNTS_FILE_NAME);
+	currentLegacyProjectStoragePath = null;
 }
 
 export function setStoragePathDirect(path: string | null): void {
@@ -482,6 +519,10 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
  * @returns AccountStorageV3 if file exists and is valid, null otherwise
  */
 export async function loadAccounts(): Promise<AccountStorageV3 | null> {
+	const adapter = activeAccountStorageAdapter;
+	if (adapter) {
+		return adapter.load(getStoragePath());
+	}
   return loadAccountsInternal(saveAccounts);
 }
 
@@ -597,6 +638,15 @@ export async function withAccountStorageTransaction<T>(
   ) => Promise<T>,
 ): Promise<T> {
   return withStorageLock(async () => {
+    const adapter = activeAccountStorageAdapter;
+    if (adapter) {
+      const path = getStoragePath();
+      const current = await adapter.load(path);
+      const persist = async (storage: AccountStorageV3): Promise<void> => {
+        await adapter.save(path, storage);
+      };
+      return handler(current, persist);
+    }
     const current = await loadAccountsInternal(saveAccountsUnlocked);
     return handler(current, saveAccountsUnlocked);
   });
@@ -611,6 +661,11 @@ export async function withAccountStorageTransaction<T>(
  */
 export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
   return withStorageLock(async () => {
+    const adapter = activeAccountStorageAdapter;
+    if (adapter) {
+      await adapter.save(getStoragePath(), storage);
+      return;
+    }
     await saveAccountsUnlocked(storage);
   });
 }
@@ -621,6 +676,11 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
  */
 export async function clearAccounts(): Promise<void> {
   return withStorageLock(async () => {
+    const adapter = activeAccountStorageAdapter;
+    if (adapter) {
+      await adapter.clear(getStoragePath());
+      return;
+    }
     try {
       const path = getStoragePath();
       await fs.unlink(path);

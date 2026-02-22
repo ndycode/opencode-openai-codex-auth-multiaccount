@@ -4,6 +4,15 @@ import {
 	getCodexMode,
 	getHashlineBridgeHintsMode,
 	getHashlineBridgeHintsBeta,
+	getPolicyProfile,
+	getToolArgumentRecoveryMode,
+	getModelCapabilitySyncMode,
+	getModelCapabilityCacheTtlMs,
+	getRetryPolicyMode,
+	getRerouteNoticeMode,
+	getJsonRepairMode,
+	getConfigDoctorMode,
+	collectConfigDoctorWarnings,
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
@@ -12,7 +21,10 @@ import {
 	getFastSessionMaxInputItems,
 	getUnsupportedCodexPolicy,
 	getFallbackOnUnsupportedCodexModel,
+	getAccountScopeMode,
 	getTokenRefreshSkewMs,
+	getTokenRefreshSkewMode,
+	getPerProjectAccounts,
 	getRetryAllAccountsMaxRetries,
 	getFallbackToGpt52OnUnsupportedGpt53,
 	getUnsupportedCodexFallbackChain,
@@ -52,6 +64,17 @@ describe('Plugin Configuration', () => {
 		'CODEX_MODE',
 		'CODEX_AUTH_HASHLINE_HINTS_MODE',
 		'CODEX_AUTH_HASHLINE_HINTS_BETA',
+		'CODEX_AUTH_POLICY_PROFILE',
+		'CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE',
+		'CODEX_AUTH_MODEL_CAPABILITY_SYNC_MODE',
+		'CODEX_AUTH_MODEL_CAPABILITY_CACHE_TTL_MS',
+		'CODEX_AUTH_RETRY_POLICY_MODE',
+		'CODEX_AUTH_REROUTE_NOTICE_MODE',
+		'CODEX_AUTH_JSON_REPAIR_MODE',
+		'CODEX_AUTH_CONFIG_DOCTOR_MODE',
+		'CODEX_AUTH_ACCOUNT_SCOPE_MODE',
+		'CODEX_AUTH_PER_PROJECT_ACCOUNTS',
+		'CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE',
 		'CODEX_TUI_V2',
 		'CODEX_TUI_COLOR_PROFILE',
 		'CODEX_TUI_GLYPHS',
@@ -92,6 +115,13 @@ describe('Plugin Configuration', () => {
 			expect(config).toEqual({
 				codexMode: true,
 				requestTransformMode: 'native',
+				toolArgumentRecoveryMode: 'safe',
+				modelCapabilitySyncMode: 'safe',
+				modelCapabilityCacheTtlMs: 600_000,
+				retryPolicyMode: 'legacy',
+				rerouteNoticeMode: 'log',
+				jsonRepairMode: 'safe',
+				configDoctorMode: 'warn',
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -133,6 +163,13 @@ describe('Plugin Configuration', () => {
 			expect(config).toEqual({
 				codexMode: false,
 				requestTransformMode: 'native',
+				toolArgumentRecoveryMode: 'safe',
+				modelCapabilitySyncMode: 'safe',
+				modelCapabilityCacheTtlMs: 600_000,
+				retryPolicyMode: 'legacy',
+				rerouteNoticeMode: 'log',
+				jsonRepairMode: 'safe',
+				configDoctorMode: 'warn',
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -171,6 +208,13 @@ describe('Plugin Configuration', () => {
 			expect(config).toEqual({
 				codexMode: true,
 				requestTransformMode: 'native',
+				toolArgumentRecoveryMode: 'safe',
+				modelCapabilitySyncMode: 'safe',
+				modelCapabilityCacheTtlMs: 600_000,
+				retryPolicyMode: 'legacy',
+				rerouteNoticeMode: 'log',
+				jsonRepairMode: 'safe',
+				configDoctorMode: 'warn',
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -220,6 +264,13 @@ describe('Plugin Configuration', () => {
 	expect(config).toEqual({
 		codexMode: true,
 		requestTransformMode: 'native',
+		toolArgumentRecoveryMode: 'safe',
+		modelCapabilitySyncMode: 'safe',
+		modelCapabilityCacheTtlMs: 600_000,
+		retryPolicyMode: 'legacy',
+		rerouteNoticeMode: 'log',
+		jsonRepairMode: 'safe',
+		configDoctorMode: 'warn',
 		codexTuiV2: true,
 		codexTuiColorProfile: 'truecolor',
 		codexTuiGlyphMode: 'ascii',
@@ -263,6 +314,13 @@ describe('Plugin Configuration', () => {
 		expect(config).toEqual({
 			codexMode: true,
 			requestTransformMode: 'native',
+			toolArgumentRecoveryMode: 'safe',
+			modelCapabilitySyncMode: 'safe',
+			modelCapabilityCacheTtlMs: 600_000,
+			retryPolicyMode: 'legacy',
+			rerouteNoticeMode: 'log',
+			jsonRepairMode: 'safe',
+			configDoctorMode: 'warn',
 			codexTuiV2: true,
 			codexTuiColorProfile: 'truecolor',
 			codexTuiGlyphMode: 'ascii',
@@ -351,10 +409,10 @@ describe('Plugin Configuration', () => {
 	});
 
 	describe('getHashlineBridgeHintsMode', () => {
-		it('should default to off', () => {
+		it('should default to auto', () => {
 			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
 			delete process.env.CODEX_AUTH_HASHLINE_HINTS_BETA;
-			expect(getHashlineBridgeHintsMode({})).toBe('off');
+			expect(getHashlineBridgeHintsMode({})).toBe('auto');
 		});
 
 		it('should prefer explicit mode env var over config', () => {
@@ -380,6 +438,9 @@ describe('Plugin Configuration', () => {
 			expect(getHashlineBridgeHintsMode({ hashlineBridgeHintsMode: 'strict' })).toBe(
 				'strict',
 			);
+			expect(getHashlineBridgeHintsMode({ hashlineBridgeHintsMode: 'auto' })).toBe(
+				'auto',
+			);
 		});
 
 		it('should fallback to legacy config boolean when mode key is absent', () => {
@@ -395,6 +456,7 @@ describe('Plugin Configuration', () => {
 			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
 			delete process.env.CODEX_AUTH_HASHLINE_HINTS_BETA;
 			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'off' })).toBe(false);
+			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'auto' })).toBe(true);
 			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'hints' })).toBe(true);
 			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'strict' })).toBe(true);
 		});
@@ -405,6 +467,84 @@ describe('Plugin Configuration', () => {
 			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsBeta: true })).toBe(false);
 			process.env.CODEX_AUTH_HASHLINE_HINTS_BETA = '1';
 			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsBeta: false })).toBe(true);
+		});
+	});
+
+	describe('getPolicyProfile', () => {
+		it('should default to stable', () => {
+			delete process.env.CODEX_AUTH_POLICY_PROFILE;
+			expect(getPolicyProfile({})).toBe('stable');
+		});
+
+		it('should prefer env over config', () => {
+			process.env.CODEX_AUTH_POLICY_PROFILE = 'aggressive';
+			expect(getPolicyProfile({ policyProfile: 'stable' })).toBe('aggressive');
+		});
+	});
+
+	describe('policy-profile defaults', () => {
+		it('should apply aggressive defaults when specific modes are unset', () => {
+			process.env.CODEX_AUTH_POLICY_PROFILE = 'aggressive';
+			delete process.env.CODEX_AUTH_RETRY_POLICY_MODE;
+			delete process.env.CODEX_AUTH_REROUTE_NOTICE_MODE;
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			expect(getRetryPolicyMode({})).toBe('route-matrix');
+			expect(getRerouteNoticeMode({})).toBe('log+ui');
+			expect(getHashlineBridgeHintsMode({})).toBe('strict');
+		});
+
+		it('should keep explicit config values over profile defaults', () => {
+			process.env.CODEX_AUTH_POLICY_PROFILE = 'aggressive';
+			delete process.env.CODEX_AUTH_RETRY_POLICY_MODE;
+			expect(getRetryPolicyMode({ retryPolicyMode: 'legacy' })).toBe('legacy');
+		});
+	});
+
+	describe('getAccountScopeMode', () => {
+		it('should default to project under stable profile', () => {
+			delete process.env.CODEX_AUTH_POLICY_PROFILE;
+			delete process.env.CODEX_AUTH_ACCOUNT_SCOPE_MODE;
+			delete process.env.CODEX_AUTH_PER_PROJECT_ACCOUNTS;
+			expect(getAccountScopeMode({})).toBe('project');
+		});
+
+		it('should respect explicit scope env value', () => {
+			process.env.CODEX_AUTH_ACCOUNT_SCOPE_MODE = 'worktree';
+			expect(getAccountScopeMode({ accountScopeMode: 'global' })).toBe('worktree');
+		});
+
+		it('should map legacy per-project env when scope mode env is unset', () => {
+			delete process.env.CODEX_AUTH_ACCOUNT_SCOPE_MODE;
+			process.env.CODEX_AUTH_PER_PROJECT_ACCOUNTS = '0';
+			expect(getAccountScopeMode({})).toBe('global');
+			process.env.CODEX_AUTH_PER_PROJECT_ACCOUNTS = '1';
+			expect(getAccountScopeMode({})).toBe('project');
+		});
+
+		it('should map perProjectAccounts helper from scope mode', () => {
+			expect(getPerProjectAccounts({ accountScopeMode: 'global' })).toBe(false);
+			expect(getPerProjectAccounts({ accountScopeMode: 'project' })).toBe(true);
+			expect(getPerProjectAccounts({ accountScopeMode: 'worktree' })).toBe(true);
+		});
+	});
+
+	describe('getTokenRefreshSkewMode', () => {
+		it('should default to static under stable profile', () => {
+			delete process.env.CODEX_AUTH_POLICY_PROFILE;
+			delete process.env.CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE;
+			expect(getTokenRefreshSkewMode({})).toBe('static');
+		});
+
+		it('should default to adaptive for aggressive profile', () => {
+			process.env.CODEX_AUTH_POLICY_PROFILE = 'aggressive';
+			delete process.env.CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE;
+			expect(getTokenRefreshSkewMode({})).toBe('adaptive');
+		});
+
+		it('should prefer explicit env value over profile', () => {
+			process.env.CODEX_AUTH_POLICY_PROFILE = 'aggressive';
+			process.env.CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE = 'static';
+			expect(getTokenRefreshSkewMode({})).toBe('static');
 		});
 	});
 
@@ -665,6 +805,188 @@ describe('Plugin Configuration', () => {
 			expect(getRequestTransformMode({ requestTransformMode: 'native' })).toBe('legacy');
 			process.env.CODEX_AUTH_REQUEST_TRANSFORM_MODE = 'native';
 			expect(getRequestTransformMode({ requestTransformMode: 'legacy' })).toBe('native');
+		});
+	});
+
+	describe('getToolArgumentRecoveryMode', () => {
+		it('should default to safe', () => {
+			delete process.env.CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE;
+			expect(getToolArgumentRecoveryMode({})).toBe('safe');
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE;
+			expect(getToolArgumentRecoveryMode({ toolArgumentRecoveryMode: 'off' })).toBe('off');
+		});
+
+		it('should prioritize valid env value over config', () => {
+			process.env.CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE = 'off';
+			expect(getToolArgumentRecoveryMode({ toolArgumentRecoveryMode: 'safe' })).toBe('off');
+			process.env.CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE = 'safe';
+			expect(getToolArgumentRecoveryMode({ toolArgumentRecoveryMode: 'off' })).toBe('safe');
+			process.env.CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE = 'schema-safe';
+			expect(getToolArgumentRecoveryMode({ toolArgumentRecoveryMode: 'off' })).toBe('schema-safe');
+		});
+
+		it('should ignore invalid env values', () => {
+			process.env.CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE = 'invalid';
+			expect(getToolArgumentRecoveryMode({ toolArgumentRecoveryMode: 'off' })).toBe('off');
+			expect(getToolArgumentRecoveryMode({})).toBe('safe');
+		});
+	});
+
+	describe('getModelCapabilitySyncMode', () => {
+		it('should default to safe', () => {
+			delete process.env.CODEX_AUTH_MODEL_CAPABILITY_SYNC_MODE;
+			expect(getModelCapabilitySyncMode({})).toBe('safe');
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_MODEL_CAPABILITY_SYNC_MODE;
+			expect(getModelCapabilitySyncMode({ modelCapabilitySyncMode: 'off' })).toBe('off');
+		});
+
+		it('should prioritize valid env value over config', () => {
+			process.env.CODEX_AUTH_MODEL_CAPABILITY_SYNC_MODE = 'off';
+			expect(getModelCapabilitySyncMode({ modelCapabilitySyncMode: 'safe' })).toBe('off');
+			process.env.CODEX_AUTH_MODEL_CAPABILITY_SYNC_MODE = 'safe';
+			expect(getModelCapabilitySyncMode({ modelCapabilitySyncMode: 'off' })).toBe('safe');
+		});
+	});
+
+	describe('getModelCapabilityCacheTtlMs', () => {
+		it('should default to 600000', () => {
+			delete process.env.CODEX_AUTH_MODEL_CAPABILITY_CACHE_TTL_MS;
+			expect(getModelCapabilityCacheTtlMs({})).toBe(600000);
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_MODEL_CAPABILITY_CACHE_TTL_MS;
+			expect(getModelCapabilityCacheTtlMs({ modelCapabilityCacheTtlMs: 120000 })).toBe(120000);
+		});
+
+		it('should clamp to minimum 1000', () => {
+			process.env.CODEX_AUTH_MODEL_CAPABILITY_CACHE_TTL_MS = '10';
+			expect(getModelCapabilityCacheTtlMs({})).toBe(1000);
+		});
+	});
+
+	describe('getRetryPolicyMode', () => {
+		it('should default to legacy', () => {
+			delete process.env.CODEX_AUTH_RETRY_POLICY_MODE;
+			expect(getRetryPolicyMode({})).toBe('legacy');
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_RETRY_POLICY_MODE;
+			expect(getRetryPolicyMode({ retryPolicyMode: 'route-matrix' })).toBe('route-matrix');
+		});
+
+		it('should prioritize valid env value over config', () => {
+			process.env.CODEX_AUTH_RETRY_POLICY_MODE = 'route-matrix';
+			expect(getRetryPolicyMode({ retryPolicyMode: 'legacy' })).toBe('route-matrix');
+			process.env.CODEX_AUTH_RETRY_POLICY_MODE = 'legacy';
+			expect(getRetryPolicyMode({ retryPolicyMode: 'route-matrix' })).toBe('legacy');
+		});
+
+		it('should ignore invalid env values', () => {
+			process.env.CODEX_AUTH_RETRY_POLICY_MODE = 'invalid';
+			expect(getRetryPolicyMode({ retryPolicyMode: 'route-matrix' })).toBe('route-matrix');
+			expect(getRetryPolicyMode({})).toBe('legacy');
+		});
+	});
+
+	describe('getRerouteNoticeMode', () => {
+		it('should default to log', () => {
+			delete process.env.CODEX_AUTH_REROUTE_NOTICE_MODE;
+			expect(getRerouteNoticeMode({})).toBe('log');
+		});
+
+		it('should prioritize valid env value over config', () => {
+			process.env.CODEX_AUTH_REROUTE_NOTICE_MODE = 'log+ui';
+			expect(getRerouteNoticeMode({ rerouteNoticeMode: 'off' })).toBe('log+ui');
+		});
+
+		it('should ignore invalid env values', () => {
+			process.env.CODEX_AUTH_REROUTE_NOTICE_MODE = 'invalid';
+			expect(getRerouteNoticeMode({ rerouteNoticeMode: 'off' })).toBe('off');
+			expect(getRerouteNoticeMode({})).toBe('log');
+		});
+	});
+
+	describe('getJsonRepairMode', () => {
+		it('should default to safe', () => {
+			delete process.env.CODEX_AUTH_JSON_REPAIR_MODE;
+			expect(getJsonRepairMode({})).toBe('safe');
+		});
+
+		it('should prioritize env over config', () => {
+			process.env.CODEX_AUTH_JSON_REPAIR_MODE = 'off';
+			expect(getJsonRepairMode({ jsonRepairMode: 'safe' })).toBe('off');
+		});
+	});
+
+	describe('getConfigDoctorMode', () => {
+		it('should default to warn', () => {
+			delete process.env.CODEX_AUTH_CONFIG_DOCTOR_MODE;
+			expect(getConfigDoctorMode({})).toBe('warn');
+		});
+
+		it('should respect config and env', () => {
+			delete process.env.CODEX_AUTH_CONFIG_DOCTOR_MODE;
+			expect(getConfigDoctorMode({ configDoctorMode: 'off' })).toBe('off');
+			process.env.CODEX_AUTH_CONFIG_DOCTOR_MODE = 'warn';
+			expect(getConfigDoctorMode({ configDoctorMode: 'off' })).toBe('warn');
+		});
+	});
+
+	describe('collectConfigDoctorWarnings', () => {
+		it('reports conflicting legacy and modern hashline settings', () => {
+			const warnings = collectConfigDoctorWarnings({
+				hashlineBridgeHintsBeta: false,
+				hashlineBridgeHintsMode: 'strict',
+			});
+			expect(warnings.join('\n')).toContain('Conflicting hashline settings');
+		});
+
+		it('reports ignored model capability ttl when sync is off', () => {
+			const warnings = collectConfigDoctorWarnings({
+				modelCapabilitySyncMode: 'off',
+				modelCapabilityCacheTtlMs: 120000,
+			});
+			expect(warnings.join('\n')).toContain('TTL is ignored');
+		});
+
+		it('reports conflicting unsupported-model fallback settings', () => {
+			const warnings = collectConfigDoctorWarnings({
+				unsupportedCodexPolicy: 'strict',
+				fallbackOnUnsupportedCodexModel: true,
+			});
+			expect(warnings.join('\n')).toContain('Conflicting unsupported-model settings');
+		});
+
+		it('reports conflicting account scope settings', () => {
+			const warnings = collectConfigDoctorWarnings({
+				accountScopeMode: 'worktree',
+				perProjectAccounts: false,
+			});
+			expect(warnings.join('\n')).toContain('Conflicting account scope settings');
+		});
+
+		it('uses effective env mode for reroute toast-duration warning', () => {
+			process.env.CODEX_AUTH_REROUTE_NOTICE_MODE = 'log+ui';
+			const warnings = collectConfigDoctorWarnings({
+				rerouteNoticeMode: 'off',
+				toastDurationMs: 1000,
+			});
+			expect(warnings.join('\n')).toContain('rerouteNoticeMode="log+ui"');
+		});
+
+		it('uses effective env toast duration for reroute warning', () => {
+			process.env.CODEX_AUTH_REROUTE_NOTICE_MODE = 'log+ui';
+			process.env.CODEX_AUTH_TOAST_DURATION_MS = '1000';
+			const warnings = collectConfigDoctorWarnings({});
+			expect(warnings.join('\n')).toContain('rerouteNoticeMode="log+ui"');
 		});
 	});
 

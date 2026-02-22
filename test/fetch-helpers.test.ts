@@ -15,7 +15,10 @@ import {
 	extractUnsupportedCodexModelFromText,
 	shouldFallbackToGpt52OnUnsupportedGpt53,
 	getToolUnavailableInfo,
+	getToolArgumentIssueInfo,
+	getApprovalPolicyInfo,
 	classifyFailureRoute,
+	getModelRerouteInfoFromHeaders,
 } from '../lib/request/fetch-helpers.js';
 import * as codexPrompts from '../lib/prompts/codex.js';
 import * as loggerModule from '../lib/logger.js';
@@ -169,6 +172,37 @@ describe('Fetch Helpers Module', () => {
 	    expect(headers.get(OPENAI_HEADERS.CONVERSATION_ID)).toBe('session-1');
 	    expect(headers.get('accept')).toBe('text/event-stream');
     });
+
+		it('injects compatibility auth/account aliases in chain mode by default', () => {
+			const headers = createCodexHeaders(undefined, accountId, accessToken, {
+				model: 'gpt-5-codex',
+				promptCacheKey: 'session-chain',
+			});
+
+			expect(headers.get('x-openai-authorization')).toBe(`Bearer ${accessToken}`);
+			expect(headers.get('x-openai-account-id')).toBe(accountId);
+			expect(headers.get('x-chatgpt-account-id')).toBe(accountId);
+			expect(headers.get('x-openai-session-id')).toBe('session-chain');
+			expect(headers.get('x-openai-conversation-id')).toBe('session-chain');
+		});
+
+		it('removes compatibility aliases when authInjectionStrategy=canonical', () => {
+			const init = {
+				headers: {
+					'x-openai-authorization': 'stale-token',
+					'x-openai-account-id': 'stale-account',
+					'x-openai-session-id': 'stale-session',
+				},
+			} as RequestInit;
+			const headers = createCodexHeaders(init, accountId, accessToken, {
+				model: 'gpt-5-codex',
+				authInjectionStrategy: 'canonical',
+			});
+
+			expect(headers.get('x-openai-authorization')).toBeNull();
+			expect(headers.get('x-openai-account-id')).toBeNull();
+			expect(headers.get('x-openai-session-id')).toBeNull();
+		});
 
                 it('maps usage-limit 404 errors to 429', async () => {
                         const body = {
@@ -437,6 +471,25 @@ describe('Fetch Helpers Module', () => {
 			expect(unknownFunction.toolName).toBe('codex_patch');
 		});
 
+		it('extracts tool argument issues and missing required parameters', () => {
+			const info = getToolArgumentIssueInfo({
+				error: {
+					message:
+						"Invalid arguments: 'run_in_background' parameter is REQUIRED for delegate_task.",
+				},
+			});
+			expect(info.isArgumentIssue).toBe(true);
+			expect(info.toolName).toBe('delegate_task');
+			expect(info.missingRequired).toContain('run_in_background');
+		});
+
+		it('detects approval/policy guidance failures', () => {
+			const info = getApprovalPolicyInfo({
+				error: { message: 'Command requires approval in this sandbox policy' },
+			});
+			expect(info.isApprovalOrPolicy).toBe(true);
+		});
+
 		it('classifies network, rate-limit, tool-unavailable, server, and other routes', () => {
 			expect(classifyFailureRoute({ networkError: new Error('offline') })).toBe('network_error');
 			expect(classifyFailureRoute({ rateLimit: { retryAfterMs: 1000 } })).toBe('rate_limit');
@@ -445,6 +498,12 @@ describe('Fetch Helpers Module', () => {
 					errorBody: { error: { message: "tool `update_plan` is unavailable" } },
 				}),
 			).toBe('tool_unavailable');
+			expect(
+				classifyFailureRoute({
+					status: 403,
+					errorBody: { error: { message: 'Operation requires approval before execution' } },
+				}),
+			).toBe('approval_or_policy');
 			expect(classifyFailureRoute({ status: 503 })).toBe('server_error');
 			expect(classifyFailureRoute({ status: 400 })).toBe('other');
 		});
@@ -488,6 +547,58 @@ describe('Fetch Helpers Module', () => {
 			expect(result.status).toBe(200);
 			const text = await result.text();
 			expect(text).toBe('stream body');
+		});
+
+		it('logs reroute warning when effective model differs from requested model', async () => {
+			const warnSpy = vi.spyOn(loggerModule, 'logWarn');
+			const headers = new Headers({ 'x-openai-model': 'gpt-5.2-codex' });
+			const response = new Response('{}', { status: 200, headers });
+
+			await handleSuccessResponse(response, false, {
+				requestedModel: 'gpt-5.3-codex',
+			});
+
+			expect(warnSpy).toHaveBeenCalledWith(
+				'Model reroute observed',
+				expect.objectContaining({
+					requestedModel: 'gpt-5.3-codex',
+					effectiveModel: 'gpt-5.2-codex',
+				}),
+			);
+		});
+
+		it('can disable reroute warning logs via rerouteNoticeMode=off', async () => {
+			const warnSpy = vi.spyOn(loggerModule, 'logWarn');
+			const headers = new Headers({ 'x-openai-model': 'gpt-5.2-codex' });
+			const response = new Response('{}', { status: 200, headers });
+
+			await handleSuccessResponse(response, false, {
+				requestedModel: 'gpt-5.3-codex',
+				rerouteNoticeMode: 'off',
+			});
+
+			expect(warnSpy).not.toHaveBeenCalledWith(
+				'Model reroute observed',
+				expect.anything(),
+			);
+		});
+
+		it('extracts reroute info from headers', () => {
+			const headers = new Headers({
+				'x-openai-model': 'gpt-5.2-codex',
+				'x-model-rerouted': '1',
+				'x-model-rerouted-from': 'gpt-5.3-codex',
+				'x-model-rerouted-to': 'gpt-5.2-codex',
+			});
+			const info = getModelRerouteInfoFromHeaders(headers, 'gpt-5.3-codex');
+			expect(info).toEqual(
+				expect.objectContaining({
+					requestedModel: 'gpt-5.3-codex',
+					effectiveModel: 'gpt-5.2-codex',
+					reroutedFrom: 'gpt-5.3-codex',
+					reroutedTo: 'gpt-5.2-codex',
+				}),
+			);
 		});
 	});
 
@@ -843,7 +954,7 @@ describe('Fetch Helpers Module', () => {
 				);
 
 				expect(result).toBeDefined();
-				expect(result?.body.model).toBe('gpt-5-codex');
+				expect(result?.body.model).toBe('gpt-5.3-codex');
 				expect(typeof result?.updatedInit.body).toBe('string');
 			});
 

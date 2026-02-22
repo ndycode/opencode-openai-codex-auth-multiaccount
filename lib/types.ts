@@ -9,7 +9,16 @@ export type {
 	TokenFailureReasonFromSchema as TokenFailureReason,
 } from "./schemas.js";
 
-export type HashlineBridgeHintsMode = "off" | "hints" | "strict";
+export type HashlineBridgeHintsMode = "off" | "hints" | "strict" | "auto";
+export type ToolArgumentRecoveryMode = "off" | "safe" | "schema-safe";
+export type ModelCapabilitySyncMode = "off" | "safe";
+export type RetryPolicyMode = "legacy" | "route-matrix";
+export type RerouteNoticeMode = "off" | "log" | "log+ui";
+export type JsonRepairMode = "off" | "safe";
+export type ConfigDoctorMode = "off" | "warn";
+export type AccountScopeMode = "global" | "project" | "worktree";
+export type TokenRefreshSkewMode = "static" | "adaptive";
+export type PolicyProfile = "stable" | "balanced" | "aggressive";
 
 export interface UserConfig {
 	global: ConfigOptions;

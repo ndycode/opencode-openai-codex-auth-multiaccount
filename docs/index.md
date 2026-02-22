@@ -32,6 +32,7 @@
 | [Configuration](configuration.md) | Advanced config options and patterns |
 | [Troubleshooting](troubleshooting.md) | Debug techniques and common issues |
 | [Privacy & Data](privacy.md) | How your data is handled |
+| [Beta Release Notes (v5.2.6-beta)](releases/v5.2.6-beta.md) | Beta feature summary, usage, and validation checklist |
 | [Release Notes](https://github.com/ndycode/oc-chatgpt-multi-auth/releases) | Version history |
 
 ### For Developers
@@ -43,6 +44,8 @@
 | [Config Fields](development/CONFIG_FIELDS.md) | Understanding config keys and fields |
 | [Testing Guide](development/TESTING.md) | Test scenarios and verification |
 | [TUI Parity Checklist](development/TUI_PARITY_CHECKLIST.md) | Auth dashboard/UI parity requirements |
+| [Codex Release Audit](audit/codex-release-parity.md) | Generated stable non-beta release parity snapshot (openai/codex) |
+| [Codex Release Parity Matrix](audit/codex-release-parity-matrix.md) | Generated semantic release-note parity matrix (stable non-beta, plugin relevance) |
 
 ---
 

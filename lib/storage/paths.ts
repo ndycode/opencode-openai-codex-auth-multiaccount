@@ -10,6 +10,7 @@ import { homedir, tmpdir } from "node:os";
 
 const PROJECT_MARKERS = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", ".opencode"];
 const PROJECTS_DIR = "projects";
+const WORKTREES_DIR = "worktrees";
 const PROJECT_KEY_HASH_LENGTH = 12;
 
 export function getConfigDir(): string {
@@ -50,6 +51,14 @@ export function getProjectStorageKey(projectPath: string): string {
  */
 export function getProjectGlobalConfigDir(projectPath: string): string {
 	return join(getConfigDir(), PROJECTS_DIR, getProjectStorageKey(projectPath));
+}
+
+/**
+ * Explicit worktree-scoped storage under ~/.opencode/worktrees.
+ * Uses the absolute path hash to isolate sibling worktrees intentionally.
+ */
+export function getWorktreeGlobalConfigDir(worktreePath: string): string {
+	return join(getConfigDir(), WORKTREES_DIR, getProjectStorageKey(worktreePath));
 }
 
 export function isProjectDirectory(dir: string): boolean {

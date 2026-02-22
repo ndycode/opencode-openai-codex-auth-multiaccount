@@ -39,6 +39,13 @@ import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getHashlineBridgeHintsMode,
+	getToolArgumentRecoveryMode,
+	getModelCapabilitySyncMode,
+	getModelCapabilityCacheTtlMs,
+	getRetryPolicyMode,
+	getRerouteNoticeMode,
+	getJsonRepairMode,
+	getConfigDoctorMode,
 	getRequestTransformMode,
 	getFastSession,
 	getFastSessionStrategy,
@@ -51,10 +58,11 @@ import {
 	getUnsupportedCodexPolicy,
 	getUnsupportedCodexFallbackChain,
 	getTokenRefreshSkewMs,
+	getTokenRefreshSkewMode,
 	getSessionRecovery,
 	getAutoResume,
 	getToastDurationMs,
-	getPerProjectAccounts,
+	getAccountScopeMode,
 	getEmptyResponseMaxRetries,
 	getEmptyResponseRetryDelayMs,
 	getPidOffsetEnabled,
@@ -63,6 +71,7 @@ import {
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
+	collectConfigDoctorWarnings,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -107,7 +116,6 @@ import {
 	saveAccounts,
 	withAccountStorageTransaction,
 	clearAccounts,
-	setStoragePath,
 	exportAccounts,
 	importAccounts,
 	loadFlaggedAccounts,
@@ -115,6 +123,7 @@ import {
 	clearFlaggedAccounts,
 	StorageError,
 	formatStorageErrorHint,
+	setStorageScopeMode,
 	type AccountStorageV3,
 	type FlaggedAccountMetadataV1,
 } from "./lib/storage.js";
@@ -122,9 +131,12 @@ import {
 	createCodexHeaders,
 	classifyFailureRoute,
 	extractRequestUrl,
-        handleErrorResponse,
-        handleSuccessResponse,
+	type FailureRoute,
+	handleErrorResponse,
+	handleSuccessResponse,
+	getModelRerouteInfoFromHeaders,
 	getToolUnavailableInfo,
+	getToolArgumentIssueInfo,
 	getUnsupportedCodexModelInfo,
 	resolveUnsupportedCodexFallbackModel,
         refreshAndUpdateToken,
@@ -134,13 +146,16 @@ import {
 } from "./lib/request/fetch-helpers.js";
 import {
 	addToolUnavailableRecoveryMessage,
+	addToolArgumentRecoveryMessage,
 	applyFastSessionDefaults,
+	extractRuntimeToolManifest,
 } from "./lib/request/request-transformer.js";
 import {
 	getRateLimitBackoff,
 	RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
 	resetRateLimitBackoff,
 } from "./lib/request/rate-limit-backoff.js";
+import { getRetryPolicyDecision } from "./lib/request/retry-policy.js";
 import { isEmptyResponse } from "./lib/request/response-handler.js";
 import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
@@ -192,6 +207,42 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let loaderMutex: Promise<void> | null = null;
 	let startupPrewarmTriggered = false;
 	const MIN_BACKOFF_MS = 100;
+	type EditPathStrategy =
+		| "hashline-like"
+		| "edit"
+		| "patch"
+		| "apply_patch"
+		| "replace"
+		| "none";
+	const EDIT_PATH_STRATEGIES = [
+		"hashline-like",
+		"edit",
+		"patch",
+		"apply_patch",
+		"replace",
+		"none",
+	] as const satisfies readonly EditPathStrategy[];
+	const FAILURE_ROUTES = [
+		"rate_limit",
+		"server_error",
+		"network_error",
+		"tool_unavailable",
+		"approval_or_policy",
+		"other",
+	] as const satisfies readonly FailureRoute[];
+
+	const buildCounterMap = <T extends string>(keys: readonly T[]): Record<T, number> => {
+		const entries = keys.map((key) => [key, 0] as const);
+		return Object.fromEntries(entries) as Record<T, number>;
+	};
+
+	const resolveEditPathStrategy = (
+		body: RequestBody | undefined,
+	): EditPathStrategy => {
+		if (!body?.tools) return "none";
+		const strategy = extractRuntimeToolManifest(body.tools).capabilities.primaryEditStrategy;
+		return strategy ?? "none";
+	};
 
 	type RuntimeMetrics = {
 		startedAt: number;
@@ -207,6 +258,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		cumulativeLatencyMs: number;
 		lastRequestAt: number | null;
 		lastError: string | null;
+		editPathAttemptCounts: Record<EditPathStrategy, number>;
+		editPathSuccessCounts: Record<EditPathStrategy, number>;
+		editPathFailureRouteCounts: Record<FailureRoute, number>;
+		editPathLatencyByStrategyMs: Record<EditPathStrategy, number>;
 	};
 
 	const runtimeMetrics: RuntimeMetrics = {
@@ -223,6 +278,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		cumulativeLatencyMs: 0,
 		lastRequestAt: null,
 		lastError: null,
+		editPathAttemptCounts: buildCounterMap(EDIT_PATH_STRATEGIES),
+		editPathSuccessCounts: buildCounterMap(EDIT_PATH_STRATEGIES),
+		editPathFailureRouteCounts: buildCounterMap(FAILURE_ROUTES),
+		editPathLatencyByStrategyMs: buildCounterMap(EDIT_PATH_STRATEGIES),
 	};
 
         type TokenSuccess = Extract<TokenResult, { type: "success" }>;
@@ -669,6 +728,81 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return ui.theme.glyphs.cross;
 		};
 
+		const emittedRerouteNoticeKeys = new Set<string>();
+		const emittedConfigDoctorWarnings = new Set<string>();
+
+		const rememberBoundedKey = (
+			store: Set<string>,
+			key: string,
+			maxEntries = 100,
+		): boolean => {
+			if (store.has(key)) return false;
+			store.add(key);
+			if (store.size > maxEntries) {
+				const oldestKey = store.values().next().value as string | undefined;
+				if (oldestKey) store.delete(oldestKey);
+			}
+			return true;
+		};
+
+		const collectUserConfigDoctorWarnings = (userConfig: UserConfig): string[] => {
+			const warnings: string[] = [];
+			const isInvalidCanonicalCodexEffort = (modelName: string, effort: unknown): boolean => {
+				if (effort !== "xhigh") return false;
+				const normalized = modelName.trim().toLowerCase();
+				const withoutProvider = normalized.includes("/")
+					? (normalized.split("/").pop() ?? normalized)
+					: normalized;
+				return withoutProvider === "gpt-5-codex";
+			};
+
+			if (userConfig.global.reasoningEffort === "xhigh") {
+				warnings.push(
+					'Global reasoningEffort="xhigh" may be invalid for canonical `gpt-5-codex`; capability sync will clamp automatically, but prefer `high` for clearer config.',
+				);
+			}
+
+			for (const [modelName, modelEntry] of Object.entries(userConfig.models ?? {})) {
+				if (!modelEntry || typeof modelEntry !== "object") continue;
+				if (isInvalidCanonicalCodexEffort(modelName, modelEntry.options?.reasoningEffort)) {
+					warnings.push(
+						`Model config \`${modelName}\` sets reasoningEffort="xhigh"; canonical \`gpt-5-codex\` commonly supports up to \`high\`. Capability sync will clamp automatically.`,
+					);
+				}
+
+				for (const [variantName, variantConfig] of Object.entries(
+					modelEntry.variants ?? {},
+				)) {
+					if (!variantConfig || typeof variantConfig !== "object") continue;
+					if (
+						isInvalidCanonicalCodexEffort(modelName, variantConfig.reasoningEffort)
+					) {
+						warnings.push(
+							`Variant config \`${modelName}/${variantName}\` sets reasoningEffort="xhigh"; canonical \`gpt-5-codex\` commonly supports up to \`high\`. Capability sync will clamp automatically.`,
+						);
+					}
+				}
+			}
+
+			return warnings;
+		};
+
+		const emitConfigDoctorWarnings = (
+			pluginConfig: ReturnType<typeof loadPluginConfig>,
+			userConfig: UserConfig,
+		): void => {
+			const warningMessages = [
+				...collectConfigDoctorWarnings(pluginConfig),
+				...collectUserConfigDoctorWarnings(userConfig),
+			];
+			for (const warning of warningMessages) {
+				if (!rememberBoundedKey(emittedConfigDoctorWarnings, warning, 256)) {
+					continue;
+				}
+				logWarn(`Config doctor: ${warning}`);
+			}
+		};
+
 		const invalidateAccountManagerCache = (): void => {
 			cachedAccountManager = null;
 			accountManagerPromise = null;
@@ -752,8 +886,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			const auth = await getAuth();
 			const pluginConfig = loadPluginConfig();
 			applyUiRuntimeFromConfig(pluginConfig);
-			const perProjectAccounts = getPerProjectAccounts(pluginConfig);
-			setStoragePath(perProjectAccounts ? process.cwd() : null);
+			const accountScopeMode = getAccountScopeMode(pluginConfig);
+			setStorageScopeMode(accountScopeMode, process.cwd());
 
 			// Only handle OAuth auth type, skip API key auth
 			if (auth.type !== "oauth") {
@@ -816,12 +950,20 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				// Priority: CODEX_MODE env var > config file > default (true)
 				const codexMode = getCodexMode(pluginConfig);
 				const hashlineBridgeHintsMode = getHashlineBridgeHintsMode(pluginConfig);
+				const toolArgumentRecoveryMode = getToolArgumentRecoveryMode(pluginConfig);
+				const modelCapabilitySyncMode = getModelCapabilitySyncMode(pluginConfig);
+				const modelCapabilityCacheTtlMs = getModelCapabilityCacheTtlMs(pluginConfig);
+				const retryPolicyMode = getRetryPolicyMode(pluginConfig);
+				const rerouteNoticeMode = getRerouteNoticeMode(pluginConfig);
+				const jsonRepairMode = getJsonRepairMode(pluginConfig);
+				const configDoctorMode = getConfigDoctorMode(pluginConfig);
 				const requestTransformMode = getRequestTransformMode(pluginConfig);
 				const useLegacyRequestTransform = requestTransformMode === "legacy";
 				const fastSessionEnabled = getFastSession(pluginConfig);
 				const fastSessionStrategy = getFastSessionStrategy(pluginConfig);
 				const fastSessionMaxInputItems = getFastSessionMaxInputItems(pluginConfig);
 				const tokenRefreshSkewMs = getTokenRefreshSkewMs(pluginConfig);
+				const tokenRefreshSkewMode = getTokenRefreshSkewMode(pluginConfig);
 				const rateLimitToastDebounceMs = getRateLimitToastDebounceMs(pluginConfig);
 				const retryAllAccountsRateLimited = getRetryAllAccountsRateLimited(pluginConfig);
 				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
@@ -841,9 +983,36 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const emptyResponseMaxRetries = getEmptyResponseMaxRetries(pluginConfig);
 				const emptyResponseRetryDelayMs = getEmptyResponseRetryDelayMs(pluginConfig);
 				const pidOffsetEnabled = getPidOffsetEnabled(pluginConfig);
+				const getEffectiveTokenRefreshSkewMs = (
+					accountAuth: OAuthAuthDetails,
+				): number => {
+					if (tokenRefreshSkewMode !== "adaptive") {
+						return tokenRefreshSkewMs;
+					}
+
+					const expiresAt =
+						typeof accountAuth.expires === "number" ? accountAuth.expires : undefined;
+					if (!expiresAt) {
+						return tokenRefreshSkewMs;
+					}
+
+					const remainingMs = Math.max(0, expiresAt - Date.now());
+					const adaptiveWindowMs = Math.round(
+						Math.max(30_000, Math.min(5 * 60_000, remainingMs * 0.2)),
+					);
+					// Increase skew when recent auth refresh failures are observed.
+					const failurePenaltyMs = Math.min(
+						120_000,
+						runtimeMetrics.authRefreshFailures * 5_000,
+					);
+					return Math.max(tokenRefreshSkewMs, adaptiveWindowMs + failurePenaltyMs);
+				};
 				const effectiveUserConfig = fastSessionEnabled
 					? applyFastSessionDefaults(userConfig)
 					: userConfig;
+				if (configDoctorMode === "warn") {
+					emitConfigDoctorWarnings(pluginConfig, effectiveUserConfig);
+				}
 				if (fastSessionEnabled) {
 					logDebug("Fast session mode enabled", {
 						reasoningEffort: "none/low",
@@ -999,6 +1168,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 									fastSessionStrategy,
 									fastSessionMaxInputItems,
 									hashlineBridgeHintsMode,
+									modelCapabilitySyncMode,
+									modelCapabilityCacheTtlMs,
 									requestTransformMode,
 								},
 							);
@@ -1008,6 +1179,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let model = transformedBody?.model;
 										let modelFamily = model ? getModelFamily(model) : "gpt-5.1";
 										let quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
+						const editPathStrategy = resolveEditPathStrategy(transformedBody);
 						const threadIdCandidate =
 							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")
 								.toString()
@@ -1076,6 +1248,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							let allRateLimitedRetries = 0;
 							let emptyResponseRetries = 0;
 							let toolUnavailableRecoveryAttempts = 0;
+							let toolArgumentRecoveryAttempts = 0;
 							const attemptedUnsupportedFallbackModels = new Set<string>();
 							if (model) {
 								attemptedUnsupportedFallbackModels.add(model);
@@ -1098,9 +1271,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 								`Using account ${account.index + 1}/${accountCount}: ${account.email ?? "unknown"} for ${modelFamily}`,
 							);
 
-											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
+							let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
 								try {
-						if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
+						const effectiveTokenRefreshSkewMs =
+							getEffectiveTokenRefreshSkewMs(accountAuth);
+						if (shouldRefreshToken(accountAuth, effectiveTokenRefreshSkewMs)) {
 							accountAuth = (await refreshAndUpdateToken(
 								accountAuth,
 								client,
@@ -1223,6 +1398,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								try {
+								runtimeMetrics.editPathAttemptCounts[editPathStrategy]++;
 								runtimeMetrics.totalRequests++;
 								response = await fetch(url, {
 									...requestInit,
@@ -1233,7 +1409,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
 								const failureRoute = classifyFailureRoute({ networkError });
-								if (failureRoute === "network_error" && networkRetryAttemptsForAccount < 1) {
+								runtimeMetrics.editPathFailureRouteCounts[failureRoute]++;
+								const networkRetryDecision = getRetryPolicyDecision({
+									mode: retryPolicyMode,
+									route: failureRoute,
+									sameAccountRetryAttempts: networkRetryAttemptsForAccount,
+									maxSameAccountRetries: 1,
+								});
+								if (networkRetryDecision.sameAccountRetry) {
 									networkRetryAttemptsForAccount++;
 									runtimeMetrics.networkErrors++;
 									runtimeMetrics.lastError = `${errorMsg} (retrying on same account)`;
@@ -1244,7 +1427,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.networkErrors++;
-								runtimeMetrics.accountRotations++;
+								if (networkRetryDecision.rotateAccount) {
+									runtimeMetrics.accountRotations++;
+								}
 								runtimeMetrics.lastError = errorMsg;
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
@@ -1398,11 +1583,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 						rateLimit,
 						errorBody,
 					});
+					runtimeMetrics.editPathFailureRouteCounts[failureRoute]++;
 
 					if (failureRoute === "tool_unavailable") {
 						const unavailable = getToolUnavailableInfo(errorBody);
+						const toolUnavailableDecision = getRetryPolicyDecision({
+							mode: retryPolicyMode,
+							route: failureRoute,
+							guidedRetryAttempts: toolUnavailableRecoveryAttempts,
+							maxGuidedRetries: 1,
+						});
 						if (
-							toolUnavailableRecoveryAttempts < 1 &&
+							toolUnavailableDecision.sameAccountRetry &&
 							transformedBody &&
 							Array.isArray(transformedBody.input)
 						) {
@@ -1433,13 +1625,92 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return errorResponse;
 					}
 
+					if (toolArgumentRecoveryMode !== "off") {
+						const argumentIssue = getToolArgumentIssueInfo(errorBody);
+						const toolArgumentDecision = getRetryPolicyDecision({
+							mode: retryPolicyMode,
+							route: "tool_argument",
+							guidedRetryAttempts: toolArgumentRecoveryAttempts,
+							maxGuidedRetries: 1,
+						});
+						if (
+							argumentIssue.isArgumentIssue &&
+							toolArgumentDecision.sameAccountRetry &&
+							transformedBody &&
+							Array.isArray(transformedBody.input)
+						) {
+							toolArgumentRecoveryAttempts++;
+							accountManager.refundToken(account, modelFamily, model);
+							const runtimeRequired =
+								toolArgumentRecoveryMode === "schema-safe" &&
+								argumentIssue.toolName &&
+								transformedBody.tools
+									? extractRuntimeToolManifest(transformedBody.tools)
+											.requiredParametersByTool[argumentIssue.toolName] ?? []
+									: [];
+							const recoveredInput = addToolArgumentRecoveryMessage(
+								transformedBody.input,
+								{
+									missingRequired: argumentIssue.missingRequired,
+									runtimeRequired,
+									toolName: argumentIssue.toolName,
+									recoveryMode: toolArgumentRecoveryMode,
+								},
+							);
+							transformedBody = {
+								...transformedBody,
+								input: recoveredInput ?? transformedBody.input,
+							};
+							requestInit = {
+								...(requestInit ?? {}),
+								body: JSON.stringify(transformedBody),
+							};
+							runtimeMetrics.lastError =
+								argumentIssue.message ?? "Tool argument validation error";
+							const missingLabel =
+								argumentIssue.missingRequired.length > 0
+									? ` Missing: ${argumentIssue.missingRequired.join(", ")}.`
+									: "";
+							await showToast(
+								`Tool arguments invalid; retrying with corrected guidance.${missingLabel}`,
+								"warning",
+								{ duration: toastDurationMs },
+							);
+							continue;
+						}
+					}
+
+					if (failureRoute === "approval_or_policy") {
+						const approvalDecision = getRetryPolicyDecision({
+							mode: retryPolicyMode,
+							route: failureRoute,
+						});
+						runtimeMetrics.failedRequests++;
+						runtimeMetrics.lastError = `Runtime approval/policy blocked request (HTTP ${response.status})`;
+						await showToast(
+							"Request blocked by runtime approval or policy. Adjust runtime permissions and retry.",
+							"warning",
+							{ duration: toastDurationMs },
+						);
+						if (!approvalDecision.failFast) {
+							logDebug("Retry policy marked approval/policy as non-fail-fast; returning current error response for safety.", approvalDecision);
+						}
+						return errorResponse;
+					}
+
 					if (failureRoute === "server_error") {
+						const serverErrorDecision = getRetryPolicyDecision({
+							mode: retryPolicyMode,
+							route: failureRoute,
+						});
 						logWarn(
 							`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`,
 						);
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.serverErrors++;
-						runtimeMetrics.accountRotations++;
+						if (serverErrorDecision.rotateAccount) {
+							runtimeMetrics.accountRotations++;
+						}
 						runtimeMetrics.lastError = `HTTP ${response.status}`;
 						accountManager.refundToken(account, modelFamily, model);
 						accountManager.recordFailure(account, modelFamily, model);
@@ -1447,6 +1718,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					if (failureRoute === "rate_limit" && rateLimit) {
+						const rateLimitDecision = getRetryPolicyDecision({
+							mode: retryPolicyMode,
+							route: failureRoute,
+							rateLimitRetryAfterMs: rateLimit.retryAfterMs,
+							rateLimitShortRetryThresholdMs: RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
+						});
 						runtimeMetrics.rateLimitedResponses++;
 						const { attempt, delayMs } = getRateLimitBackoff(
 							account.index,
@@ -1455,7 +1732,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						);
 						const waitLabel = formatWaitTime(delayMs);
 
-						if (delayMs <= RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS) {
+						if (rateLimitDecision.sameAccountRetry) {
 							if (
 								accountManager.shouldShowAccountToast(
 									account.index,
@@ -1483,7 +1760,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						);
 						accountManager.recordRateLimit(account, modelFamily, model);
 						account.lastSwitchReason = "rate-limit";
-						runtimeMetrics.accountRotations++;
+						if (rateLimitDecision.rotateAccount) {
+							runtimeMetrics.accountRotations++;
+						}
 						accountManager.saveToDiskDebounced();
 						logWarn(
 							`Rate limited. Rotating account ${account.index + 1} (${account.email ?? "unknown"}).`,
@@ -1513,12 +1792,35 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					resetRateLimitBackoff(account.index, quotaKey);
 					runtimeMetrics.cumulativeLatencyMs += fetchLatencyMs;
+					const rerouteInfo =
+						rerouteNoticeMode === "off"
+							? undefined
+							: getModelRerouteInfoFromHeaders(response.headers, model);
+					if (rerouteInfo && rerouteNoticeMode === "log+ui") {
+						const requested = rerouteInfo.requestedModel ?? model ?? "unknown";
+						const effective =
+							rerouteInfo.reroutedTo ??
+							rerouteInfo.effectiveModel ??
+							"upstream model";
+						const rerouteKey = `${requested}=>${effective}`;
+						if (rememberBoundedKey(emittedRerouteNoticeKeys, rerouteKey)) {
+							await showToast(
+								`Model reroute observed: ${requested} -> ${effective}`,
+								"warning",
+								{ duration: toastDurationMs },
+							);
+						}
+					}
 					const successResponse = await handleSuccessResponse(response, isStreaming, {
 						streamStallTimeoutMs,
+						requestedModel: model,
+						rerouteNoticeMode,
+						jsonRepairMode,
 					});
 
 					if (!successResponse.ok) {
 						runtimeMetrics.failedRequests++;
+						runtimeMetrics.editPathFailureRouteCounts.other++;
 						runtimeMetrics.lastError = `HTTP ${successResponse.status}`;
 						return successResponse;
 					}
@@ -1552,6 +1854,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					accountManager.recordSuccess(account, modelFamily, model);
 					runtimeMetrics.successfulRequests++;
+					runtimeMetrics.editPathSuccessCounts[editPathStrategy]++;
+					runtimeMetrics.editPathLatencyByStrategyMs[editPathStrategy] +=
+						fetchLatencyMs;
 					runtimeMetrics.lastError = null;
 						return successResponse;
 																								}
@@ -1614,8 +1919,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 						authorize: async (inputs?: Record<string, string>) => {
 							const authPluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(authPluginConfig);
-							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
-							setStoragePath(authPerProjectAccounts ? process.cwd() : null);
+							const authAccountScopeMode = getAccountScopeMode(authPluginConfig);
+							setStorageScopeMode(authAccountScopeMode, process.cwd());
 
 							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =
@@ -2573,8 +2878,8 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
                                                         const manualPluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(manualPluginConfig);
-                                                        const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
-							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
+                                                        const manualAccountScopeMode = getAccountScopeMode(manualPluginConfig);
+							setStorageScopeMode(manualAccountScopeMode, process.cwd());
 
                                                         const { pkce, state, url } = await createAuthorizationFlow();
                                                         return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
@@ -2936,6 +3241,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtimeMetrics.lastRequestAt !== null
 							? `${formatWaitTime(now - runtimeMetrics.lastRequestAt)} ago`
 							: "never";
+					const editPathAttemptSummary = EDIT_PATH_STRATEGIES.map((strategy) => {
+						const attempts = runtimeMetrics.editPathAttemptCounts[strategy];
+						if (attempts <= 0) return null;
+						const success = runtimeMetrics.editPathSuccessCounts[strategy];
+						const avgMs =
+							success > 0
+								? Math.round(
+										runtimeMetrics.editPathLatencyByStrategyMs[strategy] / success,
+									)
+								: 0;
+						const latencyLabel = success > 0 ? ` avg ${avgMs}ms` : "";
+						return `${strategy}:${success}/${attempts}${latencyLabel}`;
+					}).filter((value): value is string => !!value);
+					const editPathFailureSummary = FAILURE_ROUTES.map((route) => {
+						const count = runtimeMetrics.editPathFailureRouteCounts[route];
+						return count > 0 ? `${route}:${count}` : null;
+					}).filter((value): value is string => !!value);
 
 						const lines = [
 							"Codex Plugin Metrics:",
@@ -2952,6 +3274,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Auth refresh failures: ${runtimeMetrics.authRefreshFailures}`,
 						`Account rotations: ${runtimeMetrics.accountRotations}`,
 						`Empty-response retries: ${runtimeMetrics.emptyResponseRetries}`,
+						`Edit-path strategy (success/attempt): ${editPathAttemptSummary.join(" | ") || "none"}`,
+						`Edit-path failure routes: ${editPathFailureSummary.join(" | ") || "none"}`,
 						`Last upstream request: ${lastRequest}`,
 					];
 
@@ -2974,6 +3298,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 							formatUiKeyValue(ui, "Auth refresh failures", String(runtimeMetrics.authRefreshFailures), "warning"),
 							formatUiKeyValue(ui, "Account rotations", String(runtimeMetrics.accountRotations), "accent"),
 							formatUiKeyValue(ui, "Empty-response retries", String(runtimeMetrics.emptyResponseRetries), "warning"),
+							formatUiKeyValue(
+								ui,
+								"Edit-path strategy (success/attempt)",
+								editPathAttemptSummary.join(" | ") || "none",
+								"accent",
+							),
+							formatUiKeyValue(
+								ui,
+								"Edit-path failure routes",
+								editPathFailureSummary.join(" | ") || "none",
+								"warning",
+							),
 							formatUiKeyValue(ui, "Last upstream request", lastRequest, "muted"),
 						];
 						if (runtimeMetrics.lastError) {

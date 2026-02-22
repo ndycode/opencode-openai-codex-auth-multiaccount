@@ -24,12 +24,38 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 	refreshAndUpdateToken: async (auth: any) => auth,
 	createCodexHeaders: () => new Headers(),
 	handleErrorResponse: async (response: Response) => ({ response }),
+	classifyFailureRoute: () => "other",
+	getModelRerouteInfoFromHeaders: () => undefined,
+	getToolUnavailableInfo: () => ({ isToolUnavailable: false }),
+	getToolArgumentIssueInfo: () => ({ isArgumentIssue: false, missingRequired: [] }),
+	getUnsupportedCodexModelInfo: () => ({ isUnsupported: false }),
 	resolveUnsupportedCodexFallbackModel: () => undefined,
 	shouldFallbackToGpt52OnUnsupportedGpt53: () => false,
 	handleSuccessResponse: async (response: Response) => response,
 }));
 
 vi.mock("../lib/request/request-transformer.js", () => ({
+	addToolUnavailableRecoveryMessage: (input: unknown) => input,
+	addToolArgumentRecoveryMessage: (input: unknown) => input,
+	extractRuntimeToolManifest: () => ({
+		names: [],
+		hasHashlineCapabilities: false,
+		requiredParametersByTool: {},
+		capabilities: {
+			hasHashlineToolName: false,
+			hasHashlineSignals: false,
+			hasHashlineCapabilities: false,
+			hasGenericEdit: false,
+			hasPatch: false,
+			hasApplyPatch: false,
+			hasReplace: false,
+			hasTaskDelegation: false,
+			supportsBackgroundDelegation: false,
+			hasUpdatePlan: false,
+			hasTodoWrite: false,
+			primaryEditStrategy: "none",
+		},
+	}),
 	applyFastSessionDefaults: <T>(config: T) => config,
 }));
 
@@ -123,6 +149,7 @@ vi.mock("../lib/storage.js", () => ({
 	loadAccounts: async () => null,
 	saveAccounts: async () => {},
 	setStoragePath: () => {},
+	setStorageScopeMode: () => {},
 	exportAccounts: async () => {},
 	importAccounts: async () => ({ imported: 0, total: 0 }),
 }));

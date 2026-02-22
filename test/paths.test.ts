@@ -11,6 +11,7 @@ import {
 	getConfigDir,
 	getProjectConfigDir,
 	getProjectGlobalConfigDir,
+	getWorktreeGlobalConfigDir,
 	getProjectStorageKey,
 	isProjectDirectory,
 	findProjectRoot,
@@ -65,6 +66,15 @@ describe("Storage Paths Module", () => {
 			const result = getProjectGlobalConfigDir(projectPath);
 			expect(result).toContain(path.join(homedir(), ".opencode", "projects"));
 			expect(result).toContain("myproject-");
+		});
+	});
+
+	describe("getWorktreeGlobalConfigDir", () => {
+		it("returns ~/.opencode/worktrees/<key>", () => {
+			const worktreePath = "/home/user/myproject-worktree";
+			const result = getWorktreeGlobalConfigDir(worktreePath);
+			expect(result).toContain(path.join(homedir(), ".opencode", "worktrees"));
+			expect(result).toContain("myproject-worktree-");
 		});
 	});
 

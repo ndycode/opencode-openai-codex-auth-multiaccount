@@ -9,12 +9,22 @@ import {
 	injectMissingToolOutputs,
 } from "./helpers/input-utils.js";
 import { cleanupToolDefinitions } from "./helpers/tool-utils.js";
+import {
+	clampReasoningEffortForModel,
+	prepareModelCapabilitiesFor,
+} from "./model-capabilities.js";
+import {
+	analyzeRuntimeToolCapabilities,
+	type RuntimeToolCapabilities,
+} from "./runtime-tool-capabilities.js";
 import type {
 	ConfigOptions,
 	HashlineBridgeHintsMode,
 	InputItem,
+	ModelCapabilitySyncMode,
 	ReasoningConfig,
 	RequestBody,
+	ToolArgumentRecoveryMode,
 	UserConfig,
 } from "../types.js";
 
@@ -22,8 +32,18 @@ type CollaborationMode = "plan" | "default" | "unknown";
 type FastSessionStrategy = "hybrid" | "always";
 type SupportedReasoningSummary = "auto" | "concise" | "detailed";
 const TOOL_UNAVAILABLE_RECOVERY_MARKER = "<tool_unavailable_recovery";
+const TOOL_ARGUMENT_RECOVERY_MARKER = "<tool_argument_recovery";
+const CODEX_BRIDGE_MARKER = "# Codex Running in OpenCode";
+const TOOL_REMAP_MARKER = "<tool_replacements priority=\"0\">";
 
 const PLAN_MODE_ONLY_TOOLS = new Set(["request_user_input"]);
+
+interface RuntimeToolManifest {
+	names: string[];
+	hasHashlineCapabilities: boolean;
+	requiredParametersByTool: Record<string, string[]>;
+	capabilities: RuntimeToolCapabilities;
+}
 
 export {
 	isOpenCodeSystemPrompt,
@@ -37,7 +57,7 @@ export {
  * for unknown/custom model names.
  *
  * @param model - Original model name (e.g., "gpt-5-codex-low", "openai/gpt-5-codex")
- * @returns Normalized model name (e.g., "gpt-5-codex", "gpt-5.1-codex-max")
+ * @returns Normalized model name (e.g., "gpt-5-codex", "gpt-5.3-codex", "gpt-5.1-codex-max")
  */
 export function normalizeModel(model: string | undefined): string {
 	if (!model) return "gpt-5.1";
@@ -57,28 +77,28 @@ export function normalizeModel(model: string | undefined): string {
 	const normalized = modelId.toLowerCase();
 
 	// Priority order for pattern matching (most specific first):
-	// 1. GPT-5.3 Codex Spark (legacy alias -> canonical gpt-5-codex)
+	// 1. GPT-5.3 Codex Spark
 	if (
 		normalized.includes("gpt-5.3-codex-spark") ||
 		normalized.includes("gpt 5.3 codex spark")
 	) {
-		return "gpt-5-codex";
+		return "gpt-5.3-codex-spark";
 	}
 
-	// 2. GPT-5.3 Codex (legacy alias -> canonical gpt-5-codex)
+	// 2. GPT-5.3 Codex
 	if (
 		normalized.includes("gpt-5.3-codex") ||
 		normalized.includes("gpt 5.3 codex")
 	) {
-		return "gpt-5-codex";
+		return "gpt-5.3-codex";
 	}
 
-	// 3. GPT-5.2 Codex (legacy alias -> canonical gpt-5-codex)
+	// 3. GPT-5.2 Codex
 	if (
 		normalized.includes("gpt-5.2-codex") ||
 		normalized.includes("gpt 5.2 codex")
 	) {
-		return "gpt-5-codex";
+		return "gpt-5.2-codex";
 	}
 
 	// 4. GPT-5.2 (general purpose)
@@ -111,7 +131,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5.1-codex-mini";
 	}
 
-	// 8. GPT-5 Codex canonical + GPT-5.1 Codex legacy alias
+	// 8. GPT-5 Codex canonical
 	if (
 		normalized.includes("gpt-5-codex") ||
 		normalized.includes("gpt 5 codex")
@@ -119,12 +139,12 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5-codex";
 	}
 
-	// 9. GPT-5.1 Codex (legacy alias)
+	// 9. GPT-5.1 Codex
 	if (
 		normalized.includes("gpt-5.1-codex") ||
 		normalized.includes("gpt 5.1 codex")
 	) {
-		return "gpt-5-codex";
+		return "gpt-5.1-codex";
 	}
 
 	// 10. GPT-5.1 (general-purpose)
@@ -259,6 +279,10 @@ function resolveReasoningConfig(
 	modelName: string,
 	modelConfig: ConfigOptions,
 	body: RequestBody,
+	options?: {
+		modelCapabilitySyncMode?: ModelCapabilitySyncMode;
+		modelCapabilityCacheTtlMs?: number;
+	},
 ): ReasoningConfig {
 	const providerOpenAI = body.providerOptions?.openai;
 	const existingEffort =
@@ -272,7 +296,7 @@ function resolveReasoningConfig(
 		...(existingSummary ? { reasoningSummary: existingSummary } : {}),
 	};
 
-	return getReasoningConfig(modelName, mergedConfig);
+	return getReasoningConfig(modelName, mergedConfig, options);
 }
 
 function resolveTextVerbosity(
@@ -322,6 +346,21 @@ function extractMessageText(content: unknown): string {
 		})
 		.filter(Boolean)
 		.join("\n");
+}
+
+function hasDeveloperMessageMarker(
+	input: readonly InputItem[] | undefined,
+	marker: string,
+): boolean {
+	if (!Array.isArray(input) || !marker) return false;
+	for (const item of input) {
+		if (!item || typeof item !== "object") continue;
+		const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+		if (role !== "developer") continue;
+		const text = extractMessageText(item.content);
+		if (text.includes(marker)) return true;
+	}
+	return false;
 }
 
 function detectCollaborationMode(body: RequestBody): CollaborationMode {
@@ -377,28 +416,14 @@ function sanitizePlanOnlyTools(tools: unknown, mode: CollaborationMode): unknown
 	return filtered;
 }
 
-function extractRuntimeToolNames(tools: unknown): string[] {
-	if (!Array.isArray(tools)) return [];
-
-	const names: string[] = [];
-	for (const tool of tools) {
-		if (!tool || typeof tool !== "object") continue;
-
-		const directName = (tool as { name?: unknown }).name;
-		if (typeof directName === "string" && directName.trim()) {
-			names.push(directName);
-			continue;
-		}
-
-		const functionDef = (tool as { function?: unknown }).function;
-		if (!functionDef || typeof functionDef !== "object") continue;
-		const functionName = (functionDef as { name?: unknown }).name;
-		if (typeof functionName === "string" && functionName.trim()) {
-			names.push(functionName);
-		}
-	}
-
-	return names;
+export function extractRuntimeToolManifest(tools: unknown): RuntimeToolManifest {
+	const analyzed = analyzeRuntimeToolCapabilities(tools);
+	return {
+		names: analyzed.names,
+		hasHashlineCapabilities: analyzed.capabilities.hasHashlineCapabilities,
+		requiredParametersByTool: analyzed.requiredParametersByTool,
+		capabilities: analyzed.capabilities,
+	};
 }
 
 /**
@@ -416,6 +441,10 @@ function extractRuntimeToolNames(tools: unknown): string[] {
 export function getReasoningConfig(
 	modelName: string | undefined,
 	userConfig: ConfigOptions = {},
+	options?: {
+		modelCapabilitySyncMode?: ModelCapabilitySyncMode;
+		modelCapabilityCacheTtlMs?: number;
+	},
 ): ReasoningConfig {
 	const normalizedName = modelName?.toLowerCase() ?? "";
 
@@ -524,6 +553,27 @@ export function getReasoningConfig(
 		// Codex CLI presets are low/medium/high (or xhigh for Codex Max / GPT-5.3/5.2 Codex)
 	if (isCodex && effort === "minimal") {
 		effort = "low";
+	}
+
+	if ((options?.modelCapabilitySyncMode ?? "off") !== "off") {
+		const dynamicClamp = clampReasoningEffortForModel(modelName, effort, {
+			mode: options?.modelCapabilitySyncMode ?? "off",
+			cacheTtlMs: options?.modelCapabilityCacheTtlMs,
+		});
+		if (dynamicClamp.changed) {
+			logWarn(
+				`Adjusted reasoning effort ${effort} -> ${dynamicClamp.effort} for model ${dynamicClamp.capability.model} based on ${dynamicClamp.capability.source} capabilities`,
+				{
+					requestedEffort: effort,
+					effectiveEffort: dynamicClamp.effort,
+					model: dynamicClamp.capability.model,
+					capabilitySource: dynamicClamp.capability.source,
+					supportedReasoningEfforts:
+						dynamicClamp.capability.supportedReasoningEfforts,
+				},
+			);
+			effort = dynamicClamp.effort;
+		}
 	}
 
 	const summary = sanitizeReasoningSummary(userConfig.reasoningSummary);
@@ -789,11 +839,16 @@ export function addCodexBridgeMessage(
 	input: InputItem[] | undefined,
 	hasTools: boolean,
 	runtimeToolNames?: readonly string[],
-	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "off",
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "auto",
+	runtimeHasHashlineCapabilities = false,
+	runtimeCapabilitySummary?: RuntimeToolCapabilities,
 ): InputItem[] | undefined {
 	if (!hasTools || !Array.isArray(input)) return input;
+	if (hasDeveloperMessageMarker(input, CODEX_BRIDGE_MARKER)) return input;
 	const bridgeText = renderCodexOpenCodeBridgeWithOptions(runtimeToolNames ?? [], {
 		hashlineBridgeHintsMode: normalizeHashlineBridgeHintsMode(hashlineBridgeHintsMode),
+		runtimeHasHashlineCapabilities,
+		runtimeCapabilitySummary,
 	});
 
 	const bridgeMessage: InputItem = {
@@ -820,12 +875,17 @@ export function addToolRemapMessage(
 	input: InputItem[] | undefined,
 	hasTools: boolean,
 	runtimeToolNames?: readonly string[],
-	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "off",
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "auto",
+	runtimeHasHashlineCapabilities = false,
+	runtimeCapabilitySummary?: RuntimeToolCapabilities,
 ): InputItem[] | undefined {
 	if (!hasTools || !Array.isArray(input)) return input;
+	if (hasDeveloperMessageMarker(input, TOOL_REMAP_MARKER)) return input;
 	const remapText = renderToolRemapMessage({
 		hashlineBridgeHintsMode: normalizeHashlineBridgeHintsMode(hashlineBridgeHintsMode),
 		runtimeToolNames,
+		runtimeHasHashlineCapabilities,
+		runtimeCapabilitySummary,
 	});
 
 	const toolRemapMessage: InputItem = {
@@ -881,13 +941,77 @@ Previous tool invocation failed because a tool was unavailable in this runtime m
 	return [recoveryMessage, ...input];
 }
 
+export function addToolArgumentRecoveryMessage(
+	input: InputItem[] | undefined,
+	options?: {
+		missingRequired?: readonly string[];
+		runtimeRequired?: readonly string[];
+		toolName?: string;
+		recoveryMode?: ToolArgumentRecoveryMode;
+	},
+): InputItem[] | undefined {
+	if (!Array.isArray(input)) return input;
+	for (const item of input) {
+		if (!item || typeof item !== "object") continue;
+		const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+		if (role !== "developer") continue;
+		const text = extractMessageText(item.content);
+		if (text.includes(TOOL_ARGUMENT_RECOVERY_MARKER)) {
+			return input;
+		}
+	}
+
+	const missingRequired = Array.from(
+		new Set(
+			[...(options?.missingRequired ?? []), ...(options?.runtimeRequired ?? [])]
+				.map((value) => value.trim())
+				.filter(Boolean),
+		),
+	);
+	const missingRequiredSuffix =
+		missingRequired.length > 0
+			? ` Missing required parameter(s): ${missingRequired.map((value) => `\`${value}\``).join(", ")}.`
+			: "";
+	const toolSuffix = options?.toolName
+		? ` The affected tool was \`${options.toolName}\`.`
+		: "";
+	const runInBackgroundHint = missingRequired.includes("run_in_background")
+		? "\n- Set `run_in_background=false` for normal task delegation; use `true` only for parallel exploration."
+		: "";
+	const schemaSafeHint =
+		options?.recoveryMode === "schema-safe" && missingRequired.length > 0
+			? "\n- The runtime tool schema in this session marks these fields as required; include them explicitly."
+			: "";
+	const recoveryText = `${TOOL_ARGUMENT_RECOVERY_MARKER} priority="0">
+Previous tool invocation failed because required tool arguments were missing or invalid.${toolSuffix}${missingRequiredSuffix}
+- Re-read the runtime tool schema and include all required arguments with valid values.
+${schemaSafeHint}
+${runInBackgroundHint}
+- Retry with a corrected tool call while preserving the original user intent.
+</tool_argument_recovery>`;
+
+	const recoveryMessage: InputItem = {
+		type: "message",
+		role: "developer",
+		content: [
+			{
+				type: "input_text",
+				text: recoveryText,
+			},
+		],
+	};
+
+	return [recoveryMessage, ...input];
+}
+
 function normalizeHashlineBridgeHintsMode(
 	mode: HashlineBridgeHintsMode | boolean | undefined,
 ): HashlineBridgeHintsMode {
 	if (mode === true) return "hints";
-	if (mode === false || mode === undefined) return "off";
-	if (mode === "strict" || mode === "hints") return mode;
-	return "off";
+	if (mode === false) return "off";
+	if (mode === undefined) return "auto";
+	if (mode === "strict" || mode === "hints" || mode === "auto") return mode;
+	return "auto";
 }
 
 /**
@@ -913,7 +1037,9 @@ export async function transformRequestBody(
 	fastSession = false,
 	fastSessionStrategy: FastSessionStrategy = "hybrid",
 	fastSessionMaxInputItems = 30,
-	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "off",
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "auto",
+	modelCapabilitySyncMode: ModelCapabilitySyncMode = "off",
+	modelCapabilityCacheTtlMs = 600_000,
 ): Promise<RequestBody> {
 	const originalModel = body.model;
 	const normalizedModel = normalizeModel(body.model);
@@ -964,7 +1090,18 @@ export async function transformRequestBody(
 		body.tools = cleanupToolDefinitions(body.tools);
 		body.tools = sanitizePlanOnlyTools(body.tools, collaborationMode);
 	}
-	const runtimeToolNames = extractRuntimeToolNames(body.tools);
+	const runtimeToolManifest = extractRuntimeToolManifest(body.tools);
+	if (process.env.CODEX_AUTH_LOG_RUNTIME_TOOL_CAPABILITIES === "1") {
+		logDebug("Runtime tool capabilities", {
+			runtimeToolNames: runtimeToolManifest.names,
+			runtimeToolCapabilities: runtimeToolManifest.capabilities,
+			requiredParametersByTool: runtimeToolManifest.requiredParametersByTool,
+		});
+	}
+	await prepareModelCapabilitiesFor(normalizedModel, {
+		mode: modelCapabilitySyncMode,
+		cacheTtlMs: modelCapabilityCacheTtlMs,
+	});
 
 	body.instructions = shouldApplyFastSessionTuning
 		? compactInstructionsForFastSession(codexInstructions, isTrivialTurn)
@@ -1018,16 +1155,20 @@ export async function transformRequestBody(
 			body.input = addCodexBridgeMessage(
 				body.input,
 				!!body.tools,
-				runtimeToolNames,
+				runtimeToolManifest.names,
 				hashlineBridgeHintsMode,
+				runtimeToolManifest.hasHashlineCapabilities,
+				runtimeToolManifest.capabilities,
 			);
 		} else {
 			// DEFAULT MODE: Keep original behavior with tool remap message
 			body.input = addToolRemapMessage(
 				body.input,
 				!!body.tools,
-				runtimeToolNames,
+				runtimeToolManifest.names,
 				hashlineBridgeHintsMode,
+				runtimeToolManifest.hasHashlineCapabilities,
+				runtimeToolManifest.capabilities,
 			);
 		}
 
@@ -1045,6 +1186,10 @@ export async function transformRequestBody(
 		lookupModel,
 		modelConfig,
 		body,
+		{
+			modelCapabilitySyncMode,
+			modelCapabilityCacheTtlMs,
+		},
 	);
 	body.reasoning = {
 		...body.reasoning,
@@ -1064,6 +1209,9 @@ export async function transformRequestBody(
 		const fastReasoning = getReasoningConfig(lookupModel, {
 			reasoningEffort: "none",
 			reasoningSummary: "auto",
+		}, {
+			modelCapabilitySyncMode,
+			modelCapabilityCacheTtlMs,
 		});
 		body.reasoning = {
 			...body.reasoning,

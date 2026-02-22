@@ -83,6 +83,18 @@ Sandbox policies, approvals, final formatting, git protocols, and file reference
 
 const MAX_MANIFEST_TOOLS = 32;
 const HASHLINE_TOOL_PATTERN = /(hashline|line[_-]?hash|anchor[_-]?insert)/i;
+type RuntimeToolCapabilitySummary = {
+	hasHashlineCapabilities?: boolean;
+	hasApplyPatch?: boolean;
+	hasPatch?: boolean;
+	hasGenericEdit?: boolean;
+	hasReplace?: boolean;
+	hasUpdatePlan?: boolean;
+	hasTodoWrite?: boolean;
+	hasTaskDelegation?: boolean;
+	supportsBackgroundDelegation?: boolean;
+	primaryEditStrategy?: "hashline-like" | "edit" | "patch" | "apply_patch" | "replace" | "none";
+};
 const HASHLINE_BETA_BRIDGE_SECTION = `## Hashline Edit Preference (Beta)
 
 - If runtime tools include hashline-style edit tools, prefer them for targeted edits.
@@ -121,15 +133,20 @@ const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
 
 const renderRuntimeAliasCompatibilitySection = (
 	runtimeToolNames: readonly string[],
+	capabilitySummary?: RuntimeToolCapabilitySummary,
 ): string | null => {
-	if (runtimeToolNames.length === 0) return null;
+	if (runtimeToolNames.length === 0 && !capabilitySummary) return null;
 	const lower = new Set(runtimeToolNames.map((name) => name.toLowerCase()));
-	const hasApplyPatch = lower.has("apply_patch") || lower.has("applypatch");
-	const hasPatch = lower.has("patch");
-	const hasEdit = lower.has("edit");
-	const hasTodoWrite = lower.has("todowrite");
-	const hasUpdatePlan = lower.has("update_plan") || lower.has("updateplan");
-	const hasTask = lower.has("task");
+	const hasApplyPatch =
+		capabilitySummary?.hasApplyPatch ??
+		(lower.has("apply_patch") || lower.has("applypatch"));
+	const hasPatch = capabilitySummary?.hasPatch ?? lower.has("patch");
+	const hasEdit = capabilitySummary?.hasGenericEdit ?? lower.has("edit");
+	const hasTodoWrite = capabilitySummary?.hasTodoWrite ?? lower.has("todowrite");
+	const hasUpdatePlan =
+		capabilitySummary?.hasUpdatePlan ??
+		(lower.has("update_plan") || lower.has("updateplan"));
+	const hasTask = capabilitySummary?.hasTaskDelegation ?? lower.has("task");
 
 	const lines: string[] = [];
 	if (hasApplyPatch && !hasPatch && !hasEdit) {
@@ -152,6 +169,28 @@ const renderRuntimeAliasCompatibilitySection = (
 	].join("\n");
 };
 
+const renderRuntimeStrategySection = (
+	capabilitySummary?: RuntimeToolCapabilitySummary,
+): string | null => {
+	if (!capabilitySummary) return null;
+	const strategy = capabilitySummary.primaryEditStrategy ?? "none";
+	const lines: string[] = [];
+	if (strategy === "hashline-like") {
+		lines.push("- Hashline-like edit capability detected; prefer it for targeted in-place edits.");
+	} else if (strategy !== "none") {
+		lines.push(`- Primary edit strategy detected: \`${strategy}\`. Use runtime-listed names exactly.`);
+	}
+	if (capabilitySummary.supportsBackgroundDelegation) {
+		lines.push("- Task delegation supports explicit `run_in_background`; include it when the schema marks it required.");
+	}
+	if (lines.length === 0) return null;
+	return [
+		"## Runtime Tool Strategy",
+		"These capabilities were inferred from the runtime manifest for this request.",
+		...lines,
+	].join("\n");
+};
+
 export const renderCodexOpenCodeBridge = (toolNames: readonly string[]): string => {
 	const runtimeToolNames = normalizeRuntimeToolNames(toolNames);
 	return renderCodexOpenCodeBridgeWithOptions(runtimeToolNames);
@@ -161,12 +200,15 @@ export const renderCodexOpenCodeBridgeWithOptions = (
 	toolNames: readonly string[],
 	options?: {
 		hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
+		runtimeHasHashlineCapabilities?: boolean;
+		runtimeCapabilitySummary?: RuntimeToolCapabilitySummary;
 	},
 ): string => {
 	const runtimeToolNames = normalizeRuntimeToolNames(toolNames);
-	const hasHashlineRuntimeTool = runtimeToolNames.some((name) =>
-		HASHLINE_TOOL_PATTERN.test(name),
-	);
+	const hasHashlineRuntimeTool =
+		(options?.runtimeCapabilitySummary?.hasHashlineCapabilities ?? false) ||
+		(options?.runtimeHasHashlineCapabilities ?? false) ||
+		runtimeToolNames.some((name) => HASHLINE_TOOL_PATTERN.test(name));
 
 	const sections: string[] = [];
 	if (runtimeToolNames.length > 0) {
@@ -180,18 +222,31 @@ export const renderCodexOpenCodeBridgeWithOptions = (
 		sections.push(manifest);
 	}
 
-	const aliasCompat = renderRuntimeAliasCompatibilitySection(runtimeToolNames);
+	const aliasCompat = renderRuntimeAliasCompatibilitySection(
+		runtimeToolNames,
+		options?.runtimeCapabilitySummary,
+	);
 	if (aliasCompat) {
 		sections.push(aliasCompat);
 	}
+	const strategySection = renderRuntimeStrategySection(options?.runtimeCapabilitySummary);
+	if (strategySection) {
+		sections.push(strategySection);
+	}
 
 	const mode = normalizeHashlineBridgeHintsMode(options?.hashlineBridgeHintsMode);
-	if (mode !== "off") {
+	const effectiveMode: Exclude<HashlineBridgeHintsMode, "auto"> =
+		mode === "auto" ? (hasHashlineRuntimeTool ? "hints" : "off") : mode;
+	if (effectiveMode !== "off") {
 		if (hasHashlineRuntimeTool) {
-			sections.push(mode === "strict" ? HASHLINE_STRICT_BRIDGE_SECTION : HASHLINE_BETA_BRIDGE_SECTION);
+			sections.push(
+				effectiveMode === "strict"
+					? HASHLINE_STRICT_BRIDGE_SECTION
+					: HASHLINE_BETA_BRIDGE_SECTION,
+			);
 		} else {
 			sections.push(
-				mode === "strict"
+				effectiveMode === "strict"
 					? HASHLINE_STRICT_BRIDGE_SECTION_INACTIVE
 					: HASHLINE_BETA_BRIDGE_SECTION_INACTIVE,
 			);
@@ -206,9 +261,10 @@ function normalizeHashlineBridgeHintsMode(
 	mode: HashlineBridgeHintsMode | boolean | undefined,
 ): HashlineBridgeHintsMode {
 	if (mode === true) return "hints";
-	if (mode === false || mode === undefined) return "off";
-	if (mode === "strict" || mode === "hints") return mode;
-	return "off";
+	if (mode === false) return "off";
+	if (mode === undefined) return "auto";
+	if (mode === "strict" || mode === "hints" || mode === "auto") return mode;
+	return "auto";
 }
 
 export interface CodexOpenCodeBridgeMeta {

@@ -1,6 +1,6 @@
 {
   "name": "oc-chatgpt-multi-auth",
-  "version": "5.2.5-beta",
+  "version": "5.2.6-beta",
   "description": "Multi-account rotation plugin for ChatGPT Plus/Pro (OAuth / Codex backend)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -45,6 +45,8 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "audit:all": "npm audit --audit-level=high",
     "audit:dev:allowlist": "node scripts/audit-dev-allowlist.js",
+    "audit:codex:releases": "node scripts/audit-codex-releases.js",
+    "audit:codex:parity": "node scripts/audit-codex-releases.js --semantic",
     "audit:ci": "npm run audit:prod && npm run audit:dev:allowlist",
     "prepublishOnly": "npm run build",
     "prepare": "husky"

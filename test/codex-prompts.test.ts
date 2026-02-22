@@ -123,6 +123,30 @@ describe("Codex Prompts Module", () => {
 			expect(nonStrict).not.toContain('hashline_policy mode="strict"');
 		});
 
+		it("should auto-enable hashline hints only when runtime has hashline tools", () => {
+			const autoWithHashline = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "auto",
+				runtimeToolNames: ["hashline_edit", "patch"],
+			});
+			const autoWithoutHashline = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "auto",
+				runtimeToolNames: ["apply_patch", "bash"],
+			});
+			expect(autoWithHashline).toContain("hashline_beta_hints");
+			expect(autoWithoutHashline).not.toContain("hashline_beta_hints");
+			expect(autoWithoutHashline).not.toContain('hashline_policy mode="strict"');
+		});
+
+		it("should auto-enable hashline hints when runtime reports hashline capability without hashline tool names", () => {
+			const autoWithCapabilitySignal = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "auto",
+				runtimeToolNames: ["edit", "bash"],
+				runtimeHasHashlineCapabilities: true,
+			});
+			expect(autoWithCapabilitySignal).toContain("hashline_beta_hints");
+			expect(autoWithCapabilitySignal).not.toContain('active="false"');
+		});
+
 		it("should add runtime alias compatibility block when runtime lacks patch/edit", () => {
 			const remap = renderToolRemapMessage({
 				runtimeToolNames: ["apply_patch", "bash"],
@@ -138,6 +162,22 @@ describe("Codex Prompts Module", () => {
 			expect(remap).toContain("runtime_tool_alias_compat");
 			expect(remap).toContain("run_in_background");
 			expect(remap).toContain("normal delegation");
+		});
+
+		it("should add runtime tool strategy block from capability summary", () => {
+			const remap = renderToolRemapMessage({
+				runtimeToolNames: ["edit", "delegate_task"],
+				runtimeCapabilitySummary: {
+					hasHashlineCapabilities: true,
+					hasGenericEdit: true,
+					hasTaskDelegation: true,
+					supportsBackgroundDelegation: true,
+					primaryEditStrategy: "hashline-like",
+				},
+			});
+			expect(remap).toContain("runtime_tool_strategy");
+			expect(remap).toContain("hashline-like edit capability");
+			expect(remap).toContain("run_in_background");
 		});
 	});
 

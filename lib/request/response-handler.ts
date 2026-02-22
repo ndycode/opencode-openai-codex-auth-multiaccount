@@ -1,6 +1,6 @@
 import { createLogger, logRequest, LOGGING_ENABLED } from "../logger.js";
 
-import type { SSEEventData } from "../types.js";
+import type { JsonRepairMode, SSEEventData } from "../types.js";
 
 const log = createLogger("response-handler");
 
@@ -87,21 +87,154 @@ function parseDataPayload(line: string): string | null {
 	return payload;
 }
 
+function stripCodeFence(text: string): string {
+	const trimmed = text.trim();
+	const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+	return fencedMatch?.[1]?.trim() ?? trimmed;
+}
+
+function extractFirstJsonCandidate(text: string): string | null {
+	const trimmed = stripCodeFence(text);
+	const objectStart = trimmed.indexOf("{");
+	const arrayStart = trimmed.indexOf("[");
+	const starts = [objectStart, arrayStart].filter((index) => index >= 0);
+	if (starts.length === 0) return null;
+	const start = Math.min(...starts);
+	const opening = trimmed[start];
+	const closing = opening === "[" ? "]" : "}";
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = start; i < trimmed.length; i += 1) {
+		const char = trimmed[i];
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+				continue;
+			}
+			if (char === "\\") {
+				escaped = true;
+				continue;
+			}
+			if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (char === '"') {
+			inString = true;
+			continue;
+		}
+		if (char === opening) depth += 1;
+		if (char === closing) {
+			depth -= 1;
+			if (depth === 0) {
+				return trimmed.slice(start, i + 1);
+			}
+		}
+	}
+	return null;
+}
+
+function removeTrailingCommas(jsonText: string): string {
+	let result = "";
+	let inString = false;
+	let escaped = false;
+	for (let index = 0; index < jsonText.length; index += 1) {
+		const char = jsonText[index];
+		if (inString) {
+			result += char;
+			if (escaped) {
+				escaped = false;
+				continue;
+			}
+			if (char === "\\") {
+				escaped = true;
+				continue;
+			}
+			if (char === '"') {
+				inString = false;
+			}
+			continue;
+		}
+
+		if (char === '"') {
+			inString = true;
+			result += char;
+			continue;
+		}
+
+		if (char === ",") {
+			let lookahead = index + 1;
+			while (lookahead < jsonText.length) {
+				const lookaheadChar = jsonText[lookahead];
+				if (lookaheadChar === undefined || !/\s/.test(lookaheadChar)) {
+					break;
+				}
+				lookahead += 1;
+			}
+			const next = jsonText[lookahead];
+			if (next === "}" || next === "]") {
+				continue;
+			}
+		}
+
+		result += char;
+	}
+	return result;
+}
+
+function attemptJsonRepair(payload: string): string | null {
+	const candidate = extractFirstJsonCandidate(payload);
+	if (!candidate) return null;
+	const repaired = removeTrailingCommas(candidate).trim();
+	return repaired.length > 0 ? repaired : null;
+}
+
+function parseSseJsonPayload(
+	payload: string,
+	jsonRepairMode: JsonRepairMode,
+): { data: SSEEventData; repaired: boolean } | null {
+	try {
+		return { data: JSON.parse(payload) as SSEEventData, repaired: false };
+	} catch {
+		if (jsonRepairMode === "off") return null;
+		const repairedPayload = attemptJsonRepair(payload);
+		if (!repairedPayload || repairedPayload === payload) return null;
+		try {
+			return { data: JSON.parse(repairedPayload) as SSEEventData, repaired: true };
+		} catch {
+			return null;
+		}
+	}
+}
+
 /**
 
  * Parse SSE stream to extract final response
  * @param sseText - Complete SSE stream text
  * @returns Final response object or null if not found
  */
-function parseSseStream(sseText: string): ParsedSseResult | null {
+function parseSseStream(
+	sseText: string,
+	options?: { jsonRepairMode?: JsonRepairMode },
+): ParsedSseResult | null {
 	const lines = sseText.split(/\r?\n/);
+	const jsonRepairMode = options?.jsonRepairMode ?? "safe";
 
 	for (const line of lines) {
 		const trimmedLine = line.trim();
 		const payload = parseDataPayload(trimmedLine);
 		if (payload) {
-			try {
-				const data = JSON.parse(payload) as SSEEventData;
+			const parsedPayload = parseSseJsonPayload(payload, jsonRepairMode);
+			if (parsedPayload) {
+				const { data, repaired } = parsedPayload;
+				if (repaired) {
+					log.warn("Applied safe JSON repair to SSE payload", {
+						payloadPreview: payload.slice(0, 200),
+					});
+					logRequest("stream-json-repair", { payloadPreview: payload.slice(0, 200) });
+				}
 				const responseRecord = toRecord((data as { response?: unknown }).response);
 
 				if (data.type === "error" || data.type === "response.error") {
@@ -134,8 +267,6 @@ function parseSseStream(sseText: string): ParsedSseResult | null {
 					}
 					return { kind: "response", response: data.response };
 				}
-			} catch {
-				// Skip malformed JSON
 			}
 		}
 	}
@@ -152,7 +283,7 @@ function parseSseStream(sseText: string): ParsedSseResult | null {
 export async function convertSseToJson(
 	response: Response,
 	headers: Headers,
-	options?: { streamStallTimeoutMs?: number },
+	options?: { streamStallTimeoutMs?: number; jsonRepairMode?: JsonRepairMode },
 ): Promise<Response> {
 	if (!response.body) {
 		throw new Error('[openai-codex-plugin] Response has no body');
@@ -181,7 +312,9 @@ export async function convertSseToJson(
 		}
 
 		// Parse SSE events to extract the final response
-		const parsedResult = parseSseStream(fullText);
+		const parsedResult = parseSseStream(fullText, {
+			jsonRepairMode: options?.jsonRepairMode,
+		});
 
 		if (parsedResult?.kind === "error") {
 			log.warn("SSE stream returned an error event", parsedResult.error);

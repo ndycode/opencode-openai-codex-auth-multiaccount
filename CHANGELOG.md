@@ -4,6 +4,38 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ## [unreleased]
 
+## [5.2.6-beta] - 2026-02-22
+
+### fixed
+
+- **runtime alias conflict hardening in legacy remap/bridge prompts**: when runtime manifests expose `apply_patch` without `patch`/`edit` (or `update_plan` without `todowrite`), prompts now emit explicit runtime-compat guidance so the model follows listed tool names instead of contradictory generic aliases.
+- **tool-unavailable classification coverage**: failure routing now recognizes additional unavailable-tool error shapes (`does not exist`, `no such tool`, `unknown function`, and runtime-context unavailable variants).
+- **hashline auto-detection for edit-overrides**: auto mode now recognizes hashline capability from runtime tool metadata (description/schema) in addition to tool names, covering runtimes that expose hashline behavior behind generic `edit`.
+- **approval/policy failure routing hardening**: approval or sandbox policy failures now fail fast with actionable guidance instead of rotating accounts.
+- **tool-argument recovery expansion**: one-time safe recovery now supports runtime-schema-aware guidance (`schema-safe`) while preserving strict retry caps.
+
+### changed
+
+- **hashline-mode observability when runtime lacks hashline tools**: strict/hints modes now emit inactive hashline guidance blocks (`active="false"` / `[Inactive]`) instead of silently omitting hashline sections, making beta diagnostics deterministic.
+- **hashline default behavior switched to runtime-auto mode**: `hashlineBridgeHintsMode` now defaults to `auto`, which enables hashline guidance only when runtime tool manifests expose hashline-style tools.
+- **auth header injection strategy chain**: canonical auth headers are now paired with compatibility aliases by default, with explicit canonical-only override support.
+- **account scope + refresh policy controls**: added `policyProfile`, `accountScopeMode`, and `tokenRefreshSkewMode` to support stable/balanced/aggressive defaults, worktree isolation, and adaptive refresh windows.
+- **reasoning safety + model capability sync (opt-in safe default)**: added dynamic Codex model capability cache and automatic reasoning-effort clamp to prevent invalid effort values (for example unsupported `xhigh`) without rewriting model IDs.
+- **route-aware retry policy engine (opt-in)**: added `retryPolicyMode` (`legacy` / `route-matrix`) to centralize retry decisions by failure route while preserving current behavior by default.
+- **reroute observability v2 + json repair + config doctor**: added `rerouteNoticeMode`, `jsonRepairMode`, and `configDoctorMode` for reroute UI notices/logging, safe SSE JSON payload repair, and startup config warnings.
+- **runtime edit-path telemetry**: codex metrics now report edit strategy attempts/success rates and failure-route counters for better runtime debugging.
+- **Codex release parity automation v2**: added `npm run audit:codex:parity` to generate semantic release-note parity matrix artifacts for stable non-beta `openai/codex` releases.
+
+### docs
+
+- **full beta documentation refresh**: README, `docs/configuration.md`, and `config/README.md` now document policy profiles, runtime-safe defaults, advanced toggles, and beginner-focused beta test flow.
+- **generated audit artifacts**: added `docs/audit/codex-release-parity.md` + `docs/audit/codex-release-parity-matrix.md` (with JSON data) for stable non-beta Codex release tracking.
+
+### chores
+
+- **test coverage hardening**: expanded regression coverage for config parsing, retry policy, runtime tool capabilities, model capability clamp/sync, storage adapters, and error fixtures.
+- **audit tooling**: added `scripts/audit-codex-releases.js` plus script/test wiring for reproducible parity reports.
+
 ## [5.2.5-beta] - 2026-02-22
 
 ### fixed

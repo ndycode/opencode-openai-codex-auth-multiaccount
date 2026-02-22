@@ -1,0 +1,16 @@
+{
+	"kind": "errorBody",
+	"name": "tool_argument_missing_run_in_background",
+	"status": 400,
+	"payload": {
+		"error": {
+			"message": "Invalid arguments: 'run_in_background' parameter is REQUIRED for delegate_task."
+		}
+	},
+	"expect": {
+		"route": "other",
+		"toolArgument": true,
+		"toolName": "delegate_task",
+		"missingRequired": ["run_in_background"]
+	}
+}

@@ -75,16 +75,33 @@ Current defaults are strict entitlement handling:
 
 ### Optional hashline guidance mode for edit-tool performance
 
-If you use legacy request transforms and your runtime exposes hashline edit tools, you can enable:
-- `hashlineBridgeHintsMode: "hints"` in `~/.opencode/openai-codex-auth-config.json`
-- or `CODEX_AUTH_HASHLINE_HINTS_MODE=hints`
+If you use legacy request transforms, `hashlineBridgeHintsMode` now defaults to `auto`.
+That means the plugin checks runtime tool names each turn and only enables hashline hints when hashline-style edit tools are actually exposed.
+It also checks runtime tool metadata signals (description/schema) so hashline-backed `edit` overrides can still be detected.
+
+You can still force behavior manually:
+- `hashlineBridgeHintsMode: "auto"` (default), `"off"`, `"hints"`, or `"strict"` in `~/.opencode/openai-codex-auth-config.json`
+- or `CODEX_AUTH_HASHLINE_HINTS_MODE=auto|off|hints|strict`
 
 Modes:
-- `off` (default): disabled
+- `auto` (default): automatic runtime detection
+- `off`: disabled
 - `hints`: soft preference for hashline-style edits over generic patch flows
 - `strict`: hashline-first guidance for targeted edits
 
 Legacy compatibility remains available via `hashlineBridgeHintsBeta` / `CODEX_AUTH_HASHLINE_HINTS_BETA`.
+True hashline execution requires runtime-exposed hashline tools; if runtime only exposes generic edit tools, hashline cannot be forced by config alone.
+
+### Policy profile + account scope defaults
+
+- `policyProfile`: `stable` (default), `balanced`, `aggressive`
+- `accountScopeMode`: `global`, `project` (default), `worktree`
+- `tokenRefreshSkewMode`: `static` (default), `adaptive`
+
+Profile defaults are applied only when specific keys are unset. Explicit settings still win.
+Legacy compatibility:
+- `perProjectAccounts: true|false` maps to `accountScopeMode=project|global`
+- `CODEX_AUTH_PER_PROJECT_ACCOUNTS=1|0` works the same way
 
 Default fallback chain (when policy is `fallback`):
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`

@@ -135,6 +135,42 @@ data: {"type":"response.done","response":{"id":"resp_789"}}
 			expect(body).toEqual({ id: 'resp_789' });
 		});
 
+		it('repairs fenced SSE JSON payloads when jsonRepairMode is safe', async () => {
+			const sseContent = 'data: ```json {\"type\":\"response.done\",\"response\":{\"id\":\"resp_repair\"}} ```';
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers, { jsonRepairMode: 'safe' });
+			const body = await result.json();
+
+			expect(body).toEqual({ id: 'resp_repair' });
+		});
+
+		it('repairs trailing commas in SSE payloads when jsonRepairMode is safe', async () => {
+			const sseContent = `data: {"type":"response.done","response":{"id":"resp_trailing",},}
+`;
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers, { jsonRepairMode: 'safe' });
+			const body = await result.json();
+
+			expect(body).toEqual({ id: 'resp_trailing' });
+		});
+
+		it('does not mutate JSON string content while removing trailing commas', async () => {
+			const sseContent = `data: {"type":"response.done","response":{"id":"resp_safe","output":"literal,} token",},}
+`;
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers, { jsonRepairMode: 'safe' });
+			const body = await result.json() as { id: string; output: string };
+
+			expect(body.id).toBe('resp_safe');
+			expect(body.output).toBe('literal,} token');
+		});
+
 		it('should handle empty SSE stream', async () => {
 			const response = new Response('');
 			const headers = new Headers();

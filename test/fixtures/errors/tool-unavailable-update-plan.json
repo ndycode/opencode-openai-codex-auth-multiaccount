@@ -1,0 +1,15 @@
+{
+	"kind": "errorBody",
+	"name": "tool_unavailable_update_plan",
+	"status": 400,
+	"payload": {
+		"error": {
+			"message": "No tool named 'update_plan' in runtime tool list."
+		}
+	},
+	"expect": {
+		"route": "tool_unavailable",
+		"toolUnavailable": true,
+		"toolName": "update_plan"
+	}
+}

@@ -121,9 +121,11 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 
 ---
 
-## Beta Quickstart (v5.2.4-beta)
+## Beta Quickstart (v5.2.6-beta)
 
 Use this only if you are testing the beta release.
+
+Detailed beta release notes: `docs/releases/v5.2.6-beta.md`
 
 ### Install Beta
 
@@ -135,13 +137,19 @@ npm install -g oc-chatgpt-multi-auth@beta
 
 No extra config is required.
 
+The beta already enables safe defaults for:
+
+- one-time tool argument recovery for known-safe missing fields (for example `run_in_background`)
+- approval/policy errors returning actionable guidance without unnecessary account rotation
+
 ### Optional Beta Feature Config
 
 Enable legacy bridge mode and hashline hint policy:
 
 ```bash
 CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy
-CODEX_AUTH_HASHLINE_HINTS_MODE=off   # or: hints | strict
+CODEX_AUTH_HASHLINE_HINTS_MODE=auto  # default; or: off | hints | strict
+CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE=safe  # default; set off to disable safe auto-recovery
 ```
 
 Legacy compatibility toggle (used only when `CODEX_AUTH_HASHLINE_HINTS_MODE` is unset):
@@ -163,12 +171,19 @@ Then inspect plugin logs for markers:
 - `hashline_beta_hints`
 - `hashline_policy mode="strict"`
 - `tool_unavailable_recovery`
+- `tool_argument_recovery`
 - `runtime_tool_alias_compat` (appears when runtime tool names conflict with generic alias rules)
+
+Also watch warn logs for `Model reroute observed` when the upstream endpoint serves a different effective model than requested.
 
 Hashline marker interpretation:
 
+- `auto` mode checks the runtime tool manifest each turn.
+- Detection uses runtime tool names and hashline capability signals from tool metadata (description/schema) for runtimes that keep the tool name as `edit`.
 - If hashline tools are present, marker block is active.
-- If hashline tools are missing, marker block is emitted with `active="false"` and guidance falls back to runtime-listed edit tools.
+- If hashline tools are missing, marker block is not injected in `auto`; guidance falls back to runtime-listed edit tools.
+- In forced `hints`/`strict`, marker block is still emitted with `active="false"` when hashline tools are missing.
+- True hashline execution requires runtime-exposed hashline edit tools (for example `hashline_*` / `line-hash-*`). If runtime only exposes `apply_patch`/`edit`, hashline cannot be forced.
 
 ### Roll Back To Stable
 
@@ -213,7 +228,9 @@ CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy CODEX_AUTH_HASHLINE_HINTS_MODE=strict o
 |-------|----------|-------|
 | `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 with reasoning levels |
 | `gpt-5-codex` | low, medium, high | Canonical Codex model for code generation (default: high) |
+| `gpt-5.3-codex` | low, medium, high, xhigh | Versioned Codex path (kept as-is in outbound requests) |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Spark IDs are supported by the plugin, but access is entitlement-gated by account/workspace |
+| `gpt-5.2-codex` | low, medium, high, xhigh | Versioned Codex path (kept as-is in outbound requests) |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
 | `gpt-5.1-codex-mini` | medium, high | Lightweight Codex |
@@ -792,21 +809,29 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | Option | Default | What It Does |
 |--------|---------|--------------|
 | `requestTransformMode` | `native` | Request shaping mode: `native` keeps OpenCode payloads unchanged; `legacy` enables Codex compatibility rewrites |
+| `policyProfile` | `stable` | Bundled defaults for advanced toggles (`stable`, `balanced`, `aggressive`) while preserving explicit per-setting overrides |
 | `codexMode` | `true` | Legacy-only bridge prompt behavior (applies when `requestTransformMode=legacy`) |
-| `hashlineBridgeHintsMode` | `off` | Legacy-transform hint mode for hashline runtimes: `off` (disabled), `hints` (soft preference), `strict` (enforce hashline-first guidance for targeted edits) |
-| `hashlineBridgeHintsBeta` | `false` | Legacy compatibility boolean mapped to `hashlineBridgeHintsMode` (`true -> hints`, `false -> off`) |
+| `hashlineBridgeHintsMode` | `auto` | Legacy-transform hint mode for hashline runtimes: `auto` (enable hints only when runtime exposes hashline tools), `off`, `hints`, `strict` |
+| `hashlineBridgeHintsBeta` | `false` | Legacy compatibility boolean used only when `hashlineBridgeHintsMode` is unset (`true -> hints`, `false -> off`) |
 | `codexTuiV2` | `true` | Enables Codex-style terminal UI output (set `false` for legacy output) |
 | `codexTuiColorProfile` | `truecolor` | Terminal color profile for Codex UI (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | Glyph mode for Codex UI (`ascii`, `unicode`, `auto`) |
 | `fastSession` | `false` | Forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=auto`, `textVerbosity=low`) |
 | `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns but keeps full-depth on complex prompts; `always` forces fast tuning on every turn |
 | `fastSessionMaxInputItems` | `30` | Max input items kept when fast tuning is applied |
+| `toolArgumentRecoveryMode` | `safe` | One-time safe retry guidance for common tool argument schema failures; supports `off`, `safe`, `schema-safe` |
+| `retryPolicyMode` | `legacy` | Retry orchestration mode (`legacy` or `route-matrix`) |
+| `rerouteNoticeMode` | `log` | Reroute visibility (`off`, `log`, `log+ui`) |
+| `jsonRepairMode` | `safe` | Safe SSE JSON repair during non-stream conversion (`safe`, `off`) |
+| `configDoctorMode` | `warn` | Startup warnings for conflicting/legacy config settings (`warn`, `off`) |
 
 ### Account Settings (v4.10.0+)
 
 | Option | Default | What It Does |
 |--------|---------|--------------|
-| `perProjectAccounts` | `true` | Each project gets its own account storage namespace under `~/.opencode/projects/` |
+| `accountScopeMode` | `project` | Explicit account storage scope: `global`, `project`, or `worktree` |
+| `perProjectAccounts` | `true` | Legacy boolean compatibility (`true -> project`, `false -> global`) |
+| `tokenRefreshSkewMode` | `static` | Refresh-window mode: `static` uses `tokenRefreshSkewMs`, `adaptive` scales skew by expiry horizon + recent refresh failures |
 | `toastDurationMs` | `5000` | How long toast notifications stay visible (ms) |
 
 ### Retry Behavior
@@ -838,7 +863,8 @@ CODEX_PLUGIN_LOG_BODIES=1 opencode               # Include raw request/response 
 CODEX_PLUGIN_LOG_LEVEL=debug opencode            # Set log level (debug|info|warn|error)
 CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy opencode # Re-enable legacy Codex request rewrites
 CODEX_MODE=0 opencode                            # Temporarily disable bridge prompt
-CODEX_AUTH_HASHLINE_HINTS_MODE=hints opencode   # Hashline guidance mode: off|hints|strict
+CODEX_AUTH_POLICY_PROFILE=balanced opencode     # Apply bundled defaults (stable|balanced|aggressive)
+CODEX_AUTH_HASHLINE_HINTS_MODE=auto opencode    # Hashline guidance mode: auto|off|hints|strict
 CODEX_AUTH_HASHLINE_HINTS_BETA=1 opencode       # Legacy toggle (maps to hints/off when MODE is unset)
 CODEX_TUI_V2=0 opencode                          # Disable Codex-style UI (legacy output)
 CODEX_TUI_COLOR_PROFILE=ansi16 opencode          # Force UI color profile
@@ -847,6 +873,13 @@ CODEX_AUTH_PREWARM=0 opencode                    # Disable startup prewarm (prom
 CODEX_AUTH_FAST_SESSION=1 opencode               # Enable faster response defaults
 CODEX_AUTH_FAST_SESSION_STRATEGY=always opencode # Force fast mode for all prompts
 CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24 opencode # Tune fast-mode history window
+CODEX_AUTH_ACCOUNT_SCOPE_MODE=worktree opencode # Explicit account storage scope (global|project|worktree)
+CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE=schema-safe opencode # Runtime-schema-aware safe tool-arg recovery
+CODEX_AUTH_RETRY_POLICY_MODE=route-matrix opencode # Route-aware retry policy engine (opt-in)
+CODEX_AUTH_REROUTE_NOTICE_MODE=log+ui opencode   # Warn log + TUI toast on upstream model reroute
+CODEX_AUTH_JSON_REPAIR_MODE=safe opencode        # Safe SSE JSON payload repair during non-stream parsing
+CODEX_AUTH_CONFIG_DOCTOR_MODE=warn opencode      # Startup warnings for conflicting/legacy config
+CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE=adaptive opencode # Adaptive token refresh windowing
 CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode # Enable generic unsupported-model fallback
 CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 opencode # Legacy fallback toggle (prefer policy var above)
 CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode    # Disable only the legacy gpt-5.3 -> gpt-5.2 edge
@@ -862,6 +895,8 @@ For all options, see [docs/configuration.md](docs/configuration.md).
 
 - [Getting Started](docs/getting-started.md) — Complete installation guide
 - [Configuration](docs/configuration.md) — All configuration options
+- [Codex Release Audit](docs/audit/codex-release-parity.md) — Stable non-beta Codex release snapshot
+- [Codex Release Parity Matrix](docs/audit/codex-release-parity-matrix.md) — Semantic release-note parity matrix (plugin relevance)
 - [Troubleshooting](docs/troubleshooting.md) — Common issues and fixes
 - [Architecture](docs/development/ARCHITECTURE.md) — How the plugin works
 

@@ -28,6 +28,11 @@ describe("PluginConfigSchema", () => {
 			codexMode: true,
 			hashlineBridgeHintsBeta: true,
 			hashlineBridgeHintsMode: "strict",
+			toolArgumentRecoveryMode: "safe",
+			retryPolicyMode: "route-matrix",
+			rerouteNoticeMode: "log+ui",
+			jsonRepairMode: "safe",
+			configDoctorMode: "warn",
 			fastSession: true,
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 5000,
@@ -80,6 +85,67 @@ describe("PluginConfigSchema", () => {
 
 	it("rejects invalid hashlineBridgeHintsMode", () => {
 		const result = PluginConfigSchema.safeParse({ hashlineBridgeHintsMode: "beta" });
+		expect(result.success).toBe(false);
+	});
+
+	it("accepts hashlineBridgeHintsMode auto", () => {
+		const result = PluginConfigSchema.safeParse({ hashlineBridgeHintsMode: "auto" });
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects invalid toolArgumentRecoveryMode", () => {
+		const result = PluginConfigSchema.safeParse({ toolArgumentRecoveryMode: "invalid" });
+		expect(result.success).toBe(false);
+	});
+
+	it("accepts toolArgumentRecoveryMode safe", () => {
+		const result = PluginConfigSchema.safeParse({ toolArgumentRecoveryMode: "safe" });
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts retryPolicyMode route-matrix", () => {
+		const result = PluginConfigSchema.safeParse({ retryPolicyMode: "route-matrix" });
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects invalid retryPolicyMode", () => {
+		const result = PluginConfigSchema.safeParse({ retryPolicyMode: "matrix" });
+		expect(result.success).toBe(false);
+	});
+
+	it("accepts rerouteNoticeMode log+ui", () => {
+		const result = PluginConfigSchema.safeParse({ rerouteNoticeMode: "log+ui" });
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects invalid rerouteNoticeMode", () => {
+		const result = PluginConfigSchema.safeParse({ rerouteNoticeMode: "ui" });
+		expect(result.success).toBe(false);
+	});
+
+	it("accepts jsonRepairMode safe and configDoctorMode warn", () => {
+		const result = PluginConfigSchema.safeParse({
+			jsonRepairMode: "safe",
+			configDoctorMode: "warn",
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts policyProfile/accountScopeMode/tokenRefreshSkewMode", () => {
+		const result = PluginConfigSchema.safeParse({
+			policyProfile: "aggressive",
+			accountScopeMode: "worktree",
+			tokenRefreshSkewMode: "adaptive",
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects invalid policyProfile/accountScopeMode/tokenRefreshSkewMode", () => {
+		const result = PluginConfigSchema.safeParse({
+			policyProfile: "extreme",
+			accountScopeMode: "workspace",
+			tokenRefreshSkewMode: "dynamic",
+		});
 		expect(result.success).toBe(false);
 	});
 });

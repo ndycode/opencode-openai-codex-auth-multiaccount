@@ -11,8 +11,10 @@ import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type {
 	HashlineBridgeHintsMode,
+	JsonRepairMode,
 	UserConfig,
 	RequestBody,
+	RerouteNoticeMode,
 } from "../types.js";
 import { CodexAuthError } from "../errors.js";
 import { isRecord } from "../utils.js";
@@ -77,12 +79,45 @@ export interface ToolUnavailableInfo {
 	message?: string;
 }
 
+export interface ToolArgumentIssueInfo {
+	isArgumentIssue: boolean;
+	toolName?: string;
+	missingRequired: string[];
+	message?: string;
+}
+
+export interface ApprovalPolicyInfo {
+	isApprovalOrPolicy: boolean;
+	message?: string;
+}
+
 export type FailureRoute =
 	| "rate_limit"
 	| "server_error"
 	| "network_error"
 	| "tool_unavailable"
+	| "approval_or_policy"
 	| "other";
+
+export type AuthInjectionStrategy = "canonical" | "chain";
+
+type AuthHeaderValues = {
+	bearerToken: string;
+	accountId: string;
+	sessionId?: string;
+	conversationId?: string;
+	beta: string;
+	originator: string;
+};
+
+const AUTH_COMPATIBILITY_HEADER_ALIASES = {
+	authorization: ["x-openai-authorization", "x-codex-authorization"],
+	accountId: ["x-openai-account-id", "x-chatgpt-account-id"],
+	beta: ["x-openai-beta"],
+	originator: ["x-openai-originator"],
+	sessionId: ["x-openai-session-id"],
+	conversationId: ["x-openai-conversation-id"],
+} as const;
 
 const TOOL_UNAVAILABLE_PATTERNS = [
 	/tool(?:\s+name)?\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+(?:is\s+)?not\s+found/i,
@@ -93,6 +128,39 @@ const TOOL_UNAVAILABLE_PATTERNS = [
 	/unknown (?:tool|function)(?:\s+name)?[:\s`'"]+([^`'"\s.,:]+)/i,
 	/tool\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+is\s+unavailable/i,
 	/tool\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+is\s+not\s+available(?:\s+in\s+this\s+(?:runtime|environment|context))?/i,
+];
+
+const TOOL_ARGUMENT_ERROR_PATTERNS = [
+	/invalid arguments?/i,
+	/invalid tool arguments?/i,
+	/missing required/i,
+	/parameter\s+is\s+required/i,
+	/required (?:parameter|argument|field|property)/i,
+];
+
+const TOOL_ARGUMENT_NAME_PATTERNS = [
+	/[`'"]([a-zA-Z_][\w-]*)[`'"]\s+parameter\s+is\s+required/gi,
+	/required (?:parameter|argument|field|property)\s*[`'"]?([a-zA-Z_][\w-]*)[`'"]?/gi,
+	/missing (?:required )?(?:parameter|argument|field|property)s?(?:\s+named)?[:\s]+[`'"]?([a-zA-Z_][\w-]*)[`'"]?/gi,
+	/must provide\s+[`'"]?([a-zA-Z_][\w-]*)[`'"]?/gi,
+];
+
+const TOOL_ARGUMENT_TOOL_NAME_PATTERNS = [
+	/tool\s+[`'"]?([a-zA-Z0-9_.-]+)[`'"]?/i,
+	/for\s+([a-zA-Z0-9_.-]+)\s+(?:tool|call)/i,
+	/for\s+[`'"]?([a-zA-Z0-9_.-]+)[`'"]?(?:[.\s]|$)/i,
+];
+
+const APPROVAL_POLICY_PATTERNS = [
+	/approval\s+(?:is\s+)?required/i,
+	/requires?\s+approval/i,
+	/command\s+requires\s+approval/i,
+	/operation\s+requires\s+approval/i,
+	/blocked\s+by\s+(?:security|exec|sandbox|approval)\s+policy/i,
+	/not\s+allowed\s+by\s+(?:security|exec|sandbox|approval)\s+policy/i,
+	/permission\s+denied[^.\n]*(?:sandbox|policy)/i,
+	/sandbox[^.\n]*(?:deny|denied|blocked)/i,
+	/seatbelt[^.\n]*(?:deny|denied|blocked)/i,
 ];
 
 function canonicalizeModelName(model: string | undefined): string | undefined {
@@ -270,6 +338,29 @@ function extractToolUnavailableName(message: string): string | undefined {
 	return undefined;
 }
 
+function extractToolNameFromArgumentError(message: string): string | undefined {
+	for (const pattern of TOOL_ARGUMENT_TOOL_NAME_PATTERNS) {
+		const match = message.match(pattern);
+		const candidate = match?.[1]?.trim().replace(/[.,;:]+$/u, "");
+		if (candidate) return candidate;
+	}
+	return undefined;
+}
+
+function extractMissingRequiredArguments(message: string): string[] {
+	const values = new Set<string>();
+	for (const pattern of TOOL_ARGUMENT_NAME_PATTERNS) {
+		pattern.lastIndex = 0;
+		let match: RegExpExecArray | null = pattern.exec(message);
+		while (match) {
+			const candidate = match[1]?.trim();
+			if (candidate) values.add(candidate);
+			match = pattern.exec(message);
+		}
+	}
+	return [...values];
+}
+
 export function getToolUnavailableInfo(errorBody: unknown): ToolUnavailableInfo {
 	const message = extractMessageFromErrorBody(errorBody);
 	if (!message) return { isToolUnavailable: false };
@@ -288,6 +379,40 @@ export function getToolUnavailableInfo(errorBody: unknown): ToolUnavailableInfo 
 	};
 }
 
+export function getToolArgumentIssueInfo(errorBody: unknown): ToolArgumentIssueInfo {
+	const message = extractMessageFromErrorBody(errorBody);
+	if (!message) {
+		return { isArgumentIssue: false, missingRequired: [] };
+	}
+
+	const missingRequired = extractMissingRequiredArguments(message);
+	const isArgumentIssue =
+		missingRequired.length > 0 ||
+		TOOL_ARGUMENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+	if (!isArgumentIssue) {
+		return { isArgumentIssue: false, missingRequired: [] };
+	}
+
+	return {
+		isArgumentIssue: true,
+		toolName: extractToolNameFromArgumentError(message),
+		missingRequired,
+		message,
+	};
+}
+
+export function getApprovalPolicyInfo(errorBody: unknown): ApprovalPolicyInfo {
+	const message = extractMessageFromErrorBody(errorBody);
+	if (!message) return { isApprovalOrPolicy: false };
+	if (!APPROVAL_POLICY_PATTERNS.some((pattern) => pattern.test(message))) {
+		return { isApprovalOrPolicy: false };
+	}
+	return {
+		isApprovalOrPolicy: true,
+		message,
+	};
+}
+
 export function classifyFailureRoute(options: {
 	status?: number;
 	rateLimit?: RateLimitInfo;
@@ -299,6 +424,9 @@ export function classifyFailureRoute(options: {
 
 	const toolUnavailable = getToolUnavailableInfo(options.errorBody);
 	if (toolUnavailable.isToolUnavailable) return "tool_unavailable";
+
+	const approvalPolicy = getApprovalPolicyInfo(options.errorBody);
+	if (approvalPolicy.isApprovalOrPolicy) return "approval_or_policy";
 
 	if (
 		typeof options.status === "number" &&
@@ -478,6 +606,8 @@ export async function transformRequestForCodex(
 		fastSessionStrategy?: "hybrid" | "always";
 		fastSessionMaxInputItems?: number;
 		hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
+		modelCapabilitySyncMode?: "off" | "safe";
+		modelCapabilityCacheTtlMs?: number;
 	},
 ): Promise<{ body: RequestBody; updatedInit: RequestInit } | undefined> {
 	const hasParsedBody =
@@ -558,7 +688,9 @@ export async function transformRequestForCodex(
 			options?.fastSession ?? false,
 			options?.fastSessionStrategy ?? "hybrid",
 			options?.fastSessionMaxInputItems ?? 30,
-			options?.hashlineBridgeHintsMode ?? "off",
+			options?.hashlineBridgeHintsMode ?? "auto",
+			options?.modelCapabilitySyncMode ?? "off",
+			options?.modelCapabilityCacheTtlMs ?? 600_000,
 		);
 
 		// Log transformed request
@@ -598,11 +730,16 @@ export function createCodexHeaders(
     init: RequestInit | undefined,
     accountId: string,
     accessToken: string,
-    opts?: { model?: string; promptCacheKey?: string },
+    opts?: {
+		model?: string;
+		promptCacheKey?: string;
+		authInjectionStrategy?: AuthInjectionStrategy;
+	},
 ): Headers {
 	const headers = new Headers(init?.headers ?? {});
 	headers.delete("x-api-key"); // Remove any existing API key
-	headers.set("Authorization", `Bearer ${accessToken}`);
+	const bearerToken = `Bearer ${accessToken}`;
+	headers.set("Authorization", bearerToken);
 	headers.set(OPENAI_HEADERS.ACCOUNT_ID, accountId);
 	headers.set(OPENAI_HEADERS.BETA, OPENAI_HEADER_VALUES.BETA_RESPONSES);
 	headers.set(OPENAI_HEADERS.ORIGINATOR, OPENAI_HEADER_VALUES.ORIGINATOR_CODEX);
@@ -615,8 +752,47 @@ export function createCodexHeaders(
         headers.delete(OPENAI_HEADERS.CONVERSATION_ID);
         headers.delete(OPENAI_HEADERS.SESSION_ID);
     }
+
+	const authInjectionStrategy =
+		opts?.authInjectionStrategy === "canonical" ? "canonical" : "chain";
+	applyAuthInjectionStrategy(headers, authInjectionStrategy, {
+		bearerToken,
+		accountId,
+		sessionId: cacheKey,
+		conversationId: cacheKey,
+		beta: OPENAI_HEADER_VALUES.BETA_RESPONSES,
+		originator: OPENAI_HEADER_VALUES.ORIGINATOR_CODEX,
+	});
+
     headers.set("accept", "text/event-stream");
     return headers;
+}
+
+function applyAuthInjectionStrategy(
+	headers: Headers,
+	strategy: AuthInjectionStrategy,
+	values: AuthHeaderValues,
+): void {
+	const isChain = strategy === "chain";
+	const setOrDelete = (aliases: readonly string[], value: string | undefined): void => {
+		for (const alias of aliases) {
+			if (isChain && value) {
+				headers.set(alias, value);
+			} else {
+				headers.delete(alias);
+			}
+		}
+	};
+
+	setOrDelete(AUTH_COMPATIBILITY_HEADER_ALIASES.authorization, values.bearerToken);
+	setOrDelete(AUTH_COMPATIBILITY_HEADER_ALIASES.accountId, values.accountId);
+	setOrDelete(AUTH_COMPATIBILITY_HEADER_ALIASES.beta, values.beta);
+	setOrDelete(AUTH_COMPATIBILITY_HEADER_ALIASES.originator, values.originator);
+	setOrDelete(AUTH_COMPATIBILITY_HEADER_ALIASES.sessionId, values.sessionId);
+	setOrDelete(
+		AUTH_COMPATIBILITY_HEADER_ALIASES.conversationId,
+		values.conversationId,
+	);
 }
 
 /**
@@ -680,7 +856,12 @@ export async function handleErrorResponse(
 export async function handleSuccessResponse(
     response: Response,
     isStreaming: boolean,
-    options?: { streamStallTimeoutMs?: number },
+    options?: {
+		streamStallTimeoutMs?: number;
+		requestedModel?: string;
+		rerouteNoticeMode?: RerouteNoticeMode;
+		jsonRepairMode?: JsonRepairMode;
+	},
 ): Promise<Response> {
     // Check for deprecation headers (RFC 8594)
     const deprecation = response.headers.get("Deprecation");
@@ -689,11 +870,29 @@ export async function handleSuccessResponse(
         logWarn(`API deprecation notice`, { deprecation, sunset });
     }
 
+	const rerouteInfo = getModelRerouteInfoFromHeaders(
+		response.headers,
+		options?.requestedModel,
+	);
+	if (rerouteInfo && (options?.rerouteNoticeMode ?? "log") !== "off") {
+		logWarn("Model reroute observed", rerouteInfo);
+	}
+	if (rerouteInfo) {
+		logRequest(LOG_STAGES.RESPONSE, {
+			status: response.status,
+			requestedModel: options?.requestedModel,
+			reroute: rerouteInfo,
+		});
+	}
+
     const responseHeaders = ensureContentType(response.headers);
 
 	// For non-streaming requests (generateText), convert SSE to JSON
 	if (!isStreaming) {
-		return await convertSseToJson(response, responseHeaders, options);
+		return await convertSseToJson(response, responseHeaders, {
+			streamStallTimeoutMs: options?.streamStallTimeoutMs,
+			jsonRepairMode: options?.jsonRepairMode,
+		});
 	}
 
 	// For streaming requests (streamText), return stream as-is
@@ -702,6 +901,81 @@ export async function handleSuccessResponse(
 		statusText: response.statusText,
 		headers: responseHeaders,
 	});
+}
+
+function getHeaderValue(
+	headers: Headers,
+	names: readonly string[],
+): string | undefined {
+	for (const name of names) {
+		let value: string | null = null;
+		try {
+			value = headers.get(name);
+		} catch {
+			continue;
+		}
+		if (value && value.trim()) {
+			return value.trim();
+		}
+	}
+	return undefined;
+}
+
+export interface ModelRerouteInfo {
+	requestedModel?: string;
+	effectiveModel?: string;
+	reroutedFrom?: string;
+	reroutedTo?: string;
+	headerSignal?: string;
+}
+
+export function getModelRerouteInfoFromHeaders(
+	headers: Headers,
+	requestedModel?: string,
+): ModelRerouteInfo | undefined {
+	const headerSignal = getHeaderValue(headers, [
+		"x-model-rerouted",
+		"x-openai-model-rerouted",
+	]);
+	const reroutedFrom = getHeaderValue(headers, [
+		"x-model-rerouted-from",
+		"x-openai-rerouted-from",
+		"x-rerouted-from-model",
+	]);
+	const reroutedTo = getHeaderValue(headers, [
+		"x-model-rerouted-to",
+		"x-openai-rerouted-to",
+		"x-rerouted-to-model",
+	]);
+	const effectiveModel = getHeaderValue(headers, [
+		"x-openai-model",
+		"openai-model",
+		"x-codex-model",
+		"x-model",
+	]);
+	const effective = reroutedTo ?? effectiveModel;
+
+	const requestedCanonical = canonicalizeModelName(requestedModel);
+	const effectiveCanonical = canonicalizeModelName(effective);
+	const fromCanonical = canonicalizeModelName(reroutedFrom);
+	const differsFromRequested =
+		!!requestedCanonical &&
+		!!effectiveCanonical &&
+		requestedCanonical !== effectiveCanonical;
+	const differsFromSource =
+		!!fromCanonical && !!effectiveCanonical && fromCanonical !== effectiveCanonical;
+
+	if (!headerSignal && !differsFromRequested && !differsFromSource) {
+		return undefined;
+	}
+
+	return {
+		requestedModel,
+		effectiveModel: effective,
+		reroutedFrom,
+		reroutedTo,
+		headerSignal,
+	};
 }
 
 async function safeReadBody(response: Response): Promise<string> {

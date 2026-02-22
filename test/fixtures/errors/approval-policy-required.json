@@ -1,0 +1,14 @@
+{
+	"kind": "errorBody",
+	"name": "approval_policy_required",
+	"status": 403,
+	"payload": {
+		"error": {
+			"message": "Command requires approval and is blocked by sandbox policy."
+		}
+	},
+	"expect": {
+		"route": "approval_or_policy",
+		"approvalOrPolicy": true
+	}
+}

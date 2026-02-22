@@ -492,6 +492,18 @@ If ANY answer is NO → STOP and correct before proceeding.
 </user_instructions>`;
 
 const HASHLINE_TOOL_PATTERN = /(hashline|line[_-]?hash|anchor[_-]?insert)/i;
+type RuntimeToolCapabilitySummary = {
+	hasHashlineCapabilities?: boolean;
+	hasApplyPatch?: boolean;
+	hasPatch?: boolean;
+	hasGenericEdit?: boolean;
+	hasReplace?: boolean;
+	hasUpdatePlan?: boolean;
+	hasTodoWrite?: boolean;
+	hasTaskDelegation?: boolean;
+	supportsBackgroundDelegation?: boolean;
+	primaryEditStrategy?: "hashline-like" | "edit" | "patch" | "apply_patch" | "replace" | "none";
+};
 
 const HASHLINE_BETA_HINT_BLOCK = `
 <hashline_beta_hints priority="0">
@@ -543,17 +555,22 @@ export function hasHashlineRuntimeTool(toolNames: readonly string[] | undefined)
 function appendRuntimeAliasCompatibility(
 	message: string,
 	toolNames: readonly string[] | undefined,
+	capabilitySummary?: RuntimeToolCapabilitySummary,
 ): string {
 	const normalized = normalizeRuntimeToolNames(toolNames);
-	if (normalized.length === 0) return message;
+	if (normalized.length === 0 && !capabilitySummary) return message;
 
 	const lower = new Set(normalized.map((name) => name.toLowerCase()));
-	const hasApplyPatch = lower.has("apply_patch") || lower.has("applypatch");
-	const hasPatch = lower.has("patch");
-	const hasEdit = lower.has("edit");
-	const hasTodoWrite = lower.has("todowrite");
-	const hasUpdatePlan = lower.has("update_plan") || lower.has("updateplan");
-	const hasTask = lower.has("task");
+	const hasApplyPatch =
+		capabilitySummary?.hasApplyPatch ??
+		(lower.has("apply_patch") || lower.has("applypatch"));
+	const hasPatch = capabilitySummary?.hasPatch ?? lower.has("patch");
+	const hasEdit = capabilitySummary?.hasGenericEdit ?? lower.has("edit");
+	const hasTodoWrite = capabilitySummary?.hasTodoWrite ?? lower.has("todowrite");
+	const hasUpdatePlan =
+		capabilitySummary?.hasUpdatePlan ??
+		(lower.has("update_plan") || lower.has("updateplan"));
+	const hasTask = capabilitySummary?.hasTaskDelegation ?? lower.has("task");
 	if (!hasApplyPatch && !hasUpdatePlan && !hasTask) return message;
 
 	const lines: string[] = [];
@@ -582,26 +599,71 @@ ${lines.join("\n")}
 	return message.replace("</user_instructions>", `${block}\n</user_instructions>`);
 }
 
+function appendRuntimeCapabilityStrategy(
+	message: string,
+	capabilitySummary?: RuntimeToolCapabilitySummary,
+): string {
+	if (!capabilitySummary) return message;
+	const strategy = capabilitySummary.primaryEditStrategy ?? "none";
+	if (
+		strategy === "none" &&
+		!capabilitySummary.hasTaskDelegation &&
+		!capabilitySummary.supportsBackgroundDelegation
+	) {
+		return message;
+	}
+
+	const lines: string[] = [];
+	if (strategy === "hashline-like") {
+		lines.push("- Detected hashline-like edit capability; prefer it for targeted in-place edits.");
+	} else if (strategy === "edit" || strategy === "patch" || strategy === "apply_patch" || strategy === "replace") {
+		lines.push(`- Detected primary edit strategy: \`${strategy}\`. Use runtime-listed tools exactly as provided.`);
+	}
+	if (capabilitySummary.supportsBackgroundDelegation) {
+		lines.push("- Task delegation runtime supports explicit `run_in_background`; include it when the schema requires it.");
+	}
+	if (lines.length === 0) return message;
+
+	const block = `
+<runtime_tool_strategy priority="0">
+Runtime tool strategy derived from this request's manifest:
+${lines.join("\n")}
+</runtime_tool_strategy>`;
+	return message.replace("</user_instructions>", `${block}\n</user_instructions>`);
+}
+
 export function renderToolRemapMessage(options?: {
 	hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
 	runtimeToolNames?: readonly string[];
+	runtimeHasHashlineCapabilities?: boolean;
+	runtimeCapabilitySummary?: RuntimeToolCapabilitySummary;
 }): string {
 	const withRuntimeCompat = appendRuntimeAliasCompatibility(
 		TOOL_REMAP_MESSAGE,
 		options?.runtimeToolNames,
+		options?.runtimeCapabilitySummary,
 	);
+	const withRuntimeStrategy = appendRuntimeCapabilityStrategy(
+		withRuntimeCompat,
+		options?.runtimeCapabilitySummary,
+	);
+	const hasHashlineTools =
+		(options?.runtimeCapabilitySummary?.hasHashlineCapabilities ?? false) ||
+		(options?.runtimeHasHashlineCapabilities ?? false) ||
+		hasHashlineRuntimeTool(options?.runtimeToolNames);
 	const mode = normalizeHashlineBridgeHintsMode(options?.hashlineBridgeHintsMode);
-	if (mode === "off") return withRuntimeCompat;
-	const hasHashlineTools = hasHashlineRuntimeTool(options?.runtimeToolNames);
+	const effectiveMode: Exclude<HashlineBridgeHintsMode, "auto"> =
+		mode === "auto" ? (hasHashlineTools ? "hints" : "off") : mode;
+	if (effectiveMode === "off") return withRuntimeStrategy;
 
 	const hintBlock = hasHashlineTools
-		? mode === "strict"
+		? effectiveMode === "strict"
 			? HASHLINE_STRICT_HINT_BLOCK
 			: HASHLINE_BETA_HINT_BLOCK
-		: mode === "strict"
+		: effectiveMode === "strict"
 			? HASHLINE_STRICT_HINT_INACTIVE_BLOCK
 			: HASHLINE_BETA_HINT_INACTIVE_BLOCK;
-	return withRuntimeCompat.replace(
+	return withRuntimeStrategy.replace(
 		"</user_instructions>",
 		`${hintBlock}\n</user_instructions>`,
 	);
@@ -611,7 +673,8 @@ function normalizeHashlineBridgeHintsMode(
 	mode: HashlineBridgeHintsMode | boolean | undefined,
 ): HashlineBridgeHintsMode {
 	if (mode === true) return "hints";
-	if (mode === false || mode === undefined) return "off";
-	if (mode === "strict" || mode === "hints") return mode;
-	return "off";
+	if (mode === false) return "off";
+	if (mode === undefined) return "auto";
+	if (mode === "strict" || mode === "hints" || mode === "auto") return mode;
+	return "auto";
 }

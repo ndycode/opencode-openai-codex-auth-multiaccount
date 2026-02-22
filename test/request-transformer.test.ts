@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
     normalizeModel,
     getModelConfig,
+	getReasoningConfig,
     filterInput,
     addToolRemapMessage,
     isOpenCodeSystemPrompt,
@@ -9,13 +10,26 @@ import {
 	filterOpenCodeSystemPromptsWithCachedPrompt,
 	addCodexBridgeMessage,
 	addToolUnavailableRecoveryMessage,
+	addToolArgumentRecoveryMessage,
 	transformRequestBody,
 } from '../lib/request/request-transformer.js';
+import {
+	__resetModelCapabilitiesCacheForTests,
+	__setModelCapabilitiesCacheForTests,
+} from '../lib/request/model-capabilities.js';
 import { TOOL_REMAP_MESSAGE } from '../lib/prompts/codex.js';
 import { CODEX_OPENCODE_BRIDGE } from '../lib/prompts/codex-opencode-bridge.js';
 import type { RequestBody, UserConfig, InputItem } from '../lib/types.js';
 
 describe('Request Transformer Module', () => {
+	beforeEach(() => {
+		__resetModelCapabilitiesCacheForTests();
+	});
+
+	afterEach(() => {
+		__resetModelCapabilitiesCacheForTests();
+	});
+
 	describe('normalizeModel', () => {
 		// NOTE: All gpt-5 models now normalize to gpt-5.1 as gpt-5 is being phased out
 		it('should normalize gpt-5-codex to gpt-5.1-codex', async () => {
@@ -85,35 +99,35 @@ describe('Request Transformer Module', () => {
 			});
 
 				it('should normalize gpt-5.2 codex presets', async () => {
-					expect(normalizeModel('gpt-5.2-codex')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.2-codex-low')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.2-codex-medium')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.2-codex-high')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.2-codex-xhigh')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.2-codex-xhigh')).toBe('gpt-5-codex');
+					expect(normalizeModel('gpt-5.2-codex')).toBe('gpt-5.2-codex');
+					expect(normalizeModel('gpt-5.2-codex-low')).toBe('gpt-5.2-codex');
+					expect(normalizeModel('gpt-5.2-codex-medium')).toBe('gpt-5.2-codex');
+					expect(normalizeModel('gpt-5.2-codex-high')).toBe('gpt-5.2-codex');
+					expect(normalizeModel('gpt-5.2-codex-xhigh')).toBe('gpt-5.2-codex');
+					expect(normalizeModel('openai/gpt-5.2-codex-xhigh')).toBe('gpt-5.2-codex');
 				});
 
 				it('should normalize gpt-5.3 codex presets', async () => {
-					expect(normalizeModel('gpt-5.3-codex')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-low')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-medium')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-high')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-xhigh')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.3-codex-xhigh')).toBe('gpt-5-codex');
+					expect(normalizeModel('gpt-5.3-codex')).toBe('gpt-5.3-codex');
+					expect(normalizeModel('gpt-5.3-codex-low')).toBe('gpt-5.3-codex');
+					expect(normalizeModel('gpt-5.3-codex-medium')).toBe('gpt-5.3-codex');
+					expect(normalizeModel('gpt-5.3-codex-high')).toBe('gpt-5.3-codex');
+					expect(normalizeModel('gpt-5.3-codex-xhigh')).toBe('gpt-5.3-codex');
+					expect(normalizeModel('openai/gpt-5.3-codex-xhigh')).toBe('gpt-5.3-codex');
 				});
 
 				it('should normalize gpt-5.3 codex spark presets', async () => {
-					expect(normalizeModel('gpt-5.3-codex-spark')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-low')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-medium')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-high')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-xhigh')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.3-codex-spark-xhigh')).toBe('gpt-5-codex');
+					expect(normalizeModel('gpt-5.3-codex-spark')).toBe('gpt-5.3-codex-spark');
+					expect(normalizeModel('gpt-5.3-codex-spark-low')).toBe('gpt-5.3-codex-spark');
+					expect(normalizeModel('gpt-5.3-codex-spark-medium')).toBe('gpt-5.3-codex-spark');
+					expect(normalizeModel('gpt-5.3-codex-spark-high')).toBe('gpt-5.3-codex-spark');
+					expect(normalizeModel('gpt-5.3-codex-spark-xhigh')).toBe('gpt-5.3-codex-spark');
+					expect(normalizeModel('openai/gpt-5.3-codex-spark-xhigh')).toBe('gpt-5.3-codex-spark');
 				});
 
 			it('should normalize gpt-5.1 codex and mini slugs', async () => {
-					expect(normalizeModel('gpt-5.1-codex')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.1-codex')).toBe('gpt-5-codex');
+					expect(normalizeModel('gpt-5.1-codex')).toBe('gpt-5.1-codex');
+					expect(normalizeModel('openai/gpt-5.1-codex')).toBe('gpt-5.1-codex');
 					expect(normalizeModel('gpt-5.1-codex-mini')).toBe('gpt-5.1-codex-mini');
 					expect(normalizeModel('gpt-5.1-codex-mini-low')).toBe('gpt-5.1-codex-mini');
 					expect(normalizeModel('gpt-5.1-codex-mini-high')).toBe('gpt-5.1-codex-mini');
@@ -133,7 +147,7 @@ describe('Request Transformer Module', () => {
 				expect(normalizeModel('GPT-5-CODEX')).toBe('gpt-5-codex');
 				expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5.1');
 				expect(normalizeModel('CODEx-MINI-LATEST')).toBe('gpt-5.1-codex-mini');
-				expect(normalizeModel('GPT-5.3-CODEX-SPARK')).toBe('gpt-5-codex');
+				expect(normalizeModel('GPT-5.3-CODEX-SPARK')).toBe('gpt-5.3-codex-spark');
 			});
 
 			it('should handle mixed case', async () => {
@@ -442,6 +456,20 @@ describe('Request Transformer Module', () => {
 			expect(text).toContain('Prefer hashline tools');
 		});
 
+		it('should add hashline beta hints when runtime signals hashline capability behind generic tool names', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolRemapMessage(
+				input,
+				true,
+				['edit', 'bash'],
+				'auto',
+				true,
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('hashline_beta_hints');
+			expect(text).not.toContain('active="false"');
+		});
+
 		it('should add strict hashline policy when strict mode is enabled', async () => {
 			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
 			const result = addToolRemapMessage(
@@ -479,6 +507,19 @@ describe('Request Transformer Module', () => {
 			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
 			expect(text).toContain('runtime_tool_alias_compat');
 			expect(text).toContain('use `apply_patch` exactly as listed');
+		});
+
+		it('should not duplicate tool remap guidance when marker already exists', async () => {
+			const input: InputItem[] = [
+				{
+					type: 'message',
+					role: 'developer',
+					content: [{ type: 'input_text', text: '<tool_replacements priority="0">existing</tool_replacements>' }],
+				},
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addToolRemapMessage(input, true);
+			expect(result).toEqual(input);
 		});
 	});
 
@@ -727,6 +768,20 @@ describe('Request Transformer Module', () => {
 			expect(text).toContain('prefer them for targeted edits');
 		});
 
+		it('should append hashline section when runtime signals hashline capability behind generic tool names', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addCodexBridgeMessage(
+				input,
+				true,
+				['edit', 'bash'],
+				'auto',
+				true,
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('Hashline Edit Preference (Beta)');
+			expect(text).not.toContain('[Inactive]');
+		});
+
 		it('should append strict hashline section when strict mode is enabled', async () => {
 			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
 			const result = addCodexBridgeMessage(
@@ -751,6 +806,19 @@ describe('Request Transformer Module', () => {
 			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
 			expect(text).toContain('Hashline Edit Policy (Strict) [Inactive]');
 			expect(text).toContain('no hashline-style tools were found');
+		});
+
+		it('should not duplicate codex bridge guidance when marker already exists', async () => {
+			const input: InputItem[] = [
+				{
+					type: 'message',
+					role: 'developer',
+					content: [{ type: 'input_text', text: '# Codex Running in OpenCode\nexisting bridge' }],
+				},
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addCodexBridgeMessage(input, true);
+			expect(result).toEqual(input);
 		});
 	});
 
@@ -778,6 +846,91 @@ describe('Request Transformer Module', () => {
 
 		it('should return undefined for undefined input', async () => {
 			expect(addToolUnavailableRecoveryMessage(undefined, 'apply_patch')).toBeUndefined();
+		});
+	});
+
+	describe('addToolArgumentRecoveryMessage', () => {
+		it('should prepend recovery guidance with missing required args', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolArgumentRecoveryMessage(input, {
+				toolName: 'delegate_task',
+				missingRequired: ['run_in_background'],
+			});
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('<tool_argument_recovery');
+			expect(text).toContain('`delegate_task`');
+			expect(text).toContain('`run_in_background`');
+			expect(text).toContain('run_in_background=false');
+		});
+
+		it('should not duplicate tool argument recovery guidance', async () => {
+			const input: InputItem[] = [
+				{
+					type: 'message',
+					role: 'developer',
+					content: [{ type: 'input_text', text: '<tool_argument_recovery priority="0">existing</tool_argument_recovery>' }],
+				},
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addToolArgumentRecoveryMessage(input, {
+				missingRequired: ['run_in_background'],
+			});
+			expect(result).toEqual(input);
+		});
+
+		it('should include schema-safe runtime required guidance', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolArgumentRecoveryMessage(input, {
+				toolName: 'delegate_task',
+				missingRequired: ['run_in_background'],
+				runtimeRequired: ['run_in_background', 'task'],
+				recoveryMode: 'schema-safe',
+			});
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('runtime tool schema');
+			expect(text).toContain('`task`');
+		});
+	});
+
+	describe('getReasoningConfig (capability sync)', () => {
+		it('clamps xhigh when dynamic capabilities do not support it', () => {
+			__setModelCapabilitiesCacheForTests([
+				{
+					model: 'gpt-5.3-codex',
+					supportedReasoningEfforts: ['low', 'medium', 'high'],
+					defaultReasoningEffort: 'medium',
+					source: 'dynamic',
+					updatedAt: Date.now(),
+				},
+			]);
+
+			const result = getReasoningConfig(
+				'gpt-5.3-codex',
+				{ reasoningEffort: 'xhigh' },
+				{ modelCapabilitySyncMode: 'safe' },
+			);
+
+			expect(result.effort).toBe('high');
+		});
+
+		it('preserves xhigh when dynamic capabilities support it', () => {
+			__setModelCapabilitiesCacheForTests([
+				{
+					model: 'gpt-5.3-codex',
+					supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+					defaultReasoningEffort: 'medium',
+					source: 'dynamic',
+					updatedAt: Date.now(),
+				},
+			]);
+
+			const result = getReasoningConfig(
+				'gpt-5.3-codex',
+				{ reasoningEffort: 'xhigh' },
+				{ modelCapabilitySyncMode: 'safe' },
+			);
+
+			expect(result.effort).toBe('xhigh');
 		});
 	});
 
@@ -1528,7 +1681,7 @@ describe('Request Transformer Module', () => {
 					input: [],
 				};
 				const result = await transformRequestBody(body, codexInstructions);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.2-codex');
 				expect(result.reasoning?.effort).toBe('xhigh');
 			});
 
@@ -1538,7 +1691,7 @@ describe('Request Transformer Module', () => {
 					input: [],
 				};
 				const result = await transformRequestBody(body, codexInstructions);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.3-codex');
 				expect(result.reasoning?.effort).toBe('xhigh');
 			});
 
@@ -1548,7 +1701,7 @@ describe('Request Transformer Module', () => {
 					input: [],
 				};
 				const result = await transformRequestBody(body, codexInstructions);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.3-codex-spark');
 				expect(result.reasoning?.effort).toBe('xhigh');
 			});
 
@@ -1585,7 +1738,7 @@ describe('Request Transformer Module', () => {
 				},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-			expect(result.model).toBe('gpt-5-codex');
+			expect(result.model).toBe('gpt-5.2-codex');
 				expect(result.reasoning?.effort).toBe('xhigh');
 				expect(result.reasoning?.summary).toBe('detailed');
 			});
@@ -1604,7 +1757,7 @@ describe('Request Transformer Module', () => {
 					},
 				};
 				const result = await transformRequestBody(body, codexInstructions, userConfig);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.3-codex');
 				expect(result.reasoning?.effort).toBe('xhigh');
 				expect(result.reasoning?.summary).toBe('detailed');
 			});
@@ -1619,7 +1772,7 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-			expect(result.model).toBe('gpt-5-codex');
+			expect(result.model).toBe('gpt-5.1-codex');
 			expect(result.reasoning?.effort).toBe('high');
 		});
 
@@ -1661,7 +1814,7 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.2-codex');
 				expect(result.reasoning?.effort).toBe('low');
 			});
 
@@ -1675,7 +1828,7 @@ describe('Request Transformer Module', () => {
 					models: {},
 				};
 				const result = await transformRequestBody(body, codexInstructions, userConfig);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.3-codex');
 				expect(result.reasoning?.effort).toBe('low');
 			});
 
@@ -1689,7 +1842,7 @@ describe('Request Transformer Module', () => {
 					models: {},
 				};
 				const result = await transformRequestBody(body, codexInstructions, userConfig);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.3-codex-spark');
 				expect(result.reasoning?.effort).toBe('low');
 			});
 
@@ -1703,7 +1856,7 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.2-codex');
 				expect(result.reasoning?.effort).toBe('low');
 			});
 
@@ -1717,7 +1870,7 @@ describe('Request Transformer Module', () => {
 					models: {},
 				};
 				const result = await transformRequestBody(body, codexInstructions, userConfig);
-				expect(result.model).toBe('gpt-5-codex');
+				expect(result.model).toBe('gpt-5.3-codex');
 				expect(result.reasoning?.effort).toBe('low');
 			});
 
@@ -1745,7 +1898,7 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-			expect(result.model).toBe('gpt-5-codex');
+			expect(result.model).toBe('gpt-5.1-codex');
 			expect(result.reasoning?.effort).toBe('low');
 		});
 
@@ -1957,6 +2110,33 @@ describe('Request Transformer Module', () => {
 				expect(bridgeText).toContain('hashline-style edit tools');
 			});
 
+			it('should detect hashline capability from tool description in bridge auto mode', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [
+						{
+							type: 'function',
+							function: {
+								name: 'edit',
+								description: 'Hashline-backed edit tool with strict anchor validation',
+								parameters: { type: 'object', properties: {} },
+							},
+						},
+					] as unknown,
+				};
+
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+				);
+				const bridgeText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+				expect(bridgeText).toContain('Hashline Edit Preference (Beta)');
+				expect(bridgeText).not.toContain('[Inactive]');
+			});
+
 			it('should filter OpenCode prompts when codexMode=true', async () => {
 				const body: RequestBody = {
 					model: 'gpt-5',
@@ -2031,6 +2211,32 @@ describe('Request Transformer Module', () => {
 				const remapText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
 				expect(remapText).toContain('hashline_beta_hints');
 				expect(remapText).toContain('Prefer hashline tools');
+			});
+
+			it('should detect hashline capability from tool description in auto mode', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [
+						{
+							type: 'function',
+							function: {
+								name: 'edit',
+								description: 'Hashline-backed edit tool with anchor insert support',
+								parameters: { type: 'object', properties: {} },
+							},
+						},
+					] as unknown,
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					false,
+				);
+				const remapText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+				expect(remapText).toContain('hashline_beta_hints');
+				expect(remapText).not.toContain('active="false"');
 			});
 
 			it('should not filter OpenCode prompts when codexMode=false', async () => {

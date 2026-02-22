@@ -24,30 +24,30 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5-codex-xhigh": "gpt-5-codex",
 
 	// ============================================================================
-	// GPT-5.3 Codex Spark Models (legacy aliases)
+	// GPT-5.3 Codex Spark Models
 	// ============================================================================
-	"gpt-5.3-codex-spark": "gpt-5-codex",
-	"gpt-5.3-codex-spark-low": "gpt-5-codex",
-	"gpt-5.3-codex-spark-medium": "gpt-5-codex",
-	"gpt-5.3-codex-spark-high": "gpt-5-codex",
-	"gpt-5.3-codex-spark-xhigh": "gpt-5-codex",
+	"gpt-5.3-codex-spark": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-low": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-medium": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-high": "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-spark-xhigh": "gpt-5.3-codex-spark",
 
 	// ============================================================================
-	// GPT-5.3 Codex Models (legacy aliases)
+	// GPT-5.3 Codex Models
 	// ============================================================================
-	"gpt-5.3-codex": "gpt-5-codex",
-	"gpt-5.3-codex-low": "gpt-5-codex",
-	"gpt-5.3-codex-medium": "gpt-5-codex",
-	"gpt-5.3-codex-high": "gpt-5-codex",
-	"gpt-5.3-codex-xhigh": "gpt-5-codex",
+	"gpt-5.3-codex": "gpt-5.3-codex",
+	"gpt-5.3-codex-low": "gpt-5.3-codex",
+	"gpt-5.3-codex-medium": "gpt-5.3-codex",
+	"gpt-5.3-codex-high": "gpt-5.3-codex",
+	"gpt-5.3-codex-xhigh": "gpt-5.3-codex",
 
 	// ============================================================================
-	// GPT-5.1 Codex Models (legacy aliases)
+	// GPT-5.1 Codex Models
 	// ============================================================================
-	"gpt-5.1-codex": "gpt-5-codex",
-	"gpt-5.1-codex-low": "gpt-5-codex",
-	"gpt-5.1-codex-medium": "gpt-5-codex",
-	"gpt-5.1-codex-high": "gpt-5-codex",
+	"gpt-5.1-codex": "gpt-5.1-codex",
+	"gpt-5.1-codex-low": "gpt-5.1-codex",
+	"gpt-5.1-codex-medium": "gpt-5.1-codex",
+	"gpt-5.1-codex-high": "gpt-5.1-codex",
 
 	// ============================================================================
 	// GPT-5.1 Codex Max Models
@@ -69,13 +69,13 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.2-xhigh": "gpt-5.2",
 
 	// ============================================================================
-	// GPT-5.2 Codex Models (legacy aliases)
+	// GPT-5.2 Codex Models
 	// ============================================================================
-	"gpt-5.2-codex": "gpt-5-codex",
-	"gpt-5.2-codex-low": "gpt-5-codex",
-	"gpt-5.2-codex-medium": "gpt-5-codex",
-	"gpt-5.2-codex-high": "gpt-5-codex",
-	"gpt-5.2-codex-xhigh": "gpt-5-codex",
+	"gpt-5.2-codex": "gpt-5.2-codex",
+	"gpt-5.2-codex-low": "gpt-5.2-codex",
+	"gpt-5.2-codex-medium": "gpt-5.2-codex",
+	"gpt-5.2-codex-high": "gpt-5.2-codex",
+	"gpt-5.2-codex-xhigh": "gpt-5.2-codex",
 
 	// ============================================================================
 	// GPT-5.1 Codex Mini Models

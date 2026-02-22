@@ -1,7 +1,19 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { HashlineBridgeHintsMode, PluginConfig } from "./types.js";
+import type {
+	AccountScopeMode,
+	ConfigDoctorMode,
+	HashlineBridgeHintsMode,
+	JsonRepairMode,
+	ModelCapabilitySyncMode,
+	PolicyProfile,
+	PluginConfig,
+	RerouteNoticeMode,
+	RetryPolicyMode,
+	TokenRefreshSkewMode,
+	ToolArgumentRecoveryMode,
+} from "./types.js";
 import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
@@ -10,7 +22,64 @@ const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
-const HASHLINE_BRIDGE_HINT_MODES = new Set(["off", "hints", "strict"]);
+const HASHLINE_BRIDGE_HINT_MODES = new Set(["off", "hints", "strict", "auto"]);
+const TOOL_ARGUMENT_RECOVERY_MODES = new Set(["off", "safe", "schema-safe"]);
+const MODEL_CAPABILITY_SYNC_MODES = new Set(["off", "safe"]);
+const RETRY_POLICY_MODES = new Set(["legacy", "route-matrix"]);
+const REROUTE_NOTICE_MODES = new Set(["off", "log", "log+ui"]);
+const JSON_REPAIR_MODES = new Set(["off", "safe"]);
+const CONFIG_DOCTOR_MODES = new Set(["off", "warn"]);
+const ACCOUNT_SCOPE_MODES = new Set(["global", "project", "worktree"]);
+const TOKEN_REFRESH_SKEW_MODES = new Set(["static", "adaptive"]);
+const POLICY_PROFILES = new Set(["stable", "balanced", "aggressive"]);
+
+type PolicyDefaults = {
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode;
+	toolArgumentRecoveryMode: ToolArgumentRecoveryMode;
+	modelCapabilitySyncMode: ModelCapabilitySyncMode;
+	retryPolicyMode: RetryPolicyMode;
+	rerouteNoticeMode: RerouteNoticeMode;
+	jsonRepairMode: JsonRepairMode;
+	configDoctorMode: ConfigDoctorMode;
+	accountScopeMode: AccountScopeMode;
+	tokenRefreshSkewMode: TokenRefreshSkewMode;
+};
+
+const POLICY_PROFILE_DEFAULTS: Record<PolicyProfile, PolicyDefaults> = {
+	stable: {
+		hashlineBridgeHintsMode: "auto",
+		toolArgumentRecoveryMode: "safe",
+		modelCapabilitySyncMode: "safe",
+		retryPolicyMode: "legacy",
+		rerouteNoticeMode: "log",
+		jsonRepairMode: "safe",
+		configDoctorMode: "warn",
+		accountScopeMode: "project",
+		tokenRefreshSkewMode: "static",
+	},
+	balanced: {
+		hashlineBridgeHintsMode: "hints",
+		toolArgumentRecoveryMode: "safe",
+		modelCapabilitySyncMode: "safe",
+		retryPolicyMode: "route-matrix",
+		rerouteNoticeMode: "log+ui",
+		jsonRepairMode: "safe",
+		configDoctorMode: "warn",
+		accountScopeMode: "project",
+		tokenRefreshSkewMode: "adaptive",
+	},
+	aggressive: {
+		hashlineBridgeHintsMode: "strict",
+		toolArgumentRecoveryMode: "schema-safe",
+		modelCapabilitySyncMode: "safe",
+		retryPolicyMode: "route-matrix",
+		rerouteNoticeMode: "log+ui",
+		jsonRepairMode: "safe",
+		configDoctorMode: "warn",
+		accountScopeMode: "worktree",
+		tokenRefreshSkewMode: "adaptive",
+	},
+};
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -21,6 +90,13 @@ export type UnsupportedCodexPolicy = "strict" | "fallback";
 const DEFAULT_CONFIG: PluginConfig = {
 	codexMode: true,
 	requestTransformMode: "native",
+	toolArgumentRecoveryMode: "safe",
+	modelCapabilitySyncMode: "safe",
+	modelCapabilityCacheTtlMs: 600_000,
+	retryPolicyMode: "legacy",
+	rerouteNoticeMode: "log",
+	jsonRepairMode: "safe",
+	configDoctorMode: "warn",
 	codexTuiV2: true,
 	codexTuiColorProfile: "truecolor",
 	codexTuiGlyphMode: "ascii",
@@ -173,13 +249,26 @@ function resolveStringSetting<T extends string>(
 	return defaultValue;
 }
 
+export function getPolicyProfile(pluginConfig: PluginConfig): PolicyProfile {
+	return resolveStringSetting(
+		"CODEX_AUTH_POLICY_PROFILE",
+		pluginConfig.policyProfile,
+		"stable",
+		POLICY_PROFILES,
+	);
+}
+
+function getPolicyDefaults(pluginConfig: PluginConfig): PolicyDefaults {
+	return POLICY_PROFILE_DEFAULTS[getPolicyProfile(pluginConfig)];
+}
+
 export function getCodexMode(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_MODE", pluginConfig.codexMode, true);
 }
 
 /**
  * Resolve hashline hint mode with backward-compatible fallback:
- * - Preferred: CODEX_AUTH_HASHLINE_HINTS_MODE=off|hints|strict
+ * - Preferred: CODEX_AUTH_HASHLINE_HINTS_MODE=off|hints|strict|auto
  * - Legacy env: CODEX_AUTH_HASHLINE_HINTS_BETA=0|1
  * - Preferred config: hashlineBridgeHintsMode
  * - Legacy config: hashlineBridgeHintsBeta
@@ -187,6 +276,7 @@ export function getCodexMode(pluginConfig: PluginConfig): boolean {
 export function getHashlineBridgeHintsMode(
 	pluginConfig: PluginConfig,
 ): HashlineBridgeHintsMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
 	const envMode = parseStringEnv(process.env.CODEX_AUTH_HASHLINE_HINTS_MODE);
 	if (envMode && HASHLINE_BRIDGE_HINT_MODES.has(envMode)) {
 		return envMode as HashlineBridgeHintsMode;
@@ -209,7 +299,7 @@ export function getHashlineBridgeHintsMode(
 		return pluginConfig.hashlineBridgeHintsBeta ? "hints" : "off";
 	}
 
-	return "off";
+	return profileDefaults.hashlineBridgeHintsMode;
 }
 
 /**
@@ -226,6 +316,79 @@ export function getRequestTransformMode(pluginConfig: PluginConfig): "native" | 
 		pluginConfig.requestTransformMode,
 		"native",
 		REQUEST_TRANSFORM_MODES,
+	);
+}
+
+export function getToolArgumentRecoveryMode(
+	pluginConfig: PluginConfig,
+): ToolArgumentRecoveryMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE",
+		pluginConfig.toolArgumentRecoveryMode,
+		profileDefaults.toolArgumentRecoveryMode,
+		TOOL_ARGUMENT_RECOVERY_MODES,
+	);
+}
+
+export function getModelCapabilitySyncMode(
+	pluginConfig: PluginConfig,
+): ModelCapabilitySyncMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_MODEL_CAPABILITY_SYNC_MODE",
+		pluginConfig.modelCapabilitySyncMode,
+		profileDefaults.modelCapabilitySyncMode,
+		MODEL_CAPABILITY_SYNC_MODES,
+	);
+}
+
+export function getModelCapabilityCacheTtlMs(pluginConfig: PluginConfig): number {
+	return resolveNumberSetting(
+		"CODEX_AUTH_MODEL_CAPABILITY_CACHE_TTL_MS",
+		pluginConfig.modelCapabilityCacheTtlMs,
+		600_000,
+		{ min: 1_000 },
+	);
+}
+
+export function getRetryPolicyMode(pluginConfig: PluginConfig): RetryPolicyMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_RETRY_POLICY_MODE",
+		pluginConfig.retryPolicyMode,
+		profileDefaults.retryPolicyMode,
+		RETRY_POLICY_MODES,
+	);
+}
+
+export function getRerouteNoticeMode(pluginConfig: PluginConfig): RerouteNoticeMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_REROUTE_NOTICE_MODE",
+		pluginConfig.rerouteNoticeMode,
+		profileDefaults.rerouteNoticeMode,
+		REROUTE_NOTICE_MODES,
+	);
+}
+
+export function getJsonRepairMode(pluginConfig: PluginConfig): JsonRepairMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_JSON_REPAIR_MODE",
+		pluginConfig.jsonRepairMode,
+		profileDefaults.jsonRepairMode,
+		JSON_REPAIR_MODES,
+	);
+}
+
+export function getConfigDoctorMode(pluginConfig: PluginConfig): ConfigDoctorMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_CONFIG_DOCTOR_MODE",
+		pluginConfig.configDoctorMode,
+		profileDefaults.configDoctorMode,
+		CONFIG_DOCTOR_MODES,
 	);
 }
 
@@ -384,6 +547,18 @@ export function getUnsupportedCodexFallbackChain(
 	return normalized;
 }
 
+export function getTokenRefreshSkewMode(
+	pluginConfig: PluginConfig,
+): TokenRefreshSkewMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	return resolveStringSetting(
+		"CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE",
+		pluginConfig.tokenRefreshSkewMode,
+		profileDefaults.tokenRefreshSkewMode,
+		TOKEN_REFRESH_SKEW_MODES,
+	);
+}
+
 export function getTokenRefreshSkewMs(pluginConfig: PluginConfig): number {
 	return resolveNumberSetting(
 		"CODEX_AUTH_TOKEN_REFRESH_SKEW_MS",
@@ -428,11 +603,38 @@ export function getToastDurationMs(pluginConfig: PluginConfig): number {
 }
 
 export function getPerProjectAccounts(pluginConfig: PluginConfig): boolean {
-	return resolveBooleanSetting(
-		"CODEX_AUTH_PER_PROJECT_ACCOUNTS",
-		pluginConfig.perProjectAccounts,
-		true,
+	return getAccountScopeMode(pluginConfig) !== "global";
+}
+
+export function getAccountScopeMode(
+	pluginConfig: PluginConfig,
+): AccountScopeMode {
+	const profileDefaults = getPolicyDefaults(pluginConfig);
+	const envMode = parseStringEnv(process.env.CODEX_AUTH_ACCOUNT_SCOPE_MODE);
+	if (envMode && ACCOUNT_SCOPE_MODES.has(envMode)) {
+		return envMode as AccountScopeMode;
+	}
+
+	const configMode =
+		typeof pluginConfig.accountScopeMode === "string"
+			? pluginConfig.accountScopeMode.trim().toLowerCase()
+			: undefined;
+	if (configMode && ACCOUNT_SCOPE_MODES.has(configMode)) {
+		return configMode as AccountScopeMode;
+	}
+
+	const legacyEnvPerProject = parseBooleanEnv(
+		process.env.CODEX_AUTH_PER_PROJECT_ACCOUNTS,
 	);
+	if (legacyEnvPerProject !== undefined) {
+		return legacyEnvPerProject ? "project" : "global";
+	}
+
+	if (typeof pluginConfig.perProjectAccounts === "boolean") {
+		return pluginConfig.perProjectAccounts ? "project" : "global";
+	}
+
+	return profileDefaults.accountScopeMode;
 }
 
 export function getParallelProbing(pluginConfig: PluginConfig): boolean {
@@ -494,4 +696,74 @@ export function getStreamStallTimeoutMs(pluginConfig: PluginConfig): number {
 		45_000,
 		{ min: 1_000 },
 	);
+}
+
+export function collectConfigDoctorWarnings(pluginConfig: PluginConfig): string[] {
+	const warnings: string[] = [];
+
+	if (
+		typeof pluginConfig.hashlineBridgeHintsBeta === "boolean" &&
+		typeof pluginConfig.hashlineBridgeHintsMode === "string"
+	) {
+		const legacyMode = pluginConfig.hashlineBridgeHintsBeta ? "hints" : "off";
+		const explicitMode = pluginConfig.hashlineBridgeHintsMode.trim().toLowerCase();
+		if (HASHLINE_BRIDGE_HINT_MODES.has(explicitMode) && explicitMode !== legacyMode) {
+			warnings.push(
+				`Conflicting hashline settings: hashlineBridgeHintsBeta=${String(pluginConfig.hashlineBridgeHintsBeta)} vs hashlineBridgeHintsMode="${pluginConfig.hashlineBridgeHintsMode}". Prefer hashlineBridgeHintsMode only.`,
+			);
+		}
+	}
+
+	if (
+		typeof pluginConfig.modelCapabilityCacheTtlMs === "number" &&
+		getModelCapabilitySyncMode(pluginConfig) === "off"
+	) {
+		warnings.push(
+			`modelCapabilityCacheTtlMs is set but modelCapabilitySyncMode is off; TTL is ignored until capability sync is enabled.`,
+		);
+	}
+
+	if (
+		typeof pluginConfig.unsupportedCodexPolicy === "string" &&
+		typeof pluginConfig.fallbackOnUnsupportedCodexModel === "boolean"
+	) {
+		const legacyPolicy = pluginConfig.fallbackOnUnsupportedCodexModel
+			? "fallback"
+			: "strict";
+		const explicitPolicy = pluginConfig.unsupportedCodexPolicy.trim().toLowerCase();
+		if (
+			UNSUPPORTED_CODEX_POLICIES.has(explicitPolicy) &&
+			explicitPolicy !== legacyPolicy
+		) {
+			warnings.push(
+				`Conflicting unsupported-model settings: unsupportedCodexPolicy="${pluginConfig.unsupportedCodexPolicy}" vs fallbackOnUnsupportedCodexModel=${String(pluginConfig.fallbackOnUnsupportedCodexModel)}. Prefer unsupportedCodexPolicy only.`,
+			);
+		}
+	}
+
+	if (
+		typeof pluginConfig.accountScopeMode === "string" &&
+		typeof pluginConfig.perProjectAccounts === "boolean"
+	) {
+		const explicitScope = pluginConfig.accountScopeMode.trim().toLowerCase();
+		if (ACCOUNT_SCOPE_MODES.has(explicitScope)) {
+			const legacyScope = pluginConfig.perProjectAccounts ? "project" : "global";
+			if (explicitScope !== legacyScope) {
+				warnings.push(
+					`Conflicting account scope settings: accountScopeMode="${pluginConfig.accountScopeMode}" vs perProjectAccounts=${String(pluginConfig.perProjectAccounts)}. Prefer accountScopeMode only.`,
+				);
+			}
+		}
+	}
+
+	if (
+		getRerouteNoticeMode(pluginConfig) === "log+ui" &&
+		getToastDurationMs(pluginConfig) < 1500
+	) {
+		warnings.push(
+			`rerouteNoticeMode="log+ui" with toastDurationMs < 1500 may hide reroute notices too quickly.`,
+		);
+	}
+
+	return warnings;
 }

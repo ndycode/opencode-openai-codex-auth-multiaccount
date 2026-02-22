@@ -1,0 +1,15 @@
+{
+	"kind": "rerouteHeaders",
+	"name": "model_reroute_headers",
+	"requestedModel": "gpt-5.3-codex",
+	"headers": {
+		"x-model-rerouted": "1",
+		"x-model-rerouted-from": "gpt-5.3-codex",
+		"x-model-rerouted-to": "gpt-5.2-codex",
+		"x-openai-model": "gpt-5.2-codex"
+	},
+	"expect": {
+		"effectiveModel": "gpt-5.2-codex",
+		"reroutedTo": "gpt-5.2-codex"
+	}
+}

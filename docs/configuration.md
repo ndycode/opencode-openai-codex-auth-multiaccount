@@ -36,9 +36,9 @@ controls how much thinking the model does.
 |-------|------------------|
 | `gpt-5.2` | none, low, medium, high, xhigh |
 | `gpt-5-codex` | low, medium, high (default: high) |
-| `gpt-5.3-codex` | low, medium, high, xhigh (legacy alias to `gpt-5-codex`) |
-| `gpt-5.3-codex-spark` | low, medium, high, xhigh (entitlement-gated legacy alias; add manually) |
-| `gpt-5.2-codex` | low, medium, high, xhigh (legacy alias to `gpt-5-codex`) |
+| `gpt-5.3-codex` | low, medium, high, xhigh |
+| `gpt-5.3-codex-spark` | low, medium, high, xhigh (entitlement-gated; add manually) |
+| `gpt-5.2-codex` | low, medium, high, xhigh |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh |
 | `gpt-5.1-codex` | low, medium, high |
 | `gpt-5.1-codex-mini` | medium, high |
@@ -51,7 +51,7 @@ what they mean:
 - `low` - light reasoning, fastest
 - `medium` - balanced (default)
 - `high` - deep reasoning
-- `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`)
+- `xhigh` - max depth for complex tasks (default for `gpt-5.3-codex`, `gpt-5.2-codex`, and `gpt-5.1-codex-max`)
 
 ### reasoningSummary
 
@@ -96,7 +96,7 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 {
   "requestTransformMode": "native",
   "codexMode": true,
-  "hashlineBridgeHintsMode": "off",
+  "hashlineBridgeHintsMode": "auto",
   "hashlineBridgeHintsBeta": false,
   "codexTuiV2": true,
   "codexTuiColorProfile": "truecolor",
@@ -108,6 +108,11 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "toastDurationMs": 5000,
   "retryAllAccountsRateLimited": true,
   "retryAllAccountsMaxWaitMs": 0,
+  "toolArgumentRecoveryMode": "safe",
+  "retryPolicyMode": "legacy",
+  "rerouteNoticeMode": "log",
+  "jsonRepairMode": "safe",
+  "configDoctorMode": "warn",
   "unsupportedCodexPolicy": "strict",
   "fallbackOnUnsupportedCodexModel": false,
   "fallbackToGpt52OnUnsupportedGpt53": true,
@@ -122,20 +127,27 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | option | default | what it does |
 |--------|---------|--------------|
 | `requestTransformMode` | `native` | request shaping mode: `native` keeps OpenCode payloads unchanged; `legacy` enables Codex compatibility rewrites |
+| `policyProfile` | `stable` | bundled defaults for advanced toggles: `stable`, `balanced`, `aggressive` (explicit per-setting values still win) |
 | `codexMode` | `true` | legacy-only bridge prompt behavior (applies when `requestTransformMode=legacy`) |
-| `hashlineBridgeHintsMode` | `off` | hashline guidance in `legacy` mode when runtime tool names include hashline variants: `off`, `hints`, `strict` |
-| `hashlineBridgeHintsBeta` | `false` | legacy boolean compatibility (`true -> hints`, `false -> off`) |
+| `hashlineBridgeHintsMode` | `auto` | hashline guidance in `legacy` mode: `auto` (enable hints only when runtime exposes hashline tools), `off`, `hints`, `strict` |
+| `hashlineBridgeHintsBeta` | `false` | legacy boolean compatibility used only when `hashlineBridgeHintsMode` is unset (`true -> hints`, `false -> off`) |
 | `codexTuiV2` | `true` | enables codex-style terminal ui output (set `false` to keep legacy output) |
 | `codexTuiColorProfile` | `truecolor` | terminal color profile for codex ui (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | glyph set for codex ui (`ascii`, `unicode`, `auto`) |
 | `fastSession` | `false` | forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=auto`, `textVerbosity=low`) |
 | `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns and keeps full-depth for complex prompts; `always` forces fast mode every turn |
 | `fastSessionMaxInputItems` | `30` | max input items kept when fast mode is applied |
-| `perProjectAccounts` | `true` | each project gets its own account storage |
+| `accountScopeMode` | `project` | account storage scope: `global`, `project`, or `worktree` |
+| `perProjectAccounts` | `true` | legacy boolean compatibility for `accountScopeMode` (`true -> project`, `false -> global`) |
 | `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
 | `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
 | `retryAllAccountsMaxWaitMs` | `0` | max wait time in ms (0 = unlimited) |
 | `retryAllAccountsMaxRetries` | `Infinity` | max retry attempts (omit this key for unlimited retries) |
+| `toolArgumentRecoveryMode` | `safe` | one-time retry guidance for known-safe tool argument schema failures (for example missing `run_in_background`); set `off` to disable |
+| `retryPolicyMode` | `legacy` | retry orchestration mode: `legacy` (current behavior) or `route-matrix` (route-aware policy engine, opt-in) |
+| `rerouteNoticeMode` | `log` | reroute visibility: `off`, `log` (warn log only), or `log+ui` (warn log + TUI toast) |
+| `jsonRepairMode` | `safe` | safe SSE JSON repair for malformed `data:` payloads during non-stream conversion; `off` disables repair |
+| `configDoctorMode` | `warn` | startup config warnings for conflicting/legacy settings; `off` disables doctor warnings |
 | `unsupportedCodexPolicy` | `strict` | unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry with configured fallback chain) |
 | `fallbackOnUnsupportedCodexModel` | `false` | legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
@@ -143,14 +155,47 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | `sessionRecovery` | `true` | auto-recover from common api errors |
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
+| `tokenRefreshSkewMode` | `static` | token-refresh window mode: `static` uses `tokenRefreshSkewMs`, `adaptive` scales skew from expiry horizon + recent refresh failures |
 | `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
 | `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
 | `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
 
 `hashlineBridgeHintsMode` details:
+- `auto`: default. detect runtime tool names and enable hashline hints only when hashline-style edit tools are exposed.
+- `auto` also uses runtime tool metadata signals (description/schema) for runtimes that expose hashline behavior behind generic names like `edit`.
 - `off`: disable hashline-specific guidance.
 - `hints`: add soft preference guidance for hashline tools.
 - `strict`: add hashline-first policy guidance for targeted edits.
+
+note: true hashline execution still depends on runtime tool availability. if the runtime manifest only includes generic tools (for example `apply_patch` and no hashline-style tool names), the plugin cannot force hashline execution.
+
+### tool argument recovery
+
+`toolArgumentRecoveryMode` controls safe retries for tool-call argument schema mismatches.
+
+- `safe` (default): detect known-safe missing required arguments (currently includes `run_in_background`), inject corrective guidance, and retry once before account rotation.
+- `off`: disable this recovery path and surface the original error immediately.
+- `schema-safe`: uses runtime tool schema metadata (when available) to enrich safe recovery guidance while keeping the same one-retry cap.
+
+approval/policy errors (sandbox/approval denials) are classified separately and do not trigger account rotation.
+
+### reroute notices + JSON repair
+
+- `rerouteNoticeMode: "log"` (default) logs `Model reroute observed` when upstream serves a different effective model than requested.
+- `rerouteNoticeMode: "log+ui"` also shows a TUI warning toast (deduped per reroute pair).
+- `jsonRepairMode: "safe"` applies bounded repair (for example code fences / trailing commas) when parsing malformed SSE `data:` JSON payloads during non-stream conversion.
+- `codex-metrics` now reports edit-path telemetry (`hashline-like` / `patch` / `edit` strategy attempts, success rate, average latency, and failure-route counts).
+
+### config doctor
+
+`configDoctorMode: "warn"` (default) logs non-blocking startup warnings for conflicting legacy/modern plugin settings and common config footguns.
+
+### policy profiles + account scope
+
+- `policyProfile: "stable"` keeps conservative defaults (`retryPolicyMode=legacy`, `accountScopeMode=project`, `tokenRefreshSkewMode=static`).
+- `policyProfile: "balanced"` enables stronger operational defaults (`retryPolicyMode=route-matrix`, `rerouteNoticeMode=log+ui`, `tokenRefreshSkewMode=adaptive`).
+- `policyProfile: "aggressive"` enables strict hashline guidance + schema-safe tool recovery + worktree account isolation defaults.
+- explicit setting keys always override profile defaults.
 
 ### unsupported-model behavior + fallback chain
 
@@ -195,7 +240,8 @@ override any config with env vars:
 | `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
 | `CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy` | re-enable legacy Codex request rewriting |
 | `CODEX_MODE=0` | disable bridge prompt |
-| `CODEX_AUTH_HASHLINE_HINTS_MODE=hints` | set hashline guidance mode (`off`, `hints`, `strict`) |
+| `CODEX_AUTH_POLICY_PROFILE=balanced` | set bundled defaults profile (`stable`, `balanced`, `aggressive`) |
+| `CODEX_AUTH_HASHLINE_HINTS_MODE=auto` | set hashline guidance mode (`auto`, `off`, `hints`, `strict`) |
 | `CODEX_AUTH_HASHLINE_HINTS_BETA=1` | legacy toggle used only when `CODEX_AUTH_HASHLINE_HINTS_MODE` is unset |
 | `CODEX_TUI_V2=0` | disable codex-style ui (use legacy output) |
 | `CODEX_TUI_COLOR_PROFILE=ansi16` | force color profile for codex ui |
@@ -204,11 +250,18 @@ override any config with env vars:
 | `CODEX_AUTH_FAST_SESSION=1` | enable fast-session defaults |
 | `CODEX_AUTH_FAST_SESSION_STRATEGY=always` | force fast mode on every prompt |
 | `CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24` | tune max retained input items in fast mode |
+| `CODEX_AUTH_ACCOUNT_SCOPE_MODE=worktree` | explicit account storage scope (`global`, `project`, `worktree`) |
 | `CODEX_AUTH_PER_PROJECT_ACCOUNTS=0` | disable per-project accounts |
 | `CODEX_AUTH_TOAST_DURATION_MS=8000` | set toast duration |
 | `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | disable wait-and-retry |
 | `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | set max wait time |
 | `CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1` | set max retries |
+| `CODEX_AUTH_TOOL_ARGUMENT_RECOVERY_MODE=safe` | override safe tool argument recovery (`safe` or `off`) |
+| `CODEX_AUTH_RETRY_POLICY_MODE=route-matrix` | opt in to route-aware retry policy matrix |
+| `CODEX_AUTH_REROUTE_NOTICE_MODE=log+ui` | show reroute warnings in logs and TUI (`off`, `log`, `log+ui`) |
+| `CODEX_AUTH_JSON_REPAIR_MODE=safe` | enable/disable safe SSE JSON repair (`safe`, `off`) |
+| `CODEX_AUTH_CONFIG_DOCTOR_MODE=warn` | enable/disable startup config doctor warnings (`warn`, `off`) |
+| `CODEX_AUTH_TOKEN_REFRESH_SKEW_MODE=adaptive` | choose token refresh skew policy (`static`, `adaptive`) |
 | `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback` | enable generic unsupported-model fallback policy |
 | `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1` | legacy fallback toggle (prefer policy variable above) |
 | `CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0` | disable only the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge |
@@ -382,6 +435,20 @@ check which storage is being used:
 DEBUG_CODEX_PLUGIN=1 opencode
 # look for storage path in logs
 ```
+
+### approval or policy errors
+
+if a tool call is blocked by approval/sandbox policy, the plugin now returns the policy message directly and does not rotate accounts.
+
+### model reroute observability
+
+when upstream responds with a different effective model than the requested model, the plugin emits a warning log:
+
+```text
+Model reroute observed
+```
+
+enable debug/request logging if you want to correlate this with the request body and selected model.
 
 ---
 
