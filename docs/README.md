@@ -1,6 +1,6 @@
 # Documentation
 
-Welcome to the OpenCode OpenAI Codex Auth Plugin documentation!
+Welcome to the OpenCode OpenAI Codex Auth Plugin documentation.
 
 ## For Users
 
@@ -13,7 +13,7 @@ Welcome to the OpenCode OpenAI Codex Auth Plugin documentation!
 
 Explore the engineering depth behind this plugin:
 
-- **[Architecture](development/ARCHITECTURE.md)** - Technical design, request pipeline, AI SDK compatibility
+- **[Architecture](development/ARCHITECTURE.md)** - Technical design, request transform modes, AI SDK compatibility
 - **[Configuration System](development/CONFIG_FLOW.md)** - How config loading and merging works
 - **[Config Fields Guide](development/CONFIG_FIELDS.md)** - Understanding config keys, `id`, and `name`
 - **[Testing Guide](development/TESTING.md)** - Test scenarios, verification procedures, integration testing
@@ -21,17 +21,17 @@ Explore the engineering depth behind this plugin:
 
 ## Key Architectural Decisions
 
-This plugin bridges two different systems with careful engineering:
+This plugin bridges OpenCode and the ChatGPT Codex backend with explicit mode controls:
 
-1. **AI SDK Compatibility** - Filters `item_reference` (AI SDK construct) for Codex API compatibility
-2. **Stateless Operation** - ChatGPT backend requires `store: false`, verified via testing
-3. **Full Context Preservation** - Sends complete message history (IDs stripped) for LLM context (with optional fast-session trimming)
-4. **Stale-While-Revalidate Caching** - Keeps prompt/instruction fetches fast while avoiding GitHub rate limits; optional startup prewarm for first-turn latency
-5. **Per-Model Configuration** - Enables quality presets with quick switching
-6. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults
-7. **Entitlement-Aware Fallback Flow** - Unsupported models try remaining accounts/workspaces first, then optional fallback chain if enabled
+1. **Request Transform Mode Split** - `native` mode (default) preserves OpenCode payload shape; `legacy` mode applies Codex compatibility rewrites.
+2. **Stateless Operation** - ChatGPT backend requires `store: false`, verified via testing.
+3. **Full Context Preservation** - Sends complete message history and always includes `reasoning.encrypted_content`.
+4. **Stale-While-Revalidate Caching** - Keeps prompt/instruction fetches fast while avoiding GitHub rate limits; optional startup prewarm for first-turn latency.
+5. **Per-Model Configuration** - Enables quality presets with quick switching.
+6. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults.
+7. **Entitlement-Aware Fallback Flow** - Unsupported models try remaining accounts/workspaces first, then optional fallback chain if enabled.
 
-**Testing**: 1500+ tests (80% coverage threshold) plus integration coverage
+**Testing**: 1689 tests plus integration coverage.
 
 ---
 

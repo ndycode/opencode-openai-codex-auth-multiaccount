@@ -101,7 +101,7 @@ input: [
   { role: "assistant", content: "Contents..." },   // Turn 2 response
   { role: "user", content: "what did you write?" } // Turn 3 user (current)
 ]
-// All IDs stripped, item_reference filtered out
+// Legacy mode strips IDs and item_reference; native mode preserves host payload shape
 ```
 
 **Context is maintained through**:
@@ -118,7 +118,7 @@ input: [
 | **ChatGPT Support** | ✅ Required | ❌ Rejected by API |
 | **Message History** | ✅ Sent in each request (no IDs) | Stored on server |
 | **Message IDs** | ❌ Must strip all | ✅ Required |
-| **AI SDK Compat** | ❌ Must filter `item_reference` | ✅ Works natively |
+| **AI SDK Compat** | ✅ Native mode preserves host payload; legacy mode filters unsupported `item_reference` + IDs | ✅ Works natively |
 | **Context** | Full history + encrypted reasoning | Server-stored conversation |
 | **Codex CLI Parity** | ✅ Perfect match | ❌ Different mode |
 
@@ -126,7 +126,9 @@ input: [
 
 ---
 
-## Message ID Handling & AI SDK Compatibility
+## Message ID Handling & AI SDK Compatibility (Legacy Mode)
+
+> This section documents `requestTransformMode: "legacy"` behavior. Native mode bypasses this rewrite path.
 
 ### The Problem
 
@@ -256,63 +258,32 @@ let include: Vec<String> = if reasoning.is_some() {
 
 ### Transformation Steps
 
-```
-1. Original OpenCode Request
-   ├─ model: "gpt-5-codex"
-   ├─ input: [{ id: "msg_123", ... }, { id: "rs_456", ... }]
-   └─ tools: [...]
+~~~text
+1. Parse OpenCode request body
+   - Preserve the original payload shape before any optional rewrites
 
-2. Model Normalization
-   ├─ Detect codex/gpt-5/codex-mini variants
-   └─ Normalize to "gpt-5", "gpt-5-codex", or "codex-mini-latest"
+2. Request transform mode gate
+   - native (default): keep host payload unchanged
+   - legacy: fetch Codex instructions and apply compatibility transforms
 
-3. Config Merging
-   ├─ Global options (provider.openai.options)
-   ├─ Model-specific options (provider.openai.models[name].options)
-   └─ Result: merged config for this model
+3. Legacy-mode transforms (when enabled)
+   - Normalize model aliases to canonical Codex IDs
+   - Filter unsupported AI SDK constructs (item_reference)
+   - Strip IDs for stateless compatibility (store: false)
+   - Apply bridge or tool-remap prompt logic (codexMode)
+   - Normalize orphaned tool outputs and inject missing outputs
 
-4. Message ID Filtering
-   ├─ Remove ALL IDs from input array
-   ├─ Log original IDs for debugging
-   └─ Verify no IDs remain
+4. Common post-processing
+   - Resolve reasoning + verbosity settings
+   - Ensure include contains reasoning.encrypted_content
+   - Force store: false and stream: true for ChatGPT backend
 
-5. System Prompt Handling (CODEX_MODE)
-   ├─ Filter out OpenCode system prompts
-   ├─ Preserve OpenCode env + AGENTS instructions when concatenated
-   └─ Add Codex-OpenCode bridge prompt
+5. Header shaping
+   - Add OAuth/account headers
+   - Preserve host-provided prompt_cache_key session headers when present
+~~~
 
-6. Fast Session Tuning (optional)
-   ├─ Clamp reasoning + verbosity for low-latency turns
-   ├─ Trim long stateless histories to a small window
-   └─ For trivial turns: may omit tool definitions + compact instructions
-
-7. Orphan Tool Output Handling
-   ├─ Match function_call_output to function_call OR local_shell_call
-   ├─ Match custom_tool_call_output to custom_tool_call
-   └─ Convert unmatched outputs to assistant messages (preserve context)
-
-8. Reasoning Configuration
-   ├─ Set reasoningEffort (none/minimal/low/medium/high/xhigh)
-   ├─ Set reasoningSummary (auto/detailed)
-   └─ Based on model variant
-
-9. Prompt Caching & Session Headers
-   ├─ Preserve host-supplied prompt_cache_key (OpenCode session id)
-   ├─ Add conversation + account headers for Codex debugging when cache key exists
-   └─ Leave headers unset if host does not provide a cache key
-
-10. Final Body
-   ├─ store: false
-   ├─ stream: true
-   ├─ instructions: Codex system prompt
-   ├─ input: Filtered messages (no IDs)
-   ├─ reasoning: { effort, summary }
-   ├─ text: { verbosity }
-   ├─ include: ["reasoning.encrypted_content"]
-   └─ prompt_cache_key: preserved when provided by host (OpenCode session id)
-```
-
-**Source**: `lib/request/request-transformer.ts:265-329`
+**Source**: lib/request/fetch-helpers.ts:379-454, lib/request/request-transformer.ts:843-1015
 
 ---
 
@@ -334,8 +305,8 @@ let include: Vec<String> = if reasoning.is_some() {
 
 | Feature | Codex CLI | This Plugin | Why? |
 |---------|-----------|-------------|------|
-| **Codex-OpenCode Bridge** | N/A (native) | ✅ Custom prompt | OpenCode → Codex translation |
-| **OpenCode Prompt Filtering** | N/A | ✅ Filter & replace | Remove OpenCode prompts, keep env/AGENTS |
+| **Codex-OpenCode Bridge** | N/A (native) | ✅ Legacy-mode prompt injection | OpenCode -> Codex behavioral translation when legacy mode is enabled |
+| **OpenCode Prompt Filtering** | N/A | ✅ Legacy-mode prompt filtering | Removes OpenCode prompts and keeps env/AGENTS context in legacy mode |
 | **Orphan Tool Output Handling** | ✅ Drop orphans | ✅ Convert to messages | Preserve context + avoid 400s |
 | **Usage-limit messaging** | CLI prints status | ✅ Friendly error summary | Surface 5h/weekly windows in OpenCode |
 | **Per-Model Options** | CLI flags | ✅ Config file | Better UX in OpenCode |
@@ -360,7 +331,7 @@ let include: Vec<String> = if reasoning.is_some() {
 
 **Decision**: Use `store:false` for Codex parity and simplicity.
 
-### Why Complete ID Removal?
+### Why Complete ID Removal (Legacy Mode)?
 
 **Alternative**: Filter specific ID patterns (`rs_*`, `msg_*`, etc.)
 

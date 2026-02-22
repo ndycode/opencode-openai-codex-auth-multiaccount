@@ -38,7 +38,7 @@
 
 | Guide | Description |
 |-------|-------------|
-| [Architecture](development/ARCHITECTURE.md) | Technical design, AI SDK compatibility |
+| [Architecture](development/ARCHITECTURE.md) | Technical design, request transform modes, AI SDK compatibility |
 | [Config System](development/CONFIG_FLOW.md) | Configuration loading and merging |
 | [Config Fields](development/CONFIG_FIELDS.md) | Understanding config keys and fields |
 | [Testing Guide](development/TESTING.md) | Test scenarios and verification |
@@ -68,13 +68,13 @@ For detailed setup, see [Getting Started](getting-started.md).
 | Feature | Description |
 |---------|-------------|
 | **OAuth Authentication** | Secure ChatGPT Plus/Pro login |
-| **22 Template Presets** | GPT-5.2, 5.3-Codex, 5.1-Codex-Max, 5.1-Codex, 5.1-Codex-Mini, 5.1 (plus optional manual Spark IDs) |
+| **21 Template Presets** | GPT-5.2, GPT-5 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex, GPT-5.1 Codex Mini, GPT-5.1 (plus optional manual Spark IDs) |
 | **Variant System** | Works with OpenCode v1.0.210+ variants and legacy presets |
-| **Multi-Account** | Auto-rotation when rate-limited |
+| **Multi-Account** | Auto-rotation when rate-limited with workspace-aware identity persistence |
 | **Per-Model Config** | Different reasoning effort per model |
 | **Multi-Turn** | Full conversation history with stateless backend |
 | **Fast Session Mode** | Optional low-latency tuning for quick interactive turns |
-| **Comprehensive Tests** | 1500+ tests (80% coverage threshold) + integration tests |
+| **Comprehensive Tests** | 1689 tests (80% coverage threshold) + integration tests |
 
 ---
 
@@ -93,19 +93,21 @@ For detailed setup, see [Getting Started](getting-started.md).
 
 ## How It Works
 
-The plugin intercepts OpenCode's OpenAI SDK requests and transforms them for the ChatGPT backend API:
+The plugin intercepts OpenCode requests and routes them through a mode-aware Codex pipeline:
 
 ```
 OpenCode SDK Request
-        ↓
+        ->
+    Request Transform Mode Gate
+        |- Native (default): keep host payload shape
+        |- Legacy: apply Codex compatibility rewrites
+        ->
     OAuth Token Management (auto-refresh)
-        ↓
-    Request Transformation (SDK → Codex API)
-        ↓
-    AI SDK Compatibility (filter constructs)
-        ↓
-    Stateless Operation (store: false)
-        ↓
+        ->
+    Account + Workspace Selection (health-aware)
+        ->
+    Stateless Request Contract (store: false)
+        ->
 ChatGPT Codex Backend
 ```
 
@@ -134,6 +136,6 @@ See [Architecture](development/ARCHITECTURE.md) and [TUI Parity Checklist](devel
 
 ## License
 
-MIT License with Usage Disclaimer — See [LICENSE](../LICENSE) for details.
+MIT License with Usage Disclaimer - See [LICENSE](../LICENSE) for details.
 
 **Trademark Notice:** Not affiliated with OpenAI. ChatGPT, GPT-5, Codex, and OpenAI are trademarks of OpenAI, L.L.C.
