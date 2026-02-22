@@ -170,6 +170,33 @@ Then inspect plugin logs for markers:
 npm install -g oc-chatgpt-multi-auth@latest
 ```
 
+### Beta Best Practices (Recommended Workflow)
+
+Use this workflow for reliable beta testing:
+
+1. Use an isolated branch/worktree for beta runs.
+2. Pin exact beta version (`@beta`) and record plugin version under test.
+3. Run one baseline test with default config before enabling optional beta flags.
+4. Enable one beta setting at a time and re-test.
+5. Keep request logging enabled during beta sessions and capture reproducible failure logs.
+6. Keep rollback command ready (`npm install -g oc-chatgpt-multi-auth@latest`).
+
+Suggested quick test order:
+
+```bash
+# 1) baseline
+opencode run "hello" --model=openai/gpt-5.2 --variant=medium
+
+# 2) legacy mode only
+CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy opencode run "test legacy mode" --model=openai/gpt-5-codex
+
+# 3) legacy + hints
+CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy CODEX_AUTH_HASHLINE_HINTS_MODE=hints opencode run "test hints" --model=openai/gpt-5-codex
+
+# 4) legacy + strict
+CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy CODEX_AUTH_HASHLINE_HINTS_MODE=strict opencode run "test strict" --model=openai/gpt-5-codex
+```
+
 ---
 
 ## Models
