@@ -1453,7 +1453,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.activeIndex).toBe(0);
 
 		const persistedOrgIds = mockStorage.accounts
-			.filter((account) => account.organizationId)
+			.filter((account) => account.accountIdSource === "org" && account.organizationId)
 			.map((account) => account.organizationId);
 		expect(persistedOrgIds).toEqual(["org-default", "org-secondary"]);
 	});

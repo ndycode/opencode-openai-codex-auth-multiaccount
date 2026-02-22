@@ -228,6 +228,32 @@ function extractCanonicalOrganizationIds(
 	return extractOrganizationIdsByIndex(auth.organizations);
 }
 
+function resolveOrganizationOverridesForKey(
+	key: string,
+	value: unknown,
+	canonicalOrganizationIds: Array<string | undefined>,
+): Array<string | undefined> | undefined {
+	if (key === "organizations") {
+		if (canonicalOrganizationIds.length > 0) return canonicalOrganizationIds;
+		return extractOrganizationIdsByIndex(value);
+	}
+
+	if (key !== "accounts" && key !== "workspaces" && key !== "teams") {
+		return undefined;
+	}
+
+	if (canonicalOrganizationIds.length === 0) {
+		return undefined;
+	}
+
+	const listLength = normalizeCandidateArray(value).length;
+	if (listLength === 0 || listLength !== canonicalOrganizationIds.length) {
+		return undefined;
+	}
+
+	return canonicalOrganizationIds;
+}
+
 /**
  * Collects candidates from a JWT payload.
  */
@@ -239,13 +265,18 @@ function collectCandidatesFromPayload(
 
 	const candidates: AccountIdCandidate[] = [];
 	const keys = ["organizations", "orgs", "accounts", "workspaces", "teams"];
+	const payloadCanonicalOrganizationIds = extractOrganizationIdsByIndex(payload.organizations);
 	for (const key of keys) {
 		if (key in payload) {
 			candidates.push(
 				...collectCandidatesFromList(
 					payload[key],
 					source,
-					key === "organizations" ? extractOrganizationIdsByIndex(payload[key]) : undefined,
+					resolveOrganizationOverridesForKey(
+						key,
+						payload[key],
+						payloadCanonicalOrganizationIds,
+					),
 				),
 			);
 		}
@@ -260,11 +291,11 @@ function collectCandidatesFromPayload(
 					...collectCandidatesFromList(
 						auth[key],
 						source,
-						key === "organizations"
-							? canonicalOrganizationIds.length > 0
-								? canonicalOrganizationIds
-								: extractOrganizationIdsByIndex(auth[key])
-							: undefined,
+						resolveOrganizationOverridesForKey(
+							key,
+							auth[key],
+							canonicalOrganizationIds,
+						),
 					),
 				);
 			}
