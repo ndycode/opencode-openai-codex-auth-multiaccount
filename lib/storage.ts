@@ -288,12 +288,13 @@ export function deduplicateAccounts<T extends { accountId?: string; refreshToken
 }
 
 /**
- * Removes duplicate accounts by email, keeping the most recently used entry.
+ * Removes duplicate legacy accounts by email, keeping the most recently used entry.
+ * Accounts with accountId are always preserved to avoid collapsing workspace variants.
  * Accounts without email are always preserved.
  * @param accounts - Array of accounts to deduplicate
  * @returns New array with email duplicates removed
  */
-export function deduplicateAccountsByEmail<T extends { email?: string; lastUsed?: number; addedAt?: number }>(
+export function deduplicateAccountsByEmail<T extends { accountId?: string; email?: string; lastUsed?: number; addedAt?: number }>(
   accounts: T[],
 ): T[] {
   const emailToNewestIndex = new Map<string, number>();
@@ -302,6 +303,12 @@ export function deduplicateAccountsByEmail<T extends { email?: string; lastUsed?
   for (let i = 0; i < accounts.length; i += 1) {
     const account = accounts[i];
     if (!account) continue;
+
+    const accountId = account.accountId?.trim();
+    if (accountId) {
+      indicesToKeep.add(i);
+      continue;
+    }
 
     const email = account.email?.trim();
     if (!email) {
@@ -821,7 +828,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 
 /**
  * Imports accounts from a JSON file, merging with existing accounts.
- * Deduplicates by accountId/email, preserving most recently used entries.
+ * Deduplicates by accountId and legacy fallback keys (refresh/email for entries missing accountId).
  * @param filePath - Source file path
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */
@@ -851,6 +858,9 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
     await withAccountStorageTransaction(async (existing, persist) => {
       const existingAccounts = existing?.accounts ?? [];
       const existingActiveIndex = existing?.activeIndex ?? 0;
+      const clampedExistingActiveIndex = clampIndex(existingActiveIndex, existingAccounts.length);
+      const existingActiveKey = extractActiveKey(existingAccounts, clampedExistingActiveIndex);
+      const existingActiveIndexByFamily = existing?.activeIndexByFamily ?? {};
 
       const merged = [...existingAccounts, ...normalized.accounts];
 
@@ -865,11 +875,36 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
 
       const deduplicatedAccounts = deduplicateAccountsByEmail(deduplicateAccounts(merged));
 
+      const mappedActiveIndex = (() => {
+        if (deduplicatedAccounts.length === 0) return 0;
+        if (existingActiveKey) {
+          const idx = deduplicatedAccounts.findIndex((account) => toAccountKey(account) === existingActiveKey);
+          if (idx >= 0) return idx;
+        }
+        return clampIndex(clampedExistingActiveIndex, deduplicatedAccounts.length);
+      })();
+
+      const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
+      for (const family of MODEL_FAMILIES) {
+        const rawFamilyIndex = existingActiveIndexByFamily[family];
+        const familyIndex =
+          typeof rawFamilyIndex === "number" && Number.isFinite(rawFamilyIndex)
+            ? rawFamilyIndex
+            : clampedExistingActiveIndex;
+        const familyKey = extractActiveKey(existingAccounts, clampIndex(familyIndex, existingAccounts.length));
+        if (familyKey) {
+          const idx = deduplicatedAccounts.findIndex((account) => toAccountKey(account) === familyKey);
+          activeIndexByFamily[family] = idx >= 0 ? idx : mappedActiveIndex;
+          continue;
+        }
+        activeIndexByFamily[family] = mappedActiveIndex;
+      }
+
       const newStorage: AccountStorageV3 = {
         version: 3,
         accounts: deduplicatedAccounts,
-        activeIndex: existingActiveIndex,
-        activeIndexByFamily: existing?.activeIndexByFamily,
+        activeIndex: mappedActiveIndex,
+        activeIndexByFamily,
       };
 
       await persist(newStorage);
