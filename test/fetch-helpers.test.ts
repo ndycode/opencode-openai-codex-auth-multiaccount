@@ -14,6 +14,8 @@ import {
 	resolveUnsupportedCodexFallbackModel,
 	extractUnsupportedCodexModelFromText,
 	shouldFallbackToGpt52OnUnsupportedGpt53,
+	getToolUnavailableInfo,
+	classifyFailureRoute,
 } from '../lib/request/fetch-helpers.js';
 import * as codexPrompts from '../lib/prompts/codex.js';
 import * as loggerModule from '../lib/logger.js';
@@ -409,6 +411,28 @@ describe('Fetch Helpers Module', () => {
 				fallbackToGpt52OnUnsupportedGpt53: false,
 			});
 			expect(legacyEdgeFallback).toBeUndefined();
+		});
+	});
+
+	describe('failure routing helpers', () => {
+		it('extracts unavailable tool metadata from normalized error body', () => {
+			const info = getToolUnavailableInfo({
+				error: { message: "No tool named 'apply_patch' in runtime tool list" },
+			});
+			expect(info.isToolUnavailable).toBe(true);
+			expect(info.toolName).toBe('apply_patch');
+		});
+
+		it('classifies network, rate-limit, tool-unavailable, server, and other routes', () => {
+			expect(classifyFailureRoute({ networkError: new Error('offline') })).toBe('network_error');
+			expect(classifyFailureRoute({ rateLimit: { retryAfterMs: 1000 } })).toBe('rate_limit');
+			expect(
+				classifyFailureRoute({
+					errorBody: { error: { message: "tool `update_plan` is unavailable" } },
+				}),
+			).toBe('tool_unavailable');
+			expect(classifyFailureRoute({ status: 503 })).toBe('server_error');
+			expect(classifyFailureRoute({ status: 400 })).toBe('other');
 		});
 	});
 

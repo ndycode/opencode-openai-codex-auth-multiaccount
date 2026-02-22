@@ -73,6 +73,19 @@ Current defaults are strict entitlement handling:
 - `fallbackToGpt52OnUnsupportedGpt53: true` keeps the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge inside fallback mode
 - `unsupportedCodexFallbackChain` lets you override fallback order per model
 
+### Optional hashline guidance mode for edit-tool performance
+
+If you use legacy request transforms and your runtime exposes hashline edit tools, you can enable:
+- `hashlineBridgeHintsMode: "hints"` in `~/.opencode/openai-codex-auth-config.json`
+- or `CODEX_AUTH_HASHLINE_HINTS_MODE=hints`
+
+Modes:
+- `off` (default): disabled
+- `hints`: soft preference for hashline-style edits over generic patch flows
+- `strict`: hashline-first guidance for targeted edits
+
+Legacy compatibility remains available via `hashlineBridgeHintsBeta` / `CODEX_AUTH_HASHLINE_HINTS_BETA`.
+
 Default fallback chain (when policy is `fallback`):
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
 - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (only relevant if Spark IDs are added manually)

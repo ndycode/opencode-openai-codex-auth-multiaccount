@@ -26,6 +26,8 @@ describe("PluginConfigSchema", () => {
 	it("accepts valid full config", () => {
 		const config = {
 			codexMode: true,
+			hashlineBridgeHintsBeta: true,
+			hashlineBridgeHintsMode: "strict",
 			fastSession: true,
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 5000,
@@ -73,6 +75,11 @@ describe("PluginConfigSchema", () => {
 
 	it("rejects invalid unsupportedCodexPolicy", () => {
 		const result = PluginConfigSchema.safeParse({ unsupportedCodexPolicy: "invalid" });
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects invalid hashlineBridgeHintsMode", () => {
+		const result = PluginConfigSchema.safeParse({ hashlineBridgeHintsMode: "beta" });
 		expect(result.success).toBe(false);
 	});
 });

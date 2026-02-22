@@ -6,9 +6,10 @@ import {
     addToolRemapMessage,
     isOpenCodeSystemPrompt,
     filterOpenCodeSystemPrompts,
-    filterOpenCodeSystemPromptsWithCachedPrompt,
-    addCodexBridgeMessage,
-    transformRequestBody,
+	filterOpenCodeSystemPromptsWithCachedPrompt,
+	addCodexBridgeMessage,
+	addToolUnavailableRecoveryMessage,
+	transformRequestBody,
 } from '../lib/request/request-transformer.js';
 import { TOOL_REMAP_MESSAGE } from '../lib/prompts/codex.js';
 import { CODEX_OPENCODE_BRIDGE } from '../lib/prompts/codex-opencode-bridge.js';
@@ -427,6 +428,32 @@ describe('Request Transformer Module', () => {
 			const notArray = { notAnArray: true };
 			expect(addToolRemapMessage(notArray as any, true)).toBe(notArray);
 		});
+
+		it('should add hashline beta hints when enabled and hashline tools are present', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolRemapMessage(
+				input,
+				true,
+				['hashline_edit', 'patch'],
+				true,
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('hashline_beta_hints');
+			expect(text).toContain('Prefer hashline tools');
+		});
+
+		it('should add strict hashline policy when strict mode is enabled', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolRemapMessage(
+				input,
+				true,
+				['hashline_edit', 'patch'],
+				'strict',
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('hashline_policy mode="strict"');
+			expect(text).not.toContain('hashline_beta_hints');
+		});
 	});
 
 	describe('isOpenCodeSystemPrompt', () => {
@@ -659,6 +686,59 @@ describe('Request Transformer Module', () => {
 
 		it('should return undefined for undefined input', async () => {
 			expect(addCodexBridgeMessage(undefined, true)).toBeUndefined();
+		});
+
+		it('should append hashline beta section when enabled and hashline tools exist', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addCodexBridgeMessage(
+				input,
+				true,
+				['hashline_edit', 'edit'],
+				true,
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('Hashline Edit Preference (Beta)');
+			expect(text).toContain('prefer them for targeted edits');
+		});
+
+		it('should append strict hashline section when strict mode is enabled', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addCodexBridgeMessage(
+				input,
+				true,
+				['hashline_edit', 'edit'],
+				'strict',
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('Hashline Edit Policy (Strict)');
+			expect(text).not.toContain('Hashline Edit Preference (Beta)');
+		});
+	});
+
+	describe('addToolUnavailableRecoveryMessage', () => {
+		it('should prepend recovery guidance when missing tool is reported', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolUnavailableRecoveryMessage(input, 'apply_patch');
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('<tool_unavailable_recovery');
+			expect(text).toContain('The missing tool was `apply_patch`.');
+		});
+
+		it('should not duplicate recovery guidance if already present', async () => {
+			const input: InputItem[] = [
+				{
+					type: 'message',
+					role: 'developer',
+					content: [{ type: 'input_text', text: '<tool_unavailable_recovery priority="0">existing</tool_unavailable_recovery>' }],
+				},
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addToolUnavailableRecoveryMessage(input, 'apply_patch');
+			expect(result).toEqual(input);
+		});
+
+		it('should return undefined for undefined input', async () => {
+			expect(addToolUnavailableRecoveryMessage(undefined, 'apply_patch')).toBeUndefined();
 		});
 	});
 
@@ -1807,6 +1887,36 @@ describe('Request Transformer Module', () => {
 				expect(bridgeText).toContain('Do not translate tool names');
 			});
 
+			it('should include hashline beta hints in bridge mode when enabled', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [
+						{
+							type: 'function',
+							function: {
+								name: 'hashline_edit',
+								parameters: { type: 'object', properties: {} },
+							},
+						},
+					] as unknown,
+				};
+
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					true,
+					false,
+					'hybrid',
+					30,
+					true,
+				);
+				const bridgeText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+				expect(bridgeText).toContain('Hashline Edit Preference (Beta)');
+				expect(bridgeText).toContain('hashline-style edit tools');
+			});
+
 			it('should filter OpenCode prompts when codexMode=true', async () => {
 				const body: RequestBody = {
 					model: 'gpt-5',
@@ -1852,6 +1962,35 @@ describe('Request Transformer Module', () => {
 				expect(result.input![0].role).toBe('developer');
 				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
 				expect((result.input![0].content as any)[0].text).toContain('patch (preferred)');
+			});
+
+			it('should include hashline beta hints in remap mode when enabled', async () => {
+				const body: RequestBody = {
+					model: 'gpt-5',
+					input: [{ type: 'message', role: 'user', content: 'hello' }],
+					tools: [
+						{
+							type: 'function',
+							function: {
+								name: 'hashline_edit',
+								parameters: { type: 'object', properties: {} },
+							},
+						},
+					] as unknown,
+				};
+				const result = await transformRequestBody(
+					body,
+					codexInstructions,
+					undefined,
+					false,
+					false,
+					'hybrid',
+					30,
+					true,
+				);
+				const remapText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+				expect(remapText).toContain('hashline_beta_hints');
+				expect(remapText).toContain('Prefer hashline tools');
 			});
 
 			it('should not filter OpenCode prompts when codexMode=false', async () => {

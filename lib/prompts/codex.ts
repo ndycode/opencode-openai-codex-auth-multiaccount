@@ -2,7 +2,11 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CacheMetadata, GitHubRelease } from "../types.js";
+import type {
+	CacheMetadata,
+	GitHubRelease,
+	HashlineBridgeHintsMode,
+} from "../types.js";
 import { logWarn, logError, logDebug } from "../logger.js";
 
 const GITHUB_API_RELEASES =
@@ -484,3 +488,62 @@ If ANY answer is NO → STOP and correct before proceeding.
 - Never call \`request_user_input\` unless collaboration mode is explicitly Plan mode.
 </safety_rules>
 </user_instructions>`;
+
+const HASHLINE_TOOL_PATTERN = /(hashline|line[_-]?hash|anchor[_-]?insert)/i;
+
+const HASHLINE_BETA_HINT_BLOCK = `
+<hashline_beta_hints priority="0">
+When hashline-style edit tools are available in the runtime tool list:
+- Prefer hashline tools for targeted in-place edits because they validate anchors/hashes.
+- Use patch/edit only when hashline tools are unavailable or when doing broad structural rewrites.
+- If hash validation fails, re-read the file and retry with fresh anchors.
+</hashline_beta_hints>`;
+
+const HASHLINE_STRICT_HINT_BLOCK = `
+<hashline_policy mode="strict" priority="0">
+When hashline-style edit tools are available in the runtime tool list:
+- For targeted edits, use hashline-style tools first.
+- Do not default to patch/edit for small in-place edits if hashline tools are available.
+- If hash validation fails, re-read and retry with fresh anchors before switching strategy.
+- Use patch/edit only for broad structural rewrites or when hashline tools are unavailable.
+</hashline_policy>`;
+
+function normalizeRuntimeToolNames(toolNames: readonly string[] | undefined): string[] {
+	if (!toolNames || toolNames.length === 0) return [];
+	const unique = new Set<string>();
+	for (const name of toolNames) {
+		const trimmed = name.trim();
+		if (!trimmed) continue;
+		unique.add(trimmed);
+	}
+	return Array.from(unique);
+}
+
+export function hasHashlineRuntimeTool(toolNames: readonly string[] | undefined): boolean {
+	const normalized = normalizeRuntimeToolNames(toolNames);
+	return normalized.some((name) => HASHLINE_TOOL_PATTERN.test(name));
+}
+
+export function renderToolRemapMessage(options?: {
+	hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
+	runtimeToolNames?: readonly string[];
+}): string {
+	const mode = normalizeHashlineBridgeHintsMode(options?.hashlineBridgeHintsMode);
+	if (mode === "off") return TOOL_REMAP_MESSAGE;
+	if (!hasHashlineRuntimeTool(options?.runtimeToolNames)) return TOOL_REMAP_MESSAGE;
+
+	const hintBlock = mode === "strict" ? HASHLINE_STRICT_HINT_BLOCK : HASHLINE_BETA_HINT_BLOCK;
+	return TOOL_REMAP_MESSAGE.replace(
+		"</user_instructions>",
+		`${hintBlock}\n</user_instructions>`,
+	);
+}
+
+function normalizeHashlineBridgeHintsMode(
+	mode: HashlineBridgeHintsMode | boolean | undefined,
+): HashlineBridgeHintsMode {
+	if (mode === true) return "hints";
+	if (mode === false || mode === undefined) return "off";
+	if (mode === "strict" || mode === "hints") return mode;
+	return "off";
+}

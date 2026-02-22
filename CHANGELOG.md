@@ -4,6 +4,19 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ## [unreleased]
 
+## [5.2.4-beta] - 2026-02-22
+
+### fixed
+
+- **tool-unavailable recovery on codex bridge flows**: when runtime rejects an unavailable tool alias, the request loop now injects a recovery developer message with runtime-manifest guidance and retries once instead of failing immediately.
+- **transient network handling in account traversal**: network failures now get a one-time same-account retry (with token refund) before rotating to the next account, reducing avoidable account churn.
+
+### changed
+
+- **hashline guidance controls promoted to mode enum**: added `hashlineBridgeHintsMode` (`off`/`hints`/`strict`) plus `CODEX_AUTH_HASHLINE_HINTS_MODE`; legacy `hashlineBridgeHintsBeta` and `CODEX_AUTH_HASHLINE_HINTS_BETA` remain mapped for backward compatibility.
+- **failure-route classification in fetch pipeline**: centralized routing now distinguishes `rate_limit`, `server_error`, `network_error`, `tool_unavailable`, and `other` to apply targeted retry/rotation behavior.
+- **docs + test parity updates**: configuration docs and tests now cover strict hashline mode, fallback compatibility behavior, and tool-unavailable classification/recovery helpers.
+
 ## [5.2.3] - 2026-02-21
 
 ### fixed

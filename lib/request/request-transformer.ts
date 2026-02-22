@@ -1,6 +1,6 @@
 import { logDebug, logWarn } from "../logger.js";
-import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
-import { renderCodexOpenCodeBridge } from "../prompts/codex-opencode-bridge.js";
+import { renderToolRemapMessage } from "../prompts/codex.js";
+import { renderCodexOpenCodeBridgeWithOptions } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
 import { getNormalizedModel } from "./helpers/model-map.js";
 import {
@@ -11,6 +11,7 @@ import {
 import { cleanupToolDefinitions } from "./helpers/tool-utils.js";
 import type {
 	ConfigOptions,
+	HashlineBridgeHintsMode,
 	InputItem,
 	ReasoningConfig,
 	RequestBody,
@@ -20,6 +21,7 @@ import type {
 type CollaborationMode = "plan" | "default" | "unknown";
 type FastSessionStrategy = "hybrid" | "always";
 type SupportedReasoningSummary = "auto" | "concise" | "detailed";
+const TOOL_UNAVAILABLE_RECOVERY_MARKER = "<tool_unavailable_recovery";
 
 const PLAN_MODE_ONLY_TOOLS = new Set(["request_user_input"]);
 
@@ -786,10 +788,13 @@ export async function filterOpenCodeSystemPrompts(
 export function addCodexBridgeMessage(
 	input: InputItem[] | undefined,
 	hasTools: boolean,
-	tools?: unknown,
+	runtimeToolNames?: readonly string[],
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "off",
 ): InputItem[] | undefined {
 	if (!hasTools || !Array.isArray(input)) return input;
-	const bridgeText = renderCodexOpenCodeBridge(extractRuntimeToolNames(tools));
+	const bridgeText = renderCodexOpenCodeBridgeWithOptions(runtimeToolNames ?? [], {
+		hashlineBridgeHintsMode: normalizeHashlineBridgeHintsMode(hashlineBridgeHintsMode),
+	});
 
 	const bridgeMessage: InputItem = {
 		type: "message",
@@ -814,8 +819,14 @@ export function addCodexBridgeMessage(
 export function addToolRemapMessage(
 	input: InputItem[] | undefined,
 	hasTools: boolean,
+	runtimeToolNames?: readonly string[],
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "off",
 ): InputItem[] | undefined {
 	if (!hasTools || !Array.isArray(input)) return input;
+	const remapText = renderToolRemapMessage({
+		hashlineBridgeHintsMode: normalizeHashlineBridgeHintsMode(hashlineBridgeHintsMode),
+		runtimeToolNames,
+	});
 
 	const toolRemapMessage: InputItem = {
 		type: "message",
@@ -823,12 +834,60 @@ export function addToolRemapMessage(
 		content: [
 			{
 				type: "input_text",
-				text: TOOL_REMAP_MESSAGE,
+				text: remapText,
 			},
 		],
 	};
 
 	return [toolRemapMessage, ...input];
+}
+
+export function addToolUnavailableRecoveryMessage(
+	input: InputItem[] | undefined,
+	missingToolName?: string,
+): InputItem[] | undefined {
+	if (!Array.isArray(input)) return input;
+	for (const item of input) {
+		if (!item || typeof item !== "object") continue;
+		const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+		if (role !== "developer") continue;
+		const text = extractMessageText(item.content);
+		if (text.includes(TOOL_UNAVAILABLE_RECOVERY_MARKER)) {
+			return input;
+		}
+	}
+
+	const toolSuffix = missingToolName
+		? ` The missing tool was \`${missingToolName}\`.`
+		: "";
+	const recoveryText = `${TOOL_UNAVAILABLE_RECOVERY_MARKER} priority="0">
+Previous tool invocation failed because a tool was unavailable in this runtime manifest.${toolSuffix}
+- Re-read the runtime tool list and call only listed tool names.
+- Do not reuse unavailable aliases (for example apply_patch/update_plan wrappers) unless they actually exist.
+- Continue the task with available tools and preserve user intent.
+</tool_unavailable_recovery>`;
+
+	const recoveryMessage: InputItem = {
+		type: "message",
+		role: "developer",
+		content: [
+			{
+				type: "input_text",
+				text: recoveryText,
+			},
+		],
+	};
+
+	return [recoveryMessage, ...input];
+}
+
+function normalizeHashlineBridgeHintsMode(
+	mode: HashlineBridgeHintsMode | boolean | undefined,
+): HashlineBridgeHintsMode {
+	if (mode === true) return "hints";
+	if (mode === false || mode === undefined) return "off";
+	if (mode === "strict" || mode === "hints") return mode;
+	return "off";
 }
 
 /**
@@ -854,6 +913,7 @@ export async function transformRequestBody(
 	fastSession = false,
 	fastSessionStrategy: FastSessionStrategy = "hybrid",
 	fastSessionMaxInputItems = 30,
+	hashlineBridgeHintsMode: HashlineBridgeHintsMode | boolean = "off",
 ): Promise<RequestBody> {
 	const originalModel = body.model;
 	const normalizedModel = normalizeModel(body.model);
@@ -904,6 +964,7 @@ export async function transformRequestBody(
 		body.tools = cleanupToolDefinitions(body.tools);
 		body.tools = sanitizePlanOnlyTools(body.tools, collaborationMode);
 	}
+	const runtimeToolNames = extractRuntimeToolNames(body.tools);
 
 	body.instructions = shouldApplyFastSessionTuning
 		? compactInstructionsForFastSession(codexInstructions, isTrivialTurn)
@@ -954,10 +1015,20 @@ export async function transformRequestBody(
 		if (codexMode) {
 			// CODEX_MODE: Remove OpenCode system prompt, add bridge prompt
 			body.input = await filterOpenCodeSystemPrompts(body.input);
-			body.input = addCodexBridgeMessage(body.input, !!body.tools, body.tools);
+			body.input = addCodexBridgeMessage(
+				body.input,
+				!!body.tools,
+				runtimeToolNames,
+				hashlineBridgeHintsMode,
+			);
 		} else {
 			// DEFAULT MODE: Keep original behavior with tool remap message
-			body.input = addToolRemapMessage(body.input, !!body.tools);
+			body.input = addToolRemapMessage(
+				body.input,
+				!!body.tools,
+				runtimeToolNames,
+				hashlineBridgeHintsMode,
+			);
 		}
 
 		// Handle orphaned function_call_output items (where function_call was an item_reference that got filtered)

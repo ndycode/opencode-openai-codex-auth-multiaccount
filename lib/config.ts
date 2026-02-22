@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { PluginConfig } from "./types.js";
+import type { HashlineBridgeHintsMode, PluginConfig } from "./types.js";
 import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
@@ -10,6 +10,7 @@ const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
+const HASHLINE_BRIDGE_HINT_MODES = new Set(["off", "hints", "strict"]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -174,6 +175,49 @@ function resolveStringSetting<T extends string>(
 
 export function getCodexMode(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_MODE", pluginConfig.codexMode, true);
+}
+
+/**
+ * Resolve hashline hint mode with backward-compatible fallback:
+ * - Preferred: CODEX_AUTH_HASHLINE_HINTS_MODE=off|hints|strict
+ * - Legacy env: CODEX_AUTH_HASHLINE_HINTS_BETA=0|1
+ * - Preferred config: hashlineBridgeHintsMode
+ * - Legacy config: hashlineBridgeHintsBeta
+ */
+export function getHashlineBridgeHintsMode(
+	pluginConfig: PluginConfig,
+): HashlineBridgeHintsMode {
+	const envMode = parseStringEnv(process.env.CODEX_AUTH_HASHLINE_HINTS_MODE);
+	if (envMode && HASHLINE_BRIDGE_HINT_MODES.has(envMode)) {
+		return envMode as HashlineBridgeHintsMode;
+	}
+
+	const legacyEnvBeta = parseBooleanEnv(process.env.CODEX_AUTH_HASHLINE_HINTS_BETA);
+	if (legacyEnvBeta !== undefined) {
+		return legacyEnvBeta ? "hints" : "off";
+	}
+
+	const configMode =
+		typeof pluginConfig.hashlineBridgeHintsMode === "string"
+			? pluginConfig.hashlineBridgeHintsMode.trim().toLowerCase()
+			: undefined;
+	if (configMode && HASHLINE_BRIDGE_HINT_MODES.has(configMode)) {
+		return configMode as HashlineBridgeHintsMode;
+	}
+
+	if (typeof pluginConfig.hashlineBridgeHintsBeta === "boolean") {
+		return pluginConfig.hashlineBridgeHintsBeta ? "hints" : "off";
+	}
+
+	return "off";
+}
+
+/**
+ * Backward-compatible boolean helper.
+ * Prefer getHashlineBridgeHintsMode() in new call sites.
+ */
+export function getHashlineBridgeHintsBeta(pluginConfig: PluginConfig): boolean {
+	return getHashlineBridgeHintsMode(pluginConfig) !== "off";
 }
 
 export function getRequestTransformMode(pluginConfig: PluginConfig): "native" | "legacy" {

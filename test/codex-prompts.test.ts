@@ -13,7 +13,15 @@ vi.mock("node:fs", () => ({
 const originalFetch = global.fetch;
 let mockFetch: ReturnType<typeof vi.fn>;
 
-import { getModelFamily, getCodexInstructions, MODEL_FAMILIES, TOOL_REMAP_MESSAGE, __clearCacheForTesting } from "../lib/prompts/codex.js";
+import {
+	getModelFamily,
+	getCodexInstructions,
+	MODEL_FAMILIES,
+	TOOL_REMAP_MESSAGE,
+	__clearCacheForTesting,
+	renderToolRemapMessage,
+	hasHashlineRuntimeTool,
+} from "../lib/prompts/codex.js";
 
 const mockedReadFile = vi.mocked(fs.readFile);
 const mockedWriteFile = vi.mocked(fs.writeFile);
@@ -64,6 +72,41 @@ describe("Codex Prompts Module", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("read");
 			expect(TOOL_REMAP_MESSAGE).toContain("bash");
 			expect(TOOL_REMAP_MESSAGE).toContain("grep");
+		});
+
+		it("should detect hashline-style tools", () => {
+			expect(hasHashlineRuntimeTool(["hashline_edit"])).toBe(true);
+			expect(hasHashlineRuntimeTool(["line-hash-write"])).toBe(true);
+			expect(hasHashlineRuntimeTool(["patch", "edit"])).toBe(false);
+		});
+
+		it("should render hashline hints only when hints mode and hashline tools are both present", () => {
+			const withHints = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "hints",
+				runtimeToolNames: ["hashline_edit", "patch"],
+			});
+			const withoutHints = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "hints",
+				runtimeToolNames: ["patch", "edit"],
+			});
+
+			expect(withHints).toContain("hashline_beta_hints");
+			expect(withHints).toContain("Prefer hashline tools");
+			expect(withoutHints).not.toContain("hashline_beta_hints");
+		});
+
+		it("should render strict hashline policy only in strict mode", () => {
+			const strictHints = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "strict",
+				runtimeToolNames: ["hashline_edit", "patch"],
+			});
+			const nonStrict = renderToolRemapMessage({
+				hashlineBridgeHintsMode: "hints",
+				runtimeToolNames: ["hashline_edit", "patch"],
+			});
+
+			expect(strictHints).toContain('hashline_policy mode="strict"');
+			expect(nonStrict).not.toContain('hashline_policy mode="strict"');
 		});
 	});
 

@@ -80,6 +80,8 @@ vi.mock("../lib/config.js", () => ({
 	getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
 	getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
 	getUnsupportedCodexFallbackChain: () => ({}),
+	getHashlineBridgeHintsMode: () => "off",
+	getHashlineBridgeHintsBeta: () => false,
 	getTokenRefreshSkewMs: () => 60000,
 	getSessionRecovery: () => false,
 	getAutoResume: () => false,
@@ -173,6 +175,8 @@ vi.mock("../lib/request/rate-limit-backoff.js", () => ({
 	getUnsupportedCodexModelInfo: vi.fn(() => ({ isUnsupported: false })),
 	resolveUnsupportedCodexFallbackModel: vi.fn(() => undefined),
 	shouldFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
+	getToolUnavailableInfo: vi.fn(() => ({ isToolUnavailable: false })),
+	classifyFailureRoute: vi.fn(() => "other"),
 	handleSuccessResponse: vi.fn(async (response: Response) => response),
 }));
 
