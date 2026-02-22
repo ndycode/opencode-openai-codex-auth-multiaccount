@@ -29,7 +29,8 @@ export const MIN_PROACTIVE_BUFFER_MS = 30 * 1000;
 export interface ProactiveRefreshResult {
 	refreshed: boolean;
 	tokenResult?: TokenResult;
-	reason: "not_needed" | "no_refresh_token" | "success" | "failed";
+	reason: "not_needed" | "no_refresh_token" | "success" | "failed" | "exception";
+	errorMessage?: string;
 }
 
 /**
@@ -150,8 +151,24 @@ export async function refreshExpiringAccounts(
 
 	// Refresh in parallel for efficiency
 	const refreshPromises = accountsToRefresh.map(async (account) => {
-		const result = await proactiveRefreshAccount(account, bufferMs);
-		return { index: account.index, result };
+		try {
+			const result = await proactiveRefreshAccount(account, bufferMs);
+			return { index: account.index, result };
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			log.error("Unhandled exception during proactive refresh", {
+				accountId: account.accountId,
+				error: errorMessage,
+			});
+			return {
+				index: account.index,
+				result: {
+					refreshed: false,
+					reason: "exception",
+					errorMessage,
+				},
+			};
+		}
 	});
 
 	const outcomes = await Promise.all(refreshPromises);
