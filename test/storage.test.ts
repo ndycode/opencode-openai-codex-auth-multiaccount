@@ -159,6 +159,84 @@ describe("storage", () => {
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
     });
 
+    it("preserves same-email same-token accounts when accountId differs during import", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "workspace-a",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              accountId: "workspace-b",
+              refreshToken: "shared-refresh",
+              email: "user@example.com",
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+      expect(new Set(loaded?.accounts.map((a) => a.accountId))).toEqual(
+        new Set(["workspace-a", "workspace-b"]),
+      );
+    });
+
+    it("deduplicates legacy no-accountId records by email during import", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "legacy-refresh-old",
+            email: "legacy@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              refreshToken: "legacy-refresh-new",
+              email: "legacy@example.com",
+              addedAt: 2,
+              lastUsed: 20,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.refreshToken).toBe("legacy-refresh-new");
+    });
+
     it("should serialize concurrent transactional updates without losing accounts", async () => {
       await saveAccounts({
         version: 3,
@@ -596,6 +674,60 @@ describe("storage", () => {
       };
       const result = normalizeAccountStorage(data);
       expect(result?.accounts).toHaveLength(1);
+    });
+
+    it("keeps same-email same-token records distinct when accountId differs", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "workspace-a",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            accountId: "workspace-b",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(2);
+      expect(new Set(result?.accounts.map((a) => a.accountId))).toEqual(
+        new Set(["workspace-a", "workspace-b"]),
+      );
+    });
+
+    it("deduplicates legacy no-accountId records by email", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "legacy-old",
+            email: "legacy@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            refreshToken: "legacy-new",
+            email: "legacy@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(1);
+      expect(result?.accounts[0]?.refreshToken).toBe("legacy-new");
     });
   });
 

@@ -567,6 +567,39 @@ describe("Token Utils Module", () => {
 	});
 
 	describe("selectBestAccountCandidate", () => {
+		it("selects best primary candidate without mutating candidate pool metadata", () => {
+			const candidates = [
+				{
+					accountId: "token-primary",
+					label: "Token Candidate [id:imary]",
+					source: "token" as const,
+				},
+				{
+					accountId: "org-default",
+					label: "Org Default [id:fault]",
+					source: "org" as const,
+					isDefault: true,
+					isPersonal: false,
+				},
+				{
+					accountId: "id-variant",
+					label: "ID Variant [id:riant]",
+					source: "id_token" as const,
+				},
+			];
+
+			const selected = selectBestAccountCandidate(candidates);
+
+			expect(selected?.accountId).toBe("org-default");
+			expect(selected?.source).toBe("org");
+			expect(selected?.label).toBe("Org Default [id:fault]");
+			expect(candidates.map((candidate) => candidate.accountId)).toEqual([
+				"token-primary",
+				"org-default",
+				"id-variant",
+			]);
+		});
+
 		it("prefers non-personal org default over token", () => {
 			const selected = selectBestAccountCandidate([
 				{

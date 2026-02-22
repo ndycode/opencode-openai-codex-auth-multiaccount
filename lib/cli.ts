@@ -75,15 +75,18 @@ export interface LoginMenuResult {
 function formatAccountLabel(account: ExistingAccountInfo, index: number): string {
 	const num = index + 1;
 	const label = account.accountLabel?.trim();
-	if (account.email?.trim()) {
-		return label ? `${num}. ${label} (${account.email})` : `${num}. ${account.email}`;
-	}
-	if (label) {
-		return `${num}. ${label}`;
-	}
-	if (account.accountId?.trim()) {
-		const suffix = account.accountId.length > 6 ? account.accountId.slice(-6) : account.accountId;
-		return `${num}. ${suffix}`;
+	const email = account.email?.trim();
+	const accountId = account.accountId?.trim();
+	const accountIdDisplay =
+		accountId && accountId.length > 14
+			? `${accountId.slice(0, 8)}...${accountId.slice(-6)}`
+			: accountId;
+	const details: string[] = [];
+	if (email) details.push(email);
+	if (label) details.push(`workspace:${label}`);
+	if (accountIdDisplay) details.push(`id:${accountIdDisplay}`);
+	if (details.length > 0) {
+		return `${num}. ${details.join(" | ")}`;
 	}
 	return `${num}. Account`;
 }

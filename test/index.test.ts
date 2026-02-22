@@ -198,6 +198,27 @@ vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "/mock/path/accounts.json",
 	loadAccounts: vi.fn(async () => mockStorage),
 	saveAccounts: vi.fn(async () => {}),
+	withAccountStorageTransaction: vi.fn(
+		async (
+			callback: (
+				loadedStorage: typeof mockStorage,
+				persist: (nextStorage: typeof mockStorage) => Promise<void>,
+			) => Promise<void>,
+		) => {
+			const loadedStorage = {
+				...mockStorage,
+				accounts: mockStorage.accounts.map((account) => ({ ...account })),
+				activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+			};
+			const persist = async (nextStorage: typeof mockStorage) => {
+				mockStorage.version = nextStorage.version;
+				mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+				mockStorage.activeIndex = nextStorage.activeIndex;
+				mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
+			};
+			await callback(loadedStorage, persist);
+		},
+	),
 	clearAccounts: vi.fn(async () => {}),
 	setStoragePath: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
@@ -293,8 +314,12 @@ vi.mock("../lib/accounts.js", () => {
 
 	return {
 		AccountManager: MockAccountManager,
-		getAccountIdCandidates: () => [{ accountId: "acc-1", source: "token", label: "Test" }],
-		selectBestAccountCandidate: (candidates: Array<{ accountId: string }>) => candidates[0] ?? null,
+		getAccountIdCandidates: vi.fn(() => [
+			{ accountId: "acc-1", source: "token" as const, label: "Test" },
+		]),
+		selectBestAccountCandidate: vi.fn(
+			(candidates: Array<{ accountId: string }>) => candidates[0] ?? null,
+		),
 		extractAccountEmail: () => "user@example.com",
 		extractAccountId: () => "account-1",
 		resolveRequestAccountId: (_storedId: string | undefined, _source: string | undefined, tokenId: string | undefined) => tokenId,
@@ -1275,6 +1300,7 @@ describe("OpenAIOAuthPlugin resolveAccountSelection", () => {
 		mockStorage.accounts = [];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		delete process.env.CODEX_AUTH_ACCOUNT_ID;
 	});
 
 	afterEach(() => {
@@ -1335,6 +1361,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		mockStorage.accounts = [];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		delete process.env.CODEX_AUTH_ACCOUNT_ID;
 	});
 
 	afterEach(() => {
@@ -1373,6 +1400,89 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		await OpenAIOAuthPlugin({ client: mockClient } as never);
 
 		expect(mockStorage.accounts).toHaveLength(1);
+	});
+
+	it("persists all account candidates from a single login while keeping best candidate primary", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-multi",
+			refresh: "refresh-multi",
+			expires: Date.now() + 300_000,
+			idToken: "id-multi",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([
+			{ accountId: "token-personal", source: "token", label: "Token Personal [id:sonal]" },
+			{ accountId: "org-default", source: "org", label: "Workspace Alpha [id:fault]" },
+			{ accountId: "id-secondary", source: "id_token", label: "Workspace Beta [id:ndary]" },
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
+			candidates.find((candidate) => candidate.accountId === "org-default") ?? candidates[0],
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(3);
+		expect(mockStorage.accounts.map((account) => account.accountId)).toEqual([
+			"org-default",
+			"token-personal",
+			"id-secondary",
+		]);
+		expect(mockStorage.accounts.map((account) => account.accountIdSource)).toEqual([
+			"org",
+			"token",
+			"id_token",
+		]);
+		expect(mockStorage.accounts.map((account) => account.accountLabel)).toEqual([
+			"Workspace Alpha [id:fault]",
+			"Token Personal [id:sonal]",
+			"Workspace Beta [id:ndary]",
+		]);
+		expect(mockStorage.activeIndex).toBe(0);
+	});
+
+	it("keeps non-primary candidates persisted even when best candidate differs", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-two",
+			refresh: "refresh-two",
+			expires: Date.now() + 300_000,
+			idToken: "id-two",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([
+			{ accountId: "token-first", source: "token", label: "Token First [id:first]" },
+			{ accountId: "org-preferred", source: "org", label: "Org Preferred [id:ferred]" },
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
+			candidates.find((candidate) => candidate.accountId === "org-preferred") ?? candidates[0],
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts.map((account) => account.accountId)).toEqual([
+			"org-preferred",
+			"token-first",
+		]);
+		expect(mockStorage.accounts[1]?.accountIdSource).toBe("token");
 	});
 });
 

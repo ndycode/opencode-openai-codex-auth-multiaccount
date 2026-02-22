@@ -714,6 +714,32 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return ui.theme.glyphs.cross;
 		};
 
+		const formatAccountIdForDisplay = (accountId: string | undefined): string | null => {
+			const normalized = accountId?.trim();
+			if (!normalized) return null;
+			if (normalized.length <= 14) return normalized;
+			return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+		};
+
+		const formatCommandAccountLabel = (
+			account: { email?: string; accountId?: string; accountLabel?: string } | undefined,
+			index: number,
+		): string => {
+			const email = account?.email?.trim();
+			const workspace = account?.accountLabel?.trim();
+			const accountId = formatAccountIdForDisplay(account?.accountId);
+			const details: string[] = [];
+			if (email) details.push(email);
+			if (workspace) details.push(`workspace:${workspace}`);
+			if (accountId) details.push(`id:${accountId}`);
+
+			if (details.length === 0) {
+				return `Account ${index + 1}`;
+			}
+
+			return `Account ${index + 1} (${details.join(", ")})`;
+		};
+
 		const invalidateAccountManagerCache = (): void => {
 			cachedAccountManager = null;
 			accountManagerPromise = null;
@@ -2634,7 +2660,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						];
 
 						storage.accounts.forEach((account, index) => {
-							const label = formatAccountLabel(account, index);
+							const label = formatCommandAccountLabel(account, index);
 							const badges: string[] = [];
 							if (index === activeIndex) badges.push(formatUiBadge(ui, "current", "accent"));
 							if (account.enabled === false) badges.push(formatUiBadge(ui, "disabled", "danger"));
@@ -2650,7 +2676,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								badges.push(formatUiBadge(ui, "ok", "success"));
 							}
 
-							lines.push(formatUiItem(ui, `${index + 1}. ${label} ${badges.join(" ")}`.trim()));
+							lines.push(formatUiItem(ui, `${label} ${badges.join(" ")}`.trim()));
 							if (rateLimit) {
 								lines.push(`  ${paintUiText(ui, `rate limit: ${rateLimit}`, "muted")}`);
 							}
@@ -2679,9 +2705,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						...buildTableHeader(listTableOptions),
 					];
 
-                                        storage.accounts.forEach((account, index) => {
-                                                const label = formatAccountLabel(account, index);
-                                                const statuses: string[] = [];
+						storage.accounts.forEach((account, index) => {
+							const label = formatCommandAccountLabel(account, index);
+							const statuses: string[] = [];
                                                 const rateLimit = formatRateLimitEntry(
                                                         account,
                                                         now,
@@ -2766,15 +2792,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 						await saveAccounts(storage);
 					} catch (saveError) {
 						logWarn("Failed to save account switch", { error: String(saveError) });
+						const label = formatCommandAccountLabel(account, targetIndex);
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Switch account"),
 								"",
-								formatUiItem(ui, `Switched to ${formatAccountLabel(account, targetIndex)}`, "warning"),
+								formatUiItem(ui, `Switched to ${label}`, "warning"),
 								formatUiItem(ui, "Failed to persist change. It may be lost on restart.", "danger"),
 							].join("\n");
 						}
-						return `Switched to ${formatAccountLabel(account, targetIndex)} but failed to persist. Changes may be lost on restart.`;
+						return `Switched to ${label} but failed to persist. Changes may be lost on restart.`;
 					}
 
                                         if (cachedAccountManager) {
@@ -2783,7 +2810,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						accountManagerPromise = Promise.resolve(reloadedManager);
                                         }
 
-                                        const label = formatAccountLabel(account, targetIndex);
+					const label = formatCommandAccountLabel(account, targetIndex);
 					if (ui.v2Enabled) {
 						return [
 							...formatUiHeader(ui, "Switch account"),
@@ -2823,7 +2850,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					];
 
 					storage.accounts.forEach((account, index) => {
-						const label = formatAccountLabel(account, index);
+						const label = formatCommandAccountLabel(account, index);
 						const badges: string[] = [];
 						if (index === activeIndex) badges.push(formatUiBadge(ui, "active", "accent"));
 						if (account.enabled === false) badges.push(formatUiBadge(ui, "disabled", "danger"));
@@ -2833,7 +2860,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						if (cooldown !== "none") badges.push(formatUiBadge(ui, "cooldown", "warning"));
 						if (badges.length === 0) badges.push(formatUiBadge(ui, "ok", "success"));
 
-						lines.push(formatUiItem(ui, `${index + 1}. ${label} ${badges.join(" ")}`.trim()));
+						lines.push(formatUiItem(ui, `${label} ${badges.join(" ")}`.trim()));
 						lines.push(`  ${formatUiKeyValue(ui, "rate limit", rateLimit, rateLimit === "none" ? "muted" : "warning")}`);
 						lines.push(`  ${formatUiKeyValue(ui, "cooldown", cooldown, cooldown === "none" ? "muted" : "warning")}`);
 					});
@@ -2879,7 +2906,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         ];
 
 								storage.accounts.forEach((account, index) => {
-										const label = formatAccountLabel(account, index);
+										const label = formatCommandAccountLabel(account, index);
 										const active = index === activeIndex ? "Yes" : "No";
 										const rateLimit = formatRateLimitEntry(account, now) ?? "None";
 										const cooldown = formatCooldown(account, now) ?? "No";
@@ -3010,7 +3037,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						const account = storage.accounts[i];
 						if (!account) continue;
 
-						const label = formatAccountLabel(account, i);
+						const label = formatCommandAccountLabel(account, i);
 						try {
 				const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
@@ -3042,7 +3069,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				},
 			}),
 			"codex-remove": tool({
-				description: "Remove a Codex account by index (1-based). Use codex-list to list accounts first.",
+				description: "Remove one Codex account entry by index (1-based). Use codex-list to list accounts first.",
 				args: {
 					index: tool.schema.number().describe(
 						"Account number to remove (1-based, e.g., 1 for first account)",
@@ -3085,7 +3112,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return `Account ${index} not found.`;
 					}
 
-					const label = formatAccountLabel(account, targetIndex);
+					const label = formatCommandAccountLabel(account, targetIndex);
 
 					storage.accounts.splice(targetIndex, 1);
 
@@ -3121,11 +3148,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return [
 							...formatUiHeader(ui, "Remove account"),
 							"",
-							formatUiItem(ui, `Removed ${formatAccountLabel(account, targetIndex)} from memory`, "warning"),
+							formatUiItem(ui, `Removed selected entry: ${label}`, "warning"),
+							formatUiItem(ui, "Only the selected index was changed.", "muted"),
 							formatUiItem(ui, "Failed to persist. Change may be lost on restart.", "danger"),
 						].join("\n");
 					}
-					return `Removed ${formatAccountLabel(account, targetIndex)} from memory but failed to persist. Changes may be lost on restart.`;
+					return `Removed selected entry: ${label} from memory, but failed to persist. Only the selected index was changed and this may be lost on restart.`;
 				}
 
 					if (cachedAccountManager) {
@@ -3135,18 +3163,36 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					const remaining = storage.accounts.length;
+					const matchingEmailRemaining =
+						account.email?.trim()
+							? storage.accounts.filter((entry) => entry.email === account.email).length
+							: 0;
 					if (ui.v2Enabled) {
+						const postRemoveHint =
+							matchingEmailRemaining > 0 && account.email
+								? formatUiItem(
+										ui,
+										`Other entries for ${account.email} remain: ${matchingEmailRemaining}`,
+										"muted",
+								  )
+								: formatUiItem(ui, "Only the selected entry was removed.", "muted");
 						return [
 							...formatUiHeader(ui, "Remove account"),
 							"",
-							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Removed: ${label}`, "success"),
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Removed selected entry: ${label}`, "success"),
+							postRemoveHint,
 							remaining > 0
 								? formatUiKeyValue(ui, "Remaining accounts", String(remaining))
 								: formatUiItem(ui, "No accounts remaining. Run: opencode auth login", "warning"),
 						].join("\n");
 					}
+					const postRemoveHint =
+						matchingEmailRemaining > 0 && account.email
+							? `Other entries for ${account.email} remain: ${matchingEmailRemaining}`
+							: "Only the selected entry was removed.";
 					return [
-						`Removed: ${label}`,
+						`Removed selected entry: ${label}`,
+						postRemoveHint,
 						"",
 						remaining > 0
 							? `Remaining accounts: ${remaining}`
@@ -3183,7 +3229,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					for (let i = 0; i < storage.accounts.length; i++) {
 						const account = storage.accounts[i];
 						if (!account) continue;
-						const label = formatAccountLabel(account, i);
+						const label = formatCommandAccountLabel(account, i);
 
 						try {
 							const refreshResult = await queuedRefresh(account.refreshToken);
