@@ -722,6 +722,8 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			refreshToken,
 			addedAt: typeof rawAccount.addedAt === "number" ? rawAccount.addedAt : flaggedAt,
 			lastUsed: typeof rawAccount.lastUsed === "number" ? rawAccount.lastUsed : flaggedAt,
+			organizationId:
+				typeof rawAccount.organizationId === "string" ? rawAccount.organizationId : undefined,
 			accountId: typeof rawAccount.accountId === "string" ? rawAccount.accountId : undefined,
 			accountIdSource,
 			accountLabel: typeof rawAccount.accountLabel === "string" ? rawAccount.accountLabel : undefined,
