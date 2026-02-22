@@ -4,6 +4,21 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ## [unreleased]
 
+## [5.3.0] - 2026-02-22
+
+### added
+
+- **workspace-aware account persistence**: oauth workspace candidates are preserved as distinct account entries to keep per-workspace routing stable across multi-account sessions.
+
+### fixed
+
+- **organization identity reconciliation**: account restoration now preserves organization/workspace identity across token refresh and flagged-account recovery paths.
+- **verify-flagged restore identity loss**: flagged-account restore no longer drops `organizationId` when an `accountId` already exists.
+
+### changed
+
+- **documentation alignment with current runtime structure**: refreshed README and docs portal/architecture guides to reflect native-vs-legacy request transforms, workspace-aware identity behavior, and current preset/test counts.
+
 ## [5.2.3] - 2026-02-21
 
 ### fixed
