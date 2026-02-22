@@ -121,6 +121,57 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 
 ---
 
+## Beta Quickstart (v5.2.4-beta)
+
+Use this only if you are testing the beta release.
+
+### Install Beta
+
+```bash
+npm install -g oc-chatgpt-multi-auth@beta
+```
+
+### Default (Recommended)
+
+No extra config is required.
+
+### Optional Beta Feature Config
+
+Enable legacy bridge mode and hashline hint policy:
+
+```bash
+CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy
+CODEX_AUTH_HASHLINE_HINTS_MODE=off   # or: hints | strict
+```
+
+Legacy compatibility toggle (used only when `CODEX_AUTH_HASHLINE_HINTS_MODE` is unset):
+
+```bash
+CODEX_AUTH_HASHLINE_HINTS_BETA=1   # maps to hints
+CODEX_AUTH_HASHLINE_HINTS_BETA=0   # maps to off
+```
+
+### Verify Beta Behavior (Optional)
+
+```bash
+ENABLE_PLUGIN_REQUEST_LOGGING=1
+CODEX_PLUGIN_LOG_BODIES=1
+```
+
+Then inspect plugin logs for markers:
+
+- `hashline_beta_hints`
+- `hashline_policy mode="strict"`
+- `tool_unavailable_recovery`
+
+### Roll Back To Stable
+
+```bash
+npm install -g oc-chatgpt-multi-auth@latest
+```
+
+---
+
 ## Models
 
 ### Model Reference
