@@ -325,6 +325,43 @@ describe("proactive-refresh", () => {
 			expect(refreshQueue.queuedRefresh).toHaveBeenCalledTimes(3);
 		});
 
+		it("continues processing other accounts when one throws", async () => {
+			const accounts = [
+				createMockAccount({
+					index: 0,
+					access: "access-0",
+					expires: Date.now() + 20000,
+					refreshToken: "refresh-0",
+				}),
+				createMockAccount({
+					index: 1,
+					access: "access-1",
+					expires: Date.now() + 20000,
+					refreshToken: "refresh-1",
+				}),
+			];
+
+			vi.mocked(refreshQueue.queuedRefresh)
+				.mockRejectedValueOnce(new Error("network down"))
+				.mockResolvedValueOnce({
+					type: "success" as const,
+					access: "new-access",
+					refresh: "new-refresh",
+					expires: Date.now() + 3600000,
+				});
+
+			const results = await refreshExpiringAccounts(accounts);
+
+			expect(results.size).toBe(2);
+			const first = results.get(0);
+			const second = results.get(1);
+			expect(first?.reason).toBe("exception");
+			expect(first?.refreshed).toBe(false);
+			expect(first?.errorMessage).toContain("network");
+			expect(second?.reason).toBe("success");
+			expect(refreshQueue.queuedRefresh).toHaveBeenCalledTimes(2);
+		});
+
 		it("handles mixed success and failure results", async () => {
 			const accounts = [
 				createMockAccount({
