@@ -441,6 +441,7 @@ apply_patch/applyPatch are Codex names. In OpenCode, use native tools:
 File Operations:
   • write  - Create new files
   • edit   - Modify existing files with string replacement
+  - oldString must be literal text from the current file; never pass unresolved placeholders like \${TARGET_SNIPPET}
   • patch  - Apply diff patches
   • read   - Read file contents
 
