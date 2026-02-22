@@ -9,7 +9,11 @@ import { logRequest, logError, logWarn } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
-import type { UserConfig, RequestBody } from "../types.js";
+import type {
+	HashlineBridgeHintsMode,
+	UserConfig,
+	RequestBody,
+} from "../types.js";
 import { CodexAuthError } from "../errors.js";
 import { isRecord } from "../utils.js";
 import {
@@ -66,6 +70,26 @@ export interface ResolveUnsupportedCodexFallbackOptions {
 	fallbackToGpt52OnUnsupportedGpt53: boolean;
 	customChain?: Record<string, string[]>;
 }
+
+export interface ToolUnavailableInfo {
+	isToolUnavailable: boolean;
+	toolName?: string;
+	message?: string;
+}
+
+export type FailureRoute =
+	| "rate_limit"
+	| "server_error"
+	| "network_error"
+	| "tool_unavailable"
+	| "other";
+
+const TOOL_UNAVAILABLE_PATTERNS = [
+	/tool(?:\s+name)?\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+(?:is\s+)?not\s+found/i,
+	/no tool named\s+[`'"]?([^`'"\s.,:]+)[`'"]?/i,
+	/unknown tool(?:\s+[`'"]?([^`'"\s.,:]+)[`'"]?)?/i,
+	/tool\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+is\s+unavailable/i,
+];
 
 function canonicalizeModelName(model: string | undefined): string | undefined {
 	if (!model) return undefined;
@@ -219,6 +243,68 @@ export function shouldFallbackToGpt52OnUnsupportedGpt53(
 			fallbackToGpt52OnUnsupportedGpt53: true,
 		}) === "gpt-5.2-codex"
 	);
+}
+
+function extractMessageFromErrorBody(errorBody: unknown): string | undefined {
+	if (typeof errorBody === "string") return errorBody;
+	if (!isRecord(errorBody)) return undefined;
+
+	if (typeof errorBody.message === "string") return errorBody.message;
+	const maybeError = errorBody.error;
+	if (isRecord(maybeError) && typeof maybeError.message === "string") {
+		return maybeError.message;
+	}
+	return undefined;
+}
+
+function extractToolUnavailableName(message: string): string | undefined {
+	for (const pattern of TOOL_UNAVAILABLE_PATTERNS) {
+		const match = message.match(pattern);
+		const candidate = match?.[1]?.trim();
+		if (candidate) return candidate;
+	}
+	return undefined;
+}
+
+export function getToolUnavailableInfo(errorBody: unknown): ToolUnavailableInfo {
+	const message = extractMessageFromErrorBody(errorBody);
+	if (!message) return { isToolUnavailable: false };
+
+	const isToolUnavailable = TOOL_UNAVAILABLE_PATTERNS.some((pattern) =>
+		pattern.test(message),
+	);
+	if (!isToolUnavailable) {
+		return { isToolUnavailable: false };
+	}
+
+	return {
+		isToolUnavailable,
+		toolName: extractToolUnavailableName(message),
+		message,
+	};
+}
+
+export function classifyFailureRoute(options: {
+	status?: number;
+	rateLimit?: RateLimitInfo;
+	errorBody?: unknown;
+	networkError?: unknown;
+}): FailureRoute {
+	if (options.networkError !== undefined) return "network_error";
+	if (options.rateLimit) return "rate_limit";
+
+	const toolUnavailable = getToolUnavailableInfo(options.errorBody);
+	if (toolUnavailable.isToolUnavailable) return "tool_unavailable";
+
+	if (
+		typeof options.status === "number" &&
+		options.status >= 500 &&
+		options.status < 600
+	) {
+		return "server_error";
+	}
+
+	return "other";
 }
 
 /**
@@ -387,6 +473,7 @@ export async function transformRequestForCodex(
 		fastSession?: boolean;
 		fastSessionStrategy?: "hybrid" | "always";
 		fastSessionMaxInputItems?: number;
+		hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
 	},
 ): Promise<{ body: RequestBody; updatedInit: RequestInit } | undefined> {
 	const hasParsedBody =
@@ -467,6 +554,7 @@ export async function transformRequestForCodex(
 			options?.fastSession ?? false,
 			options?.fastSessionStrategy ?? "hybrid",
 			options?.fastSessionMaxInputItems ?? 30,
+			options?.hashlineBridgeHintsMode ?? "off",
 		);
 
 		// Log transformed request

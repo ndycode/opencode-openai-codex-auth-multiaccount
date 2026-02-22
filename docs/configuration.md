@@ -96,6 +96,8 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 {
   "requestTransformMode": "native",
   "codexMode": true,
+  "hashlineBridgeHintsMode": "off",
+  "hashlineBridgeHintsBeta": false,
   "codexTuiV2": true,
   "codexTuiColorProfile": "truecolor",
   "codexTuiGlyphMode": "ascii",
@@ -121,6 +123,8 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 |--------|---------|--------------|
 | `requestTransformMode` | `native` | request shaping mode: `native` keeps OpenCode payloads unchanged; `legacy` enables Codex compatibility rewrites |
 | `codexMode` | `true` | legacy-only bridge prompt behavior (applies when `requestTransformMode=legacy`) |
+| `hashlineBridgeHintsMode` | `off` | hashline guidance in `legacy` mode when runtime tool names include hashline variants: `off`, `hints`, `strict` |
+| `hashlineBridgeHintsBeta` | `false` | legacy boolean compatibility (`true -> hints`, `false -> off`) |
 | `codexTuiV2` | `true` | enables codex-style terminal ui output (set `false` to keep legacy output) |
 | `codexTuiColorProfile` | `truecolor` | terminal color profile for codex ui (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | glyph set for codex ui (`ascii`, `unicode`, `auto`) |
@@ -142,6 +146,11 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
 | `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
 | `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
+
+`hashlineBridgeHintsMode` details:
+- `off`: disable hashline-specific guidance.
+- `hints`: add soft preference guidance for hashline tools.
+- `strict`: add hashline-first policy guidance for targeted edits.
 
 ### unsupported-model behavior + fallback chain
 
@@ -186,6 +195,8 @@ override any config with env vars:
 | `CODEX_PLUGIN_LOG_LEVEL=debug` | set log level (debug/info/warn/error) |
 | `CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy` | re-enable legacy Codex request rewriting |
 | `CODEX_MODE=0` | disable bridge prompt |
+| `CODEX_AUTH_HASHLINE_HINTS_MODE=hints` | set hashline guidance mode (`off`, `hints`, `strict`) |
+| `CODEX_AUTH_HASHLINE_HINTS_BETA=1` | legacy toggle used only when `CODEX_AUTH_HASHLINE_HINTS_MODE` is unset |
 | `CODEX_TUI_V2=0` | disable codex-style ui (use legacy output) |
 | `CODEX_TUI_COLOR_PROFILE=ansi16` | force color profile for codex ui |
 | `CODEX_TUI_GLYPHS=unicode` | override glyph mode (`ascii`, `unicode`, `auto`) |

@@ -9,6 +9,8 @@ export type {
 	TokenFailureReasonFromSchema as TokenFailureReason,
 } from "./schemas.js";
 
+export type HashlineBridgeHintsMode = "off" | "hints" | "strict";
+
 export interface UserConfig {
 	global: ConfigOptions;
 	models: {

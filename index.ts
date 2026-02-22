@@ -38,6 +38,7 @@ import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
+	getHashlineBridgeHintsMode,
 	getRequestTransformMode,
 	getFastSession,
 	getFastSessionStrategy,
@@ -119,9 +120,11 @@ import {
 } from "./lib/storage.js";
 import {
 	createCodexHeaders,
+	classifyFailureRoute,
 	extractRequestUrl,
         handleErrorResponse,
         handleSuccessResponse,
+	getToolUnavailableInfo,
 	getUnsupportedCodexModelInfo,
 	resolveUnsupportedCodexFallbackModel,
         refreshAndUpdateToken,
@@ -129,7 +132,10 @@ import {
 	shouldRefreshToken,
 	transformRequestForCodex,
 } from "./lib/request/fetch-helpers.js";
-import { applyFastSessionDefaults } from "./lib/request/request-transformer.js";
+import {
+	addToolUnavailableRecoveryMessage,
+	applyFastSessionDefaults,
+} from "./lib/request/request-transformer.js";
 import {
 	getRateLimitBackoff,
 	RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS,
@@ -809,6 +815,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				// Load plugin configuration and determine CODEX_MODE
 				// Priority: CODEX_MODE env var > config file > default (true)
 				const codexMode = getCodexMode(pluginConfig);
+				const hashlineBridgeHintsMode = getHashlineBridgeHintsMode(pluginConfig);
 				const requestTransformMode = getRequestTransformMode(pluginConfig);
 				const useLegacyRequestTransform = requestTransformMode === "legacy";
 				const fastSessionEnabled = getFastSession(pluginConfig);
@@ -991,6 +998,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 									fastSession: fastSessionEnabled,
 									fastSessionStrategy,
 									fastSessionMaxInputItems,
+									hashlineBridgeHintsMode,
 									requestTransformMode,
 								},
 							);
@@ -1067,6 +1075,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 							let allRateLimitedRetries = 0;
 							let emptyResponseRetries = 0;
+							let toolUnavailableRecoveryAttempts = 0;
 							const attemptedUnsupportedFallbackModels = new Set<string>();
 							if (model) {
 								attemptedUnsupportedFallbackModels.add(model);
@@ -1083,6 +1092,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					break;
 				}
 							attempted.add(account.index);
+							let networkRetryAttemptsForAccount = 0;
 							// Log account selection for debugging rotation
 							logDebug(
 								`Using account ${account.index + 1}/${accountCount}: ${account.email ?? "unknown"} for ${modelFamily}`,
@@ -1222,6 +1232,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 				} catch (networkError) {
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
+								const failureRoute = classifyFailureRoute({ networkError });
+								if (failureRoute === "network_error" && networkRetryAttemptsForAccount < 1) {
+									networkRetryAttemptsForAccount++;
+									runtimeMetrics.networkErrors++;
+									runtimeMetrics.lastError = `${errorMsg} (retrying on same account)`;
+									accountManager.refundToken(account, modelFamily, model);
+									await sleep(addJitter(400, 0.2));
+									continue;
+								}
+
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.networkErrors++;
 								runtimeMetrics.accountRotations++;
@@ -1373,9 +1393,50 @@ while (attempted.size < Math.max(1, accountCount)) {
 						logDebug(`[${PLUGIN_NAME}] Recoverable error detected: ${errorType}`);
 					}
 
-					// Handle 5xx server errors by rotating to another account
-					if (response.status >= 500 && response.status < 600) {
-						logWarn(`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`);
+					const failureRoute = classifyFailureRoute({
+						status: response.status,
+						rateLimit,
+						errorBody,
+					});
+
+					if (failureRoute === "tool_unavailable") {
+						const unavailable = getToolUnavailableInfo(errorBody);
+						if (
+							toolUnavailableRecoveryAttempts < 1 &&
+							transformedBody &&
+							Array.isArray(transformedBody.input)
+						) {
+							toolUnavailableRecoveryAttempts++;
+							accountManager.refundToken(account, modelFamily, model);
+							const recoveredInput = addToolUnavailableRecoveryMessage(
+								transformedBody.input,
+								unavailable.toolName,
+							);
+							transformedBody = {
+								...transformedBody,
+								input: recoveredInput ?? transformedBody.input,
+							};
+							requestInit = {
+								...(requestInit ?? {}),
+								body: JSON.stringify(transformedBody),
+							};
+							runtimeMetrics.lastError = unavailable.message ?? "Tool unavailable";
+							await showToast(
+								`Tool unavailable${unavailable.toolName ? `: ${unavailable.toolName}` : ""}. Retrying with runtime tool manifest.`,
+								"warning",
+								{ duration: toastDurationMs },
+							);
+							continue;
+						}
+						runtimeMetrics.failedRequests++;
+						runtimeMetrics.lastError = unavailable.message ?? "Tool unavailable";
+						return errorResponse;
+					}
+
+					if (failureRoute === "server_error") {
+						logWarn(
+							`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`,
+						);
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.serverErrors++;
 						runtimeMetrics.accountRotations++;
@@ -1385,69 +1446,70 @@ while (attempted.size < Math.max(1, accountCount)) {
 						break;
 					}
 
-					if (rateLimit) {
-																														runtimeMetrics.rateLimitedResponses++;
-																														const { attempt, delayMs } = getRateLimitBackoff(
-																															account.index,
-																															quotaKey,
-																															rateLimit.retryAfterMs,
-																														);
-																														const waitLabel = formatWaitTime(delayMs);
+					if (failureRoute === "rate_limit" && rateLimit) {
+						runtimeMetrics.rateLimitedResponses++;
+						const { attempt, delayMs } = getRateLimitBackoff(
+							account.index,
+							quotaKey,
+							rateLimit.retryAfterMs,
+						);
+						const waitLabel = formatWaitTime(delayMs);
 
-																														if (delayMs <= RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS) {
-																																if (
-																																	accountManager.shouldShowAccountToast(
-																																		account.index,
-																																		rateLimitToastDebounceMs,
-																																		)
-																																) {
-																									await showToast(
-																										`Rate limited. Retrying in ${waitLabel} (attempt ${attempt})...`,
-																										"warning",
-																										{ duration: toastDurationMs },
-																									);
-																																			accountManager.markToastShown(account.index);
-								}
+						if (delayMs <= RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS) {
+							if (
+								accountManager.shouldShowAccountToast(
+									account.index,
+									rateLimitToastDebounceMs,
+								)
+							) {
+								await showToast(
+									`Rate limited. Retrying in ${waitLabel} (attempt ${attempt})...`,
+									"warning",
+									{ duration: toastDurationMs },
+								);
+								accountManager.markToastShown(account.index);
+							}
 
-															await sleep(addJitter(Math.max(MIN_BACKOFF_MS, delayMs), 0.2));
-															continue;
-																																}
+							await sleep(addJitter(Math.max(MIN_BACKOFF_MS, delayMs), 0.2));
+							continue;
+						}
 
-				accountManager.markRateLimitedWithReason(
-					account,
-					delayMs,
-					modelFamily,
-					parseRateLimitReason(rateLimit.code),
-					model,
-				);
-				accountManager.recordRateLimit(account, modelFamily, model);
-				account.lastSwitchReason = "rate-limit";
-				runtimeMetrics.accountRotations++;
-				accountManager.saveToDiskDebounced();
+						accountManager.markRateLimitedWithReason(
+							account,
+							delayMs,
+							modelFamily,
+							parseRateLimitReason(rateLimit.code),
+							model,
+						);
+						accountManager.recordRateLimit(account, modelFamily, model);
+						account.lastSwitchReason = "rate-limit";
+						runtimeMetrics.accountRotations++;
+						accountManager.saveToDiskDebounced();
 						logWarn(
 							`Rate limited. Rotating account ${account.index + 1} (${account.email ?? "unknown"}).`,
 						);
 
-																														if (
-																															accountManager.getAccountCount() > 1 &&
-																															accountManager.shouldShowAccountToast(
-																																account.index,
-																																rateLimitToastDebounceMs,
-																																)
-																														) {
-																									await showToast(
-																										`Rate limited. Switching accounts (retry in ${waitLabel}).`,
-																										"warning",
-																										{ duration: toastDurationMs },
-																									);
-																																	accountManager.markToastShown(account.index);
-																																}
-																														break;
-																													}
-																													runtimeMetrics.failedRequests++;
-																													runtimeMetrics.lastError = `HTTP ${response.status}`;
-																													return errorResponse;
-																											}
+						if (
+							accountManager.getAccountCount() > 1 &&
+							accountManager.shouldShowAccountToast(
+								account.index,
+								rateLimitToastDebounceMs,
+							)
+						) {
+							await showToast(
+								`Rate limited. Switching accounts (retry in ${waitLabel}).`,
+								"warning",
+								{ duration: toastDurationMs },
+							);
+							accountManager.markToastShown(account.index);
+						}
+						break;
+					}
+
+					runtimeMetrics.failedRequests++;
+					runtimeMetrics.lastError = `HTTP ${response.status}`;
+					return errorResponse;
+				}
 
 					resetRateLimitBackoff(account.index, quotaKey);
 					runtimeMetrics.cumulativeLatencyMs += fetchLatencyMs;

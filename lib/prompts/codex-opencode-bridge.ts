@@ -8,6 +8,8 @@
  * Token Count: ~450 tokens (~90% reduction vs full OpenCode prompt)
  */
 
+import type { HashlineBridgeHintsMode } from "../types.js";
+
 export const CODEX_OPENCODE_BRIDGE = `# Codex Running in OpenCode
 
 You are running Codex through OpenCode, an open-source terminal coding assistant.
@@ -78,6 +80,19 @@ Sandbox policies, approvals, final formatting, git protocols, and file reference
 - When uncertain, prefer non-destructive verification first.`;
 
 const MAX_MANIFEST_TOOLS = 32;
+const HASHLINE_TOOL_PATTERN = /(hashline|line[_-]?hash|anchor[_-]?insert)/i;
+const HASHLINE_BETA_BRIDGE_SECTION = `## Hashline Edit Preference (Beta)
+
+- If runtime tools include hashline-style edit tools, prefer them for targeted edits.
+- Keep patch/edit for broad structural rewrites or when hashline tools are absent.
+- On hash mismatch, re-read before retrying to avoid stale-anchor edits.`;
+
+const HASHLINE_STRICT_BRIDGE_SECTION = `## Hashline Edit Policy (Strict)
+
+- If runtime tools include hashline-style edit tools, use them first for targeted edits.
+- Do not default to patch/edit for small in-place edits when hashline tools are available.
+- Re-read and retry with fresh anchors on hash mismatch before switching strategy.
+- Use patch/edit only for broad structural rewrites or when hashline tools are absent.`;
 
 const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
 	const unique = new Set<string>();
@@ -92,20 +107,49 @@ const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
 
 export const renderCodexOpenCodeBridge = (toolNames: readonly string[]): string => {
 	const runtimeToolNames = normalizeRuntimeToolNames(toolNames);
-	if (runtimeToolNames.length === 0) {
-		return CODEX_OPENCODE_BRIDGE;
+	return renderCodexOpenCodeBridgeWithOptions(runtimeToolNames);
+};
+
+export const renderCodexOpenCodeBridgeWithOptions = (
+	toolNames: readonly string[],
+	options?: {
+		hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
+	},
+): string => {
+	const runtimeToolNames = normalizeRuntimeToolNames(toolNames);
+	const hasHashlineRuntimeTool = runtimeToolNames.some((name) =>
+		HASHLINE_TOOL_PATTERN.test(name),
+	);
+
+	const sections: string[] = [];
+	if (runtimeToolNames.length > 0) {
+		const manifest = [
+			"## Runtime Tool Manifest",
+			"The host has provided these exact tool names for this request:",
+			...runtimeToolNames.map((name) => `- \`${name}\``),
+			"",
+			"Do not translate tool names. Use the exact names above.",
+		].join("\n");
+		sections.push(manifest);
 	}
 
-	const manifest = [
-		"## Runtime Tool Manifest",
-		"The host has provided these exact tool names for this request:",
-		...runtimeToolNames.map((name) => `- \`${name}\``),
-		"",
-		"Do not translate tool names. Use the exact names above.",
-	].join("\n");
+	const mode = normalizeHashlineBridgeHintsMode(options?.hashlineBridgeHintsMode);
+	if (mode !== "off" && hasHashlineRuntimeTool) {
+		sections.push(mode === "strict" ? HASHLINE_STRICT_BRIDGE_SECTION : HASHLINE_BETA_BRIDGE_SECTION);
+	}
 
-	return `${manifest}\n\n${CODEX_OPENCODE_BRIDGE}`;
+	sections.push(CODEX_OPENCODE_BRIDGE);
+	return sections.join("\n\n");
 };
+
+function normalizeHashlineBridgeHintsMode(
+	mode: HashlineBridgeHintsMode | boolean | undefined,
+): HashlineBridgeHintsMode {
+	if (mode === true) return "hints";
+	if (mode === false || mode === undefined) return "off";
+	if (mode === "strict" || mode === "hints") return mode;
+	return "off";
+}
 
 export interface CodexOpenCodeBridgeMeta {
 	estimatedTokens: number;

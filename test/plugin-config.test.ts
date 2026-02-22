@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	loadPluginConfig,
 	getCodexMode,
+	getHashlineBridgeHintsMode,
+	getHashlineBridgeHintsBeta,
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
@@ -48,6 +50,8 @@ describe('Plugin Configuration', () => {
 	const mockReadFileSync = vi.mocked(fs.readFileSync);
 	const envKeys = [
 		'CODEX_MODE',
+		'CODEX_AUTH_HASHLINE_HINTS_MODE',
+		'CODEX_AUTH_HASHLINE_HINTS_BETA',
 		'CODEX_TUI_V2',
 		'CODEX_TUI_COLOR_PROFILE',
 		'CODEX_TUI_GLYPHS',
@@ -343,6 +347,64 @@ describe('Plugin Configuration', () => {
 			const result = getCodexMode(config);
 
 			expect(result).toBe(true);
+		});
+	});
+
+	describe('getHashlineBridgeHintsMode', () => {
+		it('should default to off', () => {
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_BETA;
+			expect(getHashlineBridgeHintsMode({})).toBe('off');
+		});
+
+		it('should prefer explicit mode env var over config', () => {
+			process.env.CODEX_AUTH_HASHLINE_HINTS_MODE = 'strict';
+			process.env.CODEX_AUTH_HASHLINE_HINTS_BETA = '0';
+			expect(
+				getHashlineBridgeHintsMode({
+					hashlineBridgeHintsMode: 'hints',
+					hashlineBridgeHintsBeta: false,
+				}),
+			).toBe('strict');
+		});
+
+		it('should use legacy beta env var when mode env var is absent', () => {
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			process.env.CODEX_AUTH_HASHLINE_HINTS_BETA = '1';
+			expect(getHashlineBridgeHintsMode({ hashlineBridgeHintsMode: 'off' })).toBe('hints');
+		});
+
+		it('should use config mode when env vars are not set', () => {
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_BETA;
+			expect(getHashlineBridgeHintsMode({ hashlineBridgeHintsMode: 'strict' })).toBe(
+				'strict',
+			);
+		});
+
+		it('should fallback to legacy config boolean when mode key is absent', () => {
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_BETA;
+			expect(getHashlineBridgeHintsMode({ hashlineBridgeHintsBeta: true })).toBe('hints');
+			expect(getHashlineBridgeHintsMode({ hashlineBridgeHintsBeta: false })).toBe('off');
+		});
+	});
+
+	describe('getHashlineBridgeHintsBeta', () => {
+		it('should map mode values to boolean helper output', () => {
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_BETA;
+			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'off' })).toBe(false);
+			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'hints' })).toBe(true);
+			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsMode: 'strict' })).toBe(true);
+		});
+
+		it('should still honor legacy env toggle', () => {
+			delete process.env.CODEX_AUTH_HASHLINE_HINTS_MODE;
+			process.env.CODEX_AUTH_HASHLINE_HINTS_BETA = '0';
+			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsBeta: true })).toBe(false);
+			process.env.CODEX_AUTH_HASHLINE_HINTS_BETA = '1';
+			expect(getHashlineBridgeHintsBeta({ hashlineBridgeHintsBeta: false })).toBe(true);
 		});
 	});
 
