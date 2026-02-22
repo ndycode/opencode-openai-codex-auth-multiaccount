@@ -444,7 +444,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							const accountId = account.accountId?.trim();
 							if (accountId) {
 								byAccountId.set(accountId, i);
-								continue;
 							}
 
 							const refreshToken = account.refreshToken?.trim();
@@ -484,7 +483,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								return identityIndexes.byOrganizationId.get(organizationId);
 							}
 							if (normalizedAccountId) {
-								return identityIndexes.byAccountId.get(normalizedAccountId);
+								const byAccountId = identityIndexes.byAccountId.get(normalizedAccountId);
+								if (byAccountId !== undefined) {
+									return byAccountId;
+								}
 							}
 							return (
 								identityIndexes.byRefreshTokenLegacy.get(result.refresh) ??
