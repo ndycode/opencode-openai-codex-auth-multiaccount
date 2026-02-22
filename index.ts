@@ -219,64 +219,95 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastError: null,
 	};
 
-        type TokenSuccess = Extract<TokenResult, { type: "success" }>;
-        type TokenSuccessWithAccount = TokenSuccess & {
-                accountIdOverride?: string;
-                accountIdSource?: AccountIdSource;
-                accountLabel?: string;
-        };
+		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
+		type TokenSuccessWithAccount = TokenSuccess & {
+				accountIdOverride?: string;
+				accountIdSource?: AccountIdSource;
+				accountLabel?: string;
+		};
 
-        const resolveAccountSelection = (
-                tokens: TokenSuccess,
-        ): TokenSuccessWithAccount => {
-                const override = (process.env.CODEX_AUTH_ACCOUNT_ID ?? "").trim();
-                if (override) {
-                        const suffix = override.length > 6 ? override.slice(-6) : override;
-                        logInfo(`Using account override from CODEX_AUTH_ACCOUNT_ID (id:${suffix}).`);
-                        return {
-                                ...tokens,
-                                accountIdOverride: override,
-                                accountIdSource: "manual",
-                                accountLabel: `Override [id:${suffix}]`,
-                        };
-                }
+		type AccountSelectionResult = {
+				primary: TokenSuccessWithAccount;
+				variantsForPersistence: TokenSuccessWithAccount[];
+		};
 
-                const candidates = getAccountIdCandidates(tokens.access, tokens.idToken);
-                if (candidates.length === 0) {
-                        return tokens;
-                }
+		const createSelectionVariant = (
+				tokens: TokenSuccess,
+				candidate: { accountId: string; source?: AccountIdSource; label?: string },
+		): TokenSuccessWithAccount => ({
+				...tokens,
+				accountIdOverride: candidate.accountId,
+				accountIdSource: candidate.source,
+				accountLabel: candidate.label,
+		});
 
-                if (candidates.length === 1) {
-				const [candidate] = candidates;
-				if (candidate) {
-					return {
-						...tokens,
-						accountIdOverride: candidate.accountId,
-						accountIdSource: candidate.source,
-						accountLabel: candidate.label,
-					};
+		const resolveAccountSelection = (
+				tokens: TokenSuccess,
+		): AccountSelectionResult => {
+				const override = (process.env.CODEX_AUTH_ACCOUNT_ID ?? "").trim();
+				if (override) {
+						const suffix = override.length > 6 ? override.slice(-6) : override;
+						logInfo(`Using account override from CODEX_AUTH_ACCOUNT_ID (id:${suffix}).`);
+						const primary = {
+								...tokens,
+								accountIdOverride: override,
+								accountIdSource: "manual" as const,
+								accountLabel: `Override [id:${suffix}]`,
+						};
+						return {
+								primary,
+								variantsForPersistence: [primary],
+						};
 				}
-			}
 
-                // Auto-select the best workspace candidate without prompting.
-                // This honors org/default/id-token signals and avoids forcing personal token IDs.
-                const choice = selectBestAccountCandidate(candidates);
-                if (!choice) return tokens;
+				const candidates = getAccountIdCandidates(tokens.access, tokens.idToken);
+				if (candidates.length === 0) {
+						return {
+								primary: tokens,
+								variantsForPersistence: [tokens],
+						};
+				}
 
-                return {
-                        ...tokens,
-                        accountIdOverride: choice.accountId,
-                        accountIdSource: choice.source ?? "token",
-                        accountLabel: choice.label,
-                };
-        };
+				// Auto-select the best workspace candidate without prompting.
+				// This honors org/default/id-token signals and avoids forcing personal token IDs.
+				const choice = selectBestAccountCandidate(candidates);
+				if (!choice) {
+						return {
+								primary: tokens,
+								variantsForPersistence: [tokens],
+						};
+				}
 
-        const buildManualOAuthFlow = (
-                pkce: { verifier: string },
-                url: string,
-                expectedState: string,
-                onSuccess?: (tokens: TokenSuccessWithAccount) => Promise<void>,
-        ) => ({
+				const primary = createSelectionVariant(tokens, {
+						accountId: choice.accountId,
+						source: choice.source ?? "token",
+						label: choice.label,
+				});
+
+				const variantsForPersistence: TokenSuccessWithAccount[] = [primary];
+				for (const candidate of candidates) {
+						if (candidate.accountId === primary.accountIdOverride) continue;
+						variantsForPersistence.push(
+								createSelectionVariant(tokens, {
+										accountId: candidate.accountId,
+										source: candidate.source,
+										label: candidate.label,
+								}),
+						);
+				}
+
+				return {
+						primary,
+						variantsForPersistence,
+				};
+		};
+
+		const buildManualOAuthFlow = (
+				pkce: { verifier: string },
+				url: string,
+				expectedState: string,
+				onSuccess?: (selection: AccountSelectionResult) => Promise<void>,
+		) => ({
                 url,
                 method: "code" as const,
                 instructions: AUTH_LABELS.INSTRUCTIONS_MANUAL,
@@ -309,18 +340,18 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         message: "OAuth state mismatch. Restart login and try again.",
                                 };
                         }
-                        const tokens = await exchangeAuthorizationCode(
-                                parsed.code,
-                                pkce.verifier,
-                                REDIRECT_URI,
-                        );
-                        if (tokens?.type === "success") {
-                                const resolved = resolveAccountSelection(tokens);
-                                if (onSuccess) {
-                                        await onSuccess(resolved);
-                                }
-                                return resolved;
-                        }
+						const tokens = await exchangeAuthorizationCode(
+								parsed.code,
+								pkce.verifier,
+								REDIRECT_URI,
+						);
+						if (tokens?.type === "success") {
+								const resolved = resolveAccountSelection(tokens);
+								if (onSuccess) {
+										await onSuccess(resolved);
+								}
+								return resolved.primary;
+						}
                         return tokens?.type === "failed"
                                 ? tokens
                                 : { type: "failed" as const };
@@ -375,20 +406,21 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const stored = replaceAll ? null : loadedStorage;
 					const accounts = stored?.accounts ? [...stored.accounts] : [];
 
-					const indexByRefreshToken = new Map<string, number>();
+					const indexByRefreshTokenWithoutAccountId = new Map<string, number>();
 					const indexByAccountId = new Map<string, number>();
-					const indexByEmail = new Map<string, number>();
+					const indexByEmailWithoutAccountId = new Map<string, number>();
 					for (let i = 0; i < accounts.length; i += 1) {
 						const account = accounts[i];
 						if (!account) continue;
-						if (account.refreshToken) {
-							indexByRefreshToken.set(account.refreshToken, i);
-						}
 						if (account.accountId) {
 							indexByAccountId.set(account.accountId, i);
+							continue;
+						}
+						if (account.refreshToken) {
+							indexByRefreshTokenWithoutAccountId.set(account.refreshToken, i);
 						}
 						if (account.email) {
-							indexByEmail.set(account.email, i);
+							indexByEmailWithoutAccountId.set(account.email, i);
 						}
 					}
 
@@ -401,16 +433,19 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								: undefined;
 						const accountLabel = result.accountLabel;
 						const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
-						const existingByEmail =
-							accountEmail && indexByEmail.has(accountEmail)
-								? indexByEmail.get(accountEmail)
-								: undefined;
 						const existingById =
 							accountId && indexByAccountId.has(accountId)
 								? indexByAccountId.get(accountId)
 								: undefined;
-						const existingByToken = indexByRefreshToken.get(result.refresh);
-						const existingIndex = existingById ?? existingByEmail ?? existingByToken;
+						const existingByEmailWithoutAccountId =
+							accountEmail && indexByEmailWithoutAccountId.has(accountEmail)
+								? indexByEmailWithoutAccountId.get(accountEmail)
+								: undefined;
+						const existingByRefreshTokenWithoutAccountId =
+							indexByRefreshTokenWithoutAccountId.get(result.refresh);
+						const existingFallbackWithoutAccountId =
+							existingByEmailWithoutAccountId ?? existingByRefreshTokenWithoutAccountId;
+						const existingIndex = existingById ?? existingFallbackWithoutAccountId;
 
 						if (existingIndex === undefined) {
 							const newIndex = accounts.length;
@@ -425,12 +460,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								addedAt: now,
 								lastUsed: now,
 							});
-							indexByRefreshToken.set(result.refresh, newIndex);
 							if (accountId) {
 								indexByAccountId.set(accountId, newIndex);
-							}
-							if (accountEmail) {
-								indexByEmail.set(accountEmail, newIndex);
+							} else {
+								indexByRefreshTokenWithoutAccountId.set(result.refresh, newIndex);
+								if (accountEmail) {
+									indexByEmailWithoutAccountId.set(accountEmail, newIndex);
+								}
 							}
 							continue;
 						}
@@ -438,6 +474,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const existing = accounts[existingIndex];
 						if (!existing) continue;
 
+						const oldAccountId = existing.accountId;
 						const oldToken = existing.refreshToken;
 						const oldEmail = existing.email;
 						const nextEmail = accountEmail ?? existing.email;
@@ -456,18 +493,32 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							expiresAt: result.expires,
 							lastUsed: now,
 						};
-						if (oldToken !== result.refresh) {
-							indexByRefreshToken.delete(oldToken);
-							indexByRefreshToken.set(result.refresh, existingIndex);
+						const hadOldAccountId = typeof oldAccountId === "string" && oldAccountId.length > 0;
+						if (hadOldAccountId && oldAccountId !== nextAccountId) {
+							indexByAccountId.delete(oldAccountId);
 						}
-						if (accountId) {
-							indexByAccountId.set(accountId, existingIndex);
+						if (!hadOldAccountId) {
+							if (oldToken && oldToken !== result.refresh) {
+								indexByRefreshTokenWithoutAccountId.delete(oldToken);
+							}
+							if (oldEmail && oldEmail !== nextEmail) {
+								indexByEmailWithoutAccountId.delete(oldEmail);
+							}
 						}
-						if (oldEmail && oldEmail !== nextEmail) {
-							indexByEmail.delete(oldEmail);
-						}
-						if (nextEmail) {
-							indexByEmail.set(nextEmail, existingIndex);
+
+						if (nextAccountId) {
+							indexByAccountId.set(nextAccountId, existingIndex);
+							if (!hadOldAccountId) {
+								indexByRefreshTokenWithoutAccountId.delete(result.refresh);
+								if (nextEmail) {
+									indexByEmailWithoutAccountId.delete(nextEmail);
+								}
+							}
+						} else {
+							indexByRefreshTokenWithoutAccountId.set(result.refresh, existingIndex);
+							if (nextEmail) {
+								indexByEmailWithoutAccountId.set(nextEmail, existingIndex);
+							}
 						}
 					}
 
@@ -2130,19 +2181,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 												access: cached.accessToken,
 												refresh: refreshToken,
 												expires: cached.expiresAt,
-												multiAccount: true,
-											});
-											if (!resolved.accountIdOverride && flagged.accountId) {
-												resolved.accountIdOverride = flagged.accountId;
-												resolved.accountIdSource = flagged.accountIdSource ?? "manual";
-											}
-											if (!resolved.accountLabel && flagged.accountLabel) {
-												resolved.accountLabel = flagged.accountLabel;
-											}
-											restored.push(resolved);
-											console.log(
+											multiAccount: true,
+										});
+										if (!resolved.primary.accountIdOverride && flagged.accountId) {
+											resolved.primary.accountIdOverride = flagged.accountId;
+											resolved.primary.accountIdSource = flagged.accountIdSource ?? "manual";
+											resolved.variantsForPersistence = [resolved.primary];
+										}
+										if (!resolved.primary.accountLabel && flagged.accountLabel) {
+											resolved.primary.accountLabel = flagged.accountLabel;
+										}
+										restored.push(...resolved.variantsForPersistence);
+										console.log(
 												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED (Codex CLI cache)`,
-											);
+										);
 											continue;
 										}
 
@@ -2155,16 +2207,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 											continue;
 										}
 
-										const resolved = resolveAccountSelection(refreshResult);
-										if (!resolved.accountIdOverride && flagged.accountId) {
-											resolved.accountIdOverride = flagged.accountId;
-											resolved.accountIdSource = flagged.accountIdSource ?? "manual";
-										}
-										if (!resolved.accountLabel && flagged.accountLabel) {
-											resolved.accountLabel = flagged.accountLabel;
-										}
-										restored.push(resolved);
-										console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
+									const resolved = resolveAccountSelection(refreshResult);
+									if (!resolved.primary.accountIdOverride && flagged.accountId) {
+										resolved.primary.accountIdOverride = flagged.accountId;
+										resolved.primary.accountIdSource = flagged.accountIdSource ?? "manual";
+										resolved.variantsForPersistence = [resolved.primary];
+									}
+									if (!resolved.primary.accountLabel && flagged.accountLabel) {
+										resolved.primary.accountLabel = flagged.accountLabel;
+									}
+									restored.push(...resolved.variantsForPersistence);
+									console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
 									} catch (error) {
 										const message = error instanceof Error ? error.message : String(error);
 										console.log(
@@ -2360,9 +2413,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 							if (useManualMode) {
 								const { pkce, state, url } = await createAuthorizationFlow();
-								return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
+								return buildManualOAuthFlow(pkce, url, state, async (selection) => {
 									try {
-										await persistAccountPool([tokens], startFresh);
+										await persistAccountPool(selection.variantsForPersistence, startFresh);
 										invalidateAccountManagerCache();
 									} catch (err) {
 										const storagePath = getStoragePath();
@@ -2391,8 +2444,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const result = await runOAuthFlow(forceNewLogin);
 
 								let resolved: TokenSuccessWithAccount | null = null;
+								let variantsForPersistence: TokenSuccessWithAccount[] = [];
 								if (result.type === "success") {
-									resolved = resolveAccountSelection(result);
+									const selection = resolveAccountSelection(result);
+									resolved = selection.primary;
+									variantsForPersistence = selection.variantsForPersistence;
 									const email = extractAccountEmail(resolved.access, resolved.idToken);
 									const accountId = resolved.accountIdOverride ?? extractAccountId(resolved.access);
 									const label = resolved.accountLabel ?? email ?? accountId ?? "Unknown account";
@@ -2432,7 +2488,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 								try {
 									const isFirstAccount = accounts.length === 1;
-									await persistAccountPool([resolved], isFirstAccount && startFresh);
+									const entriesToPersist =
+										variantsForPersistence.length > 0 ? variantsForPersistence : [resolved];
+									await persistAccountPool(entriesToPersist, isFirstAccount && startFresh);
 									invalidateAccountManagerCache();
 								} catch (err) {
 									const storagePath = getStoragePath();
@@ -2506,7 +2564,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				{
 					label: AUTH_LABELS.OAUTH_MANUAL,
 					type: "oauth" as const,
-				authorize: async () => {
+					authorize: async () => {
                                                         // Initialize storage path for manual OAuth flow
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
                                                         const manualPluginConfig = loadPluginConfig();
@@ -2514,11 +2572,11 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 
-                                                        const { pkce, state, url } = await createAuthorizationFlow();
-                                                        return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
-                                                                try {
-                                                                        await persistAccountPool([tokens], false);
-                                                                } catch (err) {
+												const { pkce, state, url } = await createAuthorizationFlow();
+												return buildManualOAuthFlow(pkce, url, state, async (selection) => {
+														try {
+																await persistAccountPool(selection.variantsForPersistence, false);
+														} catch (err) {
                                                                         const storagePath = getStoragePath();
                                                                         const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
                                                                         const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
