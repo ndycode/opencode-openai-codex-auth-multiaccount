@@ -40,6 +40,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "test:real-e2e": "node scripts/test-real-session-e2e.js",
     "test:coverage": "vitest run --coverage",
     "coverage": "vitest run --coverage",
     "audit:prod": "npm audit --omit=dev --audit-level=high",

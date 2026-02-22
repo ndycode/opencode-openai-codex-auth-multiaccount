@@ -14,6 +14,8 @@ export interface Tool {
 	function: ToolFunction;
 }
 
+const TASK_TOOL_NAMES = new Set(["task", "functions.task"]);
+
 /**
  * Cleans up tool definitions to ensure strict JSON Schema compliance.
  *
@@ -40,9 +42,49 @@ export function cleanupToolDefinitions(tools: unknown): unknown {
 		if (cleanedTool.function.parameters) {
 			cleanupSchema(cleanedTool.function.parameters);
 		}
+		ensureTaskRunInBackgroundDefaults(cleanedTool);
 
 		return cleanedTool;
 	});
+}
+
+function ensureTaskRunInBackgroundDefaults(tool: Tool): void {
+	const toolName =
+		typeof tool?.function?.name === "string"
+			? tool.function.name.trim().toLowerCase()
+			: "";
+	if (!TASK_TOOL_NAMES.has(toolName)) return;
+
+	const parameters = tool.function.parameters;
+	if (!parameters || parameters.type !== "object") return;
+
+	const properties = parameters.properties;
+	if (!properties || typeof properties !== "object") return;
+
+	const runInBackgroundSchema = properties.run_in_background;
+	if (!runInBackgroundSchema || typeof runInBackgroundSchema !== "object") return;
+
+	const schemaRecord = runInBackgroundSchema as Record<string, unknown>;
+	if (schemaRecord.type !== "boolean") {
+		schemaRecord.type = "boolean";
+	}
+	if (schemaRecord.default === undefined) {
+		schemaRecord.default = false;
+	}
+
+	const currentDescription =
+		typeof schemaRecord.description === "string" ? schemaRecord.description : "";
+	if (!/required/i.test(currentDescription)) {
+		schemaRecord.description = currentDescription
+			? `${currentDescription} REQUIRED: pass false for normal delegation; true only for parallel exploration.`
+			: "REQUIRED: pass false for normal delegation; true only for parallel exploration.";
+	}
+
+	const required = Array.isArray(parameters.required) ? [...parameters.required] : [];
+	if (!required.includes("run_in_background")) {
+		required.push("run_in_background");
+	}
+	parameters.required = required;
 }
 
 /**

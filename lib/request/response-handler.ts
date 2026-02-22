@@ -7,6 +7,8 @@ const log = createLogger("response-handler");
 const MAX_SSE_SIZE = 10 * 1024 * 1024; // 10MB limit to prevent memory exhaustion
 const DEFAULT_STREAM_STALL_TIMEOUT_MS = 45_000;
 const STREAM_ERROR_CODE = "stream_error";
+const SSE_DATA_PREFIX = "data:";
+const TASK_TOOL_NAMES = new Set(["task", "functions.task"]);
 
 type ParsedSseResult =
 	| {
@@ -81,8 +83,8 @@ function extractResponseError(responseRecord: Record<string, unknown>): {
 }
 
 function parseDataPayload(line: string): string | null {
-	if (!line.startsWith("data:")) return null;
-	const payload = line.slice(5).trimStart();
+	if (!line.startsWith(SSE_DATA_PREFIX)) return null;
+	const payload = line.slice(SSE_DATA_PREFIX.length).trimStart();
 	if (!payload || payload === "[DONE]") return null;
 	return payload;
 }
@@ -209,6 +211,90 @@ function parseSseJsonPayload(
 	}
 }
 
+function isTaskToolName(value: unknown): value is string {
+	if (typeof value !== "string") return false;
+	return TASK_TOOL_NAMES.has(value.trim().toLowerCase());
+}
+
+function normalizeTaskArgumentsValue(value: unknown): {
+	normalized: unknown;
+	changed: boolean;
+} {
+	if (typeof value === "string") {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			const parsedRecord = toRecord(parsed);
+			if (!parsedRecord || parsedRecord.run_in_background !== undefined) {
+				return { normalized: value, changed: false };
+			}
+			parsedRecord.run_in_background = false;
+			return { normalized: JSON.stringify(parsedRecord), changed: true };
+		} catch {
+			return { normalized: value, changed: false };
+		}
+	}
+
+	const record = toRecord(value);
+	if (!record || record.run_in_background !== undefined) {
+		return { normalized: value, changed: false };
+	}
+	record.run_in_background = false;
+	return { normalized: record, changed: true };
+}
+
+function normalizeTaskRunInBackgroundInFunctionLike(
+	record: Record<string, unknown>,
+): boolean {
+	let changed = false;
+
+	if (
+		record.type === "function_call" &&
+		isTaskToolName(record.name) &&
+		Object.prototype.hasOwnProperty.call(record, "arguments")
+	) {
+		const normalized = normalizeTaskArgumentsValue(record.arguments);
+		if (normalized.changed) {
+			record.arguments = normalized.normalized;
+			changed = true;
+		}
+	}
+
+	const functionRecord = toRecord(record.function);
+	if (functionRecord && isTaskToolName(functionRecord.name)) {
+		const normalized = normalizeTaskArgumentsValue(functionRecord.arguments);
+		if (normalized.changed) {
+			functionRecord.arguments = normalized.normalized;
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+function normalizeTaskRunInBackgroundInPayload(value: unknown): boolean {
+	if (Array.isArray(value)) {
+		let changed = false;
+		for (const item of value) {
+			if (normalizeTaskRunInBackgroundInPayload(item)) {
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
+	const record = toRecord(value);
+	if (!record) return false;
+
+	let changed = normalizeTaskRunInBackgroundInFunctionLike(record);
+	for (const nested of Object.values(record)) {
+		if (normalizeTaskRunInBackgroundInPayload(nested)) {
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
 /**
 
  * Parse SSE stream to extract final response
@@ -229,6 +315,7 @@ function parseSseStream(
 			const parsedPayload = parseSseJsonPayload(payload, jsonRepairMode);
 			if (parsedPayload) {
 				const { data, repaired } = parsedPayload;
+				normalizeTaskRunInBackgroundInPayload(data);
 				if (repaired) {
 					log.warn("Applied safe JSON repair to SSE payload", {
 						payloadPreview: payload.slice(0, 200),
@@ -380,6 +467,49 @@ export async function convertSseToJson(
 		reader.releaseLock();
 	}
 
+}
+
+function rewriteSseDataLine(line: string): string {
+	const payload = parseDataPayload(line.trim());
+	if (!payload) return line;
+
+	const parsedPayload = parseSseJsonPayload(payload, "safe");
+	if (!parsedPayload) return line;
+
+	const { data } = parsedPayload;
+	const changed = normalizeTaskRunInBackgroundInPayload(data);
+	if (!changed) return line;
+
+	return `${SSE_DATA_PREFIX} ${JSON.stringify(data)}`;
+}
+
+export function normalizeTaskToolCallsInSseStream(
+	body: ReadableStream<Uint8Array> | null,
+): ReadableStream<Uint8Array> | null {
+	if (!body) return body;
+
+	const decoder = new TextDecoder();
+	const encoder = new TextEncoder();
+	let pending = "";
+
+	return body.pipeThrough(
+		new TransformStream<Uint8Array, Uint8Array>({
+			transform(chunk, controller) {
+				pending += decoder.decode(chunk, { stream: true });
+				const parts = pending.split(/\r?\n/);
+				pending = parts.pop() ?? "";
+
+				for (const line of parts) {
+					controller.enqueue(encoder.encode(`${rewriteSseDataLine(line)}\n`));
+				}
+			},
+			flush(controller) {
+				pending += decoder.decode();
+				if (!pending) return;
+				controller.enqueue(encoder.encode(rewriteSseDataLine(pending)));
+			},
+		}),
+	);
 }
 
 /**

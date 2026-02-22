@@ -2702,6 +2702,36 @@ describe('Request Transformer Module', () => {
 					expect(params.$schema).toBeUndefined();
 					expect(params.properties.prop.const).toBeUndefined();
 				});
+
+				it('should enforce run_in_background defaults for task tool schemas', async () => {
+					const body: RequestBody = {
+						model: 'gpt-5-codex',
+						input: [],
+						tools: [
+							{
+								type: 'function',
+								function: {
+									name: 'task',
+									parameters: {
+										type: 'object',
+										properties: {
+											description: { type: 'string' },
+											run_in_background: { type: 'boolean' },
+										},
+										required: ['description'],
+									},
+								},
+							},
+						],
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+					const tool = (result.tools as any)[0];
+					const params = tool.function.parameters;
+					expect(params.required).toContain('run_in_background');
+					expect(params.properties.run_in_background.default).toBe(false);
+					expect(params.properties.run_in_background.description).toContain('REQUIRED');
+				});
 			});
 		});
 	});

@@ -218,6 +218,18 @@ CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy CODEX_AUTH_HASHLINE_HINTS_MODE=hints op
 CODEX_AUTH_REQUEST_TRANSFORM_MODE=legacy CODEX_AUTH_HASHLINE_HINTS_MODE=strict opencode run "test strict" --model=openai/gpt-5-codex
 ```
 
+One-command deep real-session verification:
+
+```bash
+npm run test:real-e2e
+```
+
+Notes:
+
+- This script runs live `opencode run` scenarios in a temporary workspace.
+- It validates baseline prompt flow, file edit flow, hashline tool usage, xhigh clamp safety, and task delegation argument safety.
+- Use `npm run test:real-e2e -- --keep-temp` to keep the temp workspace for manual inspection.
+
 ---
 
 ## Models

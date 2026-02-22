@@ -8,7 +8,11 @@ import { queuedRefresh } from "../refresh-queue.js";
 import { logRequest, logError, logWarn } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
-import { convertSseToJson, ensureContentType } from "./response-handler.js";
+import {
+	convertSseToJson,
+	ensureContentType,
+	normalizeTaskToolCallsInSseStream,
+} from "./response-handler.js";
 import type {
 	HashlineBridgeHintsMode,
 	JsonRepairMode,
@@ -896,7 +900,8 @@ export async function handleSuccessResponse(
 	}
 
 	// For streaming requests (streamText), return stream as-is
-	return new Response(response.body, {
+	const normalizedStream = normalizeTaskToolCallsInSseStream(response.body);
+	return new Response(normalizedStream, {
 		status: response.status,
 		statusText: response.statusText,
 		headers: responseHeaders,

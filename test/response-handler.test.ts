@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ensureContentType, convertSseToJson, isEmptyResponse } from '../lib/request/response-handler.js';
+import {
+	ensureContentType,
+	convertSseToJson,
+	isEmptyResponse,
+	normalizeTaskToolCallsInSseStream,
+} from '../lib/request/response-handler.js';
 
 describe('Response Handler Module', () => {
 	describe('ensureContentType', () => {
@@ -46,6 +51,22 @@ data: {"type":"response.done","response":{"id":"resp_123","output":"test"}}
 
 			expect(body).toEqual({ id: 'resp_123', output: 'test' });
 			expect(result.headers.get('content-type')).toBe('application/json; charset=utf-8');
+		});
+
+		it('should inject run_in_background=false for task function calls', async () => {
+			const sseContent = `data: {"type":"response.done","response":{"id":"resp_task","output":[{"type":"function_call","name":"task","arguments":"{\\"category\\":\\"quick\\"}"}]}}
+`;
+			const response = new Response(sseContent);
+			const headers = new Headers();
+
+			const result = await convertSseToJson(response, headers);
+			const body = await result.json() as {
+				output?: Array<{ type?: string; name?: string; arguments?: string }>;
+			};
+			const firstItem = body.output?.[0];
+			expect(firstItem?.name).toBe('task');
+			const parsedArguments = JSON.parse(firstItem?.arguments ?? '{}') as Record<string, unknown>;
+			expect(parsedArguments.run_in_background).toBe(false);
 		});
 
 		it('should parse SSE stream with response.completed event', async () => {
@@ -246,6 +267,33 @@ data: {"type":"response.done","response":{"id":"resp_789"}}
 			expect(mockReader.cancel).toHaveBeenCalled();
 			expect(mockReader.releaseLock).toHaveBeenCalled();
 			vi.useRealTimers();
+		});
+	});
+
+	describe('normalizeTaskToolCallsInSseStream', () => {
+		it('should patch task calls in streaming SSE lines', async () => {
+			const sseContent = `data: {"type":"response.output_item.done","item":{"type":"function_call","name":"task","arguments":"{\\"description\\":\\"check\\"}"}}
+data: [DONE]
+`;
+			const source = new Response(sseContent).body;
+			const normalized = normalizeTaskToolCallsInSseStream(source);
+			const text = await new Response(normalized).text();
+			const firstLine = text.split('\n')[0] ?? '';
+			const payload = JSON.parse(firstLine.replace(/^data:\s*/, '')) as {
+				item?: { arguments?: string };
+			};
+			const parsedArguments = JSON.parse(payload.item?.arguments ?? '{}') as Record<string, unknown>;
+			expect(parsedArguments.run_in_background).toBe(false);
+		});
+
+		it('should leave non-task calls untouched', async () => {
+			const sseContent = `data: {"type":"response.output_item.done","item":{"type":"function_call","name":"bash","arguments":"{\\"command\\":\\"pwd\\"}"}}
+`;
+			const source = new Response(sseContent).body;
+			const normalized = normalizeTaskToolCallsInSseStream(source);
+			const text = await new Response(normalized).text();
+			expect(text).toContain('"name":"bash"');
+			expect(text).not.toContain('run_in_background');
 		});
 	});
 
