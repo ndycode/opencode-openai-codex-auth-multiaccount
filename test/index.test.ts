@@ -1455,7 +1455,8 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const persistedOrgIds = mockStorage.accounts
 			.map((account) => account.organizationId)
 			.filter((organizationId): organizationId is string => typeof organizationId === "string");
-		expect(persistedOrgIds).toEqual(["org-default", "org-secondary"]);
+		// Personal identities are left intact while team org duplicates are collapsed.
+		expect(persistedOrgIds).toEqual(["org-default", "org-personal", "org-secondary"]);
 	});
 
 	it("keeps non-primary candidates persisted even when best candidate differs", async () => {
