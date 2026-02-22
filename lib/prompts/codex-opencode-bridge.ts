@@ -29,6 +29,7 @@ Treat the runtime tool manifest as the only authoritative tool list.
 - Do not invent wrapper namespaces unless they are explicitly listed as tools.
 - If no explicit parallel helper tool is listed, run calls sequentially.
 - If a tool call fails validation, correct arguments to match schema and retry.
+- For legacy oldString/newString edits, oldString must be literal text from the current file (no unresolved placeholders like \${TARGET_SNIPPET}).
 
 ## Planning & Modes
 

@@ -74,6 +74,11 @@ describe("Codex Prompts Module", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("grep");
 		});
 
+		it("should require literal oldString text for legacy edits", () => {
+			expect(TOOL_REMAP_MESSAGE).toContain("oldString must be literal text from the current file");
+			expect(TOOL_REMAP_MESSAGE).toContain("${TARGET_SNIPPET}");
+		});
+
 		it("should detect hashline-style tools", () => {
 			expect(hasHashlineRuntimeTool(["hashline_edit"])).toBe(true);
 			expect(hasHashlineRuntimeTool(["line-hash-write"])).toBe(true);
