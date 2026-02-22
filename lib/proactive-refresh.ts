@@ -150,8 +150,19 @@ export async function refreshExpiringAccounts(
 
 	// Refresh in parallel for efficiency
 	const refreshPromises = accountsToRefresh.map(async (account) => {
-		const result = await proactiveRefreshAccount(account, bufferMs);
-		return { index: account.index, result };
+		try {
+			const result = await proactiveRefreshAccount(account, bufferMs);
+			return { index: account.index, result };
+		} catch (error) {
+			log.error("Unhandled exception during proactive refresh", {
+				accountId: account.accountId,
+				error: String(error)
+			});
+			return { 
+				index: account.index, 
+				result: { reason: "error", error: String(error) } as ProactiveRefreshResult 
+			};
+		}
 	});
 
 	const outcomes = await Promise.all(refreshPromises);
