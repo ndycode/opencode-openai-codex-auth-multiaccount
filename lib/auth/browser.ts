@@ -33,45 +33,11 @@ function commandExists(command: string): boolean {
 	if (entries.length === 0) return false;
 
 	/* v8 ignore start -- unreachable: openBrowserUrl uses PowerShell on win32 */
-	if (process.platform === "win32") {
-		const pathext = (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM")
-			.split(";")
-			.filter(Boolean);
-		for (const entry of entries) {
-			for (const ext of pathext) {
-				const candidate = path.join(entry, `${command}${ext}`);
-				if (fs.existsSync(candidate)) return true;
-			}
-		}
-		return false;
-	}
-	/* v8 ignore stop */
-
-	for (const entry of entries) {
-		const candidate = path.join(entry, command);
-		if (fs.existsSync(candidate)) return true;
-	}
-	return false;
-}
-
-/**
- * Opens a URL in the default browser
- * Silently fails if browser cannot be opened (user can copy URL manually)
- * @param url - URL to open
- * @returns True if a browser launch was attempted
- */
-export function openBrowserUrl(url: string): boolean {
-	try {
-		// Windows: use PowerShell Start-Process to avoid cmd/start quirks with URLs containing '&' or ':'
-		if (process.platform === "win32") {
-			// Escape PowerShell special characters: backticks, double quotes, and $ (sub-expression injection)
-			const psUrl = url
-				.replace(/`/g, "``")
-				.replace(/\$/g, "`$")
-				.replace(/"/g, '""');
+			if (process.platform === "win32") {
+			// Prevent RCE by passing the URL as an argument instead of interpolating into the Command string
 			const child = spawn(
 				"powershell.exe",
-				["-NoLogo", "-NoProfile", "-Command", `Start-Process "${psUrl}"`],
+				["-NoLogo", "-NoProfile", "-Command", "Start-Process $args[0]", url],
 				{ stdio: "ignore" },
 			);
 			child.on("error", () => {});
