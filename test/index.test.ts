@@ -1545,6 +1545,115 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.accounts).toHaveLength(2);
 	});
 
+	it("updates a unique org-scoped entry when later login lacks organization metadata", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode)
+			.mockResolvedValueOnce({
+				type: "success",
+				access: "access-org-initial",
+				refresh: "refresh-unique",
+				expires: Date.now() + 300_000,
+				idToken: "id-org-initial",
+			})
+			.mockResolvedValueOnce({
+				type: "success",
+				access: "access-no-org-update",
+				refresh: "refresh-unique",
+				expires: Date.now() + 300_000,
+				idToken: "id-no-org-update",
+			});
+		vi.mocked(accountsModule.getAccountIdCandidates)
+			.mockReturnValueOnce([
+				{
+					accountId: "shared-account",
+					organizationId: "org-unique",
+					source: "org",
+					label: "Workspace Unique [id:nique]",
+				},
+			])
+			.mockReturnValueOnce([]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementation(
+			(candidates) => candidates[0],
+		);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-no-org-update" ? "shared-account" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts[0]?.organizationId).toBe("org-unique");
+		expect(mockStorage.accounts[0]?.accountId).toBe("shared-account");
+		expect(mockStorage.accounts[0]?.accessToken).toBe("access-no-org-update");
+	});
+
+	it("does not merge ambiguous org-scoped matches when organization metadata is missing", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		mockStorage.accounts = [
+			{
+				organizationId: "org-a",
+				accountId: "shared-account",
+				email: "user@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: Date.now() - 20_000,
+				lastUsed: Date.now() - 20_000,
+			},
+			{
+				organizationId: "org-b",
+				accountId: "shared-account",
+				email: "user@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: Date.now() - 10_000,
+				lastUsed: Date.now() - 10_000,
+			},
+		];
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-ambiguous",
+			refresh: "shared-refresh",
+			expires: Date.now() + 300_000,
+			idToken: "id-ambiguous",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([]);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-ambiguous" ? "shared-account" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(3);
+		const orgScopedEntries = mockStorage.accounts.filter((account) => account.organizationId);
+		expect(orgScopedEntries).toHaveLength(2);
+		const fallbackEntries = mockStorage.accounts.filter((account) => !account.organizationId);
+		expect(fallbackEntries).toHaveLength(1);
+		expect(fallbackEntries[0]?.accountId).toBe("shared-account");
+		expect(fallbackEntries[0]?.accessToken).toBe("access-ambiguous");
+	});
+
 	it("persists non-team login and updates same record via accountId/refresh fallback", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");

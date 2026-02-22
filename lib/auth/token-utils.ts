@@ -95,6 +95,16 @@ function normalizeCandidateArray(value: unknown): unknown[] {
 	return [];
 }
 
+function extractOrganizationIdFromRecord(
+	record: Record<string, unknown>,
+): string | undefined {
+	return (
+		toStringValue(record.organization_id) ??
+		toStringValue(record.organizationId) ??
+		toStringValue(record.org_id)
+	);
+}
+
 /**
  * Extracts a single account candidate from a record.
  */
@@ -115,13 +125,10 @@ function extractCandidateFromRecord(
 
 	if (!accountId) return null;
 
+	// Prefer explicit org identity from the record; only fall back to positional
+	// overrides when a record doesn't carry its own org identifier.
 	const organizationId =
-		organizationIdOverride ??
-		toStringValue(record.organization_id) ??
-		toStringValue(record.organizationId) ??
-		toStringValue(record.org_id) ??
-		toStringValue(record.team_id) ??
-		toStringValue(record.workspace_id);
+		extractOrganizationIdFromRecord(record) ?? organizationIdOverride;
 
 	const name =
 		toStringValue(record.name) ??
