@@ -686,8 +686,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 if (accountsToHydrate.length === 0) return storage;
 
                 let changed = false;
-                await Promise.all(
-                        accountsToHydrate.map(async (account) => {
+                // process in chunks of 3 to avoid auth0 rate limits (429) on startup
+                const chunkSize = 3;
+                for (let i = 0; i < accountsToHydrate.length; i += chunkSize) {
+                        const chunk = accountsToHydrate.slice(i, i + chunkSize);
+                        await Promise.all(
+                                chunk.map(async (account) => {
                                 try {
                                         const refreshed = await queuedRefresh(account.refreshToken);
                                         if (refreshed.type !== "success") return;
@@ -721,8 +725,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				} catch {
 					logWarn(`[${PLUGIN_NAME}] Failed to hydrate email for account`);
 				}
-                        }),
+                        })
                 );
+                }
 
                 if (changed) {
                         storage.accounts = accountsCopy;
