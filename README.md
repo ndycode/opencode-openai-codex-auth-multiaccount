@@ -163,6 +163,12 @@ Then inspect plugin logs for markers:
 - `hashline_beta_hints`
 - `hashline_policy mode="strict"`
 - `tool_unavailable_recovery`
+- `runtime_tool_alias_compat` (appears when runtime tool names conflict with generic alias rules)
+
+Hashline marker interpretation:
+
+- If hashline tools are present, marker block is active.
+- If hashline tools are missing, marker block is emitted with `active="false"` and guidance falls back to runtime-listed edit tools.
 
 ### Roll Back To Stable
 

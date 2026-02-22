@@ -423,6 +423,20 @@ describe('Fetch Helpers Module', () => {
 			expect(info.toolName).toBe('apply_patch');
 		});
 
+		it('detects additional unavailable-tool error message shapes', () => {
+			const doesNotExist = getToolUnavailableInfo({
+				error: { message: "Tool `update_plan` does not exist in this runtime" },
+			});
+			expect(doesNotExist.isToolUnavailable).toBe(true);
+			expect(doesNotExist.toolName).toBe('update_plan');
+
+			const unknownFunction = getToolUnavailableInfo({
+				error: { message: "Unknown function: codex_patch" },
+			});
+			expect(unknownFunction.isToolUnavailable).toBe(true);
+			expect(unknownFunction.toolName).toBe('codex_patch');
+		});
+
 		it('classifies network, rate-limit, tool-unavailable, server, and other routes', () => {
 			expect(classifyFailureRoute({ networkError: new Error('offline') })).toBe('network_error');
 			expect(classifyFailureRoute({ rateLimit: { retryAfterMs: 1000 } })).toBe('rate_limit');

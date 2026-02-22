@@ -508,6 +508,20 @@ When hashline-style edit tools are available in the runtime tool list:
 - Use patch/edit only for broad structural rewrites or when hashline tools are unavailable.
 </hashline_policy>`;
 
+const HASHLINE_BETA_HINT_INACTIVE_BLOCK = `
+<hashline_beta_hints priority="0" active="false" reason="runtime_tools_missing">
+Hashline beta hints are enabled, but no hashline-style tools were found in the runtime manifest.
+- Do not attempt hashline tool names when they are not listed.
+- Use available edit tools from the runtime manifest instead.
+</hashline_beta_hints>`;
+
+const HASHLINE_STRICT_HINT_INACTIVE_BLOCK = `
+<hashline_policy mode="strict" priority="0" active="false" reason="runtime_tools_missing">
+Strict hashline mode is enabled, but no hashline-style tools were found in the runtime manifest.
+- Do not attempt unlisted hashline tool names.
+- Use available edit tools from the runtime manifest for targeted edits.
+</hashline_policy>`;
+
 function normalizeRuntimeToolNames(toolNames: readonly string[] | undefined): string[] {
 	if (!toolNames || toolNames.length === 0) return [];
 	const unique = new Set<string>();
@@ -524,16 +538,62 @@ export function hasHashlineRuntimeTool(toolNames: readonly string[] | undefined)
 	return normalized.some((name) => HASHLINE_TOOL_PATTERN.test(name));
 }
 
+function appendRuntimeAliasCompatibility(
+	message: string,
+	toolNames: readonly string[] | undefined,
+): string {
+	const normalized = normalizeRuntimeToolNames(toolNames);
+	if (normalized.length === 0) return message;
+
+	const lower = new Set(normalized.map((name) => name.toLowerCase()));
+	const hasApplyPatch = lower.has("apply_patch") || lower.has("applypatch");
+	const hasPatch = lower.has("patch");
+	const hasEdit = lower.has("edit");
+	const hasTodoWrite = lower.has("todowrite");
+	const hasUpdatePlan = lower.has("update_plan") || lower.has("updateplan");
+	if (!hasApplyPatch && !hasUpdatePlan) return message;
+
+	const lines: string[] = [];
+	if (hasApplyPatch && !hasPatch && !hasEdit) {
+		lines.push(
+			"- Runtime includes `apply_patch` but not `patch`/`edit`; use `apply_patch` exactly as listed.",
+		);
+	}
+	if (hasUpdatePlan && !hasTodoWrite) {
+		lines.push(
+			"- Runtime includes `update_plan` but not `todowrite`; use `update_plan` exactly as listed.",
+		);
+	}
+	if (lines.length === 0) return message;
+
+	const block = `
+<runtime_tool_alias_compat priority="0">
+Use runtime manifest names over generic alias rules when they conflict.
+${lines.join("\n")}
+</runtime_tool_alias_compat>`;
+	return message.replace("</user_instructions>", `${block}\n</user_instructions>`);
+}
+
 export function renderToolRemapMessage(options?: {
 	hashlineBridgeHintsMode?: HashlineBridgeHintsMode | boolean;
 	runtimeToolNames?: readonly string[];
 }): string {
+	const withRuntimeCompat = appendRuntimeAliasCompatibility(
+		TOOL_REMAP_MESSAGE,
+		options?.runtimeToolNames,
+	);
 	const mode = normalizeHashlineBridgeHintsMode(options?.hashlineBridgeHintsMode);
-	if (mode === "off") return TOOL_REMAP_MESSAGE;
-	if (!hasHashlineRuntimeTool(options?.runtimeToolNames)) return TOOL_REMAP_MESSAGE;
+	if (mode === "off") return withRuntimeCompat;
+	const hasHashlineTools = hasHashlineRuntimeTool(options?.runtimeToolNames);
 
-	const hintBlock = mode === "strict" ? HASHLINE_STRICT_HINT_BLOCK : HASHLINE_BETA_HINT_BLOCK;
-	return TOOL_REMAP_MESSAGE.replace(
+	const hintBlock = hasHashlineTools
+		? mode === "strict"
+			? HASHLINE_STRICT_HINT_BLOCK
+			: HASHLINE_BETA_HINT_BLOCK
+		: mode === "strict"
+			? HASHLINE_STRICT_HINT_INACTIVE_BLOCK
+			: HASHLINE_BETA_HINT_INACTIVE_BLOCK;
+	return withRuntimeCompat.replace(
 		"</user_instructions>",
 		`${hintBlock}\n</user_instructions>`,
 	);

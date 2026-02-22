@@ -4,6 +4,17 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ## [unreleased]
 
+## [5.2.5-beta] - 2026-02-22
+
+### fixed
+
+- **runtime alias conflict hardening in legacy remap/bridge prompts**: when runtime manifests expose `apply_patch` without `patch`/`edit` (or `update_plan` without `todowrite`), prompts now emit explicit runtime-compat guidance so the model follows listed tool names instead of contradictory generic aliases.
+- **tool-unavailable classification coverage**: failure routing now recognizes additional unavailable-tool error shapes (`does not exist`, `no such tool`, `unknown function`, and runtime-context unavailable variants).
+
+### changed
+
+- **hashline-mode observability when runtime lacks hashline tools**: strict/hints modes now emit inactive hashline guidance blocks (`active="false"` / `[Inactive]`) instead of silently omitting hashline sections, making beta diagnostics deterministic.
+
 ## [5.2.4-beta] - 2026-02-22
 
 ### fixed

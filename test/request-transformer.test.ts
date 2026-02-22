@@ -454,6 +454,32 @@ describe('Request Transformer Module', () => {
 			expect(text).toContain('hashline_policy mode="strict"');
 			expect(text).not.toContain('hashline_beta_hints');
 		});
+
+		it('should add inactive hashline block when strict mode is enabled without hashline tools', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolRemapMessage(
+				input,
+				true,
+				['apply_patch', 'bash'],
+				'strict',
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('hashline_policy mode="strict"');
+			expect(text).toContain('active="false"');
+			expect(text).toContain('no hashline-style tools were found');
+		});
+
+		it('should add runtime alias compatibility block when apply_patch exists without patch/edit', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addToolRemapMessage(
+				input,
+				true,
+				['apply_patch', 'bash'],
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('runtime_tool_alias_compat');
+			expect(text).toContain('use `apply_patch` exactly as listed');
+		});
 	});
 
 	describe('isOpenCodeSystemPrompt', () => {
@@ -712,6 +738,19 @@ describe('Request Transformer Module', () => {
 			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
 			expect(text).toContain('Hashline Edit Policy (Strict)');
 			expect(text).not.toContain('Hashline Edit Preference (Beta)');
+		});
+
+		it('should append inactive strict hashline section when no hashline tools are present', async () => {
+			const input: InputItem[] = [{ type: 'message', role: 'user', content: 'hello' }];
+			const result = addCodexBridgeMessage(
+				input,
+				true,
+				['apply_patch', 'bash'],
+				'strict',
+			);
+			const text = String((result?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			expect(text).toContain('Hashline Edit Policy (Strict) [Inactive]');
+			expect(text).toContain('no hashline-style tools were found');
 		});
 	});
 
@@ -1885,6 +1924,7 @@ describe('Request Transformer Module', () => {
 				expect(bridgeText).toContain('`apply_patch`');
 				expect(bridgeText).toContain('`bash`');
 				expect(bridgeText).toContain('Do not translate tool names');
+				expect(bridgeText).toContain('Runtime Alias Compatibility');
 			});
 
 			it('should include hashline beta hints in bridge mode when enabled', async () => {

@@ -94,6 +94,18 @@ const HASHLINE_STRICT_BRIDGE_SECTION = `## Hashline Edit Policy (Strict)
 - Re-read and retry with fresh anchors on hash mismatch before switching strategy.
 - Use patch/edit only for broad structural rewrites or when hashline tools are absent.`;
 
+const HASHLINE_BETA_BRIDGE_SECTION_INACTIVE = `## Hashline Edit Preference (Beta) [Inactive]
+
+- Hashline beta mode is enabled, but no hashline-style tools were found in the runtime manifest.
+- Do not attempt unlisted hashline tool names.
+- Use available edit tools from the runtime manifest instead.`;
+
+const HASHLINE_STRICT_BRIDGE_SECTION_INACTIVE = `## Hashline Edit Policy (Strict) [Inactive]
+
+- Strict hashline mode is enabled, but no hashline-style tools were found in the runtime manifest.
+- Do not attempt unlisted hashline tool names.
+- Use available edit tools from the runtime manifest for targeted edits.`;
+
 const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
 	const unique = new Set<string>();
 	for (const rawName of toolNames) {
@@ -103,6 +115,33 @@ const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
 		unique.add(name);
 	}
 	return Array.from(unique);
+};
+
+const renderRuntimeAliasCompatibilitySection = (
+	runtimeToolNames: readonly string[],
+): string | null => {
+	if (runtimeToolNames.length === 0) return null;
+	const lower = new Set(runtimeToolNames.map((name) => name.toLowerCase()));
+	const hasApplyPatch = lower.has("apply_patch") || lower.has("applypatch");
+	const hasPatch = lower.has("patch");
+	const hasEdit = lower.has("edit");
+	const hasTodoWrite = lower.has("todowrite");
+	const hasUpdatePlan = lower.has("update_plan") || lower.has("updateplan");
+
+	const lines: string[] = [];
+	if (hasApplyPatch && !hasPatch && !hasEdit) {
+		lines.push("- Runtime includes `apply_patch` but not `patch`/`edit`; use `apply_patch` exactly as listed.");
+	}
+	if (hasUpdatePlan && !hasTodoWrite) {
+		lines.push("- Runtime includes `update_plan` but not `todowrite`; use `update_plan` exactly as listed.");
+	}
+	if (lines.length === 0) return null;
+
+	return [
+		"## Runtime Alias Compatibility",
+		"When static alias guidance conflicts with the runtime manifest, the manifest wins.",
+		...lines,
+	].join("\n");
 };
 
 export const renderCodexOpenCodeBridge = (toolNames: readonly string[]): string => {
@@ -133,9 +172,22 @@ export const renderCodexOpenCodeBridgeWithOptions = (
 		sections.push(manifest);
 	}
 
+	const aliasCompat = renderRuntimeAliasCompatibilitySection(runtimeToolNames);
+	if (aliasCompat) {
+		sections.push(aliasCompat);
+	}
+
 	const mode = normalizeHashlineBridgeHintsMode(options?.hashlineBridgeHintsMode);
-	if (mode !== "off" && hasHashlineRuntimeTool) {
-		sections.push(mode === "strict" ? HASHLINE_STRICT_BRIDGE_SECTION : HASHLINE_BETA_BRIDGE_SECTION);
+	if (mode !== "off") {
+		if (hasHashlineRuntimeTool) {
+			sections.push(mode === "strict" ? HASHLINE_STRICT_BRIDGE_SECTION : HASHLINE_BETA_BRIDGE_SECTION);
+		} else {
+			sections.push(
+				mode === "strict"
+					? HASHLINE_STRICT_BRIDGE_SECTION_INACTIVE
+					: HASHLINE_BETA_BRIDGE_SECTION_INACTIVE,
+			);
+		}
 	}
 
 	sections.push(CODEX_OPENCODE_BRIDGE);

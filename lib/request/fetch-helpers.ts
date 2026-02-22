@@ -86,9 +86,13 @@ export type FailureRoute =
 
 const TOOL_UNAVAILABLE_PATTERNS = [
 	/tool(?:\s+name)?\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+(?:is\s+)?not\s+found/i,
+	/tool(?:\s+name)?\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+does(?:\s+not|n't)\s+exist/i,
 	/no tool named\s+[`'"]?([^`'"\s.,:]+)[`'"]?/i,
+	/no such tool(?:\s+[`'"]?([^`'"\s.,:]+)[`'"]?)?/i,
 	/unknown tool(?:\s+[`'"]?([^`'"\s.,:]+)[`'"]?)?/i,
+	/unknown (?:tool|function)(?:\s+name)?[:\s`'"]+([^`'"\s.,:]+)/i,
 	/tool\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+is\s+unavailable/i,
+	/tool\s+[`'"]?([^`'"\s.,:]+)[`'"]?\s+is\s+not\s+available(?:\s+in\s+this\s+(?:runtime|environment|context))?/i,
 ];
 
 function canonicalizeModelName(model: string | undefined): string | undefined {

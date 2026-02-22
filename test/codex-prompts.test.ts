@@ -80,19 +80,22 @@ describe("Codex Prompts Module", () => {
 			expect(hasHashlineRuntimeTool(["patch", "edit"])).toBe(false);
 		});
 
-		it("should render hashline hints only when hints mode and hashline tools are both present", () => {
+		it("should render active hashline hints when hints mode and hashline tools are present", () => {
 			const withHints = renderToolRemapMessage({
 				hashlineBridgeHintsMode: "hints",
 				runtimeToolNames: ["hashline_edit", "patch"],
 			});
-			const withoutHints = renderToolRemapMessage({
+			const withoutHashlineTools = renderToolRemapMessage({
 				hashlineBridgeHintsMode: "hints",
 				runtimeToolNames: ["patch", "edit"],
 			});
 
 			expect(withHints).toContain("hashline_beta_hints");
 			expect(withHints).toContain("Prefer hashline tools");
-			expect(withoutHints).not.toContain("hashline_beta_hints");
+			expect(withHints).not.toContain('active="false"');
+			expect(withoutHashlineTools).toContain("hashline_beta_hints");
+			expect(withoutHashlineTools).toContain('active="false"');
+			expect(withoutHashlineTools).toContain("no hashline-style tools were found");
 		});
 
 		it("should render strict hashline policy only in strict mode", () => {
@@ -107,6 +110,14 @@ describe("Codex Prompts Module", () => {
 
 			expect(strictHints).toContain('hashline_policy mode="strict"');
 			expect(nonStrict).not.toContain('hashline_policy mode="strict"');
+		});
+
+		it("should add runtime alias compatibility block when runtime lacks patch/edit", () => {
+			const remap = renderToolRemapMessage({
+				runtimeToolNames: ["apply_patch", "bash"],
+			});
+			expect(remap).toContain("runtime_tool_alias_compat");
+			expect(remap).toContain("use `apply_patch` exactly as listed");
 		});
 	});
 
