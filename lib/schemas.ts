@@ -83,6 +83,7 @@ export type RateLimitStateV3FromSchema = z.infer<typeof RateLimitStateV3Schema>;
  */
 export const AccountMetadataV3Schema = z.object({
 	accountId: z.string().optional(),
+	organizationId: z.string().optional(),
 	accountIdSource: AccountIdSourceSchema.optional(),
 	accountLabel: z.string().optional(),
 	email: z.string().optional(),
@@ -127,6 +128,7 @@ export type AccountStorageV3FromSchema = z.infer<typeof AccountStorageV3Schema>;
  */
 export const AccountMetadataV1Schema = z.object({
 	accountId: z.string().optional(),
+	organizationId: z.string().optional(),
 	accountIdSource: AccountIdSourceSchema.optional(),
 	accountLabel: z.string().optional(),
 	email: z.string().optional(),

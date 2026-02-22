@@ -9,6 +9,8 @@ import {
   loadAccounts, 
   saveAccounts,
   clearAccounts,
+  loadFlaggedAccounts,
+  saveFlaggedAccounts,
   getStoragePath,
   setStoragePath,
   setStoragePathDirect,
@@ -157,6 +159,244 @@ describe("storage", () => {
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(2);
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
+    });
+
+    it("preserves same-email same-token accounts when accountId differs during import", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "workspace-a",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              accountId: "workspace-b",
+              refreshToken: "shared-refresh",
+              email: "user@example.com",
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+      expect(new Set(loaded?.accounts.map((a) => a.accountId))).toEqual(
+        new Set(["workspace-a", "workspace-b"]),
+      );
+    });
+
+    it("collapses same-organization records to newest during import and remaps active keys", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0, "gpt-5.1": 0 },
+        accounts: [
+          {
+            organizationId: "org-1",
+            accountId: "workspace-a",
+            refreshToken: "refresh-old",
+            email: "user@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            organizationId: "org-2",
+            accountId: "workspace-b",
+            refreshToken: "refresh-org-2",
+            email: "user@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              organizationId: "org-1",
+              accountId: "workspace-c",
+              refreshToken: "refresh-new",
+              email: "user@example.com",
+              addedAt: 3,
+              lastUsed: 30,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+
+      const org1 = loaded?.accounts.find((account) => account.organizationId === "org-1");
+      expect(org1?.accountId).toBe("workspace-c");
+      expect(org1?.refreshToken).toBe("refresh-new");
+      expect(loaded?.activeIndex).toBe(1);
+      expect(loaded?.activeIndexByFamily?.codex).toBe(1);
+    });
+
+    it("keeps same accountId/refreshToken as separate accounts when organizationId differs during import", async () => {
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              organizationId: "org-a",
+              accountId: "shared-account",
+              refreshToken: "shared-refresh",
+              addedAt: 1,
+              lastUsed: 1,
+            },
+            {
+              organizationId: "org-b",
+              accountId: "shared-account",
+              refreshToken: "shared-refresh",
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+      expect(new Set(loaded?.accounts.map((account) => account.organizationId))).toEqual(
+        new Set(["org-a", "org-b"]),
+      );
+    });
+
+    it("keeps legacy no-organization dedupe semantics during import", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "legacy-account",
+            refreshToken: "legacy-old",
+            email: "legacy-account@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            refreshToken: "legacy-email-old",
+            email: "legacy-email@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            refreshToken: "legacy-refresh",
+            email: "refresh-a@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              accountId: "legacy-account",
+              refreshToken: "legacy-new",
+              email: "legacy-account@example.com",
+              addedAt: 2,
+              lastUsed: 20,
+            },
+            {
+              refreshToken: "legacy-email-new",
+              email: "legacy-email@example.com",
+              addedAt: 2,
+              lastUsed: 20,
+            },
+            {
+              refreshToken: "legacy-refresh",
+              email: "refresh-b@example.com",
+              addedAt: 2,
+              lastUsed: 20,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(3);
+
+      const byAccountId = loaded?.accounts.find((account) => account.accountId === "legacy-account");
+      expect(byAccountId?.refreshToken).toBe("legacy-new");
+
+      const byEmail = loaded?.accounts.find((account) => account.email === "legacy-email@example.com");
+      expect(byEmail?.refreshToken).toBe("legacy-email-new");
+
+      const byRefresh = loaded?.accounts.find((account) => account.refreshToken === "legacy-refresh");
+      expect(byRefresh?.email).toBe("refresh-b@example.com");
+    });
+
+    it("deduplicates legacy no-accountId records by email during import", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "legacy-refresh-old",
+            email: "legacy@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              refreshToken: "legacy-refresh-new",
+              email: "legacy@example.com",
+              addedAt: 2,
+              lastUsed: 20,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.refreshToken).toBe("legacy-refresh-new");
     });
 
     it("should serialize concurrent transactional updates without losing accounts", async () => {
@@ -597,6 +837,154 @@ describe("storage", () => {
       const result = normalizeAccountStorage(data);
       expect(result?.accounts).toHaveLength(1);
     });
+
+    it("keeps same-email same-token records distinct when accountId differs", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "workspace-a",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            accountId: "workspace-b",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(2);
+      expect(new Set(result?.accounts.map((a) => a.accountId))).toEqual(
+        new Set(["workspace-a", "workspace-b"]),
+      );
+    });
+
+    it("uses organizationId as primary identity and keeps differing organizations distinct", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            organizationId: "org-1",
+            accountId: "workspace-a",
+            refreshToken: "refresh-old",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            organizationId: "org-1",
+            accountId: "workspace-b",
+            refreshToken: "refresh-new",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+          {
+            organizationId: "org-2",
+            accountId: "workspace-b",
+            refreshToken: "refresh-new",
+            addedAt: 3,
+            lastUsed: 30,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(2);
+      expect(result?.accounts.map((account) => account.organizationId)).toEqual(["org-1", "org-2"]);
+      expect(result?.accounts[0]?.accountId).toBe("workspace-b");
+    });
+
+    it("retains legacy no-organization dedupe semantics", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "legacy-account",
+            refreshToken: "legacy-old",
+            email: "legacy-account@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            accountId: "legacy-account",
+            refreshToken: "legacy-new",
+            email: "legacy-account@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+          {
+            refreshToken: "legacy-refresh",
+            email: "refresh-a@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            refreshToken: "legacy-refresh",
+            email: "refresh-b@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+          {
+            refreshToken: "legacy-email-old",
+            email: "legacy-email@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            refreshToken: "legacy-email-new",
+            email: "legacy-email@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(3);
+      expect(result?.accounts.find((account) => account.accountId === "legacy-account")?.refreshToken).toBe(
+        "legacy-new",
+      );
+      expect(result?.accounts.find((account) => account.refreshToken === "legacy-refresh")?.email).toBe(
+        "refresh-b@example.com",
+      );
+      expect(result?.accounts.find((account) => account.email === "legacy-email@example.com")?.refreshToken).toBe(
+        "legacy-email-new",
+      );
+    });
+
+    it("deduplicates legacy no-accountId records by email", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "legacy-old",
+            email: "legacy@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            refreshToken: "legacy-new",
+            email: "legacy@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(1);
+      expect(result?.accounts[0]?.refreshToken).toBe("legacy-new");
+    });
   });
 
   describe("loadAccounts", () => {
@@ -728,6 +1116,44 @@ describe("storage", () => {
 
     it("does not throw when file does not exist", async () => {
       await expect(clearAccounts()).resolves.not.toThrow();
+    });
+  });
+
+  describe("flagged account storage", () => {
+    const testWorkDir = join(tmpdir(), "codex-flagged-test-" + Math.random().toString(36).slice(2));
+    let testStoragePath: string;
+
+    beforeEach(async () => {
+      await fs.mkdir(testWorkDir, { recursive: true });
+      testStoragePath = join(testWorkDir, "accounts.json");
+      setStoragePathDirect(testStoragePath);
+    });
+
+    afterEach(async () => {
+      setStoragePathDirect(null);
+      await fs.rm(testWorkDir, { recursive: true, force: true });
+    });
+
+    it("preserves organizationId through flagged save/load normalization", async () => {
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "flagged-refresh",
+            organizationId: "org-secondary",
+            accountId: "id-secondary",
+            accountIdSource: "id_token",
+            flaggedAt: 123,
+            addedAt: 123,
+            lastUsed: 123,
+          },
+        ],
+      });
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts).toHaveLength(1);
+      expect(loaded.accounts[0]?.organizationId).toBe("org-secondary");
+      expect(loaded.accounts[0]?.accountIdSource).toBe("id_token");
     });
   });
 

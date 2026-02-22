@@ -505,6 +505,42 @@ describe("AccountManager", () => {
       expect(manager.getAccountCount()).toBe(0);
       expect(manager.getCurrentAccount()).toBe(null);
     });
+
+    it("removes only targeted workspace when email/token are shared", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            accountId: "workspace-a",
+            addedAt: now,
+            lastUsed: now,
+          },
+          {
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            accountId: "workspace-b",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      expect(manager.getAccountCount()).toBe(2);
+
+      const second = manager.setActiveIndex(1);
+      expect(second?.accountId).toBe("workspace-b");
+
+      const removed = manager.removeAccount(second!);
+      expect(removed).toBe(true);
+      expect(manager.getAccountCount()).toBe(1);
+      expect(manager.getAccountsSnapshot()[0]?.accountId).toBe("workspace-a");
+      expect(manager.getActiveIndex()).toBe(0);
+    });
   });
 
   describe("hasRefreshToken", () => {
@@ -929,6 +965,74 @@ describe("AccountManager", () => {
       expect(manager.setActiveIndex(999)).toBeNull();
       expect(manager.setActiveIndex(NaN)).toBeNull();
       expect(manager.setActiveIndex(Infinity)).toBeNull();
+    });
+
+    it("switches between distinct workspace accounts sharing email and token", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            accountId: "workspace-a",
+            addedAt: now,
+            lastUsed: now,
+          },
+          {
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            accountId: "workspace-b",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      expect(manager.getAccountCount()).toBe(2);
+
+      expect(manager.getCurrentAccount()?.accountId).toBe("workspace-a");
+      const switched = manager.setActiveIndex(1);
+      expect(switched?.accountId).toBe("workspace-b");
+      expect(manager.getCurrentAccount()?.accountId).toBe("workspace-b");
+      expect(manager.getActiveIndex()).toBe(1);
+    });
+
+    it("switches between accounts that share accountId/refreshToken but have different organizationId", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            organizationId: "org-a",
+            accountId: "shared-account",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: now,
+            lastUsed: now,
+          },
+          {
+            organizationId: "org-b",
+            accountId: "shared-account",
+            refreshToken: "shared-refresh",
+            email: "user@example.com",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      expect(manager.getAccountCount()).toBe(2);
+      expect(manager.getCurrentAccount()?.organizationId).toBe("org-a");
+
+      const switched = manager.setActiveIndex(1);
+      expect(switched?.organizationId).toBe("org-b");
+      expect(manager.getCurrentAccount()?.organizationId).toBe("org-b");
+      expect(manager.getActiveIndex()).toBe(1);
     });
   });
 

@@ -173,6 +173,7 @@ function initFamilyState(defaultValue: number): Record<ModelFamily, number> {
 export interface ManagedAccount {
 	index: number;
 	accountId?: string;
+	organizationId?: string;
 	accountIdSource?: AccountIdSource;
 	accountLabel?: string;
 	email?: string;
@@ -282,6 +283,7 @@ export class AccountManager {
 					return {
 						index,
 						accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
+						organizationId: account.organizationId,
 						accountIdSource: account.accountIdSource,
 						accountLabel: account.accountLabel,
 						email: matchesFallback
@@ -315,6 +317,7 @@ export class AccountManager {
 				this.accounts.push({
 					index: this.accounts.length,
 					accountId: fallbackAccountId,
+					organizationId: undefined,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
 					email: fallbackAccountEmail,
 					refreshToken: authFallback.refresh,
@@ -347,6 +350,7 @@ export class AccountManager {
 				{
 					index: 0,
 					accountId: fallbackAccountId,
+					organizationId: undefined,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
 					email: fallbackAccountEmail,
 					refreshToken: authFallback.refresh,
@@ -773,6 +777,7 @@ export class AccountManager {
 			version: 3,
 			accounts: this.accounts.map((account) => ({
 				accountId: account.accountId,
+				organizationId: account.organizationId,
 				accountIdSource: account.accountIdSource,
 				accountLabel: account.accountLabel,
 				email: account.email,

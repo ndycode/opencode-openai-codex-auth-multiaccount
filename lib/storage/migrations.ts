@@ -14,6 +14,7 @@ export interface RateLimitStateV3 {
 
 export interface AccountMetadataV1 {
 	accountId?: string;
+	organizationId?: string;
 	accountIdSource?: AccountIdSource;
 	accountLabel?: string;
 	email?: string;
@@ -39,6 +40,7 @@ export interface AccountStorageV1 {
 
 export interface AccountMetadataV3 {
 	accountId?: string;
+	organizationId?: string;
 	accountIdSource?: AccountIdSource;
 	accountLabel?: string;
 	email?: string;
@@ -80,6 +82,7 @@ export function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
 			}
 			return {
 				accountId: account.accountId,
+				organizationId: account.organizationId,
 				accountIdSource: account.accountIdSource,
 				accountLabel: account.accountLabel,
 				email: account.email,

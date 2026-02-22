@@ -180,10 +180,13 @@ const mockStorage = {
 	version: 3 as const,
 	accounts: [] as Array<{
 		accountId?: string;
+		organizationId?: string;
 		accountIdSource?: string;
 		accountLabel?: string;
 		email?: string;
 		refreshToken: string;
+		accessToken?: string;
+		expiresAt?: number;
 		addedAt?: number;
 		lastUsed?: number;
 		coolingDownUntil?: number;
@@ -198,6 +201,27 @@ vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "/mock/path/accounts.json",
 	loadAccounts: vi.fn(async () => mockStorage),
 	saveAccounts: vi.fn(async () => {}),
+	withAccountStorageTransaction: vi.fn(
+		async (
+			callback: (
+				loadedStorage: typeof mockStorage,
+				persist: (nextStorage: typeof mockStorage) => Promise<void>,
+			) => Promise<void>,
+		) => {
+			const loadedStorage = {
+				...mockStorage,
+				accounts: mockStorage.accounts.map((account) => ({ ...account })),
+				activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+			};
+			const persist = async (nextStorage: typeof mockStorage) => {
+				mockStorage.version = nextStorage.version;
+				mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+				mockStorage.activeIndex = nextStorage.activeIndex;
+				mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
+			};
+			await callback(loadedStorage, persist);
+		},
+	),
 	clearAccounts: vi.fn(async () => {}),
 	setStoragePath: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
@@ -293,10 +317,14 @@ vi.mock("../lib/accounts.js", () => {
 
 	return {
 		AccountManager: MockAccountManager,
-		getAccountIdCandidates: () => [{ accountId: "acc-1", source: "token", label: "Test" }],
-		selectBestAccountCandidate: (candidates: Array<{ accountId: string }>) => candidates[0] ?? null,
-		extractAccountEmail: () => "user@example.com",
-		extractAccountId: () => "account-1",
+		getAccountIdCandidates: vi.fn(() => [
+			{ accountId: "acc-1", source: "token" as const, label: "Test" },
+		]),
+		selectBestAccountCandidate: vi.fn(
+			(candidates: Array<{ accountId: string }>) => candidates[0] ?? null,
+		),
+		extractAccountEmail: vi.fn(() => "user@example.com"),
+		extractAccountId: vi.fn(() => "account-1"),
 		resolveRequestAccountId: (_storedId: string | undefined, _source: string | undefined, tokenId: string | undefined) => tokenId,
 		formatAccountLabel: (_account: unknown, index: number) => `Account ${index + 1}`,
 		formatCooldown: () => null,
@@ -1275,6 +1303,7 @@ describe("OpenAIOAuthPlugin resolveAccountSelection", () => {
 		mockStorage.accounts = [];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		delete process.env.CODEX_AUTH_ACCOUNT_ID;
 	});
 
 	afterEach(() => {
@@ -1335,6 +1364,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		mockStorage.accounts = [];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		delete process.env.CODEX_AUTH_ACCOUNT_ID;
 	});
 
 	afterEach(() => {
@@ -1373,6 +1403,389 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		await OpenAIOAuthPlugin({ client: mockClient } as never);
 
 		expect(mockStorage.accounts).toHaveLength(1);
+	});
+
+	it("persists distinct organization candidates from a single login while keeping best candidate primary", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-multi",
+			refresh: "refresh-multi",
+			expires: Date.now() + 300_000,
+			idToken: "id-multi",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([
+			{ accountId: "token-personal", source: "token", label: "Token Personal [id:sonal]", organizationId: "org-personal" },
+			{ accountId: "org-default", source: "org", label: "Workspace Alpha [id:fault]", organizationId: "org-default" },
+			{ accountId: "id-secondary", source: "id_token", label: "Workspace Beta [id:ndary]", organizationId: "org-secondary" },
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
+			candidates.find((candidate) => candidate.accountId === "org-default") ?? candidates[0],
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(3);
+		expect(mockStorage.accounts.map((account) => account.accountId)).toEqual([
+			"org-default",
+			"token-personal",
+			"id-secondary",
+		]);
+		expect(mockStorage.accounts.map((account) => account.accountIdSource)).toEqual([
+			"org",
+			"token",
+			"id_token",
+		]);
+		expect(mockStorage.accounts.map((account) => account.accountLabel)).toEqual([
+			"Workspace Alpha [id:fault]",
+			"Token Personal [id:sonal]",
+			"Workspace Beta [id:ndary]",
+		]);
+		expect(mockStorage.activeIndex).toBe(0);
+
+		const persistedOrgIds = mockStorage.accounts
+			.map((account) => account.organizationId)
+			.filter((organizationId): organizationId is string => typeof organizationId === "string");
+		// Personal identities are left intact while team org duplicates are collapsed.
+		expect(persistedOrgIds).toEqual(["org-default", "org-personal", "org-secondary"]);
+	});
+
+	it("keeps non-primary candidates persisted even when best candidate differs", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-two",
+			refresh: "refresh-two",
+			expires: Date.now() + 300_000,
+			idToken: "id-two",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([
+			{ accountId: "token-first", source: "token", label: "Token First [id:first]", organizationId: "org-token" },
+			{ accountId: "org-preferred", source: "org", label: "Org Preferred [id:ferred]", organizationId: "org-preferred" },
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
+			candidates.find((candidate) => candidate.accountId === "org-preferred") ?? candidates[0],
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts.map((account) => account.accountId)).toEqual([
+			"org-preferred",
+			"token-first",
+		]);
+		expect(mockStorage.accounts[1]?.accountIdSource).toBe("token");
+		expect(mockStorage.accounts.map((account) => account.organizationId)).toEqual([
+			"org-preferred",
+			"org-token",
+		]);
+	});
+
+	it("collapses duplicate organization candidates during persistence", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-org-dup",
+			refresh: "refresh-org-dup",
+			expires: Date.now() + 300_000,
+			idToken: "id-org-dup",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([
+			{
+				accountId: "org-variant-a",
+				organizationId: "organization-shared",
+				source: "org",
+				label: "Org Shared A [id:ared-a]",
+			},
+			{
+				accountId: "org-variant-b",
+				organizationId: "organization-shared",
+				source: "org",
+				label: "Org Shared B [id:ared-b]",
+			},
+			{ accountId: "token-personal", source: "token", label: "Token [id:sonal]" },
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
+			candidates.find((candidate) => candidate.accountId === "org-variant-a") ?? candidates[0],
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		const organizationEntries = mockStorage.accounts.filter(
+			(account) => account.organizationId === "organization-shared",
+		);
+		expect(organizationEntries).toHaveLength(1);
+		expect(organizationEntries[0]?.accountId).toBe("org-variant-b");
+		expect(mockStorage.accounts).toHaveLength(2);
+	});
+
+	it("updates a unique org-scoped entry when later login lacks organization metadata", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode)
+			.mockResolvedValueOnce({
+				type: "success",
+				access: "access-org-initial",
+				refresh: "refresh-unique",
+				expires: Date.now() + 300_000,
+				idToken: "id-org-initial",
+			})
+			.mockResolvedValueOnce({
+				type: "success",
+				access: "access-no-org-update",
+				refresh: "refresh-unique",
+				expires: Date.now() + 300_000,
+				idToken: "id-no-org-update",
+			});
+		vi.mocked(accountsModule.getAccountIdCandidates)
+			.mockReturnValueOnce([
+				{
+					accountId: "shared-account",
+					organizationId: "org-unique",
+					source: "org",
+					label: "Workspace Unique [id:nique]",
+				},
+			])
+			.mockReturnValueOnce([]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementation(
+			(candidates) => candidates[0],
+		);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-no-org-update" ? "shared-account" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts[0]?.organizationId).toBe("org-unique");
+		expect(mockStorage.accounts[0]?.accountId).toBe("shared-account");
+		expect(mockStorage.accounts[0]?.accessToken).toBe("access-no-org-update");
+	});
+
+	it("does not merge ambiguous org-scoped matches when organization metadata is missing", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		mockStorage.accounts = [
+			{
+				organizationId: "org-a",
+				accountId: "shared-account",
+				email: "user@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: Date.now() - 20_000,
+				lastUsed: Date.now() - 20_000,
+			},
+			{
+				organizationId: "org-b",
+				accountId: "shared-account",
+				email: "user@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: Date.now() - 10_000,
+				lastUsed: Date.now() - 10_000,
+			},
+		];
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-ambiguous",
+			refresh: "shared-refresh",
+			expires: Date.now() + 300_000,
+			idToken: "id-ambiguous",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([]);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-ambiguous" ? "shared-account" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(3);
+		const orgScopedEntries = mockStorage.accounts.filter((account) => account.organizationId);
+		expect(orgScopedEntries).toHaveLength(2);
+		const fallbackEntries = mockStorage.accounts.filter((account) => !account.organizationId);
+		expect(fallbackEntries).toHaveLength(1);
+		expect(fallbackEntries[0]?.accountId).toBe("shared-account");
+		expect(fallbackEntries[0]?.accessToken).toBe("access-ambiguous");
+	});
+
+	it("persists non-team login and updates same record via accountId/refresh fallback", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode)
+			.mockResolvedValueOnce({
+				type: "success",
+				access: "access-no-org-1",
+				refresh: "refresh-shared",
+				expires: Date.now() + 300_000,
+				idToken: "id-no-org-1",
+			})
+			.mockResolvedValueOnce({
+				type: "success",
+				access: "access-no-org-2",
+				refresh: "refresh-shared",
+				expires: Date.now() + 300_000,
+				idToken: "id-no-org-2",
+			});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValue([]);
+		vi.mocked(accountsModule.extractAccountId)
+			.mockReturnValueOnce("account-1")
+			.mockReturnValueOnce(undefined);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts[0]?.organizationId).toBeUndefined();
+		expect(mockStorage.accounts[0]?.accountId).toBe("account-1");
+		expect(mockStorage.accounts[0]?.refreshToken).toBe("refresh-shared");
+		expect(mockStorage.accounts[0]?.accessToken).toBe("access-no-org-2");
+	});
+
+	it("preserves flagged organization identity during verify-flagged restore for cached and refreshed paths", async () => {
+		const cliModule = await import("../lib/cli.js");
+		const storageModule = await import("../lib/storage.js");
+		const accountsModule = await import("../lib/accounts.js");
+		const refreshQueueModule = await import("../lib/refresh-queue.js");
+
+		const flaggedAccounts = [
+			{
+				refreshToken: "flagged-refresh-cache",
+				organizationId: "org-cache",
+				accountId: "flagged-cache",
+				accountIdSource: "manual",
+				accountLabel: "Cache Workspace",
+				email: "cache@example.com",
+				flaggedAt: Date.now() - 1000,
+				addedAt: Date.now() - 1000,
+				lastUsed: Date.now() - 1000,
+			},
+			{
+				refreshToken: "flagged-refresh-live",
+				organizationId: "org-refresh",
+				accountId: "flagged-live",
+				accountIdSource: "manual",
+				accountLabel: "Refresh Workspace",
+				email: "refresh@example.com",
+				flaggedAt: Date.now() - 500,
+				addedAt: Date.now() - 500,
+				lastUsed: Date.now() - 500,
+			},
+		];
+
+		vi.mocked(cliModule.promptLoginMode)
+			.mockResolvedValueOnce({ mode: "verify-flagged" })
+			.mockResolvedValueOnce({ mode: "cancel" });
+
+		vi.mocked(storageModule.loadFlaggedAccounts)
+			.mockResolvedValueOnce({
+				version: 1,
+				accounts: flaggedAccounts,
+			})
+			.mockResolvedValueOnce({
+				version: 1,
+				accounts: flaggedAccounts,
+			})
+			.mockResolvedValueOnce({
+				version: 1,
+				accounts: [],
+			});
+
+		vi.mocked(accountsModule.lookupCodexCliTokensByEmail).mockImplementation(async (email) => {
+			if (email === "cache@example.com") {
+				return {
+					accessToken: "cached-access",
+					refreshToken: "cached-refresh",
+					expiresAt: Date.now() + 60_000,
+				};
+			}
+			return null;
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValue([
+			{
+				accountId: "token-shared",
+				source: "token",
+				label: "Token Shared [id:shared]",
+			},
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementation(
+			(candidates) => candidates[0] ?? null,
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		const authResult = await autoMethod.authorize();
+		expect(authResult.instructions).toBe("Authentication cancelled");
+
+		expect(vi.mocked(refreshQueueModule.queuedRefresh)).toHaveBeenCalledTimes(1);
+		expect(mockStorage.accounts).toHaveLength(2);
+		expect(new Set(mockStorage.accounts.map((account) => account.organizationId))).toEqual(
+			new Set(["org-cache", "org-refresh"]),
+		);
+		expect(vi.mocked(storageModule.saveFlaggedAccounts)).toHaveBeenCalledWith({
+			version: 1,
+			accounts: [],
+		});
 	});
 });
 

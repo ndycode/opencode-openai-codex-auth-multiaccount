@@ -219,64 +219,109 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastError: null,
 	};
 
-        type TokenSuccess = Extract<TokenResult, { type: "success" }>;
-        type TokenSuccessWithAccount = TokenSuccess & {
-                accountIdOverride?: string;
-                accountIdSource?: AccountIdSource;
-                accountLabel?: string;
-        };
+		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
+		type TokenSuccessWithAccount = TokenSuccess & {
+				accountIdOverride?: string;
+				organizationIdOverride?: string;
+				accountIdSource?: AccountIdSource;
+				accountLabel?: string;
+		};
 
-        const resolveAccountSelection = (
-                tokens: TokenSuccess,
-        ): TokenSuccessWithAccount => {
-                const override = (process.env.CODEX_AUTH_ACCOUNT_ID ?? "").trim();
-                if (override) {
-                        const suffix = override.length > 6 ? override.slice(-6) : override;
-                        logInfo(`Using account override from CODEX_AUTH_ACCOUNT_ID (id:${suffix}).`);
-                        return {
-                                ...tokens,
-                                accountIdOverride: override,
-                                accountIdSource: "manual",
-                                accountLabel: `Override [id:${suffix}]`,
-                        };
-                }
+		type AccountSelectionResult = {
+				primary: TokenSuccessWithAccount;
+				variantsForPersistence: TokenSuccessWithAccount[];
+		};
 
-                const candidates = getAccountIdCandidates(tokens.access, tokens.idToken);
-                if (candidates.length === 0) {
-                        return tokens;
-                }
+		const createSelectionVariant = (
+				tokens: TokenSuccess,
+				candidate: {
+					accountId: string;
+					organizationId?: string;
+					source?: AccountIdSource;
+					label?: string;
+				},
+		): TokenSuccessWithAccount => ({
+				...tokens,
+				accountIdOverride: candidate.accountId,
+				organizationIdOverride: candidate.organizationId,
+				accountIdSource: candidate.source,
+				accountLabel: candidate.label,
+		});
 
-                if (candidates.length === 1) {
-				const [candidate] = candidates;
-				if (candidate) {
-					return {
-						...tokens,
-						accountIdOverride: candidate.accountId,
-						accountIdSource: candidate.source,
-						accountLabel: candidate.label,
-					};
+		const resolveAccountSelection = (
+				tokens: TokenSuccess,
+		): AccountSelectionResult => {
+				const override = (process.env.CODEX_AUTH_ACCOUNT_ID ?? "").trim();
+				if (override) {
+						const suffix = override.length > 6 ? override.slice(-6) : override;
+						logInfo(`Using account override from CODEX_AUTH_ACCOUNT_ID (id:${suffix}).`);
+						const primary = {
+								...tokens,
+								accountIdOverride: override,
+								accountIdSource: "manual" as const,
+								accountLabel: `Override [id:${suffix}]`,
+						};
+						return {
+								primary,
+								variantsForPersistence: [primary],
+						};
 				}
-			}
 
-                // Auto-select the best workspace candidate without prompting.
-                // This honors org/default/id-token signals and avoids forcing personal token IDs.
-                const choice = selectBestAccountCandidate(candidates);
-                if (!choice) return tokens;
+				const candidates = getAccountIdCandidates(tokens.access, tokens.idToken);
+				if (candidates.length === 0) {
+						return {
+								primary: tokens,
+								variantsForPersistence: [tokens],
+						};
+				}
 
-                return {
-                        ...tokens,
-                        accountIdOverride: choice.accountId,
-                        accountIdSource: choice.source ?? "token",
-                        accountLabel: choice.label,
-                };
-        };
+				// Auto-select the best workspace candidate without prompting.
+				// This honors org/default/id-token signals and avoids forcing personal token IDs.
+				const choice = selectBestAccountCandidate(candidates);
+				if (!choice) {
+						return {
+								primary: tokens,
+								variantsForPersistence: [tokens],
+						};
+				}
 
-        const buildManualOAuthFlow = (
-                pkce: { verifier: string },
-                url: string,
-                expectedState: string,
-                onSuccess?: (tokens: TokenSuccessWithAccount) => Promise<void>,
-        ) => ({
+				const primary = createSelectionVariant(tokens, {
+						accountId: choice.accountId,
+						organizationId: choice.organizationId,
+						source: choice.source ?? "token",
+						label: choice.label,
+				});
+
+				const variantsForPersistence: TokenSuccessWithAccount[] = [primary];
+				for (const candidate of candidates) {
+						if (
+							candidate.accountId === primary.accountIdOverride &&
+							(candidate.organizationId ?? "") === (primary.organizationIdOverride ?? "")
+						) {
+							continue;
+						}
+						variantsForPersistence.push(
+								createSelectionVariant(tokens, {
+										accountId: candidate.accountId,
+										organizationId: candidate.organizationId,
+										source: candidate.source,
+										label: candidate.label,
+								}),
+						);
+				}
+
+				return {
+						primary,
+						variantsForPersistence,
+				};
+		};
+
+		const buildManualOAuthFlow = (
+				pkce: { verifier: string },
+				url: string,
+				expectedState: string,
+				onSuccess?: (selection: AccountSelectionResult) => Promise<void>,
+		) => ({
                 url,
                 method: "code" as const,
                 instructions: AUTH_LABELS.INSTRUCTIONS_MANUAL,
@@ -309,18 +354,18 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         message: "OAuth state mismatch. Restart login and try again.",
                                 };
                         }
-                        const tokens = await exchangeAuthorizationCode(
-                                parsed.code,
-                                pkce.verifier,
-                                REDIRECT_URI,
-                        );
-                        if (tokens?.type === "success") {
-                                const resolved = resolveAccountSelection(tokens);
-                                if (onSuccess) {
-                                        await onSuccess(resolved);
-                                }
-                                return resolved;
-                        }
+						const tokens = await exchangeAuthorizationCode(
+								parsed.code,
+								pkce.verifier,
+								REDIRECT_URI,
+						);
+						if (tokens?.type === "success") {
+								const resolved = resolveAccountSelection(tokens);
+								if (onSuccess) {
+										await onSuccess(resolved);
+								}
+								return resolved.primary;
+						}
                         return tokens?.type === "failed"
                                 ? tokens
                                 : { type: "failed" as const };
@@ -375,47 +420,148 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const stored = replaceAll ? null : loadedStorage;
 					const accounts = stored?.accounts ? [...stored.accounts] : [];
 
-					const indexByRefreshToken = new Map<string, number>();
-					const indexByAccountId = new Map<string, number>();
-					const indexByEmail = new Map<string, number>();
-					for (let i = 0; i < accounts.length; i += 1) {
-						const account = accounts[i];
-						if (!account) continue;
-						if (account.refreshToken) {
-							indexByRefreshToken.set(account.refreshToken, i);
+					const pushIndex = (
+						map: Map<string, number[]>,
+						key: string,
+						index: number,
+					): void => {
+						const existing = map.get(key);
+						if (existing) {
+							existing.push(index);
+							return;
 						}
-						if (account.accountId) {
-							indexByAccountId.set(account.accountId, i);
+						map.set(key, [index]);
+					};
+
+					const asUniqueIndex = (indices: number[] | undefined): number | undefined => {
+						if (!indices || indices.length !== 1) return undefined;
+						const [onlyIndex] = indices;
+						return typeof onlyIndex === "number" ? onlyIndex : undefined;
+					};
+
+					type IdentityIndexes = {
+						byOrganizationId: Map<string, number>;
+						byAccountIdNoOrg: Map<string, number>;
+						byRefreshTokenNoOrg: Map<string, number>;
+						byEmailNoOrg: Map<string, number>;
+						byAccountIdOrgScoped: Map<string, number[]>;
+						byRefreshTokenOrgScoped: Map<string, number[]>;
+					};
+
+					const resolveUniqueOrgScopedMatch = (
+						indexes: IdentityIndexes,
+						accountId: string | undefined,
+						refreshToken: string,
+					): number | undefined => {
+						const byAccountId = accountId
+							? asUniqueIndex(indexes.byAccountIdOrgScoped.get(accountId))
+							: undefined;
+						if (byAccountId !== undefined) return byAccountId;
+
+						// Refresh-token-only fallback is allowed only when accountId is absent.
+						// This avoids collapsing distinct workspace variants that share refresh token.
+						if (accountId) return undefined;
+
+						return asUniqueIndex(indexes.byRefreshTokenOrgScoped.get(refreshToken));
+					};
+
+					const buildIdentityIndexes = (): IdentityIndexes => {
+						const byOrganizationId = new Map<string, number>();
+						const byAccountIdNoOrg = new Map<string, number>();
+						const byRefreshTokenNoOrg = new Map<string, number>();
+						const byEmailNoOrg = new Map<string, number>();
+						const byAccountIdOrgScoped = new Map<string, number[]>();
+						const byRefreshTokenOrgScoped = new Map<string, number[]>();
+
+						for (let i = 0; i < accounts.length; i += 1) {
+							const account = accounts[i];
+							if (!account) continue;
+
+							const organizationId = account.organizationId?.trim();
+							const accountId = account.accountId?.trim();
+							const refreshToken = account.refreshToken?.trim();
+							const email = account.email?.trim();
+
+							if (organizationId) {
+								byOrganizationId.set(organizationId, i);
+								if (accountId) {
+									pushIndex(byAccountIdOrgScoped, accountId, i);
+								}
+								if (refreshToken) {
+									pushIndex(byRefreshTokenOrgScoped, refreshToken, i);
+								}
+								continue;
+							}
+
+							if (accountId) {
+								byAccountIdNoOrg.set(accountId, i);
+							}
+							if (refreshToken) {
+								byRefreshTokenNoOrg.set(refreshToken, i);
+							}
+							if (email) {
+								byEmailNoOrg.set(email, i);
+							}
 						}
-						if (account.email) {
-							indexByEmail.set(account.email, i);
-						}
-					}
+
+						return {
+							byOrganizationId,
+							byAccountIdNoOrg,
+							byRefreshTokenNoOrg,
+							byEmailNoOrg,
+							byAccountIdOrgScoped,
+							byRefreshTokenOrgScoped,
+						};
+					};
+
+					let identityIndexes = buildIdentityIndexes();
 
 					for (const result of results) {
 						const accountId = result.accountIdOverride ?? extractAccountId(result.access);
+						const normalizedAccountId = accountId?.trim() || undefined;
+						const organizationId = result.organizationIdOverride?.trim() || undefined;
 						const accountIdSource =
-							accountId
+							normalizedAccountId
 								? result.accountIdSource ??
-								  (result.accountIdOverride ? "manual" : "token")
+									(result.accountIdOverride ? "manual" : "token")
 								: undefined;
 						const accountLabel = result.accountLabel;
 						const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
-						const existingByEmail =
-							accountEmail && indexByEmail.has(accountEmail)
-								? indexByEmail.get(accountEmail)
-								: undefined;
-						const existingById =
-							accountId && indexByAccountId.has(accountId)
-								? indexByAccountId.get(accountId)
-								: undefined;
-						const existingByToken = indexByRefreshToken.get(result.refresh);
-						const existingIndex = existingById ?? existingByEmail ?? existingByToken;
+
+						const existingIndex = (() => {
+							if (organizationId) {
+								return identityIndexes.byOrganizationId.get(organizationId);
+							}
+							if (normalizedAccountId) {
+								const byAccountId = identityIndexes.byAccountIdNoOrg.get(normalizedAccountId);
+								if (byAccountId !== undefined) {
+									return byAccountId;
+								}
+							}
+
+							const byRefreshToken = identityIndexes.byRefreshTokenNoOrg.get(result.refresh);
+							if (byRefreshToken !== undefined) {
+								return byRefreshToken;
+							}
+
+							if (accountEmail) {
+								const byEmail = identityIndexes.byEmailNoOrg.get(accountEmail);
+								if (byEmail !== undefined) {
+									return byEmail;
+								}
+							}
+
+							return resolveUniqueOrgScopedMatch(
+								identityIndexes,
+								normalizedAccountId,
+								result.refresh,
+							);
+						})();
 
 						if (existingIndex === undefined) {
-							const newIndex = accounts.length;
 							accounts.push({
-								accountId,
+								accountId: normalizedAccountId,
+								organizationId,
 								accountIdSource,
 								accountLabel,
 								email: accountEmail,
@@ -425,29 +571,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								addedAt: now,
 								lastUsed: now,
 							});
-							indexByRefreshToken.set(result.refresh, newIndex);
-							if (accountId) {
-								indexByAccountId.set(accountId, newIndex);
-							}
-							if (accountEmail) {
-								indexByEmail.set(accountEmail, newIndex);
-							}
+							identityIndexes = buildIdentityIndexes();
 							continue;
 						}
 
 						const existing = accounts[existingIndex];
 						if (!existing) continue;
 
-						const oldToken = existing.refreshToken;
-						const oldEmail = existing.email;
 						const nextEmail = accountEmail ?? existing.email;
-						const nextAccountId = accountId ?? existing.accountId;
+						const nextOrganizationId = organizationId ?? existing.organizationId;
+						const nextAccountId = normalizedAccountId ?? existing.accountId;
 						const nextAccountIdSource =
-							accountId ? accountIdSource ?? existing.accountIdSource : existing.accountIdSource;
+							normalizedAccountId
+								? accountIdSource ?? existing.accountIdSource
+								: existing.accountIdSource;
 						const nextAccountLabel = accountLabel ?? existing.accountLabel;
 						accounts[existingIndex] = {
 							...existing,
 							accountId: nextAccountId,
+							organizationId: nextOrganizationId,
 							accountIdSource: nextAccountIdSource,
 							accountLabel: nextAccountLabel,
 							email: nextEmail,
@@ -456,19 +598,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							expiresAt: result.expires,
 							lastUsed: now,
 						};
-						if (oldToken !== result.refresh) {
-							indexByRefreshToken.delete(oldToken);
-							indexByRefreshToken.set(result.refresh, existingIndex);
-						}
-						if (accountId) {
-							indexByAccountId.set(accountId, existingIndex);
-						}
-						if (oldEmail && oldEmail !== nextEmail) {
-							indexByEmail.delete(oldEmail);
-						}
-						if (nextEmail) {
-							indexByEmail.set(nextEmail, existingIndex);
-						}
+						identityIndexes = buildIdentityIndexes();
 					}
 
 					if (accounts.length === 0) return;
@@ -661,6 +791,32 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			if (status === "ok") return ui.theme.glyphs.check;
 			if (status === "warning") return "!";
 			return ui.theme.glyphs.cross;
+		};
+
+		const formatAccountIdForDisplay = (accountId: string | undefined): string | null => {
+			const normalized = accountId?.trim();
+			if (!normalized) return null;
+			if (normalized.length <= 14) return normalized;
+			return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+		};
+
+		const formatCommandAccountLabel = (
+			account: { email?: string; accountId?: string; accountLabel?: string } | undefined,
+			index: number,
+		): string => {
+			const email = account?.email?.trim();
+			const workspace = account?.accountLabel?.trim();
+			const accountId = formatAccountIdForDisplay(account?.accountId);
+			const details: string[] = [];
+			if (email) details.push(email);
+			if (workspace) details.push(`workspace:${workspace}`);
+			if (accountId) details.push(`id:${accountId}`);
+
+			if (details.length === 0) {
+				return `Account ${index + 1}`;
+			}
+
+			return `Account ${index + 1} (${details.join(", ")})`;
 		};
 
 		const invalidateAccountManagerCache = (): void => {
@@ -2130,19 +2286,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 												access: cached.accessToken,
 												refresh: refreshToken,
 												expires: cached.expiresAt,
-												multiAccount: true,
-											});
-											if (!resolved.accountIdOverride && flagged.accountId) {
-												resolved.accountIdOverride = flagged.accountId;
-												resolved.accountIdSource = flagged.accountIdSource ?? "manual";
-											}
-											if (!resolved.accountLabel && flagged.accountLabel) {
-												resolved.accountLabel = flagged.accountLabel;
-											}
-											restored.push(resolved);
-											console.log(
+											multiAccount: true,
+										});
+										if (!resolved.primary.accountIdOverride && flagged.accountId) {
+											resolved.primary.accountIdOverride = flagged.accountId;
+											resolved.primary.accountIdSource = flagged.accountIdSource ?? "manual";
+											resolved.variantsForPersistence = [resolved.primary];
+										}
+										if (!resolved.primary.organizationIdOverride && flagged.organizationId) {
+											resolved.primary.organizationIdOverride = flagged.organizationId;
+										}
+										if (!resolved.primary.accountLabel && flagged.accountLabel) {
+											resolved.primary.accountLabel = flagged.accountLabel;
+										}
+										restored.push(...resolved.variantsForPersistence);
+										console.log(
 												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED (Codex CLI cache)`,
-											);
+										);
 											continue;
 										}
 
@@ -2155,16 +2315,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 											continue;
 										}
 
-										const resolved = resolveAccountSelection(refreshResult);
-										if (!resolved.accountIdOverride && flagged.accountId) {
-											resolved.accountIdOverride = flagged.accountId;
-											resolved.accountIdSource = flagged.accountIdSource ?? "manual";
-										}
-										if (!resolved.accountLabel && flagged.accountLabel) {
-											resolved.accountLabel = flagged.accountLabel;
-										}
-										restored.push(resolved);
-										console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
+									const resolved = resolveAccountSelection(refreshResult);
+									if (!resolved.primary.accountIdOverride && flagged.accountId) {
+										resolved.primary.accountIdOverride = flagged.accountId;
+										resolved.primary.accountIdSource = flagged.accountIdSource ?? "manual";
+										resolved.variantsForPersistence = [resolved.primary];
+									}
+									if (!resolved.primary.organizationIdOverride && flagged.organizationId) {
+										resolved.primary.organizationIdOverride = flagged.organizationId;
+									}
+									if (!resolved.primary.accountLabel && flagged.accountLabel) {
+										resolved.primary.accountLabel = flagged.accountLabel;
+									}
+									restored.push(...resolved.variantsForPersistence);
+									console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
 									} catch (error) {
 										const message = error instanceof Error ? error.message : String(error);
 										console.log(
@@ -2360,9 +2524,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 							if (useManualMode) {
 								const { pkce, state, url } = await createAuthorizationFlow();
-								return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
+								return buildManualOAuthFlow(pkce, url, state, async (selection) => {
 									try {
-										await persistAccountPool([tokens], startFresh);
+										await persistAccountPool(selection.variantsForPersistence, startFresh);
 										invalidateAccountManagerCache();
 									} catch (err) {
 										const storagePath = getStoragePath();
@@ -2391,8 +2555,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const result = await runOAuthFlow(forceNewLogin);
 
 								let resolved: TokenSuccessWithAccount | null = null;
+								let variantsForPersistence: TokenSuccessWithAccount[] = [];
 								if (result.type === "success") {
-									resolved = resolveAccountSelection(result);
+									const selection = resolveAccountSelection(result);
+									resolved = selection.primary;
+									variantsForPersistence = selection.variantsForPersistence;
 									const email = extractAccountEmail(resolved.access, resolved.idToken);
 									const accountId = resolved.accountIdOverride ?? extractAccountId(resolved.access);
 									const label = resolved.accountLabel ?? email ?? accountId ?? "Unknown account";
@@ -2432,7 +2599,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 								try {
 									const isFirstAccount = accounts.length === 1;
-									await persistAccountPool([resolved], isFirstAccount && startFresh);
+									const entriesToPersist =
+										variantsForPersistence.length > 0 ? variantsForPersistence : [resolved];
+									await persistAccountPool(entriesToPersist, isFirstAccount && startFresh);
 									invalidateAccountManagerCache();
 								} catch (err) {
 									const storagePath = getStoragePath();
@@ -2506,7 +2675,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				{
 					label: AUTH_LABELS.OAUTH_MANUAL,
 					type: "oauth" as const,
-				authorize: async () => {
+					authorize: async () => {
                                                         // Initialize storage path for manual OAuth flow
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
                                                         const manualPluginConfig = loadPluginConfig();
@@ -2514,11 +2683,11 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 
-                                                        const { pkce, state, url } = await createAuthorizationFlow();
-                                                        return buildManualOAuthFlow(pkce, url, state, async (tokens) => {
-                                                                try {
-                                                                        await persistAccountPool([tokens], false);
-                                                                } catch (err) {
+												const { pkce, state, url } = await createAuthorizationFlow();
+												return buildManualOAuthFlow(pkce, url, state, async (selection) => {
+														try {
+																await persistAccountPool(selection.variantsForPersistence, false);
+														} catch (err) {
                                                                         const storagePath = getStoragePath();
                                                                         const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
                                                                         const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
@@ -2576,7 +2745,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						];
 
 						storage.accounts.forEach((account, index) => {
-							const label = formatAccountLabel(account, index);
+							const label = formatCommandAccountLabel(account, index);
 							const badges: string[] = [];
 							if (index === activeIndex) badges.push(formatUiBadge(ui, "current", "accent"));
 							if (account.enabled === false) badges.push(formatUiBadge(ui, "disabled", "danger"));
@@ -2592,7 +2761,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								badges.push(formatUiBadge(ui, "ok", "success"));
 							}
 
-							lines.push(formatUiItem(ui, `${index + 1}. ${label} ${badges.join(" ")}`.trim()));
+							lines.push(formatUiItem(ui, `${label} ${badges.join(" ")}`.trim()));
 							if (rateLimit) {
 								lines.push(`  ${paintUiText(ui, `rate limit: ${rateLimit}`, "muted")}`);
 							}
@@ -2621,9 +2790,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						...buildTableHeader(listTableOptions),
 					];
 
-                                        storage.accounts.forEach((account, index) => {
-                                                const label = formatAccountLabel(account, index);
-                                                const statuses: string[] = [];
+						storage.accounts.forEach((account, index) => {
+							const label = formatCommandAccountLabel(account, index);
+							const statuses: string[] = [];
                                                 const rateLimit = formatRateLimitEntry(
                                                         account,
                                                         now,
@@ -2708,15 +2877,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 						await saveAccounts(storage);
 					} catch (saveError) {
 						logWarn("Failed to save account switch", { error: String(saveError) });
+						const label = formatCommandAccountLabel(account, targetIndex);
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Switch account"),
 								"",
-								formatUiItem(ui, `Switched to ${formatAccountLabel(account, targetIndex)}`, "warning"),
+								formatUiItem(ui, `Switched to ${label}`, "warning"),
 								formatUiItem(ui, "Failed to persist change. It may be lost on restart.", "danger"),
 							].join("\n");
 						}
-						return `Switched to ${formatAccountLabel(account, targetIndex)} but failed to persist. Changes may be lost on restart.`;
+						return `Switched to ${label} but failed to persist. Changes may be lost on restart.`;
 					}
 
                                         if (cachedAccountManager) {
@@ -2725,7 +2895,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						accountManagerPromise = Promise.resolve(reloadedManager);
                                         }
 
-                                        const label = formatAccountLabel(account, targetIndex);
+					const label = formatCommandAccountLabel(account, targetIndex);
 					if (ui.v2Enabled) {
 						return [
 							...formatUiHeader(ui, "Switch account"),
@@ -2765,7 +2935,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					];
 
 					storage.accounts.forEach((account, index) => {
-						const label = formatAccountLabel(account, index);
+						const label = formatCommandAccountLabel(account, index);
 						const badges: string[] = [];
 						if (index === activeIndex) badges.push(formatUiBadge(ui, "active", "accent"));
 						if (account.enabled === false) badges.push(formatUiBadge(ui, "disabled", "danger"));
@@ -2775,7 +2945,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						if (cooldown !== "none") badges.push(formatUiBadge(ui, "cooldown", "warning"));
 						if (badges.length === 0) badges.push(formatUiBadge(ui, "ok", "success"));
 
-						lines.push(formatUiItem(ui, `${index + 1}. ${label} ${badges.join(" ")}`.trim()));
+						lines.push(formatUiItem(ui, `${label} ${badges.join(" ")}`.trim()));
 						lines.push(`  ${formatUiKeyValue(ui, "rate limit", rateLimit, rateLimit === "none" ? "muted" : "warning")}`);
 						lines.push(`  ${formatUiKeyValue(ui, "cooldown", cooldown, cooldown === "none" ? "muted" : "warning")}`);
 					});
@@ -2821,7 +2991,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         ];
 
 								storage.accounts.forEach((account, index) => {
-										const label = formatAccountLabel(account, index);
+										const label = formatCommandAccountLabel(account, index);
 										const active = index === activeIndex ? "Yes" : "No";
 										const rateLimit = formatRateLimitEntry(account, now) ?? "None";
 										const cooldown = formatCooldown(account, now) ?? "No";
@@ -2952,7 +3122,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						const account = storage.accounts[i];
 						if (!account) continue;
 
-						const label = formatAccountLabel(account, i);
+						const label = formatCommandAccountLabel(account, i);
 						try {
 				const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
@@ -2984,7 +3154,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				},
 			}),
 			"codex-remove": tool({
-				description: "Remove a Codex account by index (1-based). Use codex-list to list accounts first.",
+				description: "Remove one Codex account entry by index (1-based). Use codex-list to list accounts first.",
 				args: {
 					index: tool.schema.number().describe(
 						"Account number to remove (1-based, e.g., 1 for first account)",
@@ -3027,7 +3197,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return `Account ${index} not found.`;
 					}
 
-					const label = formatAccountLabel(account, targetIndex);
+					const label = formatCommandAccountLabel(account, targetIndex);
 
 					storage.accounts.splice(targetIndex, 1);
 
@@ -3063,11 +3233,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return [
 							...formatUiHeader(ui, "Remove account"),
 							"",
-							formatUiItem(ui, `Removed ${formatAccountLabel(account, targetIndex)} from memory`, "warning"),
+							formatUiItem(ui, `Removed selected entry: ${label}`, "warning"),
+							formatUiItem(ui, "Only the selected index was changed.", "muted"),
 							formatUiItem(ui, "Failed to persist. Change may be lost on restart.", "danger"),
 						].join("\n");
 					}
-					return `Removed ${formatAccountLabel(account, targetIndex)} from memory but failed to persist. Changes may be lost on restart.`;
+					return `Removed selected entry: ${label} from memory, but failed to persist. Only the selected index was changed and this may be lost on restart.`;
 				}
 
 					if (cachedAccountManager) {
@@ -3077,18 +3248,36 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					const remaining = storage.accounts.length;
+					const matchingEmailRemaining =
+						account.email?.trim()
+							? storage.accounts.filter((entry) => entry.email === account.email).length
+							: 0;
 					if (ui.v2Enabled) {
+						const postRemoveHint =
+							matchingEmailRemaining > 0 && account.email
+								? formatUiItem(
+										ui,
+										`Other entries for ${account.email} remain: ${matchingEmailRemaining}`,
+										"muted",
+								  )
+								: formatUiItem(ui, "Only the selected entry was removed.", "muted");
 						return [
 							...formatUiHeader(ui, "Remove account"),
 							"",
-							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Removed: ${label}`, "success"),
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Removed selected entry: ${label}`, "success"),
+							postRemoveHint,
 							remaining > 0
 								? formatUiKeyValue(ui, "Remaining accounts", String(remaining))
 								: formatUiItem(ui, "No accounts remaining. Run: opencode auth login", "warning"),
 						].join("\n");
 					}
+					const postRemoveHint =
+						matchingEmailRemaining > 0 && account.email
+							? `Other entries for ${account.email} remain: ${matchingEmailRemaining}`
+							: "Only the selected entry was removed.";
 					return [
-						`Removed: ${label}`,
+						`Removed selected entry: ${label}`,
+						postRemoveHint,
 						"",
 						remaining > 0
 							? `Remaining accounts: ${remaining}`
@@ -3125,7 +3314,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					for (let i = 0; i < storage.accounts.length; i++) {
 						const account = storage.accounts[i];
 						if (!account) continue;
-						const label = formatAccountLabel(account, i);
+						const label = formatCommandAccountLabel(account, i);
 
 						try {
 							const refreshResult = await queuedRefresh(account.refreshToken);
