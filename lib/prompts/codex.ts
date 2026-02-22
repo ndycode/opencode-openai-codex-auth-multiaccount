@@ -465,6 +465,7 @@ Task Management:
 - Call only tool names listed in the active tool schema.
 - Do not invent wrapper namespaces (for example functions.task or multi_tool_use.parallel) unless explicitly listed.
 - Follow each tool's required path format instead of forcing absolute or relative paths globally.
+- If \`task\` is listed, always include \`run_in_background\` in each call (\`false\` for normal delegation, \`true\` only for explicit parallel exploration).
 </tool_call_guardrails>
 
 <substitution_rules priority="0">
@@ -552,7 +553,8 @@ function appendRuntimeAliasCompatibility(
 	const hasEdit = lower.has("edit");
 	const hasTodoWrite = lower.has("todowrite");
 	const hasUpdatePlan = lower.has("update_plan") || lower.has("updateplan");
-	if (!hasApplyPatch && !hasUpdatePlan) return message;
+	const hasTask = lower.has("task");
+	if (!hasApplyPatch && !hasUpdatePlan && !hasTask) return message;
 
 	const lines: string[] = [];
 	if (hasApplyPatch && !hasPatch && !hasEdit) {
@@ -563,6 +565,11 @@ function appendRuntimeAliasCompatibility(
 	if (hasUpdatePlan && !hasTodoWrite) {
 		lines.push(
 			"- Runtime includes `update_plan` but not `todowrite`; use `update_plan` exactly as listed.",
+		);
+	}
+	if (hasTask) {
+		lines.push(
+			"- Runtime includes `task`; always pass `run_in_background` (`false` for normal delegation, `true` only for explicit parallel exploration).",
 		);
 	}
 	if (lines.length === 0) return message;

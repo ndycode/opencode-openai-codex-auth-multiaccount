@@ -29,6 +29,7 @@ Treat the runtime tool manifest as the only authoritative tool list.
 - Do not invent wrapper namespaces unless they are explicitly listed as tools.
 - If no explicit parallel helper tool is listed, run calls sequentially.
 - If a tool call fails validation, correct arguments to match schema and retry.
+- If a \`task\` tool is available, always include \`run_in_background\` in every call (\`false\` for normal delegation, \`true\` only for explicit parallel exploration).
 - For legacy oldString/newString edits, oldString must be literal text from the current file (no unresolved placeholders like \${TARGET_SNIPPET}).
 
 ## Planning & Modes
@@ -128,6 +129,7 @@ const renderRuntimeAliasCompatibilitySection = (
 	const hasEdit = lower.has("edit");
 	const hasTodoWrite = lower.has("todowrite");
 	const hasUpdatePlan = lower.has("update_plan") || lower.has("updateplan");
+	const hasTask = lower.has("task");
 
 	const lines: string[] = [];
 	if (hasApplyPatch && !hasPatch && !hasEdit) {
@@ -135,6 +137,11 @@ const renderRuntimeAliasCompatibilitySection = (
 	}
 	if (hasUpdatePlan && !hasTodoWrite) {
 		lines.push("- Runtime includes `update_plan` but not `todowrite`; use `update_plan` exactly as listed.");
+	}
+	if (hasTask) {
+		lines.push(
+			"- Runtime includes `task`; always pass `run_in_background` (`false` for normal delegation, `true` only for explicit parallel exploration).",
+		);
 	}
 	if (lines.length === 0) return null;
 
