@@ -9,6 +9,8 @@ import {
   loadAccounts, 
   saveAccounts,
   clearAccounts,
+  loadFlaggedAccounts,
+  saveFlaggedAccounts,
   getStoragePath,
   setStoragePath,
   setStoragePathDirect,
@@ -1114,6 +1116,44 @@ describe("storage", () => {
 
     it("does not throw when file does not exist", async () => {
       await expect(clearAccounts()).resolves.not.toThrow();
+    });
+  });
+
+  describe("flagged account storage", () => {
+    const testWorkDir = join(tmpdir(), "codex-flagged-test-" + Math.random().toString(36).slice(2));
+    let testStoragePath: string;
+
+    beforeEach(async () => {
+      await fs.mkdir(testWorkDir, { recursive: true });
+      testStoragePath = join(testWorkDir, "accounts.json");
+      setStoragePathDirect(testStoragePath);
+    });
+
+    afterEach(async () => {
+      setStoragePathDirect(null);
+      await fs.rm(testWorkDir, { recursive: true, force: true });
+    });
+
+    it("preserves organizationId through flagged save/load normalization", async () => {
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "flagged-refresh",
+            organizationId: "org-secondary",
+            accountId: "id-secondary",
+            accountIdSource: "id_token",
+            flaggedAt: 123,
+            addedAt: 123,
+            lastUsed: 123,
+          },
+        ],
+      });
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts).toHaveLength(1);
+      expect(loaded.accounts[0]?.organizationId).toBe("org-secondary");
+      expect(loaded.accounts[0]?.accountIdSource).toBe("id_token");
     });
   });
 
