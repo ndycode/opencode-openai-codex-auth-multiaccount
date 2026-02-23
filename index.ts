@@ -903,27 +903,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			 * @param provider - Provider configuration from opencode.json
 			 * @returns SDK configuration object or empty object for non-OAuth auth
 			 */
-		async loader(getAuth: () => Promise<Auth>, provider: unknown) {
-			const auth = await getAuth();
-			const pluginConfig = loadPluginConfig();
-			applyUiRuntimeFromConfig(pluginConfig);
-			const perProjectAccounts = getPerProjectAccounts(pluginConfig);
-			setStoragePath(perProjectAccounts ? process.cwd() : null);
+			async loader(getAuth: () => Promise<Auth>, provider: unknown) {
+				const auth = await getAuth();
+				const pluginConfig = loadPluginConfig();
+				applyUiRuntimeFromConfig(pluginConfig);
+				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
+				setStoragePath(perProjectAccounts ? process.cwd() : null);
+				const authFallback = auth.type === "oauth" ? (auth as OAuthAuthDetails) : undefined;
 
-			// Only handle OAuth auth type, skip API key auth
-			if (auth.type !== "oauth") {
-				return {};
-			}
-
-			// Prefer multi-account auth metadata when available, but still handle
-			// plain OAuth credentials (for OpenCode versions that inject internal
-			// Codex auth first and omit the multiAccount marker).
-			const authWithMulti = auth as typeof auth & { multiAccount?: boolean };
-			if (!authWithMulti.multiAccount) {
-				logDebug(
-					`[${PLUGIN_NAME}] Auth is missing multiAccount marker; continuing with single-account compatibility mode`,
-				);
-			}
+				// Prefer multi-account auth metadata when available, but still handle
+				// plain OAuth credentials (for OpenCode versions that inject internal
+				// Codex auth first and omit the multiAccount marker).
+				const authWithMulti = authFallback as (OAuthAuthDetails & { multiAccount?: boolean }) | undefined;
+				if (authWithMulti && !authWithMulti.multiAccount) {
+					logDebug(
+						`[${PLUGIN_NAME}] Auth is missing multiAccount marker; continuing with single-account compatibility mode`,
+					);
+				}
+				if (!authFallback) {
+					logDebug(
+						`[${PLUGIN_NAME}] Host auth is ${auth.type}; attempting stored Codex account compatibility mode`,
+					);
+				}
 
 				// Acquire mutex for thread-safe initialization
 				// Use while loop to handle multiple concurrent waiters correctly
@@ -937,14 +938,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				});
 				try {
 					if (!accountManagerPromise) {
-						accountManagerPromise = AccountManager.loadFromDisk(
-							auth as OAuthAuthDetails,
-						);
+						accountManagerPromise = AccountManager.loadFromDisk(authFallback);
 					}
 					let accountManager = await accountManagerPromise;
 					cachedAccountManager = accountManager;
-					const refreshToken =
-						auth.type === "oauth" ? auth.refresh : "";
+					const refreshToken = authFallback?.refresh ?? "";
 					const needsPersist =
 						refreshToken &&
 						!accountManager.hasRefreshToken(refreshToken);
@@ -954,7 +952,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 					if (accountManager.getAccountCount() === 0) {
 						logDebug(
-							`[${PLUGIN_NAME}] No OAuth accounts available (run opencode auth login)`,
+							`[${PLUGIN_NAME}] No Codex accounts available (run opencode auth login)`,
 						);
 						return {};
 					}
