@@ -458,7 +458,22 @@ describe("OpenAIOAuthPlugin", () => {
 	});
 
 	describe("auth loader", () => {
-		it("returns empty for non-oauth auth", async () => {
+		it("returns SDK config for non-oauth auth when stored accounts exist", async () => {
+			const getAuth = async () => ({ type: "apikey" as const, key: "test" });
+			const result = await plugin.auth.loader(getAuth, {});
+			expect(result.apiKey).toBeDefined();
+			expect(result.baseURL).toBeDefined();
+			expect(result.fetch).toBeDefined();
+		});
+
+		it("returns empty for non-oauth auth when no stored accounts exist", async () => {
+			const accountsModule = await import("../lib/accounts.js");
+			vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue({
+				getAccountCount: () => 0,
+				hasRefreshToken: () => false,
+				saveToDisk: async () => {},
+			} as unknown as InstanceType<typeof accountsModule.AccountManager>);
+
 			const getAuth = async () => ({ type: "apikey" as const, key: "test" });
 			const result = await plugin.auth.loader(getAuth, {});
 			expect(result).toEqual({});
