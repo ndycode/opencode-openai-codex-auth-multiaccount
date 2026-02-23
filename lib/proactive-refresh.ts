@@ -160,13 +160,14 @@ export async function refreshExpiringAccounts(
 				accountId: account.accountId,
 				error: errorMessage,
 			});
+			const exceptionResult: ProactiveRefreshResult = {
+				refreshed: false,
+				reason: "exception",
+				errorMessage,
+			};
 			return {
 				index: account.index,
-				result: {
-					refreshed: false,
-					reason: "exception",
-					errorMessage,
-				},
+				result: exceptionResult,
 			};
 		}
 	});
