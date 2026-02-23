@@ -926,9 +926,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					);
 				}
 
-					// Acquire mutex for thread-safe initialization
-					// Use while loop to handle multiple concurrent waiters correctly
-					while (loaderMutex) {
+				// Acquire mutex for thread-safe initialization
+				// Use while loop to handle multiple concurrent waiters correctly
+				while (loaderMutex) {
 					await loaderMutex;
 				}
 
@@ -936,26 +936,26 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				loaderMutex = new Promise<void>((resolve) => {
 					resolveMutex = resolve;
 				});
-					try {
-						if (!accountManagerPromise) {
-							accountManagerPromise = AccountManager.loadFromDisk(authFallback);
-						}
-						let accountManager = await accountManagerPromise;
-						cachedAccountManager = accountManager;
-						const refreshToken = authFallback?.refresh ?? "";
-						const needsPersist =
-							refreshToken &&
-							!accountManager.hasRefreshToken(refreshToken);
-						if (needsPersist) {
-							await accountManager.saveToDisk();
-						}
+				try {
+					if (!accountManagerPromise) {
+						accountManagerPromise = AccountManager.loadFromDisk(authFallback);
+					}
+					let accountManager = await accountManagerPromise;
+					cachedAccountManager = accountManager;
+					const refreshToken = authFallback?.refresh ?? "";
+					const needsPersist =
+						refreshToken &&
+						!accountManager.hasRefreshToken(refreshToken);
+					if (needsPersist) {
+						await accountManager.saveToDisk();
+					}
 
-						if (accountManager.getAccountCount() === 0) {
-							logDebug(
-								`[${PLUGIN_NAME}] No Codex accounts available (run opencode auth login)`,
-							);
-							return {};
-						}
+					if (accountManager.getAccountCount() === 0) {
+						logDebug(
+							`[${PLUGIN_NAME}] No Codex accounts available (run opencode auth login)`,
+						);
+						return {};
+					}
 				// Extract user configuration (global + per-model options)
 				const providerConfig = provider as
 					| { options?: Record<string, unknown>; models?: UserConfig["models"] }
