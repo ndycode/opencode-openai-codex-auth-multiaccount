@@ -1939,7 +1939,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const headers = createCodexHeaders(undefined, params.accountId, params.accessToken, {
 											model,
 										});
-										headers.set("content-type", "application/json; charset=utf-8");
+								headers.set("content-type", "application/json");
 
 										const controller = new AbortController();
 										const timeout = setTimeout(() => controller.abort(), 15_000);

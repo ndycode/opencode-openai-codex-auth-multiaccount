@@ -276,6 +276,52 @@ function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
   return result;
 }
 
+function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[]): T[] {
+  const refreshToIndex = new Map<string, number>();
+  const indicesToKeep = new Set<number>();
+
+  for (let i = 0; i < accounts.length; i += 1) {
+    const account = accounts[i];
+    if (!account) continue;
+    const refreshToken = account.refreshToken?.trim();
+    if (!refreshToken) continue;
+
+    const existingIndex = refreshToIndex.get(refreshToken);
+    if (existingIndex === undefined) {
+      refreshToIndex.set(refreshToken, i);
+      continue;
+    }
+
+    const existing = accounts[existingIndex];
+    const existingHasOrg = !!existing?.organizationId?.trim();
+    const candidateHasOrg = !!account.organizationId?.trim();
+
+    if (candidateHasOrg && !existingHasOrg) {
+      refreshToIndex.set(refreshToken, i);
+      continue;
+    }
+    if (!candidateHasOrg && existingHasOrg) {
+      continue;
+    }
+
+    const newest = selectNewestAccount(existing, account);
+    refreshToIndex.set(refreshToken, newest === account ? i : existingIndex);
+  }
+
+  for (const idx of refreshToIndex.values()) {
+    indicesToKeep.add(idx);
+  }
+
+  const result: T[] = [];
+  for (let i = 0; i < accounts.length; i += 1) {
+    if (indicesToKeep.has(i)) {
+      const account = accounts[i];
+      if (account) result.push(account);
+    }
+  }
+  return result;
+}
+
 /**
  * Removes duplicate accounts, keeping the most recently used entry for each unique key.
  * Deduplication identity hierarchy: organizationId -> accountId -> refreshToken.
@@ -294,7 +340,9 @@ export function deduplicateAccounts<T extends { organizationId?: string; account
  * 2) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
  */
 function deduplicateAccountsForStorage<T extends AccountLike & { email?: string }>(accounts: T[]): T[] {
-  return deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts));
+  return deduplicateAccountsByRefreshToken(
+    deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts)),
+  );
 }
 
 /**

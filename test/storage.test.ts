@@ -161,7 +161,7 @@ describe("storage", () => {
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
     });
 
-    it("preserves same-email same-token accounts when accountId differs during import", async () => {
+    it("collapses same-refresh imports when accountId differs", async () => {
       await saveAccounts({
         version: 3,
         activeIndex: 0,
@@ -196,10 +196,8 @@ describe("storage", () => {
       await importAccounts(exportPath);
 
       const loaded = await loadAccounts();
-      expect(loaded?.accounts).toHaveLength(2);
-      expect(new Set(loaded?.accounts.map((a) => a.accountId))).toEqual(
-        new Set(["workspace-a", "workspace-b"]),
-      );
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.accountId).toBe("workspace-b");
     });
 
     it("collapses same-organization records to newest during import and remaps active keys", async () => {
@@ -257,7 +255,7 @@ describe("storage", () => {
       expect(loaded?.activeIndexByFamily?.codex).toBe(1);
     });
 
-    it("keeps same accountId/refreshToken as separate accounts when organizationId differs during import", async () => {
+    it("collapses same refresh token across organizations during import", async () => {
       await fs.writeFile(
         exportPath,
         JSON.stringify({
@@ -285,10 +283,8 @@ describe("storage", () => {
       await importAccounts(exportPath);
 
       const loaded = await loadAccounts();
-      expect(loaded?.accounts).toHaveLength(2);
-      expect(new Set(loaded?.accounts.map((account) => account.organizationId))).toEqual(
-        new Set(["org-a", "org-b"]),
-      );
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.organizationId).toBe("org-b");
     });
 
     it("keeps legacy no-organization dedupe semantics during import", async () => {
@@ -838,7 +834,7 @@ describe("storage", () => {
       expect(result?.accounts).toHaveLength(1);
     });
 
-    it("keeps same-email same-token records distinct when accountId differs", () => {
+    it("collapses same refresh token to the newest account when accountId differs", () => {
       const data = {
         version: 3,
         activeIndex: 0,
@@ -861,13 +857,11 @@ describe("storage", () => {
       };
 
       const result = normalizeAccountStorage(data);
-      expect(result?.accounts).toHaveLength(2);
-      expect(new Set(result?.accounts.map((a) => a.accountId))).toEqual(
-        new Set(["workspace-a", "workspace-b"]),
-      );
+      expect(result?.accounts).toHaveLength(1);
+      expect(result?.accounts[0]?.accountId).toBe("workspace-b");
     });
 
-    it("uses organizationId as primary identity and keeps differing organizations distinct", () => {
+    it("collapses same refresh token across organizations to newest entry", () => {
       const data = {
         version: 3,
         activeIndex: 0,
@@ -897,8 +891,8 @@ describe("storage", () => {
       };
 
       const result = normalizeAccountStorage(data);
-      expect(result?.accounts).toHaveLength(2);
-      expect(result?.accounts.map((account) => account.organizationId)).toEqual(["org-1", "org-2"]);
+      expect(result?.accounts).toHaveLength(1);
+      expect(result?.accounts[0]?.organizationId).toBe("org-2");
       expect(result?.accounts[0]?.accountId).toBe("workspace-b");
     });
 
