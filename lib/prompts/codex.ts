@@ -473,7 +473,7 @@ read_plan             →   todoread
 
 <verification_checklist priority="0">
 Before file/plan modifications:
-1. Am I using the exact patch/edit tool name listed by the active schema?
+1. Am I using the exact patch/edit (including apply_patch when exposed) tool name listed by the active schema?
 2. Am I using "todowrite" NOT "update_plan"?
 3. Is this tool in the approved list above?
 4. Am I following the active tool schema (including path format)?
