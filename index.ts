@@ -476,8 +476,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					refreshToken: newer.refreshToken || older.refreshToken,
 					accessToken: newer.accessToken || older.accessToken,
 					expiresAt: newer.expiresAt ?? older.expiresAt,
+					enabled: target.enabled ?? source.enabled,
 					addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
 					lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
+					lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
+					rateLimitResetTimes: {
+						...(source.rateLimitResetTimes ?? {}),
+						...(target.rateLimitResetTimes ?? {}),
+					},
+					coolingDownUntil: target.coolingDownUntil ?? source.coolingDownUntil,
+					cooldownReason: target.cooldownReason ?? source.cooldownReason,
 				};
 			};
 
@@ -636,12 +644,21 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 						const nextEmail = accountEmail ?? existing.email;
 						const nextOrganizationId = organizationId ?? existing.organizationId;
-						const nextAccountId = normalizedAccountId ?? existing.accountId;
-						const nextAccountIdSource =
-							normalizedAccountId
+						const preserveOrgIdentity =
+							typeof existing.organizationId === "string" &&
+							existing.organizationId.trim().length > 0 &&
+							!organizationId;
+						const nextAccountId = preserveOrgIdentity
+							? existing.accountId ?? normalizedAccountId
+							: normalizedAccountId ?? existing.accountId;
+						const nextAccountIdSource = preserveOrgIdentity
+							? existing.accountIdSource ?? accountIdSource
+							: normalizedAccountId
 								? accountIdSource ?? existing.accountIdSource
 								: existing.accountIdSource;
-						const nextAccountLabel = accountLabel ?? existing.accountLabel;
+						const nextAccountLabel = preserveOrgIdentity
+							? existing.accountLabel ?? accountLabel
+							: accountLabel ?? existing.accountLabel;
 						accounts[existingIndex] = {
 							...existing,
 							accountId: nextAccountId,
@@ -722,35 +739,39 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				}
 			};
 
-			const resolveIdentityKey = (
+			const collectIdentityKeys = (
 				account: { organizationId?: string; accountId?: string; refreshToken?: string } | undefined,
-			): string | undefined => {
+			): string[] => {
+				const keys: string[] = [];
 				const organizationId = account?.organizationId?.trim();
-				if (organizationId) return `org:${organizationId}`;
+				if (organizationId) keys.push(`org:${organizationId}`);
 				const accountId = account?.accountId?.trim();
-				if (accountId) return `account:${accountId}`;
+				if (accountId) keys.push(`account:${accountId}`);
 				const refreshToken = account?.refreshToken?.trim();
-				return refreshToken ? `refresh:${refreshToken}` : undefined;
+				if (refreshToken) keys.push(`refresh:${refreshToken}`);
+				return keys;
 			};
 
-			const getAccountAtStoredIndex = (rawIndex: unknown) => {
+			const getStoredAccountAtIndex = (rawIndex: unknown) => {
+				const storedAccounts = stored?.accounts;
+				if (!storedAccounts) return undefined;
 				if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) return undefined;
 				const candidate = Math.floor(rawIndex);
-				if (candidate < 0 || candidate >= accounts.length) return undefined;
-				return accounts[candidate];
+				if (candidate < 0 || candidate >= storedAccounts.length) return undefined;
+				return storedAccounts[candidate];
 			};
 
-			const storedActiveKey = replaceAll
-				? undefined
-				: resolveIdentityKey(getAccountAtStoredIndex(stored?.activeIndex));
-			const storedActiveKeyByFamily: Partial<Record<ModelFamily, string>> = {};
+			const storedActiveKeys = replaceAll
+				? []
+				: collectIdentityKeys(getStoredAccountAtIndex(stored?.activeIndex));
+			const storedActiveKeysByFamily: Partial<Record<ModelFamily, string[]>> = {};
 			if (!replaceAll) {
 				for (const family of MODEL_FAMILIES) {
-					const familyKey = resolveIdentityKey(
-						getAccountAtStoredIndex(stored?.activeIndexByFamily?.[family]),
+					const familyKeys = collectIdentityKeys(
+						getStoredAccountAtIndex(stored?.activeIndexByFamily?.[family]),
 					);
-					if (familyKey) {
-						storedActiveKeyByFamily[family] = familyKey;
+					if (familyKeys.length > 0) {
+						storedActiveKeysByFamily[family] = familyKeys;
 					}
 				}
 			}
@@ -759,12 +780,17 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 			if (accounts.length === 0) return;
 
-			const resolveIndexByIdentityKey = (identityKey: string | undefined): number | undefined => {
-				if (!identityKey) return undefined;
-				const index = accounts.findIndex(
-					(account) => resolveIdentityKey(account) === identityKey,
-				);
-				return index >= 0 ? index : undefined;
+			const resolveIndexByIdentityKeys = (identityKeys: string[] | undefined): number | undefined => {
+				if (!identityKeys || identityKeys.length === 0) return undefined;
+				for (const identityKey of identityKeys) {
+					const index = accounts.findIndex(
+						(account) => collectIdentityKeys(account).includes(identityKey),
+					);
+					if (index >= 0) {
+						return index;
+					}
+				}
+				return undefined;
 			};
 
 			const fallbackActiveIndex = replaceAll
@@ -774,7 +800,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					: 0;
 			const remappedActiveIndex = replaceAll
 				? undefined
-				: resolveIndexByIdentityKey(storedActiveKey);
+				: resolveIndexByIdentityKeys(storedActiveKeys);
 			const activeIndex = remappedActiveIndex ?? fallbackActiveIndex;
 
 			const clampedActiveIndex = Math.max(0, Math.min(Math.floor(activeIndex), accounts.length - 1));
@@ -783,7 +809,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
 				const remappedFamilyIndex = replaceAll
 					? undefined
-					: resolveIndexByIdentityKey(storedActiveKeyByFamily[family]);
+					: resolveIndexByIdentityKeys(storedActiveKeysByFamily[family]);
 				const rawFamilyIndex = replaceAll
 					? 0
 					: typeof remappedFamilyIndex === "number"

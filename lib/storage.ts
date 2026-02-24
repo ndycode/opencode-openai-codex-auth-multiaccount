@@ -497,39 +497,55 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(index, length - 1));
 }
 
-function toAccountKey(account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">): string {
-  const key = toAccountIdentityKey(account);
-  return key || "";
-}
-
-function toAccountIdentityKey(account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">): string | undefined {
+function toAccountIdentityKeys(
+  account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">,
+): string[] {
+  const keys: string[] = [];
   const organizationId = typeof account.organizationId === "string" ? account.organizationId.trim() : "";
   if (organizationId) {
-    return `organizationId:${organizationId}`;
+    keys.push(`organizationId:${organizationId}`);
   }
 
   const accountId = typeof account.accountId === "string" ? account.accountId.trim() : "";
   if (accountId) {
-    return `accountId:${accountId}`;
+    keys.push(`accountId:${accountId}`);
   }
 
   const refreshToken = typeof account.refreshToken === "string" ? account.refreshToken.trim() : "";
   if (refreshToken) {
-    return `refreshToken:${refreshToken}`;
+    keys.push(`refreshToken:${refreshToken}`);
   }
 
-  return undefined;
+  return keys;
 }
 
-function extractActiveKey(accounts: unknown[], activeIndex: number): string | undefined {
-  const candidate = accounts[activeIndex];
-  if (!isRecord(candidate)) return undefined;
+function toAccountIdentityKey(account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">): string | undefined {
+  return toAccountIdentityKeys(account)[0];
+}
 
-  return toAccountIdentityKey({
+function extractActiveKeys(accounts: unknown[], activeIndex: number): string[] {
+  const candidate = accounts[activeIndex];
+  if (!isRecord(candidate)) return [];
+
+  return toAccountIdentityKeys({
     organizationId: typeof candidate.organizationId === "string" ? candidate.organizationId : undefined,
     accountId: typeof candidate.accountId === "string" ? candidate.accountId : undefined,
     refreshToken: typeof candidate.refreshToken === "string" ? candidate.refreshToken : "",
   });
+}
+
+function findAccountIndexByIdentityKeys(
+  accounts: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">[],
+  identityKeys: string[],
+): number {
+  if (identityKeys.length === 0) return -1;
+  for (const identityKey of identityKeys) {
+    const idx = accounts.findIndex((account) => toAccountIdentityKeys(account).includes(identityKey));
+    if (idx >= 0) {
+      return idx;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -563,7 +579,7 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       : 0;
 
   const rawActiveIndex = clampIndex(activeIndexValue, rawAccounts.length);
-  const activeKey = extractActiveKey(rawAccounts, rawActiveIndex);
+  const activeKeys = extractActiveKeys(rawAccounts, rawActiveIndex);
 
   const fromVersion = data.version as AnyAccountStorage["version"];
   const baseStorage: AccountStorageV3 =
@@ -581,10 +597,8 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
   const activeIndex = (() => {
     if (deduplicatedAccounts.length === 0) return 0;
 
-    if (activeKey) {
-      const mappedIndex = deduplicatedAccounts.findIndex(
-        (account) => toAccountKey(account) === activeKey,
-      );
+    if (activeKeys.length > 0) {
+      const mappedIndex = findAccountIndexByIdentityKeys(deduplicatedAccounts, activeKeys);
       if (mappedIndex >= 0) return mappedIndex;
     }
 
@@ -604,13 +618,11 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
         : rawActiveIndex;
 
     const clampedRawIndex = clampIndex(rawIndex, rawAccounts.length);
-    const familyKey = extractActiveKey(rawAccounts, clampedRawIndex);
+    const familyKeys = extractActiveKeys(rawAccounts, clampedRawIndex);
 
     let mappedIndex = clampIndex(rawIndex, deduplicatedAccounts.length);
-    if (familyKey && deduplicatedAccounts.length > 0) {
-      const idx = deduplicatedAccounts.findIndex(
-        (account) => toAccountKey(account) === familyKey,
-      );
+    if (familyKeys.length > 0 && deduplicatedAccounts.length > 0) {
+      const idx = findAccountIndexByIdentityKeys(deduplicatedAccounts, familyKeys);
       if (idx >= 0) {
         mappedIndex = idx;
       }
@@ -1009,7 +1021,7 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
       const existingAccounts = existing?.accounts ?? [];
       const existingActiveIndex = existing?.activeIndex ?? 0;
       const clampedExistingActiveIndex = clampIndex(existingActiveIndex, existingAccounts.length);
-      const existingActiveKey = extractActiveKey(existingAccounts, clampedExistingActiveIndex);
+      const existingActiveKeys = extractActiveKeys(existingAccounts, clampedExistingActiveIndex);
       const existingActiveIndexByFamily = existing?.activeIndexByFamily ?? {};
 
       const merged = [...existingAccounts, ...normalized.accounts];
@@ -1027,8 +1039,8 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
 
       const mappedActiveIndex = (() => {
         if (deduplicatedAccounts.length === 0) return 0;
-        if (existingActiveKey) {
-          const idx = deduplicatedAccounts.findIndex((account) => toAccountKey(account) === existingActiveKey);
+        if (existingActiveKeys.length > 0) {
+          const idx = findAccountIndexByIdentityKeys(deduplicatedAccounts, existingActiveKeys);
           if (idx >= 0) return idx;
         }
         return clampIndex(clampedExistingActiveIndex, deduplicatedAccounts.length);
@@ -1041,9 +1053,9 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
           typeof rawFamilyIndex === "number" && Number.isFinite(rawFamilyIndex)
             ? rawFamilyIndex
             : clampedExistingActiveIndex;
-        const familyKey = extractActiveKey(existingAccounts, clampIndex(familyIndex, existingAccounts.length));
-        if (familyKey) {
-          const idx = deduplicatedAccounts.findIndex((account) => toAccountKey(account) === familyKey);
+        const familyKeys = extractActiveKeys(existingAccounts, clampIndex(familyIndex, existingAccounts.length));
+        if (familyKeys.length > 0) {
+          const idx = findAccountIndexByIdentityKeys(deduplicatedAccounts, familyKeys);
           activeIndexByFamily[family] = idx >= 0 ? idx : mappedActiveIndex;
           continue;
         }

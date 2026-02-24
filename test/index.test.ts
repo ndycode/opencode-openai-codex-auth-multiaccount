@@ -1556,7 +1556,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			(account) => account.organizationId === "organization-shared",
 		);
 		expect(organizationEntries).toHaveLength(1);
-		expect(organizationEntries[0]?.accountId).toBe("token-personal");
+		expect(organizationEntries[0]?.accountId).toBe("org-variant-b");
 		expect(mockStorage.accounts).toHaveLength(1);
 	});
 
@@ -1599,7 +1599,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
 		};
 
-		await autoMethod.authorize({ loginMode: "add", accountCount: "0" });
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
 		// Both variants share the same refresh token so they must collapse to a single entry.
 		expect(mockStorage.accounts).toHaveLength(1);
@@ -1711,6 +1711,75 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const orgScopedEntries = mockStorage.accounts.filter((account) => account.organizationId);
 		expect(orgScopedEntries).toHaveLength(2);
 		expect(orgScopedEntries.some((account) => account.accessToken === "access-ambiguous")).toBe(true);
+	});
+
+	it("remaps active indices to merged org account when fallback variant is pruned", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		mockStorage.accounts = [
+			{
+				accountId: "other-a",
+				email: "other-a@example.com",
+				refreshToken: "refresh-a",
+				addedAt: 1,
+				lastUsed: 1,
+			},
+			{
+				accountId: "org-shared",
+				organizationId: "org-keep",
+				email: "org@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: 5,
+				lastUsed: 5,
+			},
+			{
+				accountId: "token-shared",
+				email: "token@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: 10,
+				lastUsed: 10,
+			},
+			{
+				accountId: "other-b",
+				email: "other-b@example.com",
+				refreshToken: "refresh-b",
+				addedAt: 2,
+				lastUsed: 2,
+			},
+		];
+		mockStorage.activeIndex = 2;
+		mockStorage.activeIndexByFamily = { codex: 2, "gpt-5.1": 2 };
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-other-a",
+			refresh: "refresh-a",
+			expires: Date.now() + 300_000,
+			idToken: "id-other-a",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([]);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-other-a" ? "other-a" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(3);
+		expect(mockStorage.accounts.some((account) => account.accountId === "token-shared")).toBe(false);
+		expect(mockStorage.accounts[1]?.accountId).toBe("org-shared");
+		expect(mockStorage.activeIndex).toBe(1);
+		expect(mockStorage.activeIndexByFamily.codex).toBe(1);
+		expect(mockStorage.activeIndexByFamily["gpt-5.1"]).toBe(1);
 	});
 
 	it("persists non-team login and updates same record via accountId/refresh fallback", async () => {
