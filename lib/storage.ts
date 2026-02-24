@@ -93,6 +93,8 @@ type AnyAccountStorage = AccountStorageV1 | AccountStorageV3;
 type AccountLike = {
   organizationId?: string;
   accountId?: string;
+  accountIdSource?: AccountMetadataV3["accountIdSource"];
+  accountLabel?: string;
   email?: string;
   refreshToken: string;
   addedAt?: number;
@@ -297,6 +299,8 @@ function mergeAccountRecords<T extends AccountLike>(target: T, source: T): T {
     ...newest,
     organizationId: target.organizationId ?? source.organizationId,
     accountId: target.accountId ?? source.accountId,
+    accountIdSource: target.accountIdSource ?? source.accountIdSource,
+    accountLabel: target.accountLabel ?? source.accountLabel,
     email: target.email ?? source.email,
   };
 }
@@ -400,12 +404,11 @@ export function deduplicateAccounts<T extends { organizationId?: string; account
 /**
  * Applies storage deduplication semantics used by normalize/import paths.
  * 1) Always dedupe by identity key first (organizationId -> accountId -> refreshToken).
- * 2) Collapse refresh-token collisions, preferring org-scoped entries over plain token entries.
- * 3) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
+ * 2) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
  */
 function deduplicateAccountsForStorage<T extends AccountLike & { email?: string }>(accounts: T[]): T[] {
-  return deduplicateAccountsByEmail(
-    deduplicateAccountsByRefreshToken(deduplicateAccountsByKey(accounts)),
+  return deduplicateAccountsByRefreshToken(
+    deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts)),
   );
 }
 
@@ -685,7 +688,7 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
     await ensureGitignore(path);
 
     // Normalize before persisting so every write path enforces dedup semantics
-    // (organization/account identity plus org-preferred refresh-token collapse).
+    // (organizationId/accountId identity plus refresh-token collision collapse).
     const normalizedStorage = normalizeAccountStorage(storage) ?? storage;
     const content = JSON.stringify(normalizedStorage, null, 2);
     await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
@@ -975,8 +978,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 /**
  * Imports accounts from a JSON file, merging with existing accounts.
  * Deduplicates by identity key first (organizationId -> accountId -> refreshToken),
- * then collapses org/token refresh collisions, then applies legacy email dedupe
- * to entries without organizationId/accountId.
+ * then applies legacy email dedupe only to entries without organizationId/accountId.
  * @param filePath - Source file path
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */

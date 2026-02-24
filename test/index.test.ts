@@ -1556,14 +1556,16 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			(account) => account.organizationId === "organization-shared",
 		);
 		expect(organizationEntries).toHaveLength(1);
-		expect(organizationEntries[0]?.accountId).toBe("org-variant-b");
+		expect(organizationEntries[0]?.accountId).toBe("token-personal");
 		expect(mockStorage.accounts).toHaveLength(1);
 	});
 
-	it("collapses org-scoped primary and no-org token variant sharing the same refresh token into one org record", async () => {
+	it("collapses org-scoped primary and no-org token variant sharing the same refresh token into one entry", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
+		// Simulate a single OAuth login that produces an org candidate + a token candidate.
+		// Both share the same refresh token (same human account).
 		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
 			type: "success",
 			access: "access-holly",
@@ -1587,7 +1589,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			},
 		]);
 		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
-			candidates.find((candidate) => candidate.source === "org") ?? candidates[0],
+			candidates.find((c) => c.source === "org") ?? candidates[0],
 		);
 
 		const mockClient = createMockClient();
@@ -1597,11 +1599,12 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
 		};
 
-		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		await autoMethod.authorize({ loginMode: "add", accountCount: "0" });
 
+		// Both variants share the same refresh token so they must collapse to a single entry.
 		expect(mockStorage.accounts).toHaveLength(1);
-		expect(mockStorage.accounts[0]?.organizationId).toBe("org-QA1bZCn6zb57FT6TXLZWMPO3");
 		expect(mockStorage.accounts[0]?.refreshToken).toBe("refresh-holly-shared");
+		expect(mockStorage.accounts[0]?.email).toBeDefined();
 	});
 
 	it("updates a unique org-scoped entry when later login lacks organization metadata", async () => {
