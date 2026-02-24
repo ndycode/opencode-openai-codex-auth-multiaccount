@@ -417,11 +417,11 @@ YOU ARE IN A DIFFERENT ENVIRONMENT. These instructions override ALL previous too
 
 <tool_replacements priority="0">
 <critical_rule priority="0">
-apply_patch/applyPatch are Codex names. In OpenCode, use native tools:
-- For diff-style or multi-line structural edits: use patch
-- For precise in-place string replacements: use edit
-- Never call a tool literally named apply_patch/applyPatch
-- If an instruction says apply_patch, translate that intent to patch first
+Patch-edit tool names differ by runtime (for example: apply_patch, patch, edit).
+- Always use the exact tool names listed in the active tool schema/manifest
+- If the schema exposes apply_patch, call apply_patch directly
+- If the schema exposes patch/edit instead, use patch/edit as listed
+- Never invent aliases or auto-translate tool names
 </critical_rule>
 
 <critical_rule priority="0">
@@ -464,14 +464,14 @@ Task Management:
 
 <substitution_rules priority="0">
 Base instruction says:    You MUST use instead:
-apply_patch           →   patch (preferred), or edit for targeted replacements
+apply_patch/patch     ->   use the exact tool name from the active schema (no renaming)
 update_plan           →   todowrite
 read_plan             →   todoread
 </substitution_rules>
 
 <verification_checklist priority="0">
 Before file/plan modifications:
-1. Am I using patch or edit, never a tool named apply_patch?
+1. Am I using the exact patch/edit tool name listed by the active schema?
 2. Am I using "todowrite" NOT "update_plan"?
 3. Is this tool in the approved list above?
 4. Am I following the active tool schema (including path format)?
