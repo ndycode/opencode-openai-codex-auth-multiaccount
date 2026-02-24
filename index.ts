@@ -466,6 +466,23 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					(sourceLastUsed === targetLastUsed && sourceAddedAt > targetAddedAt);
 				const newer = sourceIsNewer ? source : target;
 				const older = sourceIsNewer ? target : source;
+				const mergedRateLimitResetTimes: Record<string, number> = {};
+				const rateLimitResetKeys = new Set([
+					...Object.keys(older.rateLimitResetTimes ?? {}),
+					...Object.keys(newer.rateLimitResetTimes ?? {}),
+				]);
+				for (const key of rateLimitResetKeys) {
+					const olderRaw = older.rateLimitResetTimes?.[key];
+					const newerRaw = newer.rateLimitResetTimes?.[key];
+					const olderValue =
+						typeof olderRaw === "number" && Number.isFinite(olderRaw) ? olderRaw : 0;
+					const newerValue =
+						typeof newerRaw === "number" && Number.isFinite(newerRaw) ? newerRaw : 0;
+					const resolved = Math.max(olderValue, newerValue);
+					if (resolved > 0) {
+						mergedRateLimitResetTimes[key] = resolved;
+					}
+				}
 				accounts[targetIndex] = {
 					...target,
 					accountId: target.accountId ?? source.accountId,
@@ -480,10 +497,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
 					lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
 					lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
-					rateLimitResetTimes: {
-						...(source.rateLimitResetTimes ?? {}),
-						...(target.rateLimitResetTimes ?? {}),
-					},
+					rateLimitResetTimes: mergedRateLimitResetTimes,
 					coolingDownUntil: target.coolingDownUntil ?? source.coolingDownUntil,
 					cooldownReason: target.cooldownReason ?? source.cooldownReason,
 				};

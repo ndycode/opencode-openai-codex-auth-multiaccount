@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -24,11 +25,11 @@ const TEST_ACCOUNTS = [
 ];
 
 const DUPLICATE_EMAIL_ACCOUNTS = [
-  { email: "jorrizarellano123456@gmail.com", refresh_token: "token_old", lastUsed: 1000 },
-  { email: "jorrizarellano123456@gmail.com", refresh_token: "token_new", lastUsed: 2000 },
-  { email: "keiyoon25@gmail.com", refresh_token: "token_old_2", lastUsed: 1500 },
-  { email: "keiyoon25@gmail.com", refresh_token: "token_new_2", lastUsed: 2500 },
-  { email: "unique@gmail.com", refresh_token: "token_unique", lastUsed: 1800 },
+  { email: "duplicate.a@example.com", refresh_token: "token_old", lastUsed: 1000 },
+  { email: "duplicate.a@example.com", refresh_token: "token_new", lastUsed: 2000 },
+  { email: "duplicate.b@example.com", refresh_token: "token_old_2", lastUsed: 1500 },
+  { email: "duplicate.b@example.com", refresh_token: "token_new_2", lastUsed: 2500 },
+  { email: "unique@example.com", refresh_token: "token_unique", lastUsed: 1800 },
 ];
 
 function createStorageFromTestAccounts(accounts: typeof TEST_ACCOUNTS): AccountStorageV3 {
@@ -63,7 +64,15 @@ describe("Multi-Account Rotation Integration", () => {
     setStoragePathDirect(TEST_STORAGE_PATH);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    try {
+      await fs.unlink(TEST_STORAGE_PATH);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        throw error;
+      }
+    }
     setStoragePathDirect(null);
   });
 
@@ -205,15 +214,15 @@ describe("Multi-Account Rotation Integration", () => {
 
       expect(result.length).toBe(3);
 
-      const jorriAccount = result.find(a => a.email === "jorrizarellano123456@gmail.com");
+      const jorriAccount = result.find(a => a.email === "duplicate.a@example.com");
       expect(jorriAccount?.refresh_token).toBe("token_new");
       expect(jorriAccount?.lastUsed).toBe(2000);
 
-      const keiyoonAccount = result.find(a => a.email === "keiyoon25@gmail.com");
+      const keiyoonAccount = result.find(a => a.email === "duplicate.b@example.com");
       expect(keiyoonAccount?.refresh_token).toBe("token_new_2");
       expect(keiyoonAccount?.lastUsed).toBe(2500);
 
-      const uniqueAccount = result.find(a => a.email === "unique@gmail.com");
+      const uniqueAccount = result.find(a => a.email === "unique@example.com");
       expect(uniqueAccount?.refresh_token).toBe("token_unique");
     });
 
