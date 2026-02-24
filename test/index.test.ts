@@ -1557,7 +1557,51 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		);
 		expect(organizationEntries).toHaveLength(1);
 		expect(organizationEntries[0]?.accountId).toBe("org-variant-b");
-		expect(mockStorage.accounts).toHaveLength(2);
+		expect(mockStorage.accounts).toHaveLength(1);
+	});
+
+	it("collapses org-scoped primary and no-org token variant sharing the same refresh token into one org record", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-holly",
+			refresh: "refresh-holly-shared",
+			expires: Date.now() + 300_000,
+			idToken: "id-holly",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([
+			{
+				accountId: "org-QA1bZCn6zb57FT6TXLZWMPO3",
+				organizationId: "org-QA1bZCn6zb57FT6TXLZWMPO3",
+				source: "org",
+				label: "Personal (role:owner) [id:ZWMPO3]",
+				isPersonal: true,
+			},
+			{
+				accountId: "e4692e53-2f30-42a0-b8df-3a685d3c2a4a",
+				source: "token",
+				label: "Token account [id:3c2a4a]",
+				isDefault: true,
+			},
+		]);
+		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementationOnce((candidates) =>
+			candidates.find((candidate) => candidate.source === "org") ?? candidates[0],
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts[0]?.organizationId).toBe("org-QA1bZCn6zb57FT6TXLZWMPO3");
+		expect(mockStorage.accounts[0]?.refreshToken).toBe("refresh-holly-shared");
 	});
 
 	it("updates a unique org-scoped entry when later login lacks organization metadata", async () => {
@@ -1660,13 +1704,10 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		expect(mockStorage.accounts).toHaveLength(3);
+		expect(mockStorage.accounts).toHaveLength(2);
 		const orgScopedEntries = mockStorage.accounts.filter((account) => account.organizationId);
 		expect(orgScopedEntries).toHaveLength(2);
-		const fallbackEntries = mockStorage.accounts.filter((account) => !account.organizationId);
-		expect(fallbackEntries).toHaveLength(1);
-		expect(fallbackEntries[0]?.accountId).toBe("shared-account");
-		expect(fallbackEntries[0]?.accessToken).toBe("access-ambiguous");
+		expect(orgScopedEntries.some((account) => account.accessToken === "access-ambiguous")).toBe(true);
 	});
 
 	it("persists non-team login and updates same record via accountId/refresh fallback", async () => {

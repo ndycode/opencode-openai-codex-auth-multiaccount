@@ -276,6 +276,115 @@ function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
   return result;
 }
 
+function pickNewestAccountIndex<T extends AccountLike>(
+  accounts: T[],
+  existingIndex: number,
+  candidateIndex: number,
+): number {
+  const existing = accounts[existingIndex];
+  const candidate = accounts[candidateIndex];
+  if (!existing) return candidateIndex;
+  if (!candidate) return existingIndex;
+  const newest = selectNewestAccount(existing, candidate);
+  return newest === candidate ? candidateIndex : existingIndex;
+}
+
+function mergeAccountRecords<T extends AccountLike>(target: T, source: T): T {
+  const newest = selectNewestAccount(target, source);
+  const older = newest === target ? source : target;
+  return {
+    ...older,
+    ...newest,
+    organizationId: target.organizationId ?? source.organizationId,
+    accountId: target.accountId ?? source.accountId,
+    email: target.email ?? source.email,
+  };
+}
+
+function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[]): T[] {
+  const working = [...accounts];
+  const indicesToRemove = new Set<number>();
+  const refreshMap = new Map<string, { byOrg: Map<string, number>; fallbackIndex?: number }>();
+
+  for (let i = 0; i < working.length; i += 1) {
+    const account = working[i];
+    if (!account) continue;
+
+    const refreshToken = account.refreshToken?.trim();
+    if (!refreshToken) continue;
+    const orgKey = account.organizationId?.trim() ?? "";
+
+    let entry = refreshMap.get(refreshToken);
+    if (!entry) {
+      entry = { byOrg: new Map<string, number>(), fallbackIndex: undefined };
+      refreshMap.set(refreshToken, entry);
+    }
+
+    if (orgKey) {
+      const existingIndex = entry.byOrg.get(orgKey);
+      if (existingIndex !== undefined) {
+        const newestIndex = pickNewestAccountIndex(working, existingIndex, i);
+        const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
+        const target = working[newestIndex];
+        const source = working[obsoleteIndex];
+        if (target && source) {
+          working[newestIndex] = mergeAccountRecords(target, source);
+        }
+        indicesToRemove.add(obsoleteIndex);
+        entry.byOrg.set(orgKey, newestIndex);
+        continue;
+      }
+      entry.byOrg.set(orgKey, i);
+      continue;
+    }
+
+    const existingFallback = entry.fallbackIndex;
+    if (typeof existingFallback === "number") {
+      const newestIndex = pickNewestAccountIndex(working, existingFallback, i);
+      const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
+      const target = working[newestIndex];
+      const source = working[obsoleteIndex];
+      if (target && source) {
+        working[newestIndex] = mergeAccountRecords(target, source);
+      }
+      indicesToRemove.add(obsoleteIndex);
+      entry.fallbackIndex = newestIndex;
+      continue;
+    }
+    entry.fallbackIndex = i;
+  }
+
+  for (const entry of refreshMap.values()) {
+    const fallbackIndex = entry.fallbackIndex;
+    if (typeof fallbackIndex !== "number") continue;
+    const orgIndices = Array.from(entry.byOrg.values());
+    if (orgIndices.length === 0) continue;
+
+    const [firstOrgIndex, ...otherOrgIndices] = orgIndices;
+    if (typeof firstOrgIndex !== "number") continue;
+
+    let preferredOrgIndex = firstOrgIndex;
+    for (const orgIndex of otherOrgIndices) {
+      preferredOrgIndex = pickNewestAccountIndex(working, preferredOrgIndex, orgIndex);
+    }
+
+    const preferredOrg = working[preferredOrgIndex];
+    const fallback = working[fallbackIndex];
+    if (preferredOrg && fallback) {
+      working[preferredOrgIndex] = mergeAccountRecords(preferredOrg, fallback);
+    }
+    indicesToRemove.add(fallbackIndex);
+  }
+
+  const result: T[] = [];
+  for (let i = 0; i < working.length; i += 1) {
+    if (indicesToRemove.has(i)) continue;
+    const account = working[i];
+    if (account) result.push(account);
+  }
+  return result;
+}
+
 /**
  * Removes duplicate accounts, keeping the most recently used entry for each unique key.
  * Deduplication identity hierarchy: organizationId -> accountId -> refreshToken.
@@ -291,10 +400,13 @@ export function deduplicateAccounts<T extends { organizationId?: string; account
 /**
  * Applies storage deduplication semantics used by normalize/import paths.
  * 1) Always dedupe by identity key first (organizationId -> accountId -> refreshToken).
- * 2) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
+ * 2) Collapse refresh-token collisions, preferring org-scoped entries over plain token entries.
+ * 3) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
  */
 function deduplicateAccountsForStorage<T extends AccountLike & { email?: string }>(accounts: T[]): T[] {
-  return deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts));
+  return deduplicateAccountsByEmail(
+    deduplicateAccountsByRefreshToken(deduplicateAccountsByKey(accounts)),
+  );
 }
 
 /**
@@ -572,7 +684,10 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
     await fs.mkdir(dirname(path), { recursive: true });
     await ensureGitignore(path);
 
-    const content = JSON.stringify(storage, null, 2);
+    // Normalize before persisting so every write path enforces dedup semantics
+    // (organization/account identity plus org-preferred refresh-token collapse).
+    const normalizedStorage = normalizeAccountStorage(storage) ?? storage;
+    const content = JSON.stringify(normalizedStorage, null, 2);
     await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
 
     const stats = await fs.stat(tempPath);
@@ -860,7 +975,8 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 /**
  * Imports accounts from a JSON file, merging with existing accounts.
  * Deduplicates by identity key first (organizationId -> accountId -> refreshToken),
- * then applies legacy email dedupe only to entries without organizationId/accountId.
+ * then collapses org/token refresh collisions, then applies legacy email dedupe
+ * to entries without organizationId/accountId.
  * @param filePath - Source file path
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */

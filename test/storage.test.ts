@@ -161,7 +161,7 @@ describe("storage", () => {
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
     });
 
-    it("preserves same-email same-token accounts when accountId differs during import", async () => {
+    it("collapses same-email same-token accounts to newest token variant during import", async () => {
       await saveAccounts({
         version: 3,
         activeIndex: 0,
@@ -196,10 +196,8 @@ describe("storage", () => {
       await importAccounts(exportPath);
 
       const loaded = await loadAccounts();
-      expect(loaded?.accounts).toHaveLength(2);
-      expect(new Set(loaded?.accounts.map((a) => a.accountId))).toEqual(
-        new Set(["workspace-a", "workspace-b"]),
-      );
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.accountId).toBe("workspace-b");
     });
 
     it("collapses same-organization records to newest during import and remaps active keys", async () => {
@@ -838,7 +836,7 @@ describe("storage", () => {
       expect(result?.accounts).toHaveLength(1);
     });
 
-    it("keeps same-email same-token records distinct when accountId differs", () => {
+    it("collapses same-email same-token records to newest token variant when org is absent", () => {
       const data = {
         version: 3,
         activeIndex: 0,
@@ -861,10 +859,37 @@ describe("storage", () => {
       };
 
       const result = normalizeAccountStorage(data);
-      expect(result?.accounts).toHaveLength(2);
-      expect(new Set(result?.accounts.map((a) => a.accountId))).toEqual(
-        new Set(["workspace-a", "workspace-b"]),
-      );
+      expect(result?.accounts).toHaveLength(1);
+      expect(result?.accounts[0]?.accountId).toBe("workspace-b");
+    });
+
+    it("collapses token fallback when an org-scoped record shares the same refresh token", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            organizationId: "org-shared",
+            accountId: "workspace-org",
+            refreshToken: "same-refresh",
+            email: "user@example.com",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            accountId: "token-only-account",
+            refreshToken: "same-refresh",
+            email: "user@example.com",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(1);
+      expect(result?.accounts[0]?.organizationId).toBe("org-shared");
+      expect(result?.accounts[0]?.accountId).toBe("workspace-org");
     });
 
     it("uses organizationId as primary identity and keeps differing organizations distinct", () => {
@@ -1441,6 +1466,41 @@ describe("storage", () => {
       vi.useRealTimers();
       setStoragePathDirect(null);
       await fs.rm(testWorkDir, { recursive: true, force: true });
+    });
+
+    it("normalizes duplicate org/token variants sharing refresh token before writing", async () => {
+      const now = Date.now();
+      const storage = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            accountId: "org-i1iYFgVqyAkR8CLrUKvNczIa",
+            organizationId: "org-i1iYFgVqyAkR8CLrUKvNczIa",
+            accountIdSource: "org" as const,
+            email: "kiraacorporate@gmail.com",
+            refreshToken: "shared-refresh-kira",
+            addedAt: now,
+            lastUsed: now,
+          },
+          {
+            accountId: "7ff374aa-1b2e-4e69-89f3-0cec62582efb",
+            accountIdSource: "token" as const,
+            email: "kiraacorporate@gmail.com",
+            refreshToken: "shared-refresh-kira",
+            addedAt: now + 1,
+            lastUsed: now + 1,
+          },
+        ],
+      };
+
+      await saveAccounts(storage);
+      const loaded = await loadAccounts();
+
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.organizationId).toBe("org-i1iYFgVqyAkR8CLrUKvNczIa");
+      expect(loaded?.accounts[0]?.accountId).toBe("org-i1iYFgVqyAkR8CLrUKvNczIa");
+      expect(loaded?.accounts[0]?.refreshToken).toBe("shared-refresh-kira");
     });
 
     it("retries on EPERM and succeeds on second attempt", async () => {

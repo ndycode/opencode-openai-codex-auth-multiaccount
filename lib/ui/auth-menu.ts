@@ -100,13 +100,30 @@ function statusBadge(status: AccountStatus | undefined): string {
 	}
 }
 
+function formatAccountIdSuffix(accountId: string | undefined): string | undefined {
+	const trimmed = accountId?.trim();
+	if (!trimmed) return undefined;
+	return trimmed.length > 14
+		? `${trimmed.slice(0, 8)}...${trimmed.slice(-6)}`
+		: trimmed;
+}
+
 function accountTitle(account: AccountInfo): string {
-	const base =
-		account.email?.trim() ||
-		account.accountLabel?.trim() ||
-		account.accountId?.trim() ||
-		`Account ${account.index + 1}`;
-	return `${account.index + 1}. ${base}`;
+	const email = account.email?.trim();
+	const label = account.accountLabel?.trim();
+	const accountIdSuffix = formatAccountIdSuffix(account.accountId);
+
+	const details: string[] = [];
+	if (email) details.push(email);
+	if (label) details.push(`workspace:${label}`);
+	if (accountIdSuffix && (!label || !label.includes(accountIdSuffix))) {
+		details.push(`id:${accountIdSuffix}`);
+	}
+
+	if (details.length === 0) {
+		return `${account.index + 1}. Account`;
+	}
+	return `${account.index + 1}. ${details.join(" | ")}`;
 }
 
 export async function showAuthMenu(
