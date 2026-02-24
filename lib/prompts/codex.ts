@@ -440,7 +440,7 @@ File Operations:
   • edit   - Modify existing files with string replacement
   • patch  - Apply diff patches
   • apply_patch - Apply diff patches (alternate runtime name; use whichever the schema exposes)
-  • read   - Read file contents
+  • read   - Read file contents (strip the leading 'line#|' prefix before editing)
 
 Search/Discovery:
   • grep   - Search file contents

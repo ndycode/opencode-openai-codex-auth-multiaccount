@@ -70,6 +70,7 @@ describe("Codex Prompts Module", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("edit");
 			expect(TOOL_REMAP_MESSAGE).toContain("apply_patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("read");
+			expect(TOOL_REMAP_MESSAGE).toContain("line#|");
 			expect(TOOL_REMAP_MESSAGE).toContain("bash");
 			expect(TOOL_REMAP_MESSAGE).toContain("grep");
 		});

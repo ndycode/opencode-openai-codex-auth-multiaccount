@@ -38,6 +38,7 @@ Treat the runtime tool manifest as the only authoritative tool list.
 
 - Follow per-tool path conventions from the active schema; do not assume absolute/relative behavior.
 - Prefer specialized tools over shell when an equivalent listed tool exists.
+- When using the read tool, its output includes prefixes like '1#YX|'; remove those markers before editing or patching files.
 - Use non-destructive checks before destructive commands.
 
 ## Verification Checklist
