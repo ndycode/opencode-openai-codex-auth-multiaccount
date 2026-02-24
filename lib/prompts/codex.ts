@@ -434,6 +434,7 @@ Patch-edit tool names differ by runtime (for example: apply_patch, patch, edit).
 </tool_replacements>
 
 <available_tools priority="0">
+Note: This list is illustrative. Always defer to the active tool schema/manifest.
 File Operations:
   • write  - Create new files
   • edit   - Modify existing files with string replacement
