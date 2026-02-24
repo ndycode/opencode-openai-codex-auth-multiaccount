@@ -93,6 +93,8 @@ type AnyAccountStorage = AccountStorageV1 | AccountStorageV3;
 type AccountLike = {
   organizationId?: string;
   accountId?: string;
+  accountIdSource?: AccountMetadataV3["accountIdSource"];
+  accountLabel?: string;
   email?: string;
   refreshToken: string;
   addedAt?: number;
@@ -276,6 +278,117 @@ function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
   return result;
 }
 
+function pickNewestAccountIndex<T extends AccountLike>(
+  accounts: T[],
+  existingIndex: number,
+  candidateIndex: number,
+): number {
+  const existing = accounts[existingIndex];
+  const candidate = accounts[candidateIndex];
+  if (!existing) return candidateIndex;
+  if (!candidate) return existingIndex;
+  const newest = selectNewestAccount(existing, candidate);
+  return newest === candidate ? candidateIndex : existingIndex;
+}
+
+function mergeAccountRecords<T extends AccountLike>(target: T, source: T): T {
+  const newest = selectNewestAccount(target, source);
+  const older = newest === target ? source : target;
+  return {
+    ...older,
+    ...newest,
+    organizationId: target.organizationId ?? source.organizationId,
+    accountId: target.accountId ?? source.accountId,
+    accountIdSource: target.accountIdSource ?? source.accountIdSource,
+    accountLabel: target.accountLabel ?? source.accountLabel,
+    email: target.email ?? source.email,
+  };
+}
+
+function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[]): T[] {
+  const working = [...accounts];
+  const indicesToRemove = new Set<number>();
+  const refreshMap = new Map<string, { byOrg: Map<string, number>; fallbackIndex?: number }>();
+
+  for (let i = 0; i < working.length; i += 1) {
+    const account = working[i];
+    if (!account) continue;
+
+    const refreshToken = account.refreshToken?.trim();
+    if (!refreshToken) continue;
+    const orgKey = account.organizationId?.trim() ?? "";
+
+    let entry = refreshMap.get(refreshToken);
+    if (!entry) {
+      entry = { byOrg: new Map<string, number>(), fallbackIndex: undefined };
+      refreshMap.set(refreshToken, entry);
+    }
+
+    if (orgKey) {
+      const existingIndex = entry.byOrg.get(orgKey);
+      if (existingIndex !== undefined) {
+        const newestIndex = pickNewestAccountIndex(working, existingIndex, i);
+        const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
+        const target = working[newestIndex];
+        const source = working[obsoleteIndex];
+        if (target && source) {
+          working[newestIndex] = mergeAccountRecords(target, source);
+        }
+        indicesToRemove.add(obsoleteIndex);
+        entry.byOrg.set(orgKey, newestIndex);
+        continue;
+      }
+      entry.byOrg.set(orgKey, i);
+      continue;
+    }
+
+    const existingFallback = entry.fallbackIndex;
+    if (typeof existingFallback === "number") {
+      const newestIndex = pickNewestAccountIndex(working, existingFallback, i);
+      const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
+      const target = working[newestIndex];
+      const source = working[obsoleteIndex];
+      if (target && source) {
+        working[newestIndex] = mergeAccountRecords(target, source);
+      }
+      indicesToRemove.add(obsoleteIndex);
+      entry.fallbackIndex = newestIndex;
+      continue;
+    }
+    entry.fallbackIndex = i;
+  }
+
+  for (const entry of refreshMap.values()) {
+    const fallbackIndex = entry.fallbackIndex;
+    if (typeof fallbackIndex !== "number") continue;
+    const orgIndices = Array.from(entry.byOrg.values());
+    if (orgIndices.length === 0) continue;
+
+    const [firstOrgIndex, ...otherOrgIndices] = orgIndices;
+    if (typeof firstOrgIndex !== "number") continue;
+
+    let preferredOrgIndex = firstOrgIndex;
+    for (const orgIndex of otherOrgIndices) {
+      preferredOrgIndex = pickNewestAccountIndex(working, preferredOrgIndex, orgIndex);
+    }
+
+    const preferredOrg = working[preferredOrgIndex];
+    const fallback = working[fallbackIndex];
+    if (preferredOrg && fallback) {
+      working[preferredOrgIndex] = mergeAccountRecords(preferredOrg, fallback);
+    }
+    indicesToRemove.add(fallbackIndex);
+  }
+
+  const result: T[] = [];
+  for (let i = 0; i < working.length; i += 1) {
+    if (indicesToRemove.has(i)) continue;
+    const account = working[i];
+    if (account) result.push(account);
+  }
+  return result;
+}
+
 /**
  * Removes duplicate accounts, keeping the most recently used entry for each unique key.
  * Deduplication identity hierarchy: organizationId -> accountId -> refreshToken.
@@ -294,7 +407,9 @@ export function deduplicateAccounts<T extends { organizationId?: string; account
  * 2) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
  */
 function deduplicateAccountsForStorage<T extends AccountLike & { email?: string }>(accounts: T[]): T[] {
-  return deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts));
+  return deduplicateAccountsByRefreshToken(
+    deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts)),
+  );
 }
 
 /**
@@ -382,39 +497,55 @@ function clampIndex(index: number, length: number): number {
   return Math.max(0, Math.min(index, length - 1));
 }
 
-function toAccountKey(account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">): string {
-  const key = toAccountIdentityKey(account);
-  return key || "";
-}
-
-function toAccountIdentityKey(account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">): string | undefined {
+function toAccountIdentityKeys(
+  account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">,
+): string[] {
+  const keys: string[] = [];
   const organizationId = typeof account.organizationId === "string" ? account.organizationId.trim() : "";
   if (organizationId) {
-    return `organizationId:${organizationId}`;
+    keys.push(`organizationId:${organizationId}`);
   }
 
   const accountId = typeof account.accountId === "string" ? account.accountId.trim() : "";
   if (accountId) {
-    return `accountId:${accountId}`;
+    keys.push(`accountId:${accountId}`);
   }
 
   const refreshToken = typeof account.refreshToken === "string" ? account.refreshToken.trim() : "";
   if (refreshToken) {
-    return `refreshToken:${refreshToken}`;
+    keys.push(`refreshToken:${refreshToken}`);
   }
 
-  return undefined;
+  return keys;
 }
 
-function extractActiveKey(accounts: unknown[], activeIndex: number): string | undefined {
-  const candidate = accounts[activeIndex];
-  if (!isRecord(candidate)) return undefined;
+function toAccountIdentityKey(account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">): string | undefined {
+  return toAccountIdentityKeys(account)[0];
+}
 
-  return toAccountIdentityKey({
+function extractActiveKeys(accounts: unknown[], activeIndex: number): string[] {
+  const candidate = accounts[activeIndex];
+  if (!isRecord(candidate)) return [];
+
+  return toAccountIdentityKeys({
     organizationId: typeof candidate.organizationId === "string" ? candidate.organizationId : undefined,
     accountId: typeof candidate.accountId === "string" ? candidate.accountId : undefined,
     refreshToken: typeof candidate.refreshToken === "string" ? candidate.refreshToken : "",
   });
+}
+
+function findAccountIndexByIdentityKeys(
+  accounts: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">[],
+  identityKeys: string[],
+): number {
+  if (identityKeys.length === 0) return -1;
+  for (const identityKey of identityKeys) {
+    const idx = accounts.findIndex((account) => toAccountIdentityKeys(account).includes(identityKey));
+    if (idx >= 0) {
+      return idx;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -448,7 +579,7 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       : 0;
 
   const rawActiveIndex = clampIndex(activeIndexValue, rawAccounts.length);
-  const activeKey = extractActiveKey(rawAccounts, rawActiveIndex);
+  const activeKeys = extractActiveKeys(rawAccounts, rawActiveIndex);
 
   const fromVersion = data.version as AnyAccountStorage["version"];
   const baseStorage: AccountStorageV3 =
@@ -466,10 +597,8 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
   const activeIndex = (() => {
     if (deduplicatedAccounts.length === 0) return 0;
 
-    if (activeKey) {
-      const mappedIndex = deduplicatedAccounts.findIndex(
-        (account) => toAccountKey(account) === activeKey,
-      );
+    if (activeKeys.length > 0) {
+      const mappedIndex = findAccountIndexByIdentityKeys(deduplicatedAccounts, activeKeys);
       if (mappedIndex >= 0) return mappedIndex;
     }
 
@@ -489,13 +618,11 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
         : rawActiveIndex;
 
     const clampedRawIndex = clampIndex(rawIndex, rawAccounts.length);
-    const familyKey = extractActiveKey(rawAccounts, clampedRawIndex);
+    const familyKeys = extractActiveKeys(rawAccounts, clampedRawIndex);
 
     let mappedIndex = clampIndex(rawIndex, deduplicatedAccounts.length);
-    if (familyKey && deduplicatedAccounts.length > 0) {
-      const idx = deduplicatedAccounts.findIndex(
-        (account) => toAccountKey(account) === familyKey,
-      );
+    if (familyKeys.length > 0 && deduplicatedAccounts.length > 0) {
+      const idx = findAccountIndexByIdentityKeys(deduplicatedAccounts, familyKeys);
       if (idx >= 0) {
         mappedIndex = idx;
       }
@@ -572,7 +699,10 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
     await fs.mkdir(dirname(path), { recursive: true });
     await ensureGitignore(path);
 
-    const content = JSON.stringify(storage, null, 2);
+    // Normalize before persisting so every write path enforces dedup semantics
+    // (organizationId/accountId identity plus refresh-token collision collapse).
+    const normalizedStorage = normalizeAccountStorage(storage) ?? storage;
+    const content = JSON.stringify(normalizedStorage, null, 2);
     await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
 
     const stats = await fs.stat(tempPath);
@@ -891,7 +1021,7 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
       const existingAccounts = existing?.accounts ?? [];
       const existingActiveIndex = existing?.activeIndex ?? 0;
       const clampedExistingActiveIndex = clampIndex(existingActiveIndex, existingAccounts.length);
-      const existingActiveKey = extractActiveKey(existingAccounts, clampedExistingActiveIndex);
+      const existingActiveKeys = extractActiveKeys(existingAccounts, clampedExistingActiveIndex);
       const existingActiveIndexByFamily = existing?.activeIndexByFamily ?? {};
 
       const merged = [...existingAccounts, ...normalized.accounts];
@@ -909,8 +1039,8 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
 
       const mappedActiveIndex = (() => {
         if (deduplicatedAccounts.length === 0) return 0;
-        if (existingActiveKey) {
-          const idx = deduplicatedAccounts.findIndex((account) => toAccountKey(account) === existingActiveKey);
+        if (existingActiveKeys.length > 0) {
+          const idx = findAccountIndexByIdentityKeys(deduplicatedAccounts, existingActiveKeys);
           if (idx >= 0) return idx;
         }
         return clampIndex(clampedExistingActiveIndex, deduplicatedAccounts.length);
@@ -923,9 +1053,9 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
           typeof rawFamilyIndex === "number" && Number.isFinite(rawFamilyIndex)
             ? rawFamilyIndex
             : clampedExistingActiveIndex;
-        const familyKey = extractActiveKey(existingAccounts, clampIndex(familyIndex, existingAccounts.length));
-        if (familyKey) {
-          const idx = deduplicatedAccounts.findIndex((account) => toAccountKey(account) === familyKey);
+        const familyKeys = extractActiveKeys(existingAccounts, clampIndex(familyIndex, existingAccounts.length));
+        if (familyKeys.length > 0) {
+          const idx = findAccountIndexByIdentityKeys(deduplicatedAccounts, familyKeys);
           activeIndexByFamily[family] = idx >= 0 ? idx : mappedActiveIndex;
           continue;
         }

@@ -418,7 +418,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				await withAccountStorageTransaction(async (loadedStorage, persist) => {
 					const now = Date.now();
 					const stored = replaceAll ? null : loadedStorage;
-					const accounts = stored?.accounts ? [...stored.accounts] : [];
+			let accounts = stored?.accounts ? [...stored.accounts] : [];
 
 					const pushIndex = (
 						map: Map<string, number[]>,
@@ -433,11 +433,106 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						map.set(key, [index]);
 					};
 
-					const asUniqueIndex = (indices: number[] | undefined): number | undefined => {
-						if (!indices || indices.length !== 1) return undefined;
-						const [onlyIndex] = indices;
-						return typeof onlyIndex === "number" ? onlyIndex : undefined;
-					};
+			const asUniqueIndex = (indices: number[] | undefined): number | undefined => {
+				if (!indices || indices.length !== 1) return undefined;
+				const [onlyIndex] = indices;
+				return typeof onlyIndex === "number" ? onlyIndex : undefined;
+			};
+
+			const pickNewestAccountIndex = (existingIndex: number, candidateIndex: number): number => {
+				const existing = accounts[existingIndex];
+				const candidate = accounts[candidateIndex];
+				if (!existing) return candidateIndex;
+				if (!candidate) return existingIndex;
+				const existingLastUsed = existing.lastUsed ?? 0;
+				const candidateLastUsed = candidate.lastUsed ?? 0;
+				if (candidateLastUsed > existingLastUsed) return candidateIndex;
+				if (candidateLastUsed < existingLastUsed) return existingIndex;
+				const existingAddedAt = existing.addedAt ?? 0;
+				const candidateAddedAt = candidate.addedAt ?? 0;
+				return candidateAddedAt >= existingAddedAt ? candidateIndex : existingIndex;
+			};
+
+			const mergeAccountRecords = (targetIndex: number, sourceIndex: number): void => {
+				const target = accounts[targetIndex];
+				const source = accounts[sourceIndex];
+				if (!target || !source) return;
+				const targetLastUsed = target.lastUsed ?? 0;
+				const sourceLastUsed = source.lastUsed ?? 0;
+				const targetAddedAt = target.addedAt ?? 0;
+				const sourceAddedAt = source.addedAt ?? 0;
+				const sourceIsNewer =
+					sourceLastUsed > targetLastUsed ||
+					(sourceLastUsed === targetLastUsed && sourceAddedAt > targetAddedAt);
+				const newer = sourceIsNewer ? source : target;
+				const older = sourceIsNewer ? target : source;
+				const mergedRateLimitResetTimes: Record<string, number> = {};
+				const rateLimitResetKeys = new Set([
+					...Object.keys(older.rateLimitResetTimes ?? {}),
+					...Object.keys(newer.rateLimitResetTimes ?? {}),
+				]);
+				for (const key of rateLimitResetKeys) {
+					const olderRaw = older.rateLimitResetTimes?.[key];
+					const newerRaw = newer.rateLimitResetTimes?.[key];
+					const olderValue =
+						typeof olderRaw === "number" && Number.isFinite(olderRaw) ? olderRaw : 0;
+					const newerValue =
+						typeof newerRaw === "number" && Number.isFinite(newerRaw) ? newerRaw : 0;
+					const resolved = Math.max(olderValue, newerValue);
+					if (resolved > 0) {
+						mergedRateLimitResetTimes[key] = resolved;
+					}
+				}
+				const mergedEnabled =
+					target.enabled === false || source.enabled === false
+						? false
+						: target.enabled ?? source.enabled;
+				const targetCoolingDownUntil =
+					typeof target.coolingDownUntil === "number" && Number.isFinite(target.coolingDownUntil)
+						? target.coolingDownUntil
+						: 0;
+				const sourceCoolingDownUntil =
+					typeof source.coolingDownUntil === "number" && Number.isFinite(source.coolingDownUntil)
+						? source.coolingDownUntil
+						: 0;
+				const mergedCoolingDownUntilValue = Math.max(
+					targetCoolingDownUntil,
+					sourceCoolingDownUntil,
+				);
+				const mergedCoolingDownUntil =
+					mergedCoolingDownUntilValue > 0 ? mergedCoolingDownUntilValue : undefined;
+				const mergedCooldownReason = (() => {
+					if (mergedCoolingDownUntilValue <= 0) {
+						return target.cooldownReason ?? source.cooldownReason;
+					}
+					if (sourceCoolingDownUntil > targetCoolingDownUntil) {
+						return source.cooldownReason ?? target.cooldownReason;
+					}
+					if (targetCoolingDownUntil > sourceCoolingDownUntil) {
+						return target.cooldownReason ?? source.cooldownReason;
+					}
+					return source.cooldownReason ?? target.cooldownReason;
+				})();
+				accounts[targetIndex] = {
+					...target,
+					accountId: target.accountId ?? source.accountId,
+					organizationId: target.organizationId ?? source.organizationId,
+					accountIdSource: target.accountIdSource ?? source.accountIdSource,
+					accountLabel: target.accountLabel ?? source.accountLabel,
+					email: target.email ?? source.email,
+					refreshToken: newer.refreshToken || older.refreshToken,
+					accessToken: newer.accessToken || older.accessToken,
+					expiresAt: newer.expiresAt ?? older.expiresAt,
+					enabled: mergedEnabled,
+					addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
+					lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
+					lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
+					rateLimitResetTimes: mergedRateLimitResetTimes,
+					coolingDownUntil: mergedCoolingDownUntil,
+					cooldownReason: mergedCooldownReason,
+				};
+			};
+
 
 					type IdentityIndexes = {
 						byOrganizationId: Map<string, number>;
@@ -446,6 +541,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						byEmailNoOrg: Map<string, number>;
 						byAccountIdOrgScoped: Map<string, number[]>;
 						byRefreshTokenOrgScoped: Map<string, number[]>;
+						byRefreshTokenGlobal: Map<string, number>;
 					};
 
 					const resolveUniqueOrgScopedMatch = (
@@ -472,6 +568,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const byEmailNoOrg = new Map<string, number>();
 						const byAccountIdOrgScoped = new Map<string, number[]>();
 						const byRefreshTokenOrgScoped = new Map<string, number[]>();
+						const byRefreshTokenGlobal = new Map<string, number>();
 
 						for (let i = 0; i < accounts.length; i += 1) {
 							const account = accounts[i];
@@ -481,6 +578,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							const accountId = account.accountId?.trim();
 							const refreshToken = account.refreshToken?.trim();
 							const email = account.email?.trim();
+
+							// Global refresh token index: first entry wins (keeps earliest/primary).
+							if (refreshToken && !byRefreshTokenGlobal.has(refreshToken)) {
+								byRefreshTokenGlobal.set(refreshToken, i);
+							}
 
 							if (organizationId) {
 								byOrganizationId.set(organizationId, i);
@@ -511,6 +613,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							byEmailNoOrg,
 							byAccountIdOrgScoped,
 							byRefreshTokenOrgScoped,
+							byRefreshTokenGlobal,
 						};
 					};
 
@@ -551,11 +654,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								}
 							}
 
-							return resolveUniqueOrgScopedMatch(
+							const orgScoped = resolveUniqueOrgScopedMatch(
 								identityIndexes,
 								normalizedAccountId,
 								result.refresh,
 							);
+							if (orgScoped !== undefined) return orgScoped;
+
+							// Absolute last resort: same refresh token = same human account.
+							// Catches org-scoped entries invisible to no-org lookups.
+							return identityIndexes.byRefreshTokenGlobal.get(result.refresh);
 						})();
 
 						if (existingIndex === undefined) {
@@ -580,12 +688,21 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 						const nextEmail = accountEmail ?? existing.email;
 						const nextOrganizationId = organizationId ?? existing.organizationId;
-						const nextAccountId = normalizedAccountId ?? existing.accountId;
-						const nextAccountIdSource =
-							normalizedAccountId
+						const preserveOrgIdentity =
+							typeof existing.organizationId === "string" &&
+							existing.organizationId.trim().length > 0 &&
+							!organizationId;
+						const nextAccountId = preserveOrgIdentity
+							? existing.accountId ?? normalizedAccountId
+							: normalizedAccountId ?? existing.accountId;
+						const nextAccountIdSource = preserveOrgIdentity
+							? existing.accountIdSource ?? accountIdSource
+							: normalizedAccountId
 								? accountIdSource ?? existing.accountIdSource
 								: existing.accountIdSource;
-						const nextAccountLabel = accountLabel ?? existing.accountLabel;
+						const nextAccountLabel = preserveOrgIdentity
+							? existing.accountLabel ?? accountLabel
+							: accountLabel ?? existing.accountLabel;
 						accounts[existingIndex] = {
 							...existing,
 							accountId: nextAccountId,
@@ -601,28 +718,154 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						identityIndexes = buildIdentityIndexes();
 					}
 
-					if (accounts.length === 0) return;
+			const pruneRefreshTokenCollisions = (): void => {
+				const indicesToRemove = new Set<number>();
+				const refreshMap = new Map<string, { byOrg: Map<string, number>; fallbackIndex?: number }>();
 
-					const activeIndex = replaceAll
-						? 0
-						: typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex)
-							? stored.activeIndex
-							: 0;
-
-					const clampedActiveIndex = Math.max(0, Math.min(activeIndex, accounts.length - 1));
-					const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
-					for (const family of MODEL_FAMILIES) {
-						const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
-						const rawFamilyIndex = replaceAll
-							? 0
-							: typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex)
-								? storedFamilyIndex
-								: clampedActiveIndex;
-						activeIndexByFamily[family] = Math.max(
-							0,
-							Math.min(Math.floor(rawFamilyIndex), accounts.length - 1),
-						);
+				for (let i = 0; i < accounts.length; i += 1) {
+					const account = accounts[i];
+					if (!account) continue;
+					const refreshToken = account.refreshToken?.trim();
+					if (!refreshToken) continue;
+					const orgKey = account.organizationId?.trim() ?? "";
+					let entry = refreshMap.get(refreshToken);
+					if (!entry) {
+						entry = { byOrg: new Map<string, number>(), fallbackIndex: undefined };
+						refreshMap.set(refreshToken, entry);
 					}
+
+					if (orgKey) {
+						const existingIndex = entry.byOrg.get(orgKey);
+						if (existingIndex !== undefined) {
+							const newestIndex = pickNewestAccountIndex(existingIndex, i);
+							const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
+							mergeAccountRecords(newestIndex, obsoleteIndex);
+							indicesToRemove.add(obsoleteIndex);
+							entry.byOrg.set(orgKey, newestIndex);
+							continue;
+						}
+						entry.byOrg.set(orgKey, i);
+						continue;
+					}
+
+					const existingFallback = entry.fallbackIndex;
+					if (typeof existingFallback === "number") {
+						const newestIndex = pickNewestAccountIndex(existingFallback, i);
+						const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
+						mergeAccountRecords(newestIndex, obsoleteIndex);
+						indicesToRemove.add(obsoleteIndex);
+						entry.fallbackIndex = newestIndex;
+						continue;
+					}
+					entry.fallbackIndex = i;
+				}
+
+				for (const entry of refreshMap.values()) {
+					const fallbackIndex = entry.fallbackIndex;
+					if (typeof fallbackIndex !== "number") continue;
+					const orgIndices = Array.from(entry.byOrg.values());
+					if (orgIndices.length === 0) continue;
+
+					const [firstOrgIndex, ...otherOrgIndices] = orgIndices;
+					if (typeof firstOrgIndex !== "number") continue;
+
+					let preferredOrgIndex = firstOrgIndex;
+					for (const orgIndex of otherOrgIndices) {
+						preferredOrgIndex = pickNewestAccountIndex(preferredOrgIndex, orgIndex);
+					}
+
+					mergeAccountRecords(preferredOrgIndex, fallbackIndex);
+					indicesToRemove.add(fallbackIndex);
+				}
+
+				if (indicesToRemove.size > 0) {
+					accounts = accounts.filter((_, index) => !indicesToRemove.has(index));
+				}
+			};
+
+			const collectIdentityKeys = (
+				account: { organizationId?: string; accountId?: string; refreshToken?: string } | undefined,
+			): string[] => {
+				const keys: string[] = [];
+				const organizationId = account?.organizationId?.trim();
+				if (organizationId) keys.push(`org:${organizationId}`);
+				const accountId = account?.accountId?.trim();
+				if (accountId) keys.push(`account:${accountId}`);
+				const refreshToken = account?.refreshToken?.trim();
+				if (refreshToken) keys.push(`refresh:${refreshToken}`);
+				return keys;
+			};
+
+			const getStoredAccountAtIndex = (rawIndex: unknown) => {
+				const storedAccounts = stored?.accounts;
+				if (!storedAccounts) return undefined;
+				if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) return undefined;
+				const candidate = Math.floor(rawIndex);
+				if (candidate < 0 || candidate >= storedAccounts.length) return undefined;
+				return storedAccounts[candidate];
+			};
+
+			const storedActiveKeys = replaceAll
+				? []
+				: collectIdentityKeys(getStoredAccountAtIndex(stored?.activeIndex));
+			const storedActiveKeysByFamily: Partial<Record<ModelFamily, string[]>> = {};
+			if (!replaceAll) {
+				for (const family of MODEL_FAMILIES) {
+					const familyKeys = collectIdentityKeys(
+						getStoredAccountAtIndex(stored?.activeIndexByFamily?.[family]),
+					);
+					if (familyKeys.length > 0) {
+						storedActiveKeysByFamily[family] = familyKeys;
+					}
+				}
+			}
+
+			pruneRefreshTokenCollisions();
+
+			if (accounts.length === 0) return;
+
+			const resolveIndexByIdentityKeys = (identityKeys: string[] | undefined): number | undefined => {
+				if (!identityKeys || identityKeys.length === 0) return undefined;
+				for (const identityKey of identityKeys) {
+					const index = accounts.findIndex(
+						(account) => collectIdentityKeys(account).includes(identityKey),
+					);
+					if (index >= 0) {
+						return index;
+					}
+				}
+				return undefined;
+			};
+
+			const fallbackActiveIndex = replaceAll
+				? 0
+				: typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex)
+					? stored.activeIndex
+					: 0;
+			const remappedActiveIndex = replaceAll
+				? undefined
+				: resolveIndexByIdentityKeys(storedActiveKeys);
+			const activeIndex = remappedActiveIndex ?? fallbackActiveIndex;
+
+			const clampedActiveIndex = Math.max(0, Math.min(Math.floor(activeIndex), accounts.length - 1));
+			const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
+			for (const family of MODEL_FAMILIES) {
+				const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
+				const remappedFamilyIndex = replaceAll
+					? undefined
+					: resolveIndexByIdentityKeys(storedActiveKeysByFamily[family]);
+				const rawFamilyIndex = replaceAll
+					? 0
+					: typeof remappedFamilyIndex === "number"
+						? remappedFamilyIndex
+						: typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex)
+							? storedFamilyIndex
+							: clampedActiveIndex;
+				activeIndexByFamily[family] = Math.max(
+					0,
+					Math.min(Math.floor(rawFamilyIndex), accounts.length - 1),
+				);
+			}
 
 					await persist({
 						version: 3,
@@ -1939,7 +2182,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const headers = createCodexHeaders(undefined, params.accountId, params.accessToken, {
 											model,
 										});
-										headers.set("content-type", "application/json; charset=utf-8");
+								headers.set("content-type", "application/json");
 
 										const controller = new AbortController();
 										const timeout = setTimeout(() => controller.abort(), 15_000);
