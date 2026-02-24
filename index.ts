@@ -483,6 +483,36 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						mergedRateLimitResetTimes[key] = resolved;
 					}
 				}
+				const mergedEnabled =
+					target.enabled === false || source.enabled === false
+						? false
+						: target.enabled ?? source.enabled;
+				const targetCoolingDownUntil =
+					typeof target.coolingDownUntil === "number" && Number.isFinite(target.coolingDownUntil)
+						? target.coolingDownUntil
+						: 0;
+				const sourceCoolingDownUntil =
+					typeof source.coolingDownUntil === "number" && Number.isFinite(source.coolingDownUntil)
+						? source.coolingDownUntil
+						: 0;
+				const mergedCoolingDownUntilValue = Math.max(
+					targetCoolingDownUntil,
+					sourceCoolingDownUntil,
+				);
+				const mergedCoolingDownUntil =
+					mergedCoolingDownUntilValue > 0 ? mergedCoolingDownUntilValue : undefined;
+				const mergedCooldownReason = (() => {
+					if (mergedCoolingDownUntilValue <= 0) {
+						return target.cooldownReason ?? source.cooldownReason;
+					}
+					if (sourceCoolingDownUntil > targetCoolingDownUntil) {
+						return source.cooldownReason ?? target.cooldownReason;
+					}
+					if (targetCoolingDownUntil > sourceCoolingDownUntil) {
+						return target.cooldownReason ?? source.cooldownReason;
+					}
+					return source.cooldownReason ?? target.cooldownReason;
+				})();
 				accounts[targetIndex] = {
 					...target,
 					accountId: target.accountId ?? source.accountId,
@@ -493,13 +523,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					refreshToken: newer.refreshToken || older.refreshToken,
 					accessToken: newer.accessToken || older.accessToken,
 					expiresAt: newer.expiresAt ?? older.expiresAt,
-					enabled: target.enabled ?? source.enabled,
+					enabled: mergedEnabled,
 					addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
 					lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
 					lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
 					rateLimitResetTimes: mergedRateLimitResetTimes,
-					coolingDownUntil: target.coolingDownUntil ?? source.coolingDownUntil,
-					cooldownReason: target.cooldownReason ?? source.cooldownReason,
+					coolingDownUntil: mergedCoolingDownUntil,
+					cooldownReason: mergedCooldownReason,
 				};
 			};
 

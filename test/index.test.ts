@@ -187,9 +187,11 @@ const mockStorage = {
 		refreshToken: string;
 		accessToken?: string;
 		expiresAt?: number;
+		enabled?: boolean;
 		addedAt?: number;
 		lastUsed?: number;
 		coolingDownUntil?: number;
+		cooldownReason?: string;
 		rateLimitResetTimes?: Record<string, number>;
 		lastSwitchReason?: string;
 	}>,
@@ -1841,6 +1843,63 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mergedOrg?.rateLimitResetTimes?.codex).toBe(9_000);
 		expect(mergedOrg?.rateLimitResetTimes?.["codex-max"]).toBe(5_000);
 		expect(mergedOrg?.rateLimitResetTimes?.["gpt-5.1"]).toBe(8_000);
+	});
+
+	it("keeps restrictive enabled/cooldown metadata when collapsing refresh-token duplicates", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		mockStorage.accounts = [
+			{
+				accountId: "org-shared",
+				organizationId: "org-keep",
+				email: "org@example.com",
+				refreshToken: "shared-refresh",
+				enabled: true,
+				addedAt: 10,
+				lastUsed: 10,
+			},
+			{
+				accountId: "token-shared",
+				email: "token@example.com",
+				refreshToken: "shared-refresh",
+				enabled: false,
+				coolingDownUntil: 12_000,
+				cooldownReason: "auth-failure",
+				addedAt: 20,
+				lastUsed: 20,
+			},
+		];
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-unrelated-cooling",
+			refresh: "refresh-unrelated-cooling",
+			expires: Date.now() + 300_000,
+			idToken: "id-unrelated-cooling",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([]);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-unrelated-cooling" ? "unrelated-cooling" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		expect(mockStorage.accounts.some((account) => account.accountId === "token-shared")).toBe(false);
+		const mergedOrg = mockStorage.accounts.find((account) => account.accountId === "org-shared");
+		expect(mergedOrg).toBeDefined();
+		expect(mergedOrg?.enabled).toBe(false);
+		expect(mergedOrg?.coolingDownUntil).toBe(12_000);
+		expect(mergedOrg?.cooldownReason).toBe("auth-failure");
 	});
 
 	it("persists non-team login and updates same record via accountId/refresh fallback", async () => {
