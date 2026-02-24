@@ -48,9 +48,15 @@ describe("Codex Prompts Module", () => {
 
 	describe("TOOL_REMAP_MESSAGE constant", () => {
 		it("should contain apply_patch replacement instruction", () => {
-			expect(TOOL_REMAP_MESSAGE).toContain("apply_patch/applyPatch are Codex names");
+			expect(TOOL_REMAP_MESSAGE).toContain("exact tool names listed in the active tool schema/manifest");
+			expect(TOOL_REMAP_MESSAGE).toContain("apply_patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("edit");
+		});
+
+		it("should avoid hard-forcing apply_patch to patch", () => {
+			expect(TOOL_REMAP_MESSAGE).not.toContain("Never call a tool literally named apply_patch/applyPatch");
+			expect(TOOL_REMAP_MESSAGE).toContain("use the exact tool name from the active schema");
 		});
 
 		it("should contain update_plan replacement instruction", () => {

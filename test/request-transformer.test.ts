@@ -408,7 +408,7 @@ describe('Request Transformer Module', () => {
 			expect(result![0].role).toBe('developer');
 			expect(result![0].type).toBe('message');
 			expect((result![0].content as any)[0].text).toContain('apply_patch');
-			expect((result![0].content as any)[0].text).toContain('patch (preferred)');
+			expect((result![0].content as any)[0].text).toContain('active tool schema/manifest');
 		});
 
 		it('should not modify input when tools not present', async () => {
@@ -1807,6 +1807,40 @@ describe('Request Transformer Module', () => {
 				expect(bridgeText).toContain('Do not translate tool names');
 			});
 
+			it('should preserve patch-style tool names exactly as provided by runtime manifest', async () => {
+				const scenarios: Array<{ name: string; shouldContain: string; shouldNotContain: string }> = [
+					{ name: 'apply_patch', shouldContain: '`apply_patch`', shouldNotContain: '`patch`' },
+					{ name: 'patch', shouldContain: '`patch`', shouldNotContain: '`apply_patch`' },
+					{ name: 'edit', shouldContain: '`edit`', shouldNotContain: '`apply_patch`' },
+				];
+
+				for (const scenario of scenarios) {
+					const body: RequestBody = {
+						model: 'gpt-5',
+						input: [{ type: 'message', role: 'user', content: 'hello' }],
+						tools: [
+							{
+								type: 'function',
+								function: {
+									name: scenario.name,
+									parameters: { type: 'object', properties: {} },
+								},
+							},
+						] as unknown,
+					};
+
+					const result = await transformRequestBody(body, codexInstructions, undefined, true);
+					const bridgeText = String(
+						(result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '',
+					);
+
+					expect(bridgeText).toContain('Runtime Tool Manifest');
+					expect(bridgeText).toContain(scenario.shouldContain);
+					expect(bridgeText).not.toContain(scenario.shouldNotContain);
+					expect(bridgeText).toContain('Do not translate tool names');
+				}
+			});
+
 			it('should filter OpenCode prompts when codexMode=true', async () => {
 				const body: RequestBody = {
 					model: 'gpt-5',
@@ -1851,7 +1885,7 @@ describe('Request Transformer Module', () => {
 				expect(result.input).toHaveLength(2);
 				expect(result.input![0].role).toBe('developer');
 				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
-				expect((result.input![0].content as any)[0].text).toContain('patch (preferred)');
+				expect((result.input![0].content as any)[0].text).toContain('active schema (no renaming)');
 			});
 
 			it('should not filter OpenCode prompts when codexMode=false', async () => {
@@ -1873,7 +1907,7 @@ describe('Request Transformer Module', () => {
 				expect(result.input).toHaveLength(3);
 				expect(result.input![0].role).toBe('developer');
 				expect((result.input![0].content as any)[0].text).toContain('apply_patch');
-				expect((result.input![0].content as any)[0].text).toContain('patch (preferred)');
+				expect((result.input![0].content as any)[0].text).toContain('active schema (no renaming)');
 				expect(result.input![1].role).toBe('developer');
 				expect(result.input![2].role).toBe('user');
 			});
