@@ -439,6 +439,7 @@ File Operations:
   • write  - Create new files
   • edit   - Modify existing files with string replacement
   • patch  - Apply diff patches
+  • apply_patch - Apply diff patches (alternate runtime name; use whichever the schema exposes)
   • read   - Read file contents
 
 Search/Discovery:
@@ -464,8 +465,8 @@ Task Management:
 </tool_call_guardrails>
 
 <substitution_rules priority="0">
-Base instruction says:    You MUST use instead:
-apply_patch/patch     ->   use the exact tool name from the active schema (no renaming)
+Base instruction says:    Correct behaviour:
+apply_patch/patch      →   use the exact tool name from the active schema (no renaming)
 update_plan           →   todowrite
 read_plan             →   todoread
 </substitution_rules>

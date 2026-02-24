@@ -47,13 +47,13 @@ describe("Codex Prompts Module", () => {
 		});
 
 		describe("TOOL_REMAP_MESSAGE constant", () => {
-		it("should contain apply_patch replacement instruction", () => {
+			it("should contain apply_patch replacement instruction", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("exact tool names listed in the active tool schema/manifest");
 			expect(TOOL_REMAP_MESSAGE).toContain("This list is illustrative. Always defer to the active tool schema/manifest");
 			expect(TOOL_REMAP_MESSAGE).toContain("apply_patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("edit");
-		});
+			});
 
 		it("should avoid hard-forcing apply_patch to patch", () => {
 			expect(TOOL_REMAP_MESSAGE).not.toContain("Never call a tool literally named apply_patch/applyPatch");
@@ -68,6 +68,7 @@ describe("Codex Prompts Module", () => {
 		it("should list available tools", () => {
 			expect(TOOL_REMAP_MESSAGE).toContain("write");
 			expect(TOOL_REMAP_MESSAGE).toContain("edit");
+			expect(TOOL_REMAP_MESSAGE).toContain("apply_patch");
 			expect(TOOL_REMAP_MESSAGE).toContain("read");
 			expect(TOOL_REMAP_MESSAGE).toContain("bash");
 			expect(TOOL_REMAP_MESSAGE).toContain("grep");
