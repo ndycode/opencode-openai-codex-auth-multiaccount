@@ -1,6 +1,13 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { AccountManager } from "../lib/accounts.js";
-import { deduplicateAccounts, deduplicateAccountsByEmail, type AccountStorageV3 } from "../lib/storage.js";
+import {
+  deduplicateAccounts,
+  deduplicateAccountsByEmail,
+  setStoragePathDirect,
+  type AccountStorageV3,
+} from "../lib/storage.js";
 import type { ModelFamily } from "../lib/prompts/codex.js";
 
 const TEST_ACCOUNTS = [
@@ -45,7 +52,21 @@ function createStorageFromTestAccounts(accounts: typeof TEST_ACCOUNTS): AccountS
   };
 }
 
+const TEST_STORAGE_PATH = join(
+  tmpdir(),
+  `oc-chatgpt-multi-auth-rotation-integration-${process.pid}-${Date.now()}.json`,
+);
+
 describe("Multi-Account Rotation Integration", () => {
+  beforeAll(() => {
+    // Prevent integration tests that call saveToDisk/saveToDiskDebounced from touching real user auth storage.
+    setStoragePathDirect(TEST_STORAGE_PATH);
+  });
+
+  afterAll(() => {
+    setStoragePathDirect(null);
+  });
+
   describe("AccountManager with real test accounts", () => {
     let manager: AccountManager;
 
