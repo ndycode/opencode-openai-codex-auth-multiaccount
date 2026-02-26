@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { promises as nodeFs } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -244,6 +245,92 @@ describe("codex-sync", () => {
 		expect(savedTokens.access_token).toBe(accessToken);
 		expect(savedTokens.refresh_token).toBe("new-refresh");
 		expect(savedTokens.account_id).toBe("new-account");
+	});
+
+	it("retries rename on transient Windows lock errors during atomic writes", async () => {
+		const codexDir = await createCodexDir("codex-sync-rename-retry");
+		const authPath = join(codexDir, "auth.json");
+		const accessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "retry-account",
+			},
+		});
+
+		const originalRename = nodeFs.rename.bind(nodeFs);
+		let renameAttempts = 0;
+		const renameSpy = vi
+			.spyOn(nodeFs, "rename")
+			.mockImplementation(async (...args: Parameters<typeof nodeFs.rename>) => {
+				renameAttempts += 1;
+				if (renameAttempts <= 2) {
+					const lockError = new Error("simulated lock") as NodeJS.ErrnoException;
+					lockError.code = renameAttempts === 1 ? "EPERM" : "EBUSY";
+					throw lockError;
+				}
+				return originalRename(...args);
+			});
+
+		try {
+			await writeCodexAuthJsonSession(
+				{
+					accessToken,
+					refreshToken: "retry-refresh",
+				},
+				{ codexDir },
+			);
+			expect(renameAttempts).toBe(3);
+			const saved = JSON.parse(await readFile(authPath, "utf-8")) as {
+				tokens?: Record<string, unknown>;
+			};
+			expect(saved.tokens?.access_token).toBe(accessToken);
+		} finally {
+			renameSpy.mockRestore();
+		}
+	});
+
+	it("writes auth.json temp files with restrictive mode 0o600", async () => {
+		const codexDir = await createCodexDir("codex-sync-write-mode");
+		const accessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "mode-account",
+			},
+		});
+
+		const observedModes: number[] = [];
+		const originalWriteFile = nodeFs.writeFile.bind(nodeFs);
+		const writeSpy = vi
+			.spyOn(nodeFs, "writeFile")
+			.mockImplementation(async (...args: Parameters<typeof nodeFs.writeFile>) => {
+				const [path, _data, options] = args;
+				if (
+					typeof path === "string" &&
+					path.includes(".tmp") &&
+					typeof options === "object" &&
+					options !== null &&
+					"mode" in options
+				) {
+					const mode = (options as { mode?: unknown }).mode;
+					if (typeof mode === "number") {
+						observedModes.push(mode);
+					}
+				}
+				return originalWriteFile(...args);
+			});
+
+		try {
+			await writeCodexAuthJsonSession(
+				{
+					accessToken,
+					refreshToken: "mode-refresh",
+				},
+				{ codexDir },
+			);
+			expect(observedModes).toContain(0o600);
+		} finally {
+			writeSpy.mockRestore();
+		}
 	});
 
 	it("clears stale account and id token keys when payload omits them", async () => {
