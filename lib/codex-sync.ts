@@ -656,33 +656,32 @@ export async function writeCodexMultiAuthPool(
 	const identityKeys = collectSyncIdentityKeys(candidate);
 	const existingIndex = findSyncIndexByIdentity(existingAccounts, identityKeys);
 
-	const merged = [...existingAccounts, candidate];
-	const candidateIndex = merged.length - 1;
-	const normalized =
-		normalizeAccountStorage({
-			version: 3,
-			accounts: merged,
-			activeIndex: candidateIndex,
-			activeIndexByFamily: buildSyncFamilyIndexMap(candidateIndex),
-		}) ??
-		({
-			version: 3 as const,
-			accounts: merged,
-			activeIndex: candidateIndex,
-			activeIndexByFamily: buildSyncFamilyIndexMap(candidateIndex),
-		});
-
-	const normalizedIdentityIndex = findSyncIndexByIdentity(normalized.accounts, identityKeys);
-	if (normalizedIdentityIndex >= 0) {
-		normalized.activeIndex = normalizedIdentityIndex;
-		normalized.activeIndexByFamily = buildSyncFamilyIndexMap(normalizedIdentityIndex);
+	const merged = [...existingAccounts];
+	let candidateIndex = existingIndex;
+	if (existingIndex >= 0) {
+		const existingAccount = merged[existingIndex];
+		merged[existingIndex] = {
+			...existingAccount,
+			...candidate,
+			addedAt: existingAccount?.addedAt ?? candidate.addedAt,
+		};
+	} else {
+		merged.push(candidate);
+		candidateIndex = merged.length - 1;
 	}
 
-	const writeResult = await writeJsonAtomicWithBackup(path, normalized as unknown as Record<string, unknown>);
+	const nextStorage: AccountStorageV3 = {
+		version: 3,
+		accounts: merged,
+		activeIndex: candidateIndex,
+		activeIndexByFamily: buildSyncFamilyIndexMap(candidateIndex),
+	};
+
+	const writeResult = await writeJsonAtomicWithBackup(path, nextStorage as unknown as Record<string, unknown>);
 	return {
 		...writeResult,
-		totalAccounts: normalized.accounts.length,
-		activeIndex: normalized.activeIndex,
+		totalAccounts: nextStorage.accounts.length,
+		activeIndex: nextStorage.activeIndex,
 		created: existingIndex < 0,
 		updated: existingIndex >= 0,
 	};

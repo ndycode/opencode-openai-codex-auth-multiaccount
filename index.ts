@@ -1059,6 +1059,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return lines.join("\n");
 		};
 
+		const runAndPrintSync = async (
+			label: "from Codex" | "to Codex",
+			run: () => Promise<SyncSummary>,
+		): Promise<void> => {
+			try {
+				const summary = await run();
+				console.log("");
+				for (const line of buildSyncSummaryLines(summary)) {
+					console.log(line);
+				}
+				console.log("");
+			} catch (error) {
+				const message =
+					error instanceof CodexSyncError || error instanceof Error
+						? error.message
+						: String(error);
+				console.log("");
+				console.log(`Sync ${label} failed: ${message}`);
+				console.log("");
+			}
+		};
+
 		const rollbackPartialCodexAuthWrite = async (
 			authWrite: CodexWriteResult | undefined,
 		): Promise<string | null> => {
@@ -3652,41 +3674,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 
 									if (menuResult.mode === "sync-from-codex") {
-										try {
-											const summary = await syncFromCodexToPlugin();
-											console.log("");
-											for (const line of buildSyncSummaryLines(summary)) {
-												console.log(line);
-											}
-											console.log("");
-										} catch (error) {
-											const message =
-												error instanceof CodexSyncError || error instanceof Error
-													? error.message
-													: String(error);
-											console.log("");
-											console.log(`Sync from Codex failed: ${message}`);
-											console.log("");
-										}
+										await runAndPrintSync("from Codex", syncFromCodexToPlugin);
 										continue;
 									}
 									if (menuResult.mode === "sync-to-codex") {
-										try {
-											const summary = await syncFromPluginToCodex();
-											console.log("");
-											for (const line of buildSyncSummaryLines(summary)) {
-												console.log(line);
-											}
-											console.log("");
-										} catch (error) {
-											const message =
-												error instanceof CodexSyncError || error instanceof Error
-													? error.message
-													: String(error);
-											console.log("");
-											console.log(`Sync to Codex failed: ${message}`);
-											console.log("");
-										}
+										await runAndPrintSync("to Codex", syncFromPluginToCodex);
 										continue;
 									}
 

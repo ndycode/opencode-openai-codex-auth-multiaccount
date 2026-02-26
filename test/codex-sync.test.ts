@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { promises as nodeFs } from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -412,6 +412,44 @@ describe("codex-sync", () => {
 		} finally {
 			writeSpy.mockRestore();
 		}
+	});
+
+	it("keeps auth.json valid under concurrent atomic writes", async () => {
+		const codexDir = await createCodexDir("codex-sync-concurrent-auth-write");
+		const authPath = join(codexDir, "auth.json");
+		const payloads = Array.from({ length: 20 }, (_, index) => {
+			const accountId = `concurrent-acc-${index}`;
+			const accessToken = createJwt({
+				exp: Math.floor(Date.now() / 1000) + 3600 + index,
+				"https://api.openai.com/auth": {
+					chatgpt_account_id: accountId,
+				},
+			});
+			return {
+				accessToken,
+				refreshToken: `concurrent-refresh-${index}`,
+				accountId,
+			};
+		});
+
+		await Promise.all(
+			payloads.map(async (payload) =>
+				writeCodexAuthJsonSession(payload, {
+					codexDir,
+				}),
+			),
+		);
+
+		const saved = JSON.parse(await readFile(authPath, "utf-8")) as {
+			tokens?: Record<string, unknown>;
+		};
+		const savedAccessToken = saved.tokens?.access_token;
+		expect(typeof savedAccessToken).toBe("string");
+		expect(payloads.some((payload) => payload.accessToken === savedAccessToken)).toBe(true);
+
+		const directoryEntries = await readdir(codexDir);
+		const leftoverTempFiles = directoryEntries.filter((entry) => entry.startsWith("auth.json.") && entry.endsWith(".tmp"));
+		expect(leftoverTempFiles).toEqual([]);
 	});
 
 	it("clears stale account and id token keys when payload omits them", async () => {
