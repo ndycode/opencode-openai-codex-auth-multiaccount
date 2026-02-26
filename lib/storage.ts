@@ -1,4 +1,5 @@
 import { promises as fs, existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
 import { createLogger } from "./logger.js";
@@ -31,6 +32,34 @@ export interface FlaggedAccountMetadataV1 extends AccountMetadataV3 {
 export interface FlaggedAccountStorageV1 {
 	version: 1;
 	accounts: FlaggedAccountMetadataV1[];
+}
+
+export type ImportBackupMode = "none" | "best-effort" | "required";
+
+export interface ImportAccountsOptions {
+	/**
+	 * Optional prefix used for pre-import backup file names.
+	 * Only applied when backupMode is not "none".
+	 */
+	preImportBackupPrefix?: string;
+	/**
+	 * Backup policy before import apply:
+	 * - none: do not create a pre-import backup
+	 * - best-effort: attempt backup, continue on failure
+	 * - required: backup must succeed or import aborts
+	 */
+	backupMode?: ImportBackupMode;
+}
+
+export type ImportBackupStatus = "created" | "skipped" | "failed";
+
+export interface ImportAccountsResult {
+	imported: number;
+	total: number;
+	skipped: number;
+	backupStatus: ImportBackupStatus;
+	backupPath?: string;
+	backupError?: string;
 }
 
 /**
@@ -86,6 +115,81 @@ function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
     releaseLock = resolve;
   });
   return previousMutex.then(fn).finally(() => releaseLock());
+}
+
+const WINDOWS_RENAME_RETRY_ATTEMPTS = 5;
+const WINDOWS_RENAME_RETRY_BASE_DELAY_MS = 10;
+const PRE_IMPORT_BACKUP_WRITE_TIMEOUT_MS = 3_000;
+
+function isWindowsLockError(error: unknown): error is NodeJS.ErrnoException {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return code === "EPERM" || code === "EBUSY";
+}
+
+async function renameWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
+  let lastError: NodeJS.ErrnoException | null = null;
+
+  for (let attempt = 0; attempt < WINDOWS_RENAME_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await fs.rename(sourcePath, destinationPath);
+      return;
+    } catch (error) {
+      if (isWindowsLockError(error)) {
+        lastError = error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, WINDOWS_RENAME_RETRY_BASE_DELAY_MS * 2 ** attempt),
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+}
+
+async function writeFileWithTimeout(filePath: string, content: string, timeoutMs: number): Promise<void> {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fs.writeFile(filePath, content, {
+      encoding: "utf-8",
+      mode: 0o600,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      const timeoutError = Object.assign(
+        new Error(`Timed out writing file after ${timeoutMs}ms`),
+        { code: "ETIMEDOUT" },
+      );
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+async function writePreImportBackupFile(backupPath: string, snapshot: AccountStorageV3): Promise<void> {
+  const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const tempPath = `${backupPath}.${uniqueSuffix}.tmp`;
+
+  try {
+    await fs.mkdir(dirname(backupPath), { recursive: true });
+    const backupContent = JSON.stringify(snapshot, null, 2);
+    await writeFileWithTimeout(tempPath, backupContent, PRE_IMPORT_BACKUP_WRITE_TIMEOUT_MS);
+    await renameWithWindowsRetry(tempPath, backupPath);
+  } catch (error) {
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // Best effort temp-file cleanup.
+    }
+    throw error;
+  }
 }
 
 type AnyAccountStorage = AccountStorageV1 | AccountStorageV3;
@@ -711,23 +815,7 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
       throw emptyError;
     }
 
-    // Retry rename with exponential backoff for Windows EPERM/EBUSY
-    let lastError: NodeJS.ErrnoException | null = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await fs.rename(tempPath, path);
-        return;
-      } catch (renameError) {
-        const code = (renameError as NodeJS.ErrnoException).code;
-        if (code === "EPERM" || code === "EBUSY") {
-          lastError = renameError as NodeJS.ErrnoException;
-          await new Promise(r => setTimeout(r, 10 * Math.pow(2, attempt)));
-          continue;
-        }
-        throw renameError;
-      }
-    }
-    if (lastError) throw lastError;
+    await renameWithWindowsRetry(tempPath, path);
   } catch (error) {
     try {
       await fs.unlink(tempPath);
@@ -824,6 +912,14 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			value: unknown,
 		): value is AccountMetadataV3["cooldownReason"] =>
 			value === "auth-failure" || value === "network-error";
+		const normalizeTags = (value: unknown): string[] | undefined => {
+			if (!Array.isArray(value)) return undefined;
+			const normalized = value
+				.filter((entry): entry is string => typeof entry === "string")
+				.map((entry) => entry.trim().toLowerCase())
+				.filter((entry) => entry.length > 0);
+			return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+		};
 
 		let rateLimitResetTimes: AccountMetadataV3["rateLimitResetTimes"] | undefined;
 		if (isRecord(rawAccount.rateLimitResetTimes)) {
@@ -847,6 +943,11 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		const cooldownReason = isCooldownReason(rawAccount.cooldownReason)
 			? rawAccount.cooldownReason
 			: undefined;
+		const accountTags = normalizeTags(rawAccount.accountTags);
+		const accountNote =
+			typeof rawAccount.accountNote === "string" && rawAccount.accountNote.trim()
+				? rawAccount.accountNote.trim()
+				: undefined;
 
 		const normalized: FlaggedAccountMetadataV1 = {
 			refreshToken,
@@ -857,6 +958,8 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			accountId: typeof rawAccount.accountId === "string" ? rawAccount.accountId : undefined,
 			accountIdSource,
 			accountLabel: typeof rawAccount.accountLabel === "string" ? rawAccount.accountLabel : undefined,
+			accountTags,
+			accountNote,
 			email: typeof rawAccount.email === "string" ? rawAccount.email : undefined,
 			enabled: typeof rawAccount.enabled === "boolean" ? rawAccount.enabled : undefined,
 			lastSwitchReason,
@@ -936,7 +1039,7 @@ export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Pro
 			await fs.mkdir(dirname(path), { recursive: true });
 			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
 			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-			await fs.rename(tempPath, path);
+			await renameWithWindowsRetry(tempPath, path);
 		} catch (error) {
 			try {
 				await fs.unlink(tempPath);
@@ -959,6 +1062,90 @@ export async function clearFlaggedAccounts(): Promise<void> {
 				log.error("Failed to clear flagged account storage", { error: String(error) });
 			}
 		}
+	});
+}
+
+function formatBackupTimestamp(date: Date = new Date()): string {
+	const yyyy = String(date.getFullYear());
+	const mm = String(date.getMonth() + 1).padStart(2, "0");
+	const dd = String(date.getDate()).padStart(2, "0");
+	const hh = String(date.getHours()).padStart(2, "0");
+	const min = String(date.getMinutes()).padStart(2, "0");
+	const ss = String(date.getSeconds()).padStart(2, "0");
+	const mmm = String(date.getMilliseconds()).padStart(3, "0");
+	return `${yyyy}${mm}${dd}-${hh}${min}${ss}${mmm}`;
+}
+
+function sanitizeBackupPrefix(prefix: string): string {
+	const trimmed = prefix.trim();
+	const safe = trimmed
+		.replace(/[^a-zA-Z0-9_-]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	return safe.length > 0 ? safe : "codex-backup";
+}
+
+export function createTimestampedBackupPath(prefix = "codex-backup"): string {
+	const storagePath = getStoragePath();
+	const backupDir = join(dirname(storagePath), "backups");
+	const safePrefix = sanitizeBackupPrefix(prefix);
+	const nonce = randomBytes(3).toString("hex");
+	return join(backupDir, `${safePrefix}-${formatBackupTimestamp()}-${nonce}.json`);
+}
+
+async function readAndNormalizeImportFile(filePath: string): Promise<{
+	resolvedPath: string;
+	normalized: AccountStorageV3;
+}> {
+	const resolvedPath = resolvePath(filePath);
+
+	if (!existsSync(resolvedPath)) {
+		throw new Error(`Import file not found: ${resolvedPath}`);
+	}
+
+	const content = await fs.readFile(resolvedPath, "utf-8");
+
+	let imported: unknown;
+	try {
+		imported = JSON.parse(content);
+	} catch {
+		throw new Error(`Invalid JSON in import file: ${resolvedPath}`);
+	}
+
+	const normalized = normalizeAccountStorage(imported);
+	if (!normalized) {
+		throw new Error("Invalid account storage format");
+	}
+
+	return { resolvedPath, normalized };
+}
+
+export async function previewImportAccounts(
+	filePath: string,
+): Promise<{ imported: number; total: number; skipped: number }> {
+	const { normalized } = await readAndNormalizeImportFile(filePath);
+
+	return withAccountStorageTransaction((existing) => {
+		const existingAccounts = existing?.accounts ?? [];
+		const merged = [...existingAccounts, ...normalized.accounts];
+
+		if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+			const deduped = deduplicateAccountsForStorage(merged);
+			if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+				throw new Error(
+					`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
+				);
+			}
+		}
+
+		const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
+		const imported = deduplicatedAccounts.length - existingAccounts.length;
+		const skipped = normalized.accounts.length - imported;
+		return Promise.resolve({
+			imported,
+			total: deduplicatedAccounts.length,
+			skipped,
+		});
 	});
 }
 
@@ -994,35 +1181,57 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
  * @param filePath - Source file path
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */
-export async function importAccounts(filePath: string): Promise<{ imported: number; total: number; skipped: number }> {
-  const resolvedPath = resolvePath(filePath);
+export async function importAccounts(
+	filePath: string,
+	options: ImportAccountsOptions = {},
+): Promise<ImportAccountsResult> {
+  const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
+  const backupMode = options.backupMode ?? "none";
+  const backupPrefix = options.preImportBackupPrefix ?? "codex-pre-import-backup";
   
-  // Check file exists with friendly error
-  if (!existsSync(resolvedPath)) {
-    throw new Error(`Import file not found: ${resolvedPath}`);
-  }
-  
-  const content = await fs.readFile(resolvedPath, "utf-8");
-  
-  let imported: unknown;
-  try {
-    imported = JSON.parse(content);
-  } catch {
-    throw new Error(`Invalid JSON in import file: ${resolvedPath}`);
-  }
-  
-  const normalized = normalizeAccountStorage(imported);
-  if (!normalized) {
-    throw new Error("Invalid account storage format");
-  }
-  
-  const { imported: importedCount, total, skipped: skippedCount } =
+  const {
+    imported: importedCount,
+    total,
+    skipped: skippedCount,
+    backupStatus,
+    backupPath,
+    backupError,
+  } =
     await withAccountStorageTransaction(async (existing, persist) => {
-      const existingAccounts = existing?.accounts ?? [];
-      const existingActiveIndex = existing?.activeIndex ?? 0;
+      const existingStorage: AccountStorageV3 =
+        existing ??
+        ({
+          version: 3,
+          accounts: [],
+          activeIndex: 0,
+          activeIndexByFamily: {},
+        } satisfies AccountStorageV3);
+      const existingAccounts = existingStorage.accounts;
+      const existingActiveIndex = existingStorage.activeIndex;
       const clampedExistingActiveIndex = clampIndex(existingActiveIndex, existingAccounts.length);
       const existingActiveKeys = extractActiveKeys(existingAccounts, clampedExistingActiveIndex);
-      const existingActiveIndexByFamily = existing?.activeIndexByFamily ?? {};
+      const existingActiveIndexByFamily = existingStorage.activeIndexByFamily ?? {};
+
+      let backupStatus: ImportBackupStatus = "skipped";
+      let backupPath: string | undefined;
+      let backupError: string | undefined;
+      if (backupMode !== "none" && existingAccounts.length > 0) {
+        backupPath = createTimestampedBackupPath(backupPrefix);
+        try {
+          await writePreImportBackupFile(backupPath, existingStorage);
+          backupStatus = "created";
+        } catch (error) {
+          backupStatus = "failed";
+          backupError = error instanceof Error ? error.message : String(error);
+          if (backupMode === "required") {
+            throw new Error(`Pre-import backup failed: ${backupError}`);
+          }
+          log.warn("Pre-import backup failed; continuing import apply", {
+            path: backupPath,
+            error: backupError,
+          });
+        }
+      }
 
       const merged = [...existingAccounts, ...normalized.accounts];
 
@@ -1073,10 +1282,32 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
 
       const imported = deduplicatedAccounts.length - existingAccounts.length;
       const skipped = normalized.accounts.length - imported;
-      return { imported, total: deduplicatedAccounts.length, skipped };
+      return {
+        imported,
+        total: deduplicatedAccounts.length,
+        skipped,
+        backupStatus,
+        backupPath,
+        backupError,
+      };
     });
 
-  log.info("Imported accounts", { path: resolvedPath, imported: importedCount, skipped: skippedCount, total });
+  log.info("Imported accounts", {
+    path: resolvedPath,
+    imported: importedCount,
+    skipped: skippedCount,
+    total,
+    backupStatus,
+    backupPath,
+    backupError,
+  });
 
-  return { imported: importedCount, total, skipped: skippedCount };
+  return {
+    imported: importedCount,
+    total,
+    skipped: skippedCount,
+    backupStatus,
+    backupPath,
+    backupError,
+  };
 }

@@ -22,6 +22,36 @@ interface RefreshEntry {
   startedAt: number;
 }
 
+export interface RefreshQueueMetrics {
+	started: number;
+	deduplicated: number;
+	rotationReused: number;
+	succeeded: number;
+	failed: number;
+	exceptions: number;
+	rotated: number;
+	staleEvictions: number;
+	lastDurationMs: number;
+	lastFailureReason: string | null;
+	pending: number;
+}
+
+function createInitialMetrics(): RefreshQueueMetrics {
+	return {
+		started: 0,
+		deduplicated: 0,
+		rotationReused: 0,
+		succeeded: 0,
+		failed: 0,
+		exceptions: 0,
+		rotated: 0,
+		staleEvictions: 0,
+		lastDurationMs: 0,
+		lastFailureReason: null,
+		pending: 0,
+	};
+}
+
 /**
  * Manages queued token refresh operations to prevent race conditions.
  *
@@ -55,6 +85,7 @@ interface RefreshEntry {
  */
 export class RefreshQueue {
   private pending: Map<string, RefreshEntry> = new Map();
+  private metrics: RefreshQueueMetrics = createInitialMetrics();
   
   /**
    * Maps old refresh tokens to new tokens after rotation.
@@ -93,6 +124,8 @@ export class RefreshQueue {
     // Check for existing in-flight refresh (direct match)
     const existing = this.pending.get(refreshToken);
     if (existing) {
+      this.metrics.deduplicated += 1;
+      this.metrics.pending = this.pending.size;
       log.info("Reusing in-flight refresh for token", {
         tokenSuffix: refreshToken.slice(-6),
         waitingMs: Date.now() - existing.startedAt,
@@ -106,6 +139,8 @@ export class RefreshQueue {
     if (rotatedFrom) {
       const originalEntry = this.pending.get(rotatedFrom);
       if (originalEntry) {
+        this.metrics.rotationReused += 1;
+        this.metrics.pending = this.pending.size;
         log.info("Reusing in-flight refresh via rotation mapping", {
           newTokenSuffix: refreshToken.slice(-6),
           originalTokenSuffix: rotatedFrom.slice(-6),
@@ -117,15 +152,18 @@ export class RefreshQueue {
 
     // Start a new refresh
     const startedAt = Date.now();
+    this.metrics.started += 1;
     const promise = this.executeRefreshWithRotationTracking(refreshToken);
 
     this.pending.set(refreshToken, { promise, startedAt });
+    this.metrics.pending = this.pending.size;
 
     try {
       return await promise;
     } finally {
       this.pending.delete(refreshToken);
       this.cleanupRotationMapping(refreshToken);
+      this.metrics.pending = this.pending.size;
     }
   }
 
@@ -152,6 +190,7 @@ export class RefreshQueue {
     
     if (result.type === "success" && result.refresh !== refreshToken) {
       this.tokenRotationMap.set(refreshToken, result.refresh);
+      this.metrics.rotated += 1;
       log.info("Token rotated during refresh", {
         oldTokenSuffix: refreshToken.slice(-6),
         newTokenSuffix: result.refresh.slice(-6),
@@ -171,13 +210,18 @@ export class RefreshQueue {
     try {
       const result = await refreshAccessToken(refreshToken);
       const duration = Date.now() - startTime;
+      this.metrics.lastDurationMs = duration;
 
       if (result.type === "success") {
+        this.metrics.succeeded += 1;
+        this.metrics.lastFailureReason = null;
         log.info("Token refresh succeeded", {
           tokenSuffix: refreshToken.slice(-6),
           durationMs: duration,
         });
       } else {
+        this.metrics.failed += 1;
+        this.metrics.lastFailureReason = result.reason ?? "unknown";
         log.warn("Token refresh failed", {
           tokenSuffix: refreshToken.slice(-6),
           reason: result.reason,
@@ -188,6 +232,11 @@ export class RefreshQueue {
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
+      this.metrics.failed += 1;
+      this.metrics.exceptions += 1;
+      this.metrics.lastDurationMs = duration;
+      this.metrics.lastFailureReason =
+        error instanceof Error ? error.message : "unknown_exception";
       log.error("Token refresh threw exception", {
         tokenSuffix: refreshToken.slice(-6),
         error: (error as Error)?.message ?? String(error),
@@ -219,12 +268,14 @@ export class RefreshQueue {
     for (const token of staleTokens) {
       // istanbul ignore next -- defensive: token always exists in pending at this point (not yet deleted)
       const ageMs = now - (this.pending.get(token)?.startedAt ?? now);
+      this.metrics.staleEvictions += 1;
       log.warn("Removing stale refresh entry", {
         tokenSuffix: token.slice(-6),
         ageMs,
       });
       this.pending.delete(token);
     }
+    this.metrics.pending = this.pending.size;
   }
 
   /**
@@ -250,6 +301,14 @@ export class RefreshQueue {
   clear(): void {
     this.pending.clear();
     this.tokenRotationMap.clear();
+    this.metrics = createInitialMetrics();
+  }
+
+  getMetricsSnapshot(): RefreshQueueMetrics {
+    return {
+      ...this.metrics,
+      pending: this.pending.size,
+    };
   }
 }
 
@@ -286,4 +345,8 @@ export function resetRefreshQueue(): void {
  */
 export async function queuedRefresh(refreshToken: string): Promise<TokenResult> {
   return getRefreshQueue().refresh(refreshToken);
+}
+
+export function getRefreshQueueMetrics(): RefreshQueueMetrics {
+  return getRefreshQueue().getMetricsSnapshot();
 }

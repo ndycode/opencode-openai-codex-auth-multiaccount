@@ -2,6 +2,37 @@
 
 Comprehensive testing matrix for all config scenarios and backwards compatibility.
 
+## Current Coverage Additions (Beginner + Backup Hardening)
+
+The current codebase includes dedicated tests for the beginner operations layer and safer import/export flows:
+
+- `test/beginner-ui.test.ts`
+  - checklist summary behavior
+  - doctor findings and severity mapping
+  - next-action recommendation logic
+- `test/index.test.ts`
+  - `codex-doctor fix` remediation behavior
+  - `codex-setup wizard` fallback behavior
+  - interactive index command handling for `codex-switch`, `codex-label`, `codex-remove`
+  - `codex-tag`, `codex-note`, and `codex-list` tag-filter behavior
+  - `codex-export` default timestamped path behavior
+  - `codex-import dryRun` preview behavior
+- `test/storage.test.ts`
+  - `previewImportAccounts()` result validation
+  - `createTimestampedBackupPath()` path generation
+- `test/plugin-config.test.ts`
+  - `beginnerSafeMode` default + env override (`CODEX_AUTH_BEGINNER_SAFE_MODE`)
+- `test/schemas.test.ts`
+  - schema validation for `accountTags` and `accountNote`
+
+Recommended validation command before release:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+```
+
 ## Test Scenarios Matrix
 
 ### Scenario 1: Default OpenCode Models (No Custom Config)

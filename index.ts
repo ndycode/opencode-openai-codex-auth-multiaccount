@@ -32,7 +32,7 @@ import {
         parseAuthorizationInput,
         REDIRECT_URI,
 } from "./lib/auth/auth.js";
-import { queuedRefresh } from "./lib/refresh-queue.js";
+import { queuedRefresh, getRefreshQueueMetrics } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
 import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
@@ -42,6 +42,8 @@ import {
 	getFastSession,
 	getFastSessionStrategy,
 	getFastSessionMaxInputItems,
+	getRetryProfile,
+	getRetryBudgetOverrides,
 	getRateLimitToastDebounceMs,
 	getRetryAllAccountsMaxRetries,
 	getRetryAllAccountsMaxWaitMs,
@@ -62,6 +64,7 @@ import {
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
+	getBeginnerSafeMode,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -87,6 +90,7 @@ import { checkAndNotify } from "./lib/auto-update-checker.js";
 import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
 	AccountManager,
+	type AccountSelectionExplainability,
         getAccountIdCandidates,
         extractAccountEmail,
         extractAccountId,
@@ -109,6 +113,8 @@ import {
 	setStoragePath,
 	exportAccounts,
 	importAccounts,
+	previewImportAccounts,
+	createTimestampedBackupPath,
 	loadFlaggedAccounts,
 	saveFlaggedAccounts,
 	clearFlaggedAccounts,
@@ -136,10 +142,25 @@ import {
 	resetRateLimitBackoff,
 } from "./lib/request/rate-limit-backoff.js";
 import { isEmptyResponse } from "./lib/request/response-handler.js";
+import {
+	RetryBudgetTracker,
+	resolveRetryBudgetLimits,
+	type RetryBudgetClass,
+	type RetryBudgetLimits,
+} from "./lib/request/retry-budget.js";
 import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
 import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
+import {
+	buildBeginnerChecklist,
+	buildBeginnerDoctorFindings,
+	recommendBeginnerNextAction,
+	summarizeBeginnerAccounts,
+	type BeginnerAccountSnapshot,
+	type BeginnerDiagnosticSeverity,
+	type BeginnerRuntimeSnapshot,
+} from "./lib/ui/beginner.js";
 import {
 	getModelFamily,
 	getCodexInstructions,
@@ -185,7 +206,27 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let accountManagerPromise: Promise<AccountManager> | null = null;
 	let loaderMutex: Promise<void> | null = null;
 	let startupPrewarmTriggered = false;
+	let startupPreflightShown = false;
+	let beginnerSafeModeEnabled = false;
 	const MIN_BACKOFF_MS = 100;
+
+	type SelectionSnapshot = {
+		timestamp: number;
+		family: ModelFamily;
+		model: string | null;
+		selectedAccountIndex: number | null;
+		quotaKey: string;
+		explainability: AccountSelectionExplainability[];
+	};
+
+	const createRetryBudgetUsage = (): Record<RetryBudgetClass, number> => ({
+		authRefresh: 0,
+		network: 0,
+		server: 0,
+		rateLimitShort: 0,
+		rateLimitGlobal: 0,
+		emptyResponse: 0,
+	});
 
 	type RuntimeMetrics = {
 		startedAt: number;
@@ -199,8 +240,18 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		emptyResponseRetries: number;
 		accountRotations: number;
 		cumulativeLatencyMs: number;
+		retryBudgetExhaustions: number;
+		retryBudgetUsage: Record<RetryBudgetClass, number>;
+		retryBudgetLimits: RetryBudgetLimits;
+		retryProfile: string;
+		lastRetryBudgetExhaustedClass: RetryBudgetClass | null;
+		lastRetryBudgetReason: string | null;
 		lastRequestAt: number | null;
 		lastError: string | null;
+		lastErrorCategory: string | null;
+		lastSelectedAccountIndex: number | null;
+		lastQuotaKey: string | null;
+		lastSelectionSnapshot: SelectionSnapshot | null;
 	};
 
 	const runtimeMetrics: RuntimeMetrics = {
@@ -215,8 +266,18 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		emptyResponseRetries: 0,
 		accountRotations: 0,
 		cumulativeLatencyMs: 0,
+		retryBudgetExhaustions: 0,
+		retryBudgetUsage: createRetryBudgetUsage(),
+		retryBudgetLimits: resolveRetryBudgetLimits("balanced"),
+		retryProfile: "balanced",
+		lastRetryBudgetExhaustedClass: null,
+		lastRetryBudgetReason: null,
 		lastRequestAt: null,
 		lastError: null,
+		lastErrorCategory: null,
+		lastSelectedAccountIndex: null,
+		lastQuotaKey: null,
+		lastSelectionSnapshot: null,
 	};
 
 		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
@@ -1049,22 +1110,393 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		const formatCommandAccountLabel = (
-			account: { email?: string; accountId?: string; accountLabel?: string } | undefined,
+			account: {
+				email?: string;
+				accountId?: string;
+				accountLabel?: string;
+				accountTags?: string[];
+				accountNote?: string;
+			} | undefined,
 			index: number,
 		): string => {
 			const email = account?.email?.trim();
 			const workspace = account?.accountLabel?.trim();
 			const accountId = formatAccountIdForDisplay(account?.accountId);
+			const tags =
+				Array.isArray(account?.accountTags)
+					? account.accountTags
+							.filter((tag): tag is string => typeof tag === "string")
+							.map((tag) => tag.trim().toLowerCase())
+							.filter((tag) => tag.length > 0)
+					: [];
 			const details: string[] = [];
 			if (email) details.push(email);
 			if (workspace) details.push(`workspace:${workspace}`);
 			if (accountId) details.push(`id:${accountId}`);
+			if (tags.length > 0) details.push(`tags:${tags.join(",")}`);
 
 			if (details.length === 0) {
 				return `Account ${index + 1}`;
 			}
 
 			return `Account ${index + 1} (${details.join(", ")})`;
+		};
+
+		const normalizeAccountTags = (raw: string): string[] => {
+			return Array.from(
+				new Set(
+					raw
+						.split(",")
+						.map((entry) => entry.trim().toLowerCase())
+						.filter((entry) => entry.length > 0),
+				),
+			);
+		};
+
+		const supportsInteractiveMenus = (): boolean => {
+			if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+			if (process.env.OPENCODE_TUI === "1") return false;
+			if (process.env.OPENCODE_DESKTOP === "1") return false;
+			if (process.env.TERM_PROGRAM === "opencode") return false;
+			return true;
+		};
+
+		const promptAccountIndexSelection = async (
+			ui: UiRuntimeOptions,
+			storage: AccountStorageV3,
+			title: string,
+		): Promise<number | null> => {
+			if (!supportsInteractiveMenus()) return null;
+			try {
+				const { select } = await import("./lib/ui/select.js");
+				const selected = await select<number>(
+					storage.accounts.map((account, index) => ({
+						label: formatCommandAccountLabel(account, index),
+						value: index,
+					})),
+					{
+						message: title,
+						subtitle: "Select account index",
+						help: "Up/Down select | Enter confirm | Esc cancel",
+						clearScreen: true,
+						variant: ui.v2Enabled ? "codex" : "legacy",
+						theme: ui.theme,
+					},
+				);
+				return typeof selected === "number" ? selected : null;
+			} catch {
+				return null;
+			}
+		};
+
+		const toBeginnerAccountSnapshots = (
+			storage: AccountStorageV3,
+			activeIndex: number,
+			now: number,
+		): BeginnerAccountSnapshot[] => {
+			return storage.accounts.map((account, index) => ({
+				index,
+				label: formatCommandAccountLabel(account, index),
+				accountLabel: account.accountLabel,
+				enabled: account.enabled !== false,
+				isActive: index === activeIndex,
+				rateLimitedUntil: getRateLimitResetTimeForFamily(account, now, "codex"),
+				coolingDownUntil:
+					typeof account.coolingDownUntil === "number"
+						? account.coolingDownUntil
+						: null,
+			}));
+		};
+
+		const getBeginnerRuntimeSnapshot = (): BeginnerRuntimeSnapshot => ({
+			totalRequests: runtimeMetrics.totalRequests,
+			failedRequests: runtimeMetrics.failedRequests,
+			rateLimitedResponses: runtimeMetrics.rateLimitedResponses,
+			authRefreshFailures: runtimeMetrics.authRefreshFailures,
+			serverErrors: runtimeMetrics.serverErrors,
+			networkErrors: runtimeMetrics.networkErrors,
+			lastErrorCategory: runtimeMetrics.lastErrorCategory,
+		});
+
+		const formatDoctorSeverity = (
+			ui: UiRuntimeOptions,
+			severity: BeginnerDiagnosticSeverity,
+		): string => {
+			if (severity === "ok") return formatUiBadge(ui, "ok", "success");
+			if (severity === "warning") return formatUiBadge(ui, "warning", "warning");
+			return formatUiBadge(ui, "error", "danger");
+		};
+
+		const formatDoctorSeverityText = (
+			severity: BeginnerDiagnosticSeverity,
+		): string => {
+			if (severity === "ok") return "[ok]";
+			if (severity === "warning") return "[warning]";
+			return "[error]";
+		};
+
+		type SetupWizardChoice =
+			| "checklist"
+			| "next"
+			| "add-account"
+			| "health"
+			| "switch"
+			| "label"
+			| "doctor"
+			| "dashboard"
+			| "metrics"
+			| "backup"
+			| "safe-mode"
+			| "help"
+			| "exit";
+
+		const buildSetupChecklistState = async () => {
+			const storage = await loadAccounts();
+			const now = Date.now();
+			const activeIndex =
+				storage && storage.accounts.length > 0
+					? resolveActiveIndex(storage, "codex")
+					: 0;
+			const snapshots = storage
+				? toBeginnerAccountSnapshots(storage, activeIndex, now)
+				: [];
+			const runtime = getBeginnerRuntimeSnapshot();
+			const checklist = buildBeginnerChecklist(snapshots, now);
+			const summary = summarizeBeginnerAccounts(snapshots, now);
+			const nextAction = recommendBeginnerNextAction({
+				accounts: snapshots,
+				now,
+				runtime,
+			});
+
+			return {
+				now,
+				storage,
+				activeIndex,
+				snapshots,
+				runtime,
+				checklist,
+				summary,
+				nextAction,
+			};
+		};
+
+		const renderSetupChecklistOutput = (
+			ui: UiRuntimeOptions,
+			state: Awaited<ReturnType<typeof buildSetupChecklistState>>,
+		): string => {
+			if (ui.v2Enabled) {
+				const lines: string[] = [
+					...formatUiHeader(ui, "Setup checklist"),
+					formatUiKeyValue(ui, "Accounts", String(state.summary.total)),
+					formatUiKeyValue(
+						ui,
+						"Healthy",
+						String(state.summary.healthy),
+						state.summary.healthy > 0 ? "success" : "warning",
+					),
+					formatUiKeyValue(
+						ui,
+						"Blocked",
+						String(state.summary.blocked),
+						state.summary.blocked > 0 ? "warning" : "muted",
+					),
+					"",
+				];
+				for (const item of state.checklist) {
+					const marker = item.done
+						? getStatusMarker(ui, "ok")
+						: getStatusMarker(ui, "warning");
+					lines.push(
+						formatUiItem(
+							ui,
+							`${marker} ${item.label} - ${item.detail}`,
+							item.done ? "success" : "warning",
+						),
+					);
+					if (item.command) {
+						lines.push(`  ${formatUiKeyValue(ui, "command", item.command, "muted")}`);
+					}
+				}
+				lines.push("");
+				lines.push(...formatUiSection(ui, "Recommended next step"));
+				lines.push(formatUiItem(ui, state.nextAction, "accent"));
+				lines.push(formatUiItem(ui, "Guided wizard: codex-setup --wizard", "muted"));
+				return lines.join("\n");
+			}
+
+			const lines: string[] = [
+				"Setup Checklist:",
+				`Accounts: ${state.summary.total}`,
+				`Healthy accounts: ${state.summary.healthy}`,
+				`Blocked accounts: ${state.summary.blocked}`,
+				"",
+			];
+			for (const item of state.checklist) {
+				const marker = item.done ? "[x]" : "[ ]";
+				lines.push(`${marker} ${item.label} - ${item.detail}`);
+				if (item.command) lines.push(`    command: ${item.command}`);
+			}
+			lines.push("");
+			lines.push(`Recommended next step: ${state.nextAction}`);
+			lines.push("Guided wizard: codex-setup --wizard");
+			return lines.join("\n");
+		};
+
+		const runSetupWizard = async (
+			ui: UiRuntimeOptions,
+			state: Awaited<ReturnType<typeof buildSetupChecklistState>>,
+		): Promise<string> => {
+			if (!supportsInteractiveMenus()) {
+				return [
+					ui.v2Enabled
+						? formatUiItem(
+								ui,
+								"Interactive wizard mode is unavailable in this session.",
+								"warning",
+						  )
+						: "Interactive wizard mode is unavailable in this session.",
+					ui.v2Enabled
+						? formatUiItem(ui, "Showing checklist view instead.", "muted")
+						: "Showing checklist view instead.",
+					"",
+					renderSetupChecklistOutput(ui, state),
+				].join("\n");
+			}
+
+			try {
+				const { select } = await import("./lib/ui/select.js");
+				const labels: Record<Exclude<SetupWizardChoice, "exit">, string> = {
+					checklist: "Show setup checklist",
+					next: "Show best next action",
+					"add-account": "Add account now",
+					health: "Run health check",
+					switch: "Switch active account",
+					label: "Set account label",
+					doctor: "Run doctor diagnostics",
+					dashboard: "Open live dashboard",
+					metrics: "Open runtime metrics",
+					backup: "Backup accounts",
+					"safe-mode": "Enable beginner safe mode",
+					help: "Open command help",
+				};
+				const commandMap: Record<Exclude<SetupWizardChoice, "checklist" | "next" | "exit">, string> = {
+					"add-account": "opencode auth login",
+					health: "codex-health",
+					switch: "codex-switch index=2",
+					label: "codex-label index=2 label=\"Work\"",
+					doctor: "codex-doctor",
+					dashboard: "codex-dashboard",
+					metrics: "codex-metrics",
+					backup: "codex-export <path>",
+					"safe-mode": "set CODEX_AUTH_BEGINNER_SAFE_MODE=1",
+					help: "codex-help",
+				};
+
+				const choice = await select<SetupWizardChoice>(
+					[
+						{ label: "Setup wizard", value: "exit", kind: "heading" },
+						{ label: labels.checklist, value: "checklist", color: "cyan" },
+						{ label: labels.next, value: "next", color: "green" },
+						{ label: labels["add-account"], value: "add-account", color: "cyan" },
+						{ label: labels.health, value: "health", color: "cyan" },
+						{ label: labels.switch, value: "switch", color: "cyan" },
+						{ label: labels.label, value: "label", color: "cyan" },
+						{ label: labels.doctor, value: "doctor", color: "yellow" },
+						{ label: labels.dashboard, value: "dashboard", color: "cyan" },
+						{ label: labels.metrics, value: "metrics", color: "cyan" },
+						{ label: labels.backup, value: "backup", color: "yellow" },
+						{ label: labels["safe-mode"], value: "safe-mode", color: "yellow" },
+						{ label: labels.help, value: "help", color: "cyan" },
+						{ label: "", value: "exit", separator: true },
+						{ label: "Exit wizard", value: "exit", color: "red" },
+					],
+					{
+						message: "Beginner setup wizard",
+						subtitle: `Accounts: ${state.summary.total} | Healthy: ${state.summary.healthy} | Blocked: ${state.summary.blocked}`,
+						help: "Up/Down select | Enter confirm | Esc exit",
+						clearScreen: true,
+						variant: ui.v2Enabled ? "codex" : "legacy",
+						theme: ui.theme,
+					},
+				);
+
+				if (!choice || choice === "exit") {
+					return ui.v2Enabled
+						? [
+								...formatUiHeader(ui, "Setup wizard"),
+								"",
+								formatUiItem(ui, "Wizard closed.", "muted"),
+								formatUiItem(ui, `Next: ${state.nextAction}`, "accent"),
+						  ].join("\n")
+						: `Setup wizard closed.\n\nNext: ${state.nextAction}`;
+				}
+
+				if (choice === "checklist") {
+					return renderSetupChecklistOutput(ui, state);
+				}
+				if (choice === "next") {
+					return ui.v2Enabled
+						? [
+								...formatUiHeader(ui, "Setup wizard"),
+								"",
+								formatUiItem(ui, "Best next action", "accent"),
+								formatUiItem(ui, state.nextAction, "success"),
+						  ].join("\n")
+						: `Best next action:\n${state.nextAction}`;
+				}
+
+				const command = commandMap[choice];
+				const selectedLabel = labels[choice];
+				if (ui.v2Enabled) {
+					return [
+						...formatUiHeader(ui, "Setup wizard"),
+						"",
+						formatUiItem(ui, `Selected: ${selectedLabel}`, "accent"),
+						formatUiItem(ui, `Run: ${command}`, "success"),
+						formatUiItem(ui, "Run codex-setup --wizard again to choose another step.", "muted"),
+					].join("\n");
+				}
+				return [
+					"Setup wizard:",
+					`Selected: ${selectedLabel}`,
+					`Run: ${command}`,
+					"",
+					"Run codex-setup --wizard again to choose another step.",
+				].join("\n");
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				return [
+					ui.v2Enabled
+						? formatUiItem(ui, `Wizard failed to open: ${reason}`, "warning")
+						: `Wizard failed to open: ${reason}`,
+					ui.v2Enabled
+						? formatUiItem(ui, "Showing checklist view instead.", "muted")
+						: "Showing checklist view instead.",
+					"",
+					renderSetupChecklistOutput(ui, state),
+				].join("\n");
+			}
+		};
+
+		const runStartupPreflight = async (): Promise<void> => {
+			if (startupPreflightShown) return;
+			startupPreflightShown = true;
+			try {
+				const state = await buildSetupChecklistState();
+				const message =
+					`Codex preflight: healthy ${state.summary.healthy}/${state.summary.total}, ` +
+					`blocked ${state.summary.blocked}, rate-limited ${state.summary.rateLimited}. ` +
+					`Next: ${state.nextAction}`;
+				await showToast(message, state.summary.healthy > 0 ? "info" : "warning");
+				logInfo(message);
+			} catch (error) {
+				logDebug(
+					`[${PLUGIN_NAME}] Startup preflight skipped: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+			}
 		};
 
 		const invalidateAccountManagerCache = (): void => {
@@ -1216,11 +1648,29 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const fastSessionEnabled = getFastSession(pluginConfig);
 				const fastSessionStrategy = getFastSessionStrategy(pluginConfig);
 				const fastSessionMaxInputItems = getFastSessionMaxInputItems(pluginConfig);
+				const beginnerSafeMode = getBeginnerSafeMode(pluginConfig);
+				beginnerSafeModeEnabled = beginnerSafeMode;
+				const retryProfile = beginnerSafeMode
+					? "conservative"
+					: getRetryProfile(pluginConfig);
+				const retryBudgetOverrides = beginnerSafeMode
+					? {}
+					: getRetryBudgetOverrides(pluginConfig);
+				const retryBudgetLimits = resolveRetryBudgetLimits(
+					retryProfile,
+					retryBudgetOverrides,
+				);
+				runtimeMetrics.retryProfile = retryProfile;
+				runtimeMetrics.retryBudgetLimits = { ...retryBudgetLimits };
 				const tokenRefreshSkewMs = getTokenRefreshSkewMs(pluginConfig);
 				const rateLimitToastDebounceMs = getRateLimitToastDebounceMs(pluginConfig);
-				const retryAllAccountsRateLimited = getRetryAllAccountsRateLimited(pluginConfig);
+				const retryAllAccountsRateLimited = beginnerSafeMode
+					? false
+					: getRetryAllAccountsRateLimited(pluginConfig);
 				const retryAllAccountsMaxWaitMs = getRetryAllAccountsMaxWaitMs(pluginConfig);
-				const retryAllAccountsMaxRetries = getRetryAllAccountsMaxRetries(pluginConfig);
+				const retryAllAccountsMaxRetries = beginnerSafeMode
+					? Math.min(1, getRetryAllAccountsMaxRetries(pluginConfig))
+					: getRetryAllAccountsMaxRetries(pluginConfig);
 				const unsupportedCodexPolicy = getUnsupportedCodexPolicy(pluginConfig);
 				const fallbackOnUnsupportedCodexModel = unsupportedCodexPolicy === "fallback";
 				const fallbackToGpt52OnUnsupportedGpt53 =
@@ -1246,6 +1696,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						textVerbosity: "low",
 						fastSessionStrategy,
 						fastSessionMaxInputItems,
+					});
+				}
+				if (beginnerSafeMode) {
+					logInfo("Beginner safe mode enabled", {
+						retryProfile,
+						retryAllAccountsRateLimited,
+						retryAllAccountsMaxRetries,
 					});
 				}
 
@@ -1275,6 +1732,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}).catch((err) => {
 				logDebug(`Update check failed: ${err instanceof Error ? err.message : String(err)}`);
 			});
+			await runStartupPreflight();
 
 
 				// Return SDK configuration
@@ -1410,6 +1868,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
 							);
 							runtimeMetrics.lastRequestAt = Date.now();
+							const retryBudget = new RetryBudgetTracker(retryBudgetLimits);
+							const consumeRetryBudget = (
+								bucket: RetryBudgetClass,
+								reason: string,
+							): boolean => {
+								if (retryBudget.consume(bucket)) {
+									runtimeMetrics.retryBudgetUsage[bucket] += 1;
+									return true;
+								}
+								runtimeMetrics.retryBudgetExhaustions += 1;
+								runtimeMetrics.lastRetryBudgetExhaustedClass = bucket;
+								runtimeMetrics.lastRetryBudgetReason = reason;
+								runtimeMetrics.lastErrorCategory = "retry-budget";
+								runtimeMetrics.lastError = `Retry budget exhausted (${bucket}): ${reason}`;
+								logWarn(`Retry budget exhausted for ${bucket}`, {
+									reason,
+									profile: retryProfile,
+									limits: retryBudget.getLimits(),
+									usage: retryBudget.getUsage(),
+								});
+								return false;
+							};
 
 					const abortSignal = requestInit?.signal ?? init?.signal ?? null;
 					const sleep = (ms: number): Promise<void> =>
@@ -1480,11 +1960,32 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let restartAccountTraversalWithFallback = false;
 
 while (attempted.size < Math.max(1, accountCount)) {
+				const selectionExplainability = accountManager.getSelectionExplainability(
+					modelFamily,
+					model,
+					Date.now(),
+				);
+				runtimeMetrics.lastSelectionSnapshot = {
+					timestamp: Date.now(),
+					family: modelFamily,
+					model: model ?? null,
+					selectedAccountIndex: null,
+					quotaKey,
+					explainability: selectionExplainability,
+				};
 				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model, { pidOffsetEnabled });
 				if (!account || attempted.has(account.index)) {
 					break;
 				}
 							attempted.add(account.index);
+							runtimeMetrics.lastSelectedAccountIndex = account.index;
+							runtimeMetrics.lastQuotaKey = quotaKey;
+							if (runtimeMetrics.lastSelectionSnapshot) {
+								runtimeMetrics.lastSelectionSnapshot = {
+									...runtimeMetrics.lastSelectionSnapshot,
+									selectedAccountIndex: account.index,
+								};
+							}
 							// Log account selection for debugging rotation
 							logDebug(
 								`Using account ${account.index + 1}/${accountCount}: ${account.email ?? "unknown"} for ${modelFamily}`,
@@ -1503,10 +2004,32 @@ while (attempted.size < Math.max(1, accountCount)) {
 						}
 			} catch (err) {
 				logDebug(`[${PLUGIN_NAME}] Auth refresh failed for account: ${(err as Error)?.message ?? String(err)}`);
+				if (
+					!consumeRetryBudget(
+						"authRefresh",
+						`Auth refresh failed for account ${account.index + 1}`,
+					)
+				) {
+					return new Response(
+						JSON.stringify({
+							error: {
+								message:
+									"Auth refresh retry budget exhausted for this request. Try again or switch accounts.",
+							},
+						}),
+						{
+							status: 503,
+							headers: {
+								"content-type": "application/json; charset=utf-8",
+							},
+						},
+					);
+				}
 				runtimeMetrics.authRefreshFailures++;
 				runtimeMetrics.failedRequests++;
 				runtimeMetrics.accountRotations++;
 				runtimeMetrics.lastError = (err as Error)?.message ?? String(err);
+				runtimeMetrics.lastErrorCategory = "auth-refresh";
 				const failures = accountManager.incrementAuthFailures(account);
 				const accountLabel = formatAccountLabel(account, account.index);
 				
@@ -1585,6 +2108,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									runtimeMetrics.accountRotations++;
 									runtimeMetrics.lastError =
 										`Local token bucket depleted for account ${account.index + 1} (${modelFamily}${model ? `:${model}` : ""})`;
+									runtimeMetrics.lastErrorCategory = "rate-limit-local";
 									logWarn(
 										`Skipping account ${account.index + 1}: local token bucket depleted for ${modelFamily}${model ? `:${model}` : ""}`,
 									);
@@ -1624,10 +2148,33 @@ while (attempted.size < Math.max(1, accountCount)) {
 				} catch (networkError) {
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
+								if (
+									!consumeRetryBudget(
+										"network",
+										`Network error on account ${account.index + 1}: ${errorMsg}`,
+									)
+								) {
+									accountManager.refundToken(account, modelFamily, model);
+									return new Response(
+										JSON.stringify({
+											error: {
+												message:
+													"Network retry budget exhausted for this request. Try again in a moment.",
+											},
+										}),
+										{
+											status: 503,
+											headers: {
+												"content-type": "application/json; charset=utf-8",
+											},
+										},
+									);
+								}
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.networkErrors++;
 								runtimeMetrics.accountRotations++;
 								runtimeMetrics.lastError = errorMsg;
+								runtimeMetrics.lastErrorCategory = "network";
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
 								break;
@@ -1671,6 +2218,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				accountManager.recordFailure(account, modelFamily, model);
 				account.lastSwitchReason = "rotation";
 				runtimeMetrics.lastError = `Unsupported model on account ${account.index + 1}: ${blockedModel}`;
+				runtimeMetrics.lastErrorCategory = "unsupported-model";
 				logWarn(
 					`Model ${blockedModel} is unsupported for account ${account.index + 1}. Trying next account/workspace before fallback.`,
 					{
@@ -1724,6 +2272,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					body: JSON.stringify(transformedBody),
 				};
 				runtimeMetrics.lastError = `Model fallback: ${previousModel} -> ${model}`;
+				runtimeMetrics.lastErrorCategory = "model-fallback";
 				logWarn(
 					`Model ${previousModel} is unsupported for this ChatGPT account. Falling back to ${model}.`,
 					{
@@ -1747,6 +2296,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				const blockedModel =
 					unsupportedModelInfo.unsupportedModel ?? model ?? "requested model";
 				runtimeMetrics.lastError = `Unsupported model (strict): ${blockedModel}`;
+				runtimeMetrics.lastErrorCategory = "unsupported-model";
 				logWarn(
 					`Model ${blockedModel} is unsupported for this ChatGPT account. Strict policy blocks automatic fallback.`,
 					{
@@ -1782,8 +2332,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtimeMetrics.serverErrors++;
 						runtimeMetrics.accountRotations++;
 						runtimeMetrics.lastError = `HTTP ${response.status}`;
+						runtimeMetrics.lastErrorCategory = "server";
 						accountManager.refundToken(account, modelFamily, model);
 						accountManager.recordFailure(account, modelFamily, model);
+						if (
+							!consumeRetryBudget(
+								"server",
+								`Server error ${response.status} on account ${account.index + 1}`,
+							)
+						) {
+							return errorResponse;
+						}
 						break;
 					}
 
@@ -1796,7 +2355,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 																														);
 																														const waitLabel = formatWaitTime(delayMs);
 
-																														if (delayMs <= RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS) {
+																														if (
+																															delayMs <= RATE_LIMIT_SHORT_RETRY_THRESHOLD_MS &&
+																															consumeRetryBudget(
+																																"rateLimitShort",
+																																`Short 429 retry for account ${account.index + 1} after ${delayMs}ms`,
+																															)
+																														) {
 																																if (
 																																	accountManager.shouldShowAccountToast(
 																																		account.index,
@@ -1825,6 +2390,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				accountManager.recordRateLimit(account, modelFamily, model);
 				account.lastSwitchReason = "rate-limit";
 				runtimeMetrics.accountRotations++;
+				runtimeMetrics.lastErrorCategory = "rate-limit";
 				accountManager.saveToDiskDebounced();
 						logWarn(
 							`Rate limited. Rotating account ${account.index + 1} (${account.email ?? "unknown"}).`,
@@ -1848,6 +2414,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 																													}
 																													runtimeMetrics.failedRequests++;
 																													runtimeMetrics.lastError = `HTTP ${response.status}`;
+																													runtimeMetrics.lastErrorCategory = "http";
 																													return errorResponse;
 																											}
 
@@ -1860,6 +2427,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					if (!successResponse.ok) {
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.lastError = `HTTP ${successResponse.status}`;
+						runtimeMetrics.lastErrorCategory = "http";
 						return successResponse;
 					}
 
@@ -1869,7 +2437,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const bodyText = await clonedResponse.text();
 							const parsedBody = bodyText ? JSON.parse(bodyText) as unknown : null;
 							if (isEmptyResponse(parsedBody)) {
-								if (emptyResponseRetries < emptyResponseMaxRetries) {
+								if (
+									emptyResponseRetries < emptyResponseMaxRetries &&
+									consumeRetryBudget(
+										"emptyResponse",
+										`Empty response retry ${emptyResponseRetries + 1}/${emptyResponseMaxRetries}`,
+									)
+								) {
 									emptyResponseRetries++;
 									runtimeMetrics.emptyResponseRetries++;
 									logWarn(`Empty response received (attempt ${emptyResponseRetries}/${emptyResponseMaxRetries}). Retrying...`);
@@ -1893,6 +2467,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					accountManager.recordSuccess(account, modelFamily, model);
 					runtimeMetrics.successfulRequests++;
 					runtimeMetrics.lastError = null;
+					runtimeMetrics.lastErrorCategory = null;
 						return successResponse;
 																								}
 										if (restartAccountTraversalWithFallback) {
@@ -1913,7 +2488,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 									waitMs > 0 &&
 									(retryAllAccountsMaxWaitMs === 0 ||
 										waitMs <= retryAllAccountsMaxWaitMs) &&
-									allRateLimitedRetries < retryAllAccountsMaxRetries
+									allRateLimitedRetries < retryAllAccountsMaxRetries &&
+									consumeRetryBudget(
+										"rateLimitGlobal",
+										`All accounts rate-limited wait ${waitMs}ms`,
+									)
 								) {
 									const countdownMessage = `All ${count} account(s) rate-limited. Waiting`;
 									await sleepWithCountdown(addJitter(waitMs, 0.2), countdownMessage);
@@ -1930,6 +2509,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 											: `All ${count} account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.lastError = message;
+								runtimeMetrics.lastErrorCategory = waitMs > 0 ? "rate-limit" : "account-failure";
 								return new Response(JSON.stringify({ error: { message } }), {
 									status: waitMs > 0 ? 429 : 503,
 											headers: {
@@ -2953,11 +3533,17 @@ while (attempted.size < Math.max(1, accountCount)) {
                         "codex-list": tool({
                                 description:
                                         "List all Codex OAuth accounts and the current active index.",
-                                args: {},
-                                async execute() {
+                                args: {
+					tag: tool.schema
+						.string()
+						.optional()
+						.describe("Optional tag filter (e.g., work, personal, team-a)."),
+				},
+                                async execute({ tag }: { tag?: string } = {}) {
 					const ui = resolveUiRuntime();
                                         const storage = await loadAccounts();
                                         const storePath = getStoragePath();
+					const normalizedTag = tag?.trim().toLowerCase() ?? "";
 
                                         if (!storage || storage.accounts.length === 0) {
 						if (ui.v2Enabled) {
@@ -2966,6 +3552,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 								"",
 								formatUiItem(ui, "No accounts configured.", "warning"),
 								formatUiItem(ui, "Run: opencode auth login", "accent"),
+								formatUiItem(ui, "Setup checklist: codex-setup"),
+								formatUiItem(ui, "Command guide: codex-help"),
 								formatUiKeyValue(ui, "Storage", storePath, "muted"),
 							].join("\n");
 						}
@@ -2974,6 +3562,8 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         "",
                                                         "Add accounts:",
                                                         "  opencode auth login",
+							"  codex-setup",
+							"  codex-help",
                                                         "",
                                                         `Storage: ${storePath}`,
                                                 ].join("\n");
@@ -2981,16 +3571,39 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					const now = Date.now();
 					const activeIndex = resolveActiveIndex(storage, "codex");
+					const filteredEntries = storage.accounts
+						.map((account, index) => ({ account, index }))
+						.filter(({ account }) => {
+							if (!normalizedTag) return true;
+							const tags = Array.isArray(account.accountTags)
+								? account.accountTags.map((entry) => entry.trim().toLowerCase())
+								: [];
+							return tags.includes(normalizedTag);
+						});
+					if (normalizedTag && filteredEntries.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Codex accounts"),
+								"",
+								formatUiItem(ui, `No accounts found for tag: ${normalizedTag}`, "warning"),
+								formatUiItem(ui, "Use codex-tag index=2 tags=\"work,team-a\" to add tags.", "accent"),
+							].join("\n");
+						}
+						return `No accounts found for tag: ${normalizedTag}\n\nUse codex-tag index=2 tags="work,team-a" to add tags.`;
+					}
 					if (ui.v2Enabled) {
 						const lines: string[] = [
 							...formatUiHeader(ui, "Codex accounts"),
-							formatUiKeyValue(ui, "Total", String(storage.accounts.length)),
+							formatUiKeyValue(ui, "Total", String(filteredEntries.length)),
+							normalizedTag
+								? formatUiKeyValue(ui, "Filter tag", normalizedTag, "accent")
+								: formatUiKeyValue(ui, "Filter tag", "none", "muted"),
 							formatUiKeyValue(ui, "Storage", storePath, "muted"),
 							"",
 							...formatUiSection(ui, "Accounts"),
 						];
 
-						storage.accounts.forEach((account, index) => {
+						filteredEntries.forEach(({ account, index }) => {
 							const label = formatCommandAccountLabel(account, index);
 							const badges: string[] = [];
 							if (index === activeIndex) badges.push(formatUiBadge(ui, "current", "accent"));
@@ -3016,9 +3629,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push("");
 						lines.push(...formatUiSection(ui, "Commands"));
 						lines.push(formatUiItem(ui, "Add account: opencode auth login", "accent"));
-						lines.push(formatUiItem(ui, "Switch account: codex-switch <index>"));
+						lines.push(formatUiItem(ui, "Switch account: codex-switch index=2"));
 						lines.push(formatUiItem(ui, "Detailed status: codex-status"));
+						lines.push(formatUiItem(ui, "Live dashboard: codex-dashboard"));
 						lines.push(formatUiItem(ui, "Runtime metrics: codex-metrics"));
+						lines.push(formatUiItem(ui, "Set account tags: codex-tag index=2 tags=\"work,team-a\""));
+						lines.push(formatUiItem(ui, "Set account note: codex-note index=2 note=\"weekday primary\""));
+						lines.push(formatUiItem(ui, "Doctor checks: codex-doctor"));
+						lines.push(formatUiItem(ui, "Onboarding checklist: codex-setup"));
+						lines.push(formatUiItem(ui, "Guided setup wizard: codex-setup --wizard"));
+						lines.push(formatUiItem(ui, "Best next action: codex-next"));
+						lines.push(formatUiItem(ui, "Rename account label: codex-label index=2 label=\"Work\""));
+						lines.push(formatUiItem(ui, "Command guide: codex-help"));
 						return lines.join("\n");
 					}
 					
@@ -3031,12 +3653,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 					};
 					
 					const lines: string[] = [
-						`Codex Accounts (${storage.accounts.length}):`,
+						`Codex Accounts (${filteredEntries.length}):`,
 						"",
 						...buildTableHeader(listTableOptions),
 					];
 
-						storage.accounts.forEach((account, index) => {
+						filteredEntries.forEach(({ account, index }) => {
 							const label = formatCommandAccountLabel(account, index);
 							const statuses: string[] = [];
                                                 const rateLimit = formatRateLimitEntry(
@@ -3056,26 +3678,38 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                 lines.push(buildTableRow([String(index + 1), label, statusText], listTableOptions));
                                         });
 
-                                        lines.push("");
+					lines.push("");
                                         lines.push(`Storage: ${storePath}`);
+					if (normalizedTag) {
+						lines.push(`Filter tag: ${normalizedTag}`);
+					}
                                         lines.push("");
                                         lines.push("Commands:");
                                         lines.push("  - Add account: opencode auth login");
                                         lines.push("  - Switch account: codex-switch");
                                         lines.push("  - Status details: codex-status");
+                                        lines.push("  - Live dashboard: codex-dashboard");
                                         lines.push("  - Runtime metrics: codex-metrics");
+					lines.push("  - Set account tags: codex-tag");
+					lines.push("  - Set account note: codex-note");
+                                        lines.push("  - Doctor checks: codex-doctor");
+                                        lines.push("  - Setup checklist: codex-setup");
+                                        lines.push("  - Guided setup wizard: codex-setup --wizard");
+                                        lines.push("  - Best next action: codex-next");
+                                        lines.push("  - Rename account label: codex-label");
+                                        lines.push("  - Command guide: codex-help");
 
                                         return lines.join("\n");
                                 },
                         }),
                         "codex-switch": tool({
-                                description: "Switch active Codex account by index (1-based).",
+                                description: "Switch active Codex account by index (1-based) or interactive picker when index is omitted.",
                                 args: {
-                                        index: tool.schema.number().describe(
+                                        index: tool.schema.number().optional().describe(
                                                 "Account number to switch to (1-based, e.g., 1 for first account)",
                                         ),
                                 },
-                                async execute({ index }) {
+                                async execute({ index }: { index?: number } = {}) {
 					const ui = resolveUiRuntime();
                                         const storage = await loadAccounts();
                                         if (!storage || storage.accounts.length === 0) {
@@ -3090,7 +3724,39 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                 return "No Codex accounts configured. Run: opencode auth login";
                                         }
 
-                                        const targetIndex = Math.floor((index ?? 0) - 1);
+					let resolvedIndex = index;
+					if (resolvedIndex === undefined) {
+						const selectedIndex = await promptAccountIndexSelection(
+							ui,
+							storage,
+							"Switch account",
+						);
+						if (selectedIndex === null) {
+							if (supportsInteractiveMenus()) {
+								if (ui.v2Enabled) {
+									return [
+										...formatUiHeader(ui, "Switch account"),
+										"",
+										formatUiItem(ui, "No account selected.", "warning"),
+										formatUiItem(ui, "Run again and pick an account, or pass codex-switch index=2.", "muted"),
+									].join("\n");
+								}
+								return "No account selected.";
+							}
+							if (ui.v2Enabled) {
+								return [
+									...formatUiHeader(ui, "Switch account"),
+									"",
+									formatUiItem(ui, "Missing account number.", "warning"),
+									formatUiItem(ui, "Use: codex-switch index=2", "accent"),
+								].join("\n");
+							}
+							return "Missing account number. Use: codex-switch index=2";
+						}
+						resolvedIndex = selectedIndex + 1;
+					}
+
+                                        const targetIndex = Math.floor((resolvedIndex ?? 0) - 1);
                                         if (
                                                 !Number.isFinite(targetIndex) ||
                                                 targetIndex < 0 ||
@@ -3100,11 +3766,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 							return [
 								...formatUiHeader(ui, "Switch account"),
 								"",
-								formatUiItem(ui, `Invalid account number: ${index}`, "danger"),
+								formatUiItem(ui, `Invalid account number: ${resolvedIndex}`, "danger"),
 								formatUiKeyValue(ui, "Valid range", `1-${storage.accounts.length}`, "muted"),
 							].join("\n");
 						}
-                                                return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}`;
+                                                return `Invalid account number: ${resolvedIndex}\n\nValid range: 1-${storage.accounts.length}`;
                                         }
 
                                         const now = Date.now();
@@ -3172,10 +3838,32 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 				const now = Date.now();
 				const activeIndex = resolveActiveIndex(storage, "codex");
+				const explainabilityFamily =
+					runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
+				const explainabilityModel =
+					runtimeMetrics.lastSelectionSnapshot?.model ?? undefined;
+				const managerForExplainability =
+					cachedAccountManager ?? (await AccountManager.loadFromDisk());
+				const explainability = managerForExplainability.getSelectionExplainability(
+					explainabilityFamily,
+					explainabilityModel,
+					now,
+				);
+				const explainabilityByIndex = new Map(
+					explainability.map((entry) => [entry.index, entry]),
+				);
 				if (ui.v2Enabled) {
 					const lines: string[] = [
 						...formatUiHeader(ui, "Account status"),
 						formatUiKeyValue(ui, "Total", String(storage.accounts.length)),
+						formatUiKeyValue(
+							ui,
+							"Selection view",
+							explainabilityModel
+								? `${explainabilityFamily}:${explainabilityModel}`
+								: explainabilityFamily,
+							"muted",
+						),
 						"",
 						...formatUiSection(ui, "Accounts"),
 					];
@@ -3215,6 +3903,28 @@ while (attempted.size < Math.max(1, accountCount)) {
 						});
 						lines.push(formatUiItem(ui, `Account ${index + 1}: ${statuses.join(" | ")}`));
 					});
+
+					lines.push("");
+					lines.push(...formatUiSection(ui, "Selection explainability"));
+					for (const entry of explainability) {
+						const state = entry.eligible ? "eligible" : "blocked";
+						const reasons = entry.reasons.join(", ");
+						lines.push(
+							formatUiItem(
+								ui,
+								`Account ${entry.index + 1}: ${state} | health=${Math.round(entry.healthScore)} | tokens=${entry.tokensAvailable.toFixed(1)} | ${reasons}`,
+							),
+						);
+					}
+
+					const nextAction = recommendBeginnerNextAction({
+						accounts: toBeginnerAccountSnapshots(storage, activeIndex, now),
+						now,
+						runtime: getBeginnerRuntimeSnapshot(),
+					});
+					lines.push("");
+					lines.push(...formatUiSection(ui, "Recommended next step"));
+					lines.push(formatUiItem(ui, nextAction, "accent"));
 
 					return lines.join("\n");
 				}
@@ -3269,6 +3979,28 @@ while (attempted.size < Math.max(1, accountCount)) {
 												lines.push(`  Account ${index + 1}: ${statuses.join(" | ")}`);
 										});
 
+										lines.push("");
+										lines.push(
+											`Selection explainability (${explainabilityModel ? `${explainabilityFamily}:${explainabilityModel}` : explainabilityFamily}):`,
+										);
+										for (const [index] of storage.accounts.entries()) {
+											const details = explainabilityByIndex.get(index);
+											if (!details) continue;
+											const state = details.eligible ? "eligible" : "blocked";
+											lines.push(
+												`  Account ${index + 1}: ${state} | health=${Math.round(details.healthScore)} | tokens=${details.tokensAvailable.toFixed(1)} | ${details.reasons.join(", ")}`,
+											);
+										}
+
+										lines.push("");
+										lines.push(
+											`Recommended next step: ${recommendBeginnerNextAction({
+												accounts: toBeginnerAccountSnapshots(storage, activeIndex, now),
+												now,
+												runtime: getBeginnerRuntimeSnapshot(),
+											})}`,
+										);
+
 										return lines.join("\n");
                                 },
                         }),
@@ -3281,6 +4013,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const uptimeMs = Math.max(0, now - runtimeMetrics.startedAt);
 					const total = runtimeMetrics.totalRequests;
 					const successful = runtimeMetrics.successfulRequests;
+					const refreshMetrics = getRefreshQueueMetrics();
 					const successRate = total > 0 ? ((successful / total) * 100).toFixed(1) : "0.0";
 					const avgLatencyMs =
 						successful > 0
@@ -3306,11 +4039,43 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Auth refresh failures: ${runtimeMetrics.authRefreshFailures}`,
 						`Account rotations: ${runtimeMetrics.accountRotations}`,
 						`Empty-response retries: ${runtimeMetrics.emptyResponseRetries}`,
+						`Retry profile: ${runtimeMetrics.retryProfile}`,
+						`Beginner safe mode: ${beginnerSafeModeEnabled ? "on" : "off"}`,
+						`Retry budget exhaustions: ${runtimeMetrics.retryBudgetExhaustions}`,
+						`Retry budget usage (auth/network/server/short/global/empty): ` +
+							`${runtimeMetrics.retryBudgetUsage.authRefresh}/` +
+							`${runtimeMetrics.retryBudgetUsage.network}/` +
+							`${runtimeMetrics.retryBudgetUsage.server}/` +
+							`${runtimeMetrics.retryBudgetUsage.rateLimitShort}/` +
+							`${runtimeMetrics.retryBudgetUsage.rateLimitGlobal}/` +
+							`${runtimeMetrics.retryBudgetUsage.emptyResponse}`,
+						`Refresh queue (started/success/failed/pending): ` +
+							`${refreshMetrics.started}/` +
+							`${refreshMetrics.succeeded}/` +
+							`${refreshMetrics.failed}/` +
+							`${refreshMetrics.pending}`,
 						`Last upstream request: ${lastRequest}`,
 					];
 
 					if (runtimeMetrics.lastError) {
 						lines.push(`Last error: ${runtimeMetrics.lastError}`);
+					}
+					if (runtimeMetrics.lastErrorCategory) {
+						lines.push(`Last error category: ${runtimeMetrics.lastErrorCategory}`);
+					}
+					if (runtimeMetrics.lastSelectedAccountIndex !== null) {
+						lines.push(`Last selected account: ${runtimeMetrics.lastSelectedAccountIndex + 1}`);
+					}
+					if (runtimeMetrics.lastQuotaKey) {
+						lines.push(`Last quota key: ${runtimeMetrics.lastQuotaKey}`);
+					}
+					if (runtimeMetrics.lastRetryBudgetExhaustedClass) {
+						lines.push(
+							`Last budget exhaustion: ${runtimeMetrics.lastRetryBudgetExhaustedClass}` +
+								(runtimeMetrics.lastRetryBudgetReason
+									? ` (${runtimeMetrics.lastRetryBudgetReason})`
+									: ""),
+						);
 					}
 
 					if (ui.v2Enabled) {
@@ -3328,15 +4093,867 @@ while (attempted.size < Math.max(1, accountCount)) {
 							formatUiKeyValue(ui, "Auth refresh failures", String(runtimeMetrics.authRefreshFailures), "warning"),
 							formatUiKeyValue(ui, "Account rotations", String(runtimeMetrics.accountRotations), "accent"),
 							formatUiKeyValue(ui, "Empty-response retries", String(runtimeMetrics.emptyResponseRetries), "warning"),
+							formatUiKeyValue(ui, "Retry profile", runtimeMetrics.retryProfile, "muted"),
+							formatUiKeyValue(ui, "Beginner safe mode", beginnerSafeModeEnabled ? "on" : "off", beginnerSafeModeEnabled ? "accent" : "muted"),
+							formatUiKeyValue(ui, "Retry budget exhaustions", String(runtimeMetrics.retryBudgetExhaustions), "warning"),
+							formatUiKeyValue(
+								ui,
+								"Retry budget usage",
+								`A${runtimeMetrics.retryBudgetUsage.authRefresh} N${runtimeMetrics.retryBudgetUsage.network} S${runtimeMetrics.retryBudgetUsage.server} RS${runtimeMetrics.retryBudgetUsage.rateLimitShort} RG${runtimeMetrics.retryBudgetUsage.rateLimitGlobal} E${runtimeMetrics.retryBudgetUsage.emptyResponse}`,
+								"muted",
+							),
+							formatUiKeyValue(
+								ui,
+								"Retry budget limits",
+								`A${runtimeMetrics.retryBudgetLimits.authRefresh} N${runtimeMetrics.retryBudgetLimits.network} S${runtimeMetrics.retryBudgetLimits.server} RS${runtimeMetrics.retryBudgetLimits.rateLimitShort} RG${runtimeMetrics.retryBudgetLimits.rateLimitGlobal} E${runtimeMetrics.retryBudgetLimits.emptyResponse}`,
+								"muted",
+							),
+							formatUiKeyValue(
+								ui,
+								"Refresh queue",
+								`started=${refreshMetrics.started} dedup=${refreshMetrics.deduplicated} reuse=${refreshMetrics.rotationReused} success=${refreshMetrics.succeeded} failed=${refreshMetrics.failed} pending=${refreshMetrics.pending}`,
+								"muted",
+							),
 							formatUiKeyValue(ui, "Last upstream request", lastRequest, "muted"),
 						];
 						if (runtimeMetrics.lastError) {
 							styled.push(formatUiKeyValue(ui, "Last error", runtimeMetrics.lastError, "danger"));
 						}
+						if (runtimeMetrics.lastErrorCategory) {
+							styled.push(
+								formatUiKeyValue(ui, "Last error category", runtimeMetrics.lastErrorCategory, "warning"),
+							);
+						}
+						if (runtimeMetrics.lastSelectedAccountIndex !== null) {
+							styled.push(
+								formatUiKeyValue(
+									ui,
+									"Last selected account",
+									String(runtimeMetrics.lastSelectedAccountIndex + 1),
+									"accent",
+								),
+							);
+						}
+						if (runtimeMetrics.lastQuotaKey) {
+							styled.push(formatUiKeyValue(ui, "Last quota key", runtimeMetrics.lastQuotaKey, "muted"));
+						}
+						if (runtimeMetrics.lastRetryBudgetExhaustedClass) {
+							styled.push(
+								formatUiKeyValue(
+									ui,
+									"Last budget exhaustion",
+									runtimeMetrics.lastRetryBudgetReason
+										? `${runtimeMetrics.lastRetryBudgetExhaustedClass} (${runtimeMetrics.lastRetryBudgetReason})`
+										: runtimeMetrics.lastRetryBudgetExhaustedClass,
+									"warning",
+								),
+							);
+						}
 						return Promise.resolve(styled.join("\n"));
 					}
 
 					return Promise.resolve(lines.join("\n"));
+				},
+			}),
+			"codex-help": tool({
+				description: "Beginner-friendly command guide with quickstart and troubleshooting flows.",
+				args: {
+					topic: tool.schema
+						.string()
+						.optional()
+						.describe("Optional topic: setup, switch, health, backup, dashboard, metrics."),
+				},
+				async execute({ topic }) {
+					const ui = resolveUiRuntime();
+					await Promise.resolve();
+					const normalizedTopic = (topic ?? "").trim().toLowerCase();
+					const sections: Array<{ key: string; title: string; lines: string[] }> = [
+						{
+							key: "setup",
+							title: "Quickstart",
+							lines: [
+								"1) Add account: opencode auth login",
+								"2) Verify account health: codex-health",
+								"3) View account list: codex-list",
+								"4) Run checklist: codex-setup",
+								"5) Use guided wizard: codex-setup --wizard",
+								"6) Start requests and monitor: codex-dashboard",
+							],
+						},
+						{
+							key: "switch",
+							title: "Daily account operations",
+							lines: [
+								"List accounts: codex-list",
+								"Switch active account: codex-switch index=2",
+								"Show detailed status: codex-status",
+								"Set account label: codex-label index=2 label=\"Work\"",
+								"Set account tags: codex-tag index=2 tags=\"work,team-a\"",
+								"Set account note: codex-note index=2 note=\"weekday primary\"",
+								"Filter by tag: codex-list tag=\"work\"",
+								"Remove account: codex-remove index=2",
+							],
+						},
+						{
+							key: "health",
+							title: "Health and recovery",
+							lines: [
+								"Verify token health: codex-health",
+								"Refresh all tokens: codex-refresh",
+								"Run diagnostics: codex-doctor",
+								"Run diagnostics with fixes: codex-doctor --fix",
+								"Show best next action: codex-next",
+								"Run guided wizard: codex-setup --wizard",
+							],
+						},
+						{
+							key: "dashboard",
+							title: "Monitoring",
+							lines: [
+								"Live dashboard: codex-dashboard",
+								"Runtime metrics: codex-metrics",
+								"Per-account status detail: codex-status",
+							],
+						},
+						{
+							key: "backup",
+							title: "Backup and migration",
+							lines: [
+								"Export accounts: codex-export <path>",
+								"Auto backup export: codex-export",
+								"Import preview: codex-import <path> --dryRun",
+								"Import apply: codex-import <path>",
+								"Setup checklist: codex-setup",
+							],
+						},
+					];
+
+					const visibleSections =
+						normalizedTopic.length === 0
+							? sections
+							: sections.filter((section) => section.key.includes(normalizedTopic));
+					if (visibleSections.length === 0) {
+						const available = sections.map((section) => section.key).join(", ");
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Codex help"),
+								"",
+								formatUiItem(ui, `Unknown topic: ${normalizedTopic}`, "warning"),
+								formatUiItem(ui, `Available topics: ${available}`, "muted"),
+							].join("\n");
+						}
+						return `Unknown topic: ${normalizedTopic}\n\nAvailable topics: ${available}`;
+					}
+
+					if (ui.v2Enabled) {
+						const lines: string[] = [...formatUiHeader(ui, "Codex help"), ""];
+						for (const section of visibleSections) {
+							lines.push(...formatUiSection(ui, section.title));
+							for (const line of section.lines) {
+								lines.push(formatUiItem(ui, line));
+							}
+							lines.push("");
+						}
+						lines.push(...formatUiSection(ui, "Tips"));
+						lines.push(formatUiItem(ui, "Run codex-setup after adding accounts."));
+						lines.push(formatUiItem(ui, "Use codex-setup --wizard for menu-driven onboarding."));
+						lines.push(formatUiItem(ui, "Use codex-doctor when request failures increase."));
+						return lines.join("\n").trimEnd();
+					}
+
+					const lines: string[] = ["Codex Help:", ""];
+					for (const section of visibleSections) {
+						lines.push(`${section.title}:`);
+						for (const line of section.lines) {
+							lines.push(`  - ${line}`);
+						}
+						lines.push("");
+					}
+					lines.push("Tips:");
+					lines.push("  - Run codex-setup after adding accounts.");
+					lines.push("  - Use codex-setup --wizard for menu-driven onboarding.");
+					lines.push("  - Use codex-doctor when request failures increase.");
+					return lines.join("\n");
+				},
+			}),
+			"codex-setup": tool({
+				description: "Beginner checklist for first-time setup and account readiness.",
+				args: {
+					wizard: tool.schema
+						.boolean()
+						.optional()
+						.describe("Launch menu-driven setup wizard when terminal supports it."),
+				},
+				async execute({ wizard }: { wizard?: boolean } = {}) {
+					const ui = resolveUiRuntime();
+					const state = await buildSetupChecklistState();
+					if (wizard) {
+						return runSetupWizard(ui, state);
+					}
+					return renderSetupChecklistOutput(ui, state);
+				},
+			}),
+			"codex-doctor": tool({
+				description: "Run beginner-friendly diagnostics with clear fixes.",
+				args: {
+					deep: tool.schema
+						.boolean()
+						.optional()
+						.describe("Include technical snapshot details (default: false)."),
+					fix: tool.schema
+						.boolean()
+						.optional()
+						.describe("Apply safe automated fixes (refresh tokens and switch to healthiest eligible account)."),
+				},
+				async execute({ deep, fix }: { deep?: boolean; fix?: boolean } = {}) {
+					const ui = resolveUiRuntime();
+					const storage = await loadAccounts();
+					const now = Date.now();
+					const activeIndex =
+						storage && storage.accounts.length > 0
+							? resolveActiveIndex(storage, "codex")
+							: 0;
+					const snapshots = storage
+						? toBeginnerAccountSnapshots(storage, activeIndex, now)
+						: [];
+					const runtime = getBeginnerRuntimeSnapshot();
+					const summary = summarizeBeginnerAccounts(snapshots, now);
+					const findings = buildBeginnerDoctorFindings({
+						accounts: snapshots,
+						now,
+						runtime,
+					});
+					const nextAction = recommendBeginnerNextAction({ accounts: snapshots, now, runtime });
+					const appliedFixes: string[] = [];
+					const fixErrors: string[] = [];
+
+					if (fix && storage && storage.accounts.length > 0) {
+						let changedByRefresh = false;
+						let refreshedCount = 0;
+						for (const account of storage.accounts) {
+							try {
+								const refreshResult = await queuedRefresh(account.refreshToken);
+								if (refreshResult.type === "success") {
+									account.refreshToken = refreshResult.refresh;
+									account.accessToken = refreshResult.access;
+									account.expiresAt = refreshResult.expires;
+									changedByRefresh = true;
+									refreshedCount += 1;
+								}
+							} catch (error) {
+								fixErrors.push(
+									error instanceof Error ? error.message : String(error),
+								);
+							}
+						}
+						if (changedByRefresh) {
+							try {
+								await saveAccounts(storage);
+								appliedFixes.push(`Refreshed ${refreshedCount} account token(s).`);
+							} catch (error) {
+								fixErrors.push(
+									`Failed to persist refresh updates: ${
+										error instanceof Error ? error.message : String(error)
+									}`,
+								);
+							}
+						}
+
+						try {
+							const managerForFix = await AccountManager.loadFromDisk();
+							const explainability = managerForFix.getSelectionExplainability("codex", undefined, Date.now());
+							const eligible = explainability
+								.filter((entry) => entry.eligible)
+								.sort((a, b) => {
+									if (b.healthScore !== a.healthScore) return b.healthScore - a.healthScore;
+									return b.tokensAvailable - a.tokensAvailable;
+								});
+							const best = eligible[0];
+							if (best) {
+								const currentActive = resolveActiveIndex(storage, "codex");
+								if (best.index !== currentActive) {
+									storage.activeIndex = best.index;
+									storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
+									for (const family of MODEL_FAMILIES) {
+										storage.activeIndexByFamily[family] = best.index;
+									}
+									await saveAccounts(storage);
+									appliedFixes.push(`Switched active account to ${best.index + 1} (best eligible).`);
+								}
+							} else {
+								appliedFixes.push("No eligible account available for auto-switch.");
+							}
+						} catch (error) {
+							fixErrors.push(
+								`Auto-switch evaluation failed: ${
+									error instanceof Error ? error.message : String(error)
+								}`,
+							);
+						}
+
+						if (cachedAccountManager) {
+							const reloadedManager = await AccountManager.loadFromDisk();
+							cachedAccountManager = reloadedManager;
+							accountManagerPromise = Promise.resolve(reloadedManager);
+						}
+					}
+
+					if (ui.v2Enabled) {
+						const lines: string[] = [
+							...formatUiHeader(ui, "Codex doctor"),
+							formatUiKeyValue(ui, "Accounts", String(summary.total)),
+							formatUiKeyValue(ui, "Healthy", String(summary.healthy), summary.healthy > 0 ? "success" : "warning"),
+							formatUiKeyValue(ui, "Blocked", String(summary.blocked), summary.blocked > 0 ? "warning" : "muted"),
+							formatUiKeyValue(ui, "Failure rate", runtime.totalRequests > 0 ? `${Math.round((runtime.failedRequests / runtime.totalRequests) * 100)}%` : "0%"),
+							"",
+							...formatUiSection(ui, "Findings"),
+						];
+
+						for (const finding of findings) {
+							const tone =
+								finding.severity === "ok"
+									? "success"
+									: finding.severity === "warning"
+										? "warning"
+										: "danger";
+							lines.push(
+								formatUiItem(
+									ui,
+									`${formatDoctorSeverity(ui, finding.severity)} ${finding.summary}`,
+									tone,
+								),
+							);
+							lines.push(`  ${formatUiKeyValue(ui, "fix", finding.action, "muted")}`);
+						}
+
+						lines.push("");
+						lines.push(...formatUiSection(ui, "Recommended next step"));
+						lines.push(formatUiItem(ui, nextAction, "accent"));
+						if (fix) {
+							lines.push("");
+							lines.push(...formatUiSection(ui, "Auto-fix"));
+							if (appliedFixes.length === 0) {
+								lines.push(formatUiItem(ui, "No safe fixes were applied.", "muted"));
+							} else {
+								for (const entry of appliedFixes) {
+									lines.push(formatUiItem(ui, entry, "success"));
+								}
+							}
+							for (const error of fixErrors) {
+								lines.push(formatUiItem(ui, error, "warning"));
+							}
+						}
+
+						if (deep) {
+							lines.push("");
+							lines.push(...formatUiSection(ui, "Technical snapshot"));
+							lines.push(formatUiKeyValue(ui, "Storage", getStoragePath(), "muted"));
+							lines.push(
+								formatUiKeyValue(
+									ui,
+									"Runtime failures",
+									`failed=${runtime.failedRequests}, rateLimited=${runtime.rateLimitedResponses}, authRefreshFailed=${runtime.authRefreshFailures}, server=${runtime.serverErrors}, network=${runtime.networkErrors}`,
+									"muted",
+								),
+							);
+						}
+
+						return lines.join("\n");
+					}
+
+					const lines: string[] = [
+						"Codex Doctor:",
+						`Accounts: ${summary.total} (healthy=${summary.healthy}, blocked=${summary.blocked})`,
+						`Failure rate: ${runtime.totalRequests > 0 ? Math.round((runtime.failedRequests / runtime.totalRequests) * 100) : 0}%`,
+						"",
+						"Findings:",
+					];
+					for (const finding of findings) {
+						lines.push(`  ${formatDoctorSeverityText(finding.severity)} ${finding.summary}`);
+						lines.push(`      fix: ${finding.action}`);
+					}
+					lines.push("");
+					lines.push(`Recommended next step: ${nextAction}`);
+					if (fix) {
+						lines.push("");
+						lines.push("Auto-fix:");
+						if (appliedFixes.length === 0) {
+							lines.push("  - No safe fixes were applied.");
+						} else {
+							for (const entry of appliedFixes) {
+								lines.push(`  - ${entry}`);
+							}
+						}
+						for (const error of fixErrors) {
+							lines.push(`  - warning: ${error}`);
+						}
+					}
+					if (deep) {
+						lines.push("");
+						lines.push("Technical snapshot:");
+						lines.push(`  Storage: ${getStoragePath()}`);
+						lines.push(
+							`  Runtime failures: failed=${runtime.failedRequests}, rateLimited=${runtime.rateLimitedResponses}, authRefreshFailed=${runtime.authRefreshFailures}, server=${runtime.serverErrors}, network=${runtime.networkErrors}`,
+						);
+					}
+					return lines.join("\n");
+				},
+			}),
+			"codex-next": tool({
+				description: "Show the single most recommended next action for beginners.",
+				args: {},
+				async execute() {
+					const ui = resolveUiRuntime();
+					const storage = await loadAccounts();
+					const now = Date.now();
+					const activeIndex =
+						storage && storage.accounts.length > 0
+							? resolveActiveIndex(storage, "codex")
+							: 0;
+					const snapshots = storage
+						? toBeginnerAccountSnapshots(storage, activeIndex, now)
+						: [];
+					const action = recommendBeginnerNextAction({
+						accounts: snapshots,
+						now,
+						runtime: getBeginnerRuntimeSnapshot(),
+					});
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Recommended next action"),
+							"",
+							formatUiItem(ui, action, "accent"),
+						].join("\n");
+					}
+					return `Recommended next action:\n${action}`;
+				},
+			}),
+			"codex-label": tool({
+				description: "Set or clear a beginner-friendly display label for an account (interactive picker when index is omitted).",
+				args: {
+					index: tool.schema.number().optional().describe(
+						"Account number to update (1-based, e.g., 1 for first account)",
+					),
+					label: tool.schema.string().describe(
+						"Display label. Use an empty string to clear (e.g., Work, Personal, Team A)",
+					),
+				},
+				async execute({ index, label }: { index?: number; label: string }) {
+					const ui = resolveUiRuntime();
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Set account label"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
+						return "No Codex accounts configured. Run: opencode auth login";
+					}
+
+					let resolvedIndex = index;
+					if (resolvedIndex === undefined) {
+						const selectedIndex = await promptAccountIndexSelection(ui, storage, "Set account label");
+						if (selectedIndex === null) {
+							if (supportsInteractiveMenus()) {
+								if (ui.v2Enabled) {
+									return [
+										...formatUiHeader(ui, "Set account label"),
+										"",
+										formatUiItem(ui, "No account selected.", "warning"),
+										formatUiItem(ui, "Run again and pick an account, or pass codex-label index=2 label=\"Work\".", "muted"),
+									].join("\n");
+								}
+								return "No account selected.";
+							}
+							if (ui.v2Enabled) {
+								return [
+									...formatUiHeader(ui, "Set account label"),
+									"",
+									formatUiItem(ui, "Missing account number.", "warning"),
+									formatUiItem(ui, "Use: codex-label index=2 label=\"Work\"", "accent"),
+								].join("\n");
+							}
+							return "Missing account number. Use: codex-label index=2 label=\"Work\"";
+						}
+						resolvedIndex = selectedIndex + 1;
+					}
+
+					const targetIndex = Math.floor((resolvedIndex ?? 0) - 1);
+					if (
+						!Number.isFinite(targetIndex) ||
+						targetIndex < 0 ||
+						targetIndex >= storage.accounts.length
+					) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Set account label"),
+								"",
+								formatUiItem(ui, `Invalid account number: ${resolvedIndex}`, "danger"),
+								formatUiKeyValue(ui, "Valid range", `1-${storage.accounts.length}`, "muted"),
+							].join("\n");
+						}
+						return `Invalid account number: ${resolvedIndex}\n\nValid range: 1-${storage.accounts.length}`;
+					}
+
+					const normalizedLabel = (label ?? "").trim().replace(/\s+/g, " ");
+					if (normalizedLabel.length > 60) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Set account label"),
+								"",
+								formatUiItem(ui, "Label is too long (max 60 characters).", "danger"),
+							].join("\n");
+						}
+						return "Label is too long (max 60 characters).";
+					}
+
+					const account = storage.accounts[targetIndex];
+					if (!account) {
+						return `Account ${resolvedIndex} not found.`;
+					}
+
+					const previousLabel = account.accountLabel?.trim() ?? "";
+					if (normalizedLabel.length === 0) {
+						delete account.accountLabel;
+					} else {
+						account.accountLabel = normalizedLabel;
+					}
+
+					try {
+						await saveAccounts(storage);
+					} catch (saveError) {
+						logWarn("Failed to save account label update", { error: String(saveError) });
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Set account label"),
+								"",
+								formatUiItem(ui, "Label updated in memory but failed to persist.", "danger"),
+							].join("\n");
+						}
+						return "Label updated in memory but failed to persist. Changes may be lost on restart.";
+					}
+
+					if (cachedAccountManager) {
+						const reloadedManager = await AccountManager.loadFromDisk();
+						cachedAccountManager = reloadedManager;
+						accountManagerPromise = Promise.resolve(reloadedManager);
+					}
+
+					const accountLabel = formatCommandAccountLabel(account, targetIndex);
+					if (ui.v2Enabled) {
+						const statusText =
+							normalizedLabel.length === 0
+								? `Cleared label for ${accountLabel}`
+								: `Set label for ${accountLabel} to "${normalizedLabel}"`;
+						const previousText =
+							previousLabel.length > 0
+								? formatUiKeyValue(ui, "Previous label", previousLabel, "muted")
+								: formatUiKeyValue(ui, "Previous label", "none", "muted");
+						return [
+							...formatUiHeader(ui, "Set account label"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} ${statusText}`, "success"),
+							previousText,
+						].join("\n");
+					}
+
+					if (normalizedLabel.length === 0) {
+						return `Cleared label for ${accountLabel}`;
+					}
+					return `Set label for ${accountLabel} to "${normalizedLabel}"`;
+				},
+			}),
+			"codex-tag": tool({
+				description: "Set or clear account tags for filtering and grouping.",
+				args: {
+					index: tool.schema.number().optional().describe(
+						"Account number to update (1-based, e.g., 1 for first account)",
+					),
+					tags: tool.schema.string().describe(
+						"Comma-separated tags (e.g., work,team-a). Empty string clears tags.",
+					),
+				},
+				async execute({ index, tags }: { index?: number; tags: string }) {
+					const ui = resolveUiRuntime();
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Set account tags"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
+						return "No Codex accounts configured. Run: opencode auth login";
+					}
+
+					let resolvedIndex = index;
+					if (resolvedIndex === undefined) {
+						const selectedIndex = await promptAccountIndexSelection(ui, storage, "Set account tags");
+						if (selectedIndex === null) {
+							if (supportsInteractiveMenus()) {
+								return ui.v2Enabled
+									? [
+											...formatUiHeader(ui, "Set account tags"),
+											"",
+											formatUiItem(ui, "No account selected.", "warning"),
+									  ].join("\n")
+									: "No account selected.";
+							}
+							return "Missing account number. Use: codex-tag index=2 tags=\"work,team-a\"";
+						}
+						resolvedIndex = selectedIndex + 1;
+					}
+
+					const targetIndex = Math.floor((resolvedIndex ?? 0) - 1);
+					if (
+						!Number.isFinite(targetIndex) ||
+						targetIndex < 0 ||
+						targetIndex >= storage.accounts.length
+					) {
+						return `Invalid account number: ${resolvedIndex}\n\nValid range: 1-${storage.accounts.length}`;
+					}
+
+					const account = storage.accounts[targetIndex];
+					if (!account) return `Account ${resolvedIndex} not found.`;
+					const normalizedTags = normalizeAccountTags(tags ?? "");
+					const previousTags = Array.isArray(account.accountTags)
+						? [...account.accountTags]
+						: [];
+					if (normalizedTags.length === 0) {
+						delete account.accountTags;
+					} else {
+						account.accountTags = normalizedTags;
+					}
+
+					try {
+						await saveAccounts(storage);
+					} catch (error) {
+						logWarn("Failed to save account tag update", { error: String(error) });
+						return "Tag update failed to persist. Changes may be lost on restart.";
+					}
+
+					if (cachedAccountManager) {
+						const reloadedManager = await AccountManager.loadFromDisk();
+						cachedAccountManager = reloadedManager;
+						accountManagerPromise = Promise.resolve(reloadedManager);
+					}
+
+					const accountLabel = formatCommandAccountLabel(account, targetIndex);
+					const previousText = previousTags.length > 0 ? previousTags.join(", ") : "none";
+					const nextText = normalizedTags.length > 0 ? normalizedTags.join(", ") : "none";
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Set account tags"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Updated tags for ${accountLabel}`, "success"),
+							formatUiKeyValue(ui, "Previous tags", previousText, "muted"),
+							formatUiKeyValue(ui, "Current tags", nextText, normalizedTags.length > 0 ? "accent" : "muted"),
+						].join("\n");
+					}
+					return `Updated tags for ${accountLabel}\nPrevious tags: ${previousText}\nCurrent tags: ${nextText}`;
+				},
+			}),
+			"codex-note": tool({
+				description: "Set or clear an account note for reminders.",
+				args: {
+					index: tool.schema.number().optional().describe(
+						"Account number to update (1-based, e.g., 1 for first account)",
+					),
+					note: tool.schema.string().describe(
+						"Short note. Empty string clears the note.",
+					),
+				},
+				async execute({ index, note }: { index?: number; note: string }) {
+					const ui = resolveUiRuntime();
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						return "No Codex accounts configured. Run: opencode auth login";
+					}
+
+					let resolvedIndex = index;
+					if (resolvedIndex === undefined) {
+						const selectedIndex = await promptAccountIndexSelection(ui, storage, "Set account note");
+						if (selectedIndex === null) {
+							if (supportsInteractiveMenus()) return "No account selected.";
+							return "Missing account number. Use: codex-note index=2 note=\"weekday primary\"";
+						}
+						resolvedIndex = selectedIndex + 1;
+					}
+
+					const targetIndex = Math.floor((resolvedIndex ?? 0) - 1);
+					if (
+						!Number.isFinite(targetIndex) ||
+						targetIndex < 0 ||
+						targetIndex >= storage.accounts.length
+					) {
+						return `Invalid account number: ${resolvedIndex}\n\nValid range: 1-${storage.accounts.length}`;
+					}
+
+					const account = storage.accounts[targetIndex];
+					if (!account) return `Account ${resolvedIndex} not found.`;
+
+					const normalizedNote = (note ?? "").trim();
+					if (normalizedNote.length > 240) {
+						return "Note is too long (max 240 characters).";
+					}
+
+					if (normalizedNote.length === 0) {
+						delete account.accountNote;
+					} else {
+						account.accountNote = normalizedNote;
+					}
+
+					try {
+						await saveAccounts(storage);
+					} catch (error) {
+						logWarn("Failed to save account note update", { error: String(error) });
+						return "Note update failed to persist. Changes may be lost on restart.";
+					}
+
+					if (cachedAccountManager) {
+						const reloadedManager = await AccountManager.loadFromDisk();
+						cachedAccountManager = reloadedManager;
+						accountManagerPromise = Promise.resolve(reloadedManager);
+					}
+
+					const accountLabel = formatCommandAccountLabel(account, targetIndex);
+					if (normalizedNote.length === 0) {
+						return `Cleared note for ${accountLabel}`;
+					}
+					return `Saved note for ${accountLabel}: ${normalizedNote}`;
+				},
+			}),
+			"codex-dashboard": tool({
+				description:
+					"Show a live Codex dashboard: account eligibility, retry budgets, and refresh queue health.",
+				args: {},
+				async execute() {
+					const ui = resolveUiRuntime();
+					const storage = await loadAccounts();
+					if (!storage || storage.accounts.length === 0) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Codex dashboard"),
+								"",
+								formatUiItem(ui, "No accounts configured.", "warning"),
+								formatUiItem(ui, "Run: opencode auth login", "accent"),
+							].join("\n");
+						}
+						return "No Codex accounts configured. Run: opencode auth login";
+					}
+
+					const now = Date.now();
+					const refreshMetrics = getRefreshQueueMetrics();
+					const family = runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
+					const model = runtimeMetrics.lastSelectionSnapshot?.model ?? undefined;
+					const manager = cachedAccountManager ?? (await AccountManager.loadFromDisk());
+					const explainability = manager.getSelectionExplainability(family, model, now);
+					const selectionLabel = model ? `${family}:${model}` : family;
+
+					if (ui.v2Enabled) {
+						const lines: string[] = [
+							...formatUiHeader(ui, "Codex dashboard"),
+							formatUiKeyValue(ui, "Accounts", String(storage.accounts.length)),
+							formatUiKeyValue(ui, "Selection lens", selectionLabel, "muted"),
+							formatUiKeyValue(ui, "Retry profile", runtimeMetrics.retryProfile, "muted"),
+							formatUiKeyValue(ui, "Beginner safe mode", beginnerSafeModeEnabled ? "on" : "off", beginnerSafeModeEnabled ? "accent" : "muted"),
+							formatUiKeyValue(
+								ui,
+								"Retry usage",
+								`A${runtimeMetrics.retryBudgetUsage.authRefresh} N${runtimeMetrics.retryBudgetUsage.network} S${runtimeMetrics.retryBudgetUsage.server} RS${runtimeMetrics.retryBudgetUsage.rateLimitShort} RG${runtimeMetrics.retryBudgetUsage.rateLimitGlobal} E${runtimeMetrics.retryBudgetUsage.emptyResponse}`,
+								"muted",
+							),
+							formatUiKeyValue(
+								ui,
+								"Refresh queue",
+								`pending=${refreshMetrics.pending}, success=${refreshMetrics.succeeded}, failed=${refreshMetrics.failed}`,
+								"muted",
+							),
+							"",
+							...formatUiSection(ui, "Account eligibility"),
+						];
+
+						for (const entry of explainability) {
+							const label = formatCommandAccountLabel(storage.accounts[entry.index], entry.index);
+							const state = entry.eligible ? formatUiBadge(ui, "eligible", "success") : formatUiBadge(ui, "blocked", "warning");
+							lines.push(
+								formatUiItem(
+									ui,
+									`${label} ${state} health=${Math.round(entry.healthScore)} tokens=${entry.tokensAvailable.toFixed(1)} reasons=${entry.reasons.join(", ")}`,
+								),
+							);
+						}
+
+						lines.push("");
+						lines.push(...formatUiSection(ui, "Recommended next step"));
+						lines.push(
+							formatUiItem(
+								ui,
+								recommendBeginnerNextAction({
+									accounts: toBeginnerAccountSnapshots(storage, resolveActiveIndex(storage, "codex"), now),
+									now,
+									runtime: getBeginnerRuntimeSnapshot(),
+								}),
+								"accent",
+							),
+						);
+
+						if (runtimeMetrics.lastError) {
+							lines.push("");
+							lines.push(...formatUiSection(ui, "Last error"));
+							lines.push(formatUiItem(ui, runtimeMetrics.lastError, "danger"));
+							if (runtimeMetrics.lastErrorCategory) {
+								lines.push(
+									formatUiKeyValue(ui, "Category", runtimeMetrics.lastErrorCategory, "warning"),
+								);
+							}
+						}
+
+						return lines.join("\n");
+					}
+
+					const lines: string[] = [
+						"Codex Dashboard:",
+						`Accounts: ${storage.accounts.length}`,
+						`Selection lens: ${selectionLabel}`,
+						`Retry profile: ${runtimeMetrics.retryProfile}`,
+						`Beginner safe mode: ${beginnerSafeModeEnabled ? "on" : "off"}`,
+						`Retry usage: auth=${runtimeMetrics.retryBudgetUsage.authRefresh}, network=${runtimeMetrics.retryBudgetUsage.network}, server=${runtimeMetrics.retryBudgetUsage.server}, short429=${runtimeMetrics.retryBudgetUsage.rateLimitShort}, global429=${runtimeMetrics.retryBudgetUsage.rateLimitGlobal}, empty=${runtimeMetrics.retryBudgetUsage.emptyResponse}`,
+						`Refresh queue: pending=${refreshMetrics.pending}, success=${refreshMetrics.succeeded}, failed=${refreshMetrics.failed}`,
+						"",
+						"Account eligibility:",
+					];
+
+					for (const entry of explainability) {
+						const label = formatCommandAccountLabel(storage.accounts[entry.index], entry.index);
+						lines.push(
+							`  - ${label}: ${entry.eligible ? "eligible" : "blocked"} | health=${Math.round(entry.healthScore)} | tokens=${entry.tokensAvailable.toFixed(1)} | reasons=${entry.reasons.join(", ")}`,
+						);
+					}
+
+					lines.push("");
+					lines.push(
+						`Recommended next step: ${recommendBeginnerNextAction({
+							accounts: toBeginnerAccountSnapshots(storage, resolveActiveIndex(storage, "codex"), now),
+							now,
+							runtime: getBeginnerRuntimeSnapshot(),
+						})}`,
+					);
+
+					if (runtimeMetrics.lastError) {
+						lines.push("");
+						lines.push(`Last error: ${runtimeMetrics.lastError}`);
+						if (runtimeMetrics.lastErrorCategory) {
+							lines.push(`Category: ${runtimeMetrics.lastErrorCategory}`);
+						}
+					}
+
+					return lines.join("\n");
 				},
 			}),
 				"codex-health": tool({
@@ -3400,13 +5017,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 				},
 			}),
 			"codex-remove": tool({
-				description: "Remove one Codex account entry by index (1-based). Use codex-list to list accounts first.",
+				description: "Remove one Codex account entry by index (1-based) or interactive picker when index is omitted.",
 				args: {
-					index: tool.schema.number().describe(
+					index: tool.schema.number().optional().describe(
 						"Account number to remove (1-based, e.g., 1 for first account)",
 					),
 				},
-				async execute({ index }) {
+				async execute({ index }: { index?: number } = {}) {
 					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
@@ -3420,7 +5037,35 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return "No Codex accounts configured. Nothing to remove.";
 					}
 
-					const targetIndex = Math.floor((index ?? 0) - 1);
+					let resolvedIndex = index;
+					if (resolvedIndex === undefined) {
+						const selectedIndex = await promptAccountIndexSelection(ui, storage, "Remove account");
+						if (selectedIndex === null) {
+							if (supportsInteractiveMenus()) {
+								if (ui.v2Enabled) {
+									return [
+										...formatUiHeader(ui, "Remove account"),
+										"",
+										formatUiItem(ui, "No account selected.", "warning"),
+										formatUiItem(ui, "Run again and pick an account, or pass codex-remove index=2.", "muted"),
+									].join("\n");
+								}
+								return "No account selected.";
+							}
+							if (ui.v2Enabled) {
+								return [
+									...formatUiHeader(ui, "Remove account"),
+									"",
+									formatUiItem(ui, "Missing account number.", "warning"),
+									formatUiItem(ui, "Use: codex-remove index=2", "accent"),
+								].join("\n");
+							}
+							return "Missing account number. Use: codex-remove index=2";
+						}
+						resolvedIndex = selectedIndex + 1;
+					}
+
+					const targetIndex = Math.floor((resolvedIndex ?? 0) - 1);
 					if (
 						!Number.isFinite(targetIndex) ||
 						targetIndex < 0 ||
@@ -3430,17 +5075,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 							return [
 								...formatUiHeader(ui, "Remove account"),
 								"",
-								formatUiItem(ui, `Invalid account number: ${index}`, "danger"),
+								formatUiItem(ui, `Invalid account number: ${resolvedIndex}`, "danger"),
 								formatUiKeyValue(ui, "Valid range", `1-${storage.accounts.length}`, "muted"),
 								formatUiItem(ui, "Use codex-list to list all accounts.", "accent"),
 							].join("\n");
 						}
-						return `Invalid account number: ${index}\n\nValid range: 1-${storage.accounts.length}\n\nUse codex-list to list all accounts.`;
+						return `Invalid account number: ${resolvedIndex}\n\nValid range: 1-${storage.accounts.length}\n\nUse codex-list to list all accounts.`;
 					}
 
 					const account = storage.accounts[targetIndex];
 					if (!account) {
-						return `Account ${index} not found.`;
+						return `Account ${resolvedIndex} not found.`;
 					}
 
 					const label = formatCommandAccountLabel(account, targetIndex);
@@ -3601,19 +5246,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 		}),
 
 		"codex-export": tool({
-			description: "Export accounts to a JSON file for backup or migration to another machine.",
+			description: "Export accounts to a JSON file for backup or migration. Can auto-generate timestamped backup paths.",
 			args: {
-				path: tool.schema.string().describe(
-					"File path to export to (e.g., ~/codex-backup.json)"
+				path: tool.schema.string().optional().describe(
+					"File path to export to (e.g., ~/codex-backup.json). If omitted, a timestamped backup path is used."
 				),
 				force: tool.schema.boolean().optional().describe(
 					"Overwrite existing file (default: true)"
 				),
+				timestamped: tool.schema.boolean().optional().describe(
+					"When true (default), omitted paths use a timestamped backup filename."
+				),
 			},
-			async execute({ path: filePath, force }) {
+			async execute({
+				path: filePath,
+				force,
+				timestamped,
+			}: {
+				path?: string;
+				force?: boolean;
+				timestamped?: boolean;
+			}) {
 				const ui = resolveUiRuntime();
+				const shouldTimestamp = timestamped ?? true;
+				const resolvedExportPath =
+					filePath && filePath.trim().length > 0
+						? filePath
+						: shouldTimestamp
+							? createTimestampedBackupPath()
+							: "codex-backup.json";
 				try {
-					await exportAccounts(filePath, force ?? true);
+					await exportAccounts(resolvedExportPath, force ?? true);
 					const storage = await loadAccounts();
 					const count = storage?.accounts.length ?? 0;
 					if (ui.v2Enabled) {
@@ -3621,10 +5284,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 							...formatUiHeader(ui, "Export accounts"),
 							"",
 							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Exported ${count} account(s)`, "success"),
-							formatUiKeyValue(ui, "Path", filePath, "muted"),
+							formatUiKeyValue(ui, "Path", resolvedExportPath, "muted"),
 						].join("\n");
 					}
-					return `Exported ${count} account(s) to: ${filePath}`;
+					return `Exported ${count} account(s) to: ${resolvedExportPath}`;
 				} catch (error) {
 					const msg = error instanceof Error ? error.message : String(error);
 					if (ui.v2Enabled) {
@@ -3641,18 +5304,56 @@ while (attempted.size < Math.max(1, accountCount)) {
 		}),
 
 		"codex-import": tool({
-			description: "Import accounts from a JSON file, merging with existing accounts.",
+			description: "Import accounts from a JSON file, with dry-run preview and automatic timestamped backup before apply.",
 			args: {
 				path: tool.schema.string().describe(
 					"File path to import from (e.g., ~/codex-backup.json)"
 				),
+				dryRun: tool.schema.boolean().optional().describe(
+					"Preview import impact without applying changes."
+				),
 			},
-			async execute({ path: filePath }) {
+			async execute({ path: filePath, dryRun }: { path: string; dryRun?: boolean }) {
 				const ui = resolveUiRuntime();
 				try {
-					const result = await importAccounts(filePath);
+					const preview = await previewImportAccounts(filePath);
+					if (dryRun) {
+						if (ui.v2Enabled) {
+							return [
+								...formatUiHeader(ui, "Import preview"),
+								"",
+								formatUiItem(ui, "No changes applied (dry run).", "warning"),
+								formatUiKeyValue(ui, "Path", filePath, "muted"),
+								formatUiKeyValue(ui, "New accounts", String(preview.imported), preview.imported > 0 ? "success" : "muted"),
+								formatUiKeyValue(ui, "Duplicates skipped", String(preview.skipped), preview.skipped > 0 ? "warning" : "muted"),
+								formatUiKeyValue(ui, "Resulting total", String(preview.total), "accent"),
+							].join("\n");
+						}
+						return [
+							"Import preview (dry run):",
+							`Path: ${filePath}`,
+							`New accounts: ${preview.imported}`,
+							`Duplicates skipped: ${preview.skipped}`,
+							`Resulting total: ${preview.total}`,
+						].join("\n");
+					}
+
+					const result = await importAccounts(filePath, {
+						preImportBackupPrefix: "codex-pre-import-backup",
+						backupMode: "required",
+					});
+					const backupSummary =
+						result.backupStatus === "created"
+							? result.backupPath ?? "created"
+							: result.backupStatus === "failed"
+								? `failed (${result.backupError ?? "unknown error"})`
+								: "skipped (no existing accounts)";
+					const backupStatus: "ok" | "warning" =
+						result.backupStatus === "created" ? "ok" : "warning";
 					invalidateAccountManagerCache();
 					const lines = [`Import complete.`, ``];
+					lines.push(`Preview: +${preview.imported} new, ${preview.skipped} skipped, ${preview.total} total`);
+					lines.push(`Auto-backup: ${backupSummary}`);
 					if (result.imported > 0) {
 						lines.push(`New accounts: ${result.imported}`);
 					}
@@ -3666,6 +5367,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 							"",
 							formatUiItem(ui, `${getStatusMarker(ui, "ok")} Import complete`, "success"),
 							formatUiKeyValue(ui, "Path", filePath, "muted"),
+							formatUiKeyValue(
+								ui,
+								"Auto-backup",
+								backupSummary,
+								backupStatus === "ok" ? "muted" : "warning",
+							),
+							formatUiKeyValue(ui, "Preview", `+${preview.imported}, skipped=${preview.skipped}, total=${preview.total}`, "muted"),
 							formatUiKeyValue(ui, "New accounts", String(result.imported), result.imported > 0 ? "success" : "muted"),
 							formatUiKeyValue(ui, "Duplicates skipped", String(result.skipped), result.skipped > 0 ? "warning" : "muted"),
 							formatUiKeyValue(ui, "Total accounts", String(result.total), "accent"),

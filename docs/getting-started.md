@@ -157,6 +157,49 @@ If `gpt-5-codex` or `gpt-5.3-codex-spark` returns an unsupported-model entitleme
 
 If you manually add Spark IDs and want to confirm effective upstream routing, run with `ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1` and inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json`.
 
+### Step 5: Run Beginner Onboarding Commands (Recommended)
+
+After adding accounts, run:
+
+```text
+codex-setup
+codex-help topic="setup"
+codex-doctor
+codex-next
+```
+
+If your terminal supports menus, you can use guided onboarding:
+
+```text
+codex-setup wizard=true
+```
+
+Notes:
+- `codex-switch`, `codex-label`, and `codex-remove` support interactive account pickers when `index` is omitted in interactive terminals.
+- On plugin startup, a one-line preflight summary is shown (healthy/blocked/rate-limited + suggested next action).
+
+### Optional: Enable Beginner Safe Mode
+
+If you want conservative retry behavior while learning:
+
+```json
+// ~/.opencode/openai-codex-auth-config.json
+{
+  "beginnerSafeMode": true
+}
+```
+
+Or via environment variable:
+
+```bash
+CODEX_AUTH_BEGINNER_SAFE_MODE=1 opencode
+```
+
+Safe mode effects:
+- Forces conservative retry profile
+- Disables all-accounts rate-limit wait/retry
+- Caps all-accounts retries to one attempt
+
 ---
 
 ## Available Models

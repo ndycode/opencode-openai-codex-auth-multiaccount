@@ -6,6 +6,15 @@ Common issues and debugging techniques for the OpenCode OpenAI Codex Auth Plugin
 
 > **Quick Reset**: Most issues can be resolved by deleting `~/.opencode/auth/openai.json` and running `opencode auth login` again.
 
+If you prefer guided recovery before manual debugging, run:
+
+```text
+codex-setup
+codex-doctor
+codex-doctor fix=true
+codex-next
+```
+
 ---
 
 ## Known Limitations
@@ -247,6 +256,17 @@ Failed to access Codex API
    DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5-codex
    ```
 5. If you only need personal Plus/Pro usage, ensure login selected the intended personal workspace/account id.
+6. Run guided diagnostics and safe auto-remediation:
+   ```text
+   codex-doctor
+   codex-doctor fix=true
+   ```
+7. If you are onboarding or returning after a long gap, run:
+   ```text
+   codex-setup
+   codex-setup wizard=true
+   codex-next
+   ```
 
 </details>
 
@@ -479,6 +499,44 @@ Your input exceeds the context window
 1. Exit and restart OpenCode (clears history)
 2. Use compact mode (if OpenCode supports it)
 3. Switch to model with larger context
+
+</details>
+
+<details>
+<summary><b>Account command says "Missing account number"</b></summary>
+
+**Symptoms:**
+- `codex-switch`, `codex-label`, or `codex-remove` returns a missing index message
+- You expected an interactive picker
+
+**Cause:** Interactive pickers require an interactive TTY session. In non-interactive sessions, you must pass `index`.
+
+**Solutions:**
+1. Pass explicit index arguments:
+   ```text
+   codex-switch index=2
+   codex-label index=2 label="Work"
+   codex-remove index=2
+   ```
+2. Run from an interactive terminal when you want picker menus.
+3. Use `codex-list` first to inspect valid index range.
+
+</details>
+
+<details>
+<summary><b>Import concerns: accidental overwrite or bad backup file</b></summary>
+
+**Recommended safe flow:**
+1. Preview first:
+   ```text
+   codex-import path="~/backup/accounts.json" dryRun=true
+   ```
+2. Apply only after preview:
+   ```text
+   codex-import path="~/backup/accounts.json"
+   ```
+3. Before apply, the plugin creates a timestamped pre-import backup when existing accounts are present.
+4. Use `codex-export` with no path to create timestamped backups in the storage-adjacent `backups/` directory.
 
 </details>
 

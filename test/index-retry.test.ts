@@ -55,6 +55,10 @@ vi.mock("../lib/accounts.js", () => {
 			return this.getCurrentOrNextForFamily();
 		}
 
+		getSelectionExplainability() {
+			return [];
+		}
+
 		recordSuccess() {}
 
 		recordRateLimit() {}
@@ -125,6 +129,8 @@ vi.mock("../lib/storage.js", () => ({
 	setStoragePath: () => {},
 	exportAccounts: async () => {},
 	importAccounts: async () => ({ imported: 0, total: 0 }),
+	previewImportAccounts: async () => ({ imported: 0, total: 0, skipped: 0 }),
+	createTimestampedBackupPath: () => "/tmp/codex-backup-test.json",
 }));
 
 vi.mock("../lib/auto-update-checker.js", () => ({

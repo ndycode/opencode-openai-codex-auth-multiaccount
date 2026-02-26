@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RefreshQueue, getRefreshQueue, resetRefreshQueue, queuedRefresh } from "../lib/refresh-queue.js";
+import {
+	RefreshQueue,
+	getRefreshQueue,
+	getRefreshQueueMetrics,
+	resetRefreshQueue,
+	queuedRefresh,
+} from "../lib/refresh-queue.js";
 import * as authModule from "../lib/auth/auth.js";
 
 vi.mock("../lib/auth/auth.js", () => ({
@@ -267,6 +273,22 @@ describe("RefreshQueue", () => {
       expect(result).toEqual(mockResult);
       expect(authModule.refreshAccessToken).toHaveBeenCalledWith("test-token");
     });
+
+		it("getRefreshQueueMetrics should expose singleton metrics", async () => {
+			vi.mocked(authModule.refreshAccessToken).mockResolvedValue({
+				type: "success",
+				access: "access",
+				refresh: "refresh",
+				expires: Date.now() + 3600000,
+			});
+
+			await queuedRefresh("metrics-token");
+			const metrics = getRefreshQueueMetrics();
+
+			expect(metrics.started).toBe(1);
+			expect(metrics.succeeded).toBe(1);
+			expect(metrics.failed).toBe(0);
+		});
   });
 
 	describe("clear", () => {
@@ -304,6 +326,7 @@ describe("RefreshQueue", () => {
 			if (result.type === "success") {
 				expect(result.refresh).toBe("new-rotated-token");
 			}
+			expect(queue.getMetricsSnapshot().rotated).toBe(1);
 		});
 
 		it("should reuse in-flight refresh via rotation mapping when new token arrives during refresh", async () => {
