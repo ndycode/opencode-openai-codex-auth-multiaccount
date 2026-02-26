@@ -169,6 +169,14 @@ import {
 	type ModelFamily,
 } from "./lib/prompts/codex.js";
 import { prewarmOpenCodeCodexPrompt } from "./lib/prompts/opencode-codex.js";
+import {
+	CodexSyncError,
+	readCodexCurrentAccount,
+	writeCodexAuthJsonSession,
+	writeCodexMultiAuthPool,
+	type CodexSyncAccountPayload,
+} from "./lib/codex-sync.js";
+import { auditLog, AuditAction, AuditOutcome } from "./lib/audit.js";
 import type {
 	AccountIdSource,
 	OAuthAuthDetails,
@@ -969,6 +977,351 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const rawCandidate = storage.activeIndexByFamily?.[family] ?? storage.activeIndex;
 				const raw = Number.isFinite(rawCandidate) ? rawCandidate : 0;
 				return Math.max(0, Math.min(raw, total - 1));
+		};
+
+		type SyncDirection = "pull" | "push";
+		type SyncSummary = {
+			direction: SyncDirection;
+			sourcePath: string;
+			targetPaths: string[];
+			backupPaths: string[];
+			totalAccounts: number;
+			activeIndex: number;
+			activeSwitched: boolean;
+			created: number;
+			updated: number;
+			notes: string[];
+		};
+
+		const buildSyncFamilyIndexMap = (index: number): Partial<Record<ModelFamily, number>> => {
+			const next: Partial<Record<ModelFamily, number>> = {};
+			for (const family of MODEL_FAMILIES) {
+				next[family] = index;
+			}
+			return next;
+		};
+
+		const collectSyncIdentityKeys = (
+			account: {
+				organizationId?: string;
+				accountId?: string;
+				refreshToken?: string;
+			} | undefined,
+		): string[] => {
+			const keys: string[] = [];
+			const organizationId = account?.organizationId?.trim();
+			if (organizationId) keys.push(`organizationId:${organizationId}`);
+			const accountId = account?.accountId?.trim();
+			if (accountId) keys.push(`accountId:${accountId}`);
+			const refreshToken = account?.refreshToken?.trim();
+			if (refreshToken) keys.push(`refreshToken:${refreshToken}`);
+			return keys;
+		};
+
+		const findSyncIndexByIdentity = (
+			accounts: Array<{ organizationId?: string; accountId?: string; refreshToken?: string }>,
+			identityKeys: string[],
+		): number => {
+			if (identityKeys.length === 0) return -1;
+			for (const key of identityKeys) {
+				const index = accounts.findIndex((account) =>
+					collectSyncIdentityKeys(account).includes(key),
+				);
+				if (index >= 0) return index;
+			}
+			return -1;
+		};
+
+		const buildSyncSummaryLines = (summary: SyncSummary): string[] => {
+			const directionLabel =
+				summary.direction === "pull" ? "Codex -> plugin" : "plugin -> Codex";
+			const lines: string[] = [
+				`Direction: ${directionLabel}`,
+				`Source: ${summary.sourcePath}`,
+				`Targets: ${summary.targetPaths.join(", ")}`,
+				`Changes: created=${summary.created}, updated=${summary.updated}`,
+				`Plugin total accounts: ${summary.totalAccounts}`,
+				`Plugin active account: ${summary.activeIndex + 1}${summary.activeSwitched ? " (switched)" : ""}`,
+			];
+			if (summary.backupPaths.length > 0) {
+				lines.push(`Backups: ${summary.backupPaths.join(", ")}`);
+			}
+			for (const note of summary.notes) {
+				lines.push(`Note: ${note}`);
+			}
+			return lines;
+		};
+
+		const renderSyncSummary = (
+			ui: UiRuntimeOptions,
+			title: string,
+			summary: SyncSummary,
+		): string => {
+			if (!ui.v2Enabled) {
+				return [title, "", ...buildSyncSummaryLines(summary)].join("\n");
+			}
+
+			const directionLabel =
+				summary.direction === "pull" ? "Codex -> plugin" : "plugin -> Codex";
+			const lines: string[] = [
+				...formatUiHeader(ui, title),
+				"",
+				formatUiKeyValue(ui, "Direction", directionLabel, "accent"),
+				formatUiKeyValue(ui, "Source", summary.sourcePath, "muted"),
+				formatUiKeyValue(ui, "Targets", summary.targetPaths.join(", "), "muted"),
+				formatUiKeyValue(
+					ui,
+					"Changes",
+					`created=${summary.created}, updated=${summary.updated}`,
+					summary.created > 0 ? "success" : "muted",
+				),
+				formatUiKeyValue(ui, "Plugin total", String(summary.totalAccounts)),
+				formatUiKeyValue(
+					ui,
+					"Plugin active",
+					`${summary.activeIndex + 1}${summary.activeSwitched ? " (switched)" : ""}`,
+					summary.activeSwitched ? "success" : "muted",
+				),
+			];
+
+			if (summary.backupPaths.length > 0) {
+				lines.push(formatUiKeyValue(ui, "Backups", summary.backupPaths.join(", "), "muted"));
+			}
+			for (const note of summary.notes) {
+				lines.push(formatUiItem(ui, note, "muted"));
+			}
+			return lines.join("\n");
+		};
+
+		const syncFromCodexToPlugin = async (): Promise<SyncSummary> => {
+			try {
+				const codexAccount = await readCodexCurrentAccount();
+				const inferredAccountId =
+					codexAccount.accountId ?? extractAccountId(codexAccount.accessToken);
+				const inferredEmail =
+					codexAccount.email ??
+					sanitizeEmail(
+						extractAccountEmail(codexAccount.accessToken, codexAccount.idToken),
+					);
+				const identityKeys = collectSyncIdentityKeys({
+					accountId: inferredAccountId,
+					refreshToken: codexAccount.refreshToken,
+				});
+
+				let created = 0;
+				let updated = 0;
+
+				await withAccountStorageTransaction(async (loadedStorage, persist) => {
+					const workingStorage = loadedStorage
+						? {
+								...loadedStorage,
+								accounts: loadedStorage.accounts.map((account) => ({ ...account })),
+								activeIndexByFamily: loadedStorage.activeIndexByFamily
+									? { ...loadedStorage.activeIndexByFamily }
+									: {},
+						  }
+						: {
+								version: 3 as const,
+								accounts: [],
+								activeIndex: 0,
+								activeIndexByFamily: {},
+						  };
+
+					const existingIndex = findSyncIndexByIdentity(
+						workingStorage.accounts,
+						identityKeys,
+					);
+					created = existingIndex >= 0 ? 0 : 1;
+					updated = existingIndex >= 0 ? 1 : 0;
+
+					workingStorage.accounts.push({
+						accountId: inferredAccountId,
+						accountIdSource: inferredAccountId ? "token" : undefined,
+						email: inferredEmail,
+						refreshToken: codexAccount.refreshToken,
+						accessToken: codexAccount.accessToken,
+						expiresAt: codexAccount.expiresAt,
+						enabled: true,
+						addedAt: Date.now(),
+						lastUsed: Date.now(),
+					});
+
+					const candidateIndex = workingStorage.accounts.length - 1;
+					workingStorage.activeIndex = candidateIndex;
+					workingStorage.activeIndexByFamily = buildSyncFamilyIndexMap(candidateIndex);
+					await persist(workingStorage);
+				});
+
+				const reloadedStorage = await loadAccounts();
+				const totalAccounts = reloadedStorage?.accounts.length ?? 0;
+				const activeIndex = reloadedStorage
+					? resolveActiveIndex(reloadedStorage, "codex")
+					: 0;
+				const summary: SyncSummary = {
+					direction: "pull",
+					sourcePath: codexAccount.sourcePath,
+					targetPaths: [getStoragePath()],
+					backupPaths: [],
+					totalAccounts,
+					activeIndex,
+					activeSwitched: true,
+					created,
+					updated,
+					notes: [],
+				};
+				auditLog(
+					AuditAction.ACCOUNT_SYNC_PULL,
+					"sync",
+					"plugin-accounts",
+					AuditOutcome.SUCCESS,
+					{
+						direction: summary.direction,
+						sourcePath: summary.sourcePath,
+						targetPath: summary.targetPaths[0],
+						created: summary.created,
+						updated: summary.updated,
+						totalAccounts: summary.totalAccounts,
+						activeIndex: summary.activeIndex,
+						email: inferredEmail,
+						accountId: inferredAccountId,
+					},
+				);
+				return summary;
+			} catch (error) {
+				auditLog(
+					AuditAction.ACCOUNT_SYNC_PULL,
+					"sync",
+					"plugin-accounts",
+					AuditOutcome.FAILURE,
+					{
+						error: error instanceof Error ? error.message : String(error),
+					},
+				);
+				throw error;
+			}
+		};
+
+		const syncFromPluginToCodex = async (): Promise<SyncSummary> => {
+			try {
+				const storage = await loadAccounts();
+				if (!storage || storage.accounts.length === 0) {
+					throw new Error("No plugin accounts available. Run: opencode auth login");
+				}
+
+				const activeIndex = resolveActiveIndex(storage, "codex");
+				const activeAccount = storage.accounts[activeIndex];
+				if (!activeAccount) {
+					throw new Error("Active plugin account not found.");
+				}
+				if (activeAccount.enabled === false) {
+					throw new Error(
+						`Active plugin account ${activeIndex + 1} is disabled. Enable it before syncing to Codex.`,
+					);
+				}
+
+				const flaggedStorage = await loadFlaggedAccounts();
+				const isFlagged = flaggedStorage.accounts.some(
+					(flagged) => flagged.refreshToken === activeAccount.refreshToken,
+				);
+				if (isFlagged) {
+					throw new Error(
+						`Active plugin account ${activeIndex + 1} is flagged. Verify flagged accounts before syncing to Codex.`,
+					);
+				}
+
+				const notes: string[] = [];
+				let accessToken = activeAccount.accessToken;
+				let refreshToken = activeAccount.refreshToken;
+				let idToken: string | undefined;
+				const isExpired =
+					typeof activeAccount.expiresAt === "number" &&
+					activeAccount.expiresAt <= Date.now();
+				if (!accessToken || isExpired) {
+					const refreshResult = await queuedRefresh(activeAccount.refreshToken);
+					if (refreshResult.type !== "success") {
+						throw new Error(
+							`Failed to refresh active account before sync (${refreshResult.message ?? refreshResult.reason ?? "refresh failed"}).`,
+						);
+					}
+					accessToken = refreshResult.access;
+					refreshToken = refreshResult.refresh;
+					idToken = refreshResult.idToken;
+					activeAccount.accessToken = refreshResult.access;
+					activeAccount.refreshToken = refreshResult.refresh;
+					activeAccount.expiresAt = refreshResult.expires;
+					await saveAccounts(storage);
+					invalidateAccountManagerCache();
+					notes.push("Refreshed active plugin account before syncing.");
+				}
+
+				if (!accessToken) {
+					throw new Error(
+						"Active plugin account is missing access token and refresh failed. Re-authenticate the account first.",
+					);
+				}
+
+				const payload: CodexSyncAccountPayload = {
+					accessToken,
+					refreshToken,
+					idToken,
+					accountId: activeAccount.accountId ?? extractAccountId(accessToken),
+					email:
+						activeAccount.email ??
+						sanitizeEmail(extractAccountEmail(accessToken, idToken)),
+					accountIdSource: activeAccount.accountIdSource,
+					accountLabel: activeAccount.accountLabel,
+					organizationId: activeAccount.organizationId,
+					enabled: activeAccount.enabled,
+				};
+
+				const authWrite = await writeCodexAuthJsonSession(payload);
+				const poolWrite = await writeCodexMultiAuthPool(payload);
+				const backupPaths = [authWrite.backupPath, poolWrite.backupPath].filter(
+					(path): path is string => typeof path === "string" && path.length > 0,
+				);
+
+				const summary: SyncSummary = {
+					direction: "push",
+					sourcePath: getStoragePath(),
+					targetPaths: [authWrite.path, poolWrite.path],
+					backupPaths,
+					totalAccounts: storage.accounts.length,
+					activeIndex,
+					activeSwitched: false,
+					created: poolWrite.created ? 1 : 0,
+					updated: poolWrite.updated ? 1 : 0,
+					notes,
+				};
+				auditLog(
+					AuditAction.ACCOUNT_SYNC_PUSH,
+					"sync",
+					"codex-auth",
+					AuditOutcome.SUCCESS,
+					{
+						direction: summary.direction,
+						sourcePath: summary.sourcePath,
+						targetPaths: summary.targetPaths,
+						created: summary.created,
+						updated: summary.updated,
+						totalAccounts: summary.totalAccounts,
+						activeIndex: summary.activeIndex,
+						email: payload.email,
+						accountId: payload.accountId,
+					},
+				);
+				return summary;
+			} catch (error) {
+				auditLog(
+					AuditAction.ACCOUNT_SYNC_PUSH,
+					"sync",
+					"codex-auth",
+					AuditOutcome.FAILURE,
+					{
+						error: error instanceof Error ? error.message : String(error),
+					},
+				);
+				throw error;
+			}
 		};
 
 	const hydrateEmails = async (
@@ -3247,6 +3600,45 @@ while (attempted.size < Math.max(1, accountCount)) {
 										};
 									}
 
+									if (menuResult.mode === "sync-from-codex") {
+										try {
+											const summary = await syncFromCodexToPlugin();
+											console.log("");
+											for (const line of buildSyncSummaryLines(summary)) {
+												console.log(line);
+											}
+											console.log("");
+										} catch (error) {
+											const message =
+												error instanceof CodexSyncError || error instanceof Error
+													? error.message
+													: String(error);
+											console.log("");
+											console.log(`Sync from Codex failed: ${message}`);
+											console.log("");
+										}
+										continue;
+									}
+									if (menuResult.mode === "sync-to-codex") {
+										try {
+											const summary = await syncFromPluginToCodex();
+											console.log("");
+											for (const line of buildSyncSummaryLines(summary)) {
+												console.log(line);
+											}
+											console.log("");
+										} catch (error) {
+											const message =
+												error instanceof CodexSyncError || error instanceof Error
+													? error.message
+													: String(error);
+											console.log("");
+											console.log(`Sync to Codex failed: ${message}`);
+											console.log("");
+										}
+										continue;
+									}
+
 									if (menuResult.mode === "check") {
 										await runAccountCheck(false);
 										continue;
@@ -3629,6 +4021,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push("");
 						lines.push(...formatUiSection(ui, "Commands"));
 						lines.push(formatUiItem(ui, "Add account: opencode auth login", "accent"));
+						lines.push(formatUiItem(ui, "Sync from Codex: codex-sync direction=\"pull\""));
+						lines.push(formatUiItem(ui, "Sync to Codex: codex-sync direction=\"push\""));
 						lines.push(formatUiItem(ui, "Switch account: codex-switch index=2"));
 						lines.push(formatUiItem(ui, "Detailed status: codex-status"));
 						lines.push(formatUiItem(ui, "Live dashboard: codex-dashboard"));
@@ -3686,6 +4080,8 @@ while (attempted.size < Math.max(1, accountCount)) {
                                         lines.push("");
                                         lines.push("Commands:");
                                         lines.push("  - Add account: opencode auth login");
+                                        lines.push("  - Sync from Codex: codex-sync direction=\"pull\"");
+                                        lines.push("  - Sync to Codex: codex-sync direction=\"push\"");
                                         lines.push("  - Switch account: codex-switch");
                                         lines.push("  - Status details: codex-status");
                                         lines.push("  - Live dashboard: codex-dashboard");
@@ -4185,6 +4581,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 							title: "Daily account operations",
 							lines: [
 								"List accounts: codex-list",
+								"Sync from Codex CLI: codex-sync direction=\"pull\"",
+								"Sync to Codex CLI: codex-sync direction=\"push\"",
 								"Switch active account: codex-switch index=2",
 								"Show detailed status: codex-status",
 								"Set account label: codex-label index=2 label=\"Work\"",
@@ -4223,6 +4621,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 								"Auto backup export: codex-export",
 								"Import preview: codex-import <path> --dryRun",
 								"Import apply: codex-import <path>",
+								"Sync pull from Codex: codex-sync direction=\"pull\"",
+								"Sync push to Codex: codex-sync direction=\"push\"",
 								"Setup checklist: codex-setup",
 							],
 						},
@@ -5392,6 +5792,54 @@ while (attempted.size < Math.max(1, accountCount)) {
 						].join("\n");
 					}
 					return `Import failed: ${msg}`;
+				}
+			},
+		}),
+
+		"codex-sync": tool({
+			description:
+				"Manually sync current account between Codex CLI and plugin storage. direction=pull (Codex -> plugin) or direction=push (plugin -> Codex).",
+			args: {
+				direction: tool.schema
+					.string()
+					.describe("Sync direction: pull (Codex -> plugin) or push (plugin -> Codex)"),
+			},
+			async execute({ direction }: { direction: string }) {
+				const ui = resolveUiRuntime();
+				const normalizedDirection = direction.trim().toLowerCase();
+				if (normalizedDirection !== "pull" && normalizedDirection !== "push") {
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Codex sync"),
+							"",
+							formatUiItem(ui, `Invalid direction: ${direction}`, "danger"),
+							formatUiItem(ui, "Use direction=pull (Codex -> plugin) or direction=push (plugin -> Codex).", "accent"),
+						].join("\n");
+					}
+					return `Invalid direction: ${direction}\n\nUse direction=pull (Codex -> plugin) or direction=push (plugin -> Codex).`;
+				}
+
+				try {
+					const summary =
+						normalizedDirection === "pull"
+							? await syncFromCodexToPlugin()
+							: await syncFromPluginToCodex();
+					return renderSyncSummary(ui, "Codex sync", summary);
+				} catch (error) {
+					const message =
+						error instanceof CodexSyncError || error instanceof Error
+							? error.message
+							: String(error);
+					if (ui.v2Enabled) {
+						return [
+							...formatUiHeader(ui, "Codex sync"),
+							"",
+							formatUiItem(ui, `${getStatusMarker(ui, "error")} Sync failed`, "danger"),
+							formatUiKeyValue(ui, "Direction", normalizedDirection, "muted"),
+							formatUiKeyValue(ui, "Error", message, "danger"),
+						].join("\n");
+					}
+					return `Sync failed (${normalizedDirection}): ${message}`;
 				}
 			},
 		}),

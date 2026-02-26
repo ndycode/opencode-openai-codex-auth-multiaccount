@@ -554,6 +554,7 @@ codex-dashboard
 | `codex-remove` | Remove account entry | `codex-remove index=3` |
 | `codex-export` | Export account backups | `codex-export` |
 | `codex-import` | Dry-run or apply imports | `codex-import path="~/backup/accounts.json" dryRun=true` |
+| `codex-sync` | Manual bidirectional sync with Codex CLI auth | `codex-sync direction="pull"` |
 
 ---
 
