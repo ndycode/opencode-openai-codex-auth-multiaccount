@@ -27,6 +27,15 @@ describe("PluginConfigSchema", () => {
 		const config = {
 			codexMode: true,
 			fastSession: true,
+			retryProfile: "balanced",
+			retryBudgetOverrides: {
+				authRefresh: 2,
+				network: 3,
+				server: 3,
+				rateLimitShort: 3,
+				rateLimitGlobal: 2,
+				emptyResponse: 1,
+			},
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 5000,
 			retryAllAccountsMaxRetries: 3,
@@ -75,6 +84,18 @@ describe("PluginConfigSchema", () => {
 		const result = PluginConfigSchema.safeParse({ unsupportedCodexPolicy: "invalid" });
 		expect(result.success).toBe(false);
 	});
+
+	it("rejects invalid retryProfile", () => {
+		const result = PluginConfigSchema.safeParse({ retryProfile: "wild" });
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects negative retry budget override values", () => {
+		const result = PluginConfigSchema.safeParse({
+			retryBudgetOverrides: { network: -1 },
+		});
+		expect(result.success).toBe(false);
+	});
 });
 
 describe("AccountMetadataV3Schema", () => {
@@ -95,6 +116,8 @@ describe("AccountMetadataV3Schema", () => {
 			accountId: "acc_123",
 			accountIdSource: "token" as const,
 			accountLabel: "Work Account",
+			accountTags: ["work", "team-a"],
+			accountNote: "Primary workspace",
 			email: "test@example.com",
 			lastSwitchReason: "rate-limit" as const,
 			rateLimitResetTimes: { "gpt-5.2-codex": Date.now() + 60000 },
@@ -122,6 +145,11 @@ describe("AccountMetadataV3Schema", () => {
 
 	it("rejects invalid cooldownReason", () => {
 		const result = AccountMetadataV3Schema.safeParse({ ...validAccount, cooldownReason: "unknown" });
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects empty account tag entries", () => {
+		const result = AccountMetadataV3Schema.safeParse({ ...validAccount, accountTags: [""] });
 		expect(result.success).toBe(false);
 	});
 });

@@ -71,10 +71,15 @@ For detailed setup, see [Getting Started](getting-started.md).
 | **21 Template Presets** | GPT-5.2, GPT-5 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex, GPT-5.1 Codex Mini, GPT-5.1 (plus optional manual Spark IDs) |
 | **Variant System** | Works with OpenCode v1.0.210+ variants and legacy presets |
 | **Multi-Account** | Auto-rotation when rate-limited with workspace-aware identity persistence |
+| **Beginner Toolkit** | `codex-help`, `codex-setup`, `codex-doctor`, and `codex-next` for onboarding + recovery |
+| **Interactive Pickers** | `codex-switch`, `codex-label`, and `codex-remove` can prompt for account selection when index is omitted |
+| **Account Metadata** | Labels, tags, and notes via `codex-label`, `codex-tag`, `codex-note`, plus `codex-list tag="..."` filtering |
+| **Safe Backup/Import** | Timestamped exports, import dry-run preview, and pre-import backup before apply when existing accounts are present |
+| **Startup Preflight** | One-line startup summary of healthy/blocked/rate-limited accounts with recommended next step |
 | **Per-Model Config** | Different reasoning effort per model |
 | **Multi-Turn** | Full conversation history with stateless backend |
 | **Fast Session Mode** | Optional low-latency tuning for quick interactive turns |
-| **Comprehensive Tests** | 1689 tests (80% coverage threshold) + integration tests |
+| **Comprehensive Tests** | 1752 tests (80% coverage threshold) + integration tests |
 
 ---
 

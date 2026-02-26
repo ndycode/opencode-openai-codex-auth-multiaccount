@@ -1824,5 +1824,40 @@ describe("AccountManager", () => {
       expect(selected).not.toBeNull();
       expect(selected?.index).toBe(0);
     });
+
+    it("reports selection explainability with eligibility reasons", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now, enabled: false },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now - 1000 },
+          { refreshToken: "token-3", addedAt: now, lastUsed: now - 2000 },
+          { refreshToken: "token-4", addedAt: now, lastUsed: now - 3000 },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      const rateLimited = manager.setActiveIndex(1)!;
+      manager.markRateLimited(rateLimited, 60_000, "codex");
+      getTokenTracker().drain(2, "codex", 100);
+
+      const explainability = manager.getSelectionExplainability("codex", undefined, Date.now());
+      const byIndex = new Map(explainability.map((entry) => [entry.index, entry]));
+
+      expect(byIndex.get(0)?.eligible).toBe(false);
+      expect(byIndex.get(0)?.reasons).toContain("disabled");
+
+      expect(byIndex.get(1)?.eligible).toBe(false);
+      expect(byIndex.get(1)?.reasons).toContain("rate-limited");
+
+      expect(byIndex.get(2)?.eligible).toBe(false);
+      expect(byIndex.get(2)?.reasons).toContain("token-bucket-empty");
+
+      expect(byIndex.get(3)?.eligible).toBe(true);
+      expect(byIndex.get(3)?.reasons).toEqual(["eligible"]);
+    });
   });
 });

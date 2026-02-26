@@ -824,6 +824,14 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			value: unknown,
 		): value is AccountMetadataV3["cooldownReason"] =>
 			value === "auth-failure" || value === "network-error";
+		const normalizeTags = (value: unknown): string[] | undefined => {
+			if (!Array.isArray(value)) return undefined;
+			const normalized = value
+				.filter((entry): entry is string => typeof entry === "string")
+				.map((entry) => entry.trim().toLowerCase())
+				.filter((entry) => entry.length > 0);
+			return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+		};
 
 		let rateLimitResetTimes: AccountMetadataV3["rateLimitResetTimes"] | undefined;
 		if (isRecord(rawAccount.rateLimitResetTimes)) {
@@ -847,6 +855,11 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		const cooldownReason = isCooldownReason(rawAccount.cooldownReason)
 			? rawAccount.cooldownReason
 			: undefined;
+		const accountTags = normalizeTags(rawAccount.accountTags);
+		const accountNote =
+			typeof rawAccount.accountNote === "string" && rawAccount.accountNote.trim()
+				? rawAccount.accountNote.trim()
+				: undefined;
 
 		const normalized: FlaggedAccountMetadataV1 = {
 			refreshToken,
@@ -857,6 +870,8 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			accountId: typeof rawAccount.accountId === "string" ? rawAccount.accountId : undefined,
 			accountIdSource,
 			accountLabel: typeof rawAccount.accountLabel === "string" ? rawAccount.accountLabel : undefined,
+			accountTags,
+			accountNote,
 			email: typeof rawAccount.email === "string" ? rawAccount.email : undefined,
 			enabled: typeof rawAccount.enabled === "boolean" ? rawAccount.enabled : undefined,
 			lastSwitchReason,
@@ -962,6 +977,78 @@ export async function clearFlaggedAccounts(): Promise<void> {
 	});
 }
 
+function formatBackupTimestamp(date: Date = new Date()): string {
+	const yyyy = String(date.getFullYear());
+	const mm = String(date.getMonth() + 1).padStart(2, "0");
+	const dd = String(date.getDate()).padStart(2, "0");
+	const hh = String(date.getHours()).padStart(2, "0");
+	const min = String(date.getMinutes()).padStart(2, "0");
+	const ss = String(date.getSeconds()).padStart(2, "0");
+	return `${yyyy}${mm}${dd}-${hh}${min}${ss}`;
+}
+
+export function createTimestampedBackupPath(prefix = "codex-backup"): string {
+	const storagePath = getStoragePath();
+	const backupDir = join(dirname(storagePath), "backups");
+	return join(backupDir, `${prefix}-${formatBackupTimestamp()}.json`);
+}
+
+async function readAndNormalizeImportFile(filePath: string): Promise<{
+	resolvedPath: string;
+	normalized: AccountStorageV3;
+}> {
+	const resolvedPath = resolvePath(filePath);
+
+	if (!existsSync(resolvedPath)) {
+		throw new Error(`Import file not found: ${resolvedPath}`);
+	}
+
+	const content = await fs.readFile(resolvedPath, "utf-8");
+
+	let imported: unknown;
+	try {
+		imported = JSON.parse(content);
+	} catch {
+		throw new Error(`Invalid JSON in import file: ${resolvedPath}`);
+	}
+
+	const normalized = normalizeAccountStorage(imported);
+	if (!normalized) {
+		throw new Error("Invalid account storage format");
+	}
+
+	return { resolvedPath, normalized };
+}
+
+export async function previewImportAccounts(
+	filePath: string,
+): Promise<{ imported: number; total: number; skipped: number }> {
+	const { normalized } = await readAndNormalizeImportFile(filePath);
+
+	return withAccountStorageTransaction((existing) => {
+		const existingAccounts = existing?.accounts ?? [];
+		const merged = [...existingAccounts, ...normalized.accounts];
+
+		if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+			const deduped = deduplicateAccountsForStorage(merged);
+			if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+				throw new Error(
+					`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
+				);
+			}
+		}
+
+		const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
+		const imported = deduplicatedAccounts.length - existingAccounts.length;
+		const skipped = normalized.accounts.length - imported;
+		return Promise.resolve({
+			imported,
+			total: deduplicatedAccounts.length,
+			skipped,
+		});
+	});
+}
+
 /**
  * Exports current accounts to a JSON file for backup/migration.
  * @param filePath - Destination file path
@@ -995,26 +1082,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */
 export async function importAccounts(filePath: string): Promise<{ imported: number; total: number; skipped: number }> {
-  const resolvedPath = resolvePath(filePath);
-  
-  // Check file exists with friendly error
-  if (!existsSync(resolvedPath)) {
-    throw new Error(`Import file not found: ${resolvedPath}`);
-  }
-  
-  const content = await fs.readFile(resolvedPath, "utf-8");
-  
-  let imported: unknown;
-  try {
-    imported = JSON.parse(content);
-  } catch {
-    throw new Error(`Invalid JSON in import file: ${resolvedPath}`);
-  }
-  
-  const normalized = normalizeAccountStorage(imported);
-  if (!normalized) {
-    throw new Error("Invalid account storage format");
-  }
+  const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
   
   const { imported: importedCount, total, skipped: skippedCount } =
     await withAccountStorageTransaction(async (existing, persist) => {

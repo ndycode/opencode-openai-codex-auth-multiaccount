@@ -15,6 +15,10 @@ OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with mo
 - **Per-project accounts** — Each project gets its own account storage (new in v4.10.0)
 - **Workspace-aware identity persistence** — Keeps workspace/org identity stable across token refresh and verify-flagged restore flows
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
+- **Beginner command toolkit** — Guided onboarding with `codex-help`, `codex-setup`, `codex-doctor`, and `codex-next`
+- **Account metadata controls** — Per-account labels, tags, and notes with quick filtering
+- **Safer backup/import flow** — Timestamped exports, import dry-run preview, and conditional pre-import backups when existing accounts are present
+- **Startup preflight summary** — One-line health/readiness summary at plugin startup with suggested next step
 - **Strict tool validation** — Automatically cleans schemas for compatibility with strict models
 - **Auto-update notifications** — Get notified when a new version is available
 - **21 template model presets** — Full variant system with reasoning levels (none/low/medium/high/xhigh)
@@ -278,36 +282,145 @@ The plugin provides built-in tools for managing your OpenAI accounts. These are 
 
 ### codex-list
 
-List all configured accounts with their status.
+List all configured accounts with status badges.
 
 ```
 codex-list
 ```
 
-**Output:**
-```
-OpenAI Accounts (3 total):
+Filter by tag:
 
-  [1] user@gmail.com (active)
-  [2] work@company.com
-  [3] backup@email.com
-
-Use codex-switch to change active account.
 ```
+codex-list tag="work"
+```
+
+Shows account labels, IDs, tags, active state, and rate-limit/cooldown markers.
 
 ---
 
 ### codex-switch
 
-Switch to a different account by index (1-based).
+Switch to a different account. If `index` is omitted and your terminal supports menus, an interactive picker opens.
 
 ```
 codex-switch index=2
 ```
 
-**Output:**
+or:
+
 ```
-Switched to account [2] work@company.com
+codex-switch
+```
+
+---
+
+### codex-label
+
+Set or clear a display label for an account. Useful for workspace naming.
+
+```
+codex-label index=2 label="Work"
+```
+
+Clear:
+
+```
+codex-label index=2 label=""
+```
+
+If `index` is omitted in interactive terminals, a picker opens.
+
+---
+
+### codex-tag
+
+Set or clear comma-separated tags for filtering and grouping.
+
+```
+codex-tag index=2 tags="work,team-a"
+```
+
+Clear:
+
+```
+codex-tag index=2 tags=""
+```
+
+Use tags with `codex-list tag="work"`.
+
+---
+
+### codex-note
+
+Set or clear a short per-account note for reminders.
+
+```
+codex-note index=2 note="primary for weekday daytime usage"
+```
+
+Clear:
+
+```
+codex-note index=2 note=""
+```
+
+---
+
+### codex-help
+
+Show beginner-friendly command guidance. Optional topic filter:
+
+```
+codex-help
+codex-help topic="backup"
+```
+
+Available topics: `setup`, `switch`, `health`, `backup`, `dashboard`, `metrics`.
+
+---
+
+### codex-setup
+
+Show readiness checklist for first-run onboarding and account health.
+
+```
+codex-setup
+```
+
+Open guided wizard (menu-driven when terminal supports it, checklist fallback otherwise):
+
+```
+codex-setup wizard=true
+```
+
+---
+
+### codex-doctor
+
+Run diagnostics with actionable findings.
+
+```
+codex-doctor
+codex-doctor deep=true
+```
+
+Apply safe auto-fixes (`--fix` equivalent):
+- Refreshes tokens where possible
+- Persists refreshed credentials
+- Switches active account to the healthiest eligible account
+
+```
+codex-doctor fix=true
+```
+
+---
+
+### codex-next
+
+Show the single most recommended next action based on current account/runtime state.
+
+```
+codex-next
 ```
 
 ---
@@ -320,42 +433,14 @@ Show detailed status including rate limits and health scores.
 codex-status
 ```
 
-**Output:**
-```
-OpenAI Account Status:
-
-[1] user@gmail.com (active)
-    Health: 100/100
-    Rate Limit: 45/50 requests remaining
-    Resets: 2m 30s
-    Last Used: 5 minutes ago
-
-[2] work@company.com
-    Health: 85/100
-    Rate Limit: 12/50 requests remaining
-    Resets: 8m 15s
-    Last Used: 1 hour ago
-```
-
 ---
 
 ### codex-metrics
 
-Show live runtime metrics (request counts, latency, errors, rotations) for the current plugin process.
+Show live runtime metrics (request counts, latency, errors, retries, and safe mode).
 
 ```
 codex-metrics
-```
-
-**Output:**
-```
-Codex Plugin Metrics:
-
-Uptime: 12m
-Total upstream requests: 84
-Successful responses: 77
-Failed responses: 7
-Average successful latency: 842ms
 ```
 
 ---
@@ -368,17 +453,6 @@ Check if all account tokens are still valid (read-only check).
 codex-health
 ```
 
-**Output:**
-```
-Checking 3 account(s):
-
-  ✓ [1] user@gmail.com: Healthy
-  ✓ [2] work@company.com: Healthy
-  ✗ [3] old@expired.com: Token expired
-
-Summary: 2 healthy, 1 unhealthy
-```
-
 ---
 
 ### codex-refresh
@@ -389,66 +463,72 @@ Refresh all OAuth tokens and save them to disk. Use this after long idle periods
 codex-refresh
 ```
 
-**Output:**
-```
-Refreshing 3 account(s):
-
-  ✓ [1] user@gmail.com: Refreshed
-  ✓ [2] work@company.com: Refreshed
-  ✗ [3] old@expired.com: Failed - Token expired
-
-Summary: 2 refreshed, 1 failed
-```
-
-**Difference from health check:** `codex-health` only validates tokens. `codex-refresh` actually refreshes them and saves new tokens to disk.
+`codex-health` validates. `codex-refresh` validates + refreshes + persists.
 
 ---
 
 ### codex-remove
 
-Remove an account by index. Useful for cleaning up expired accounts.
+Remove an account entry. If `index` is omitted and your terminal supports menus, an interactive picker opens.
 
 ```
 codex-remove index=3
 ```
 
-**Output:**
-```
-Removed: [3] old@expired.com
+or:
 
-Remaining accounts: 2
+```
+codex-remove
 ```
 
 ---
 
 ### codex-export
 
-Export all accounts to a portable JSON file. Useful for backup or migration.
+Export accounts to JSON for backup/migration.
+
+Explicit path:
 
 ```
 codex-export path="~/backup/accounts.json"
 ```
 
-**Output:**
+Auto timestamped backup path (default behavior when `path` is omitted):
+
 ```
-Exported 3 account(s) to ~/backup/accounts.json
+codex-export
 ```
+
+Generated paths are stored in a `backups/` subdirectory near the active account storage file.
 
 ---
 
 ### codex-import
 
-Import accounts from a JSON file (exported via `codex-export`). Merges with existing accounts.
+Import accounts from a JSON file (dedupe-aware merge).
+
+Dry-run preview (no writes):
+
+```
+codex-import path="~/backup/accounts.json" dryRun=true
+```
+
+Apply import:
 
 ```
 codex-import path="~/backup/accounts.json"
 ```
 
-**Output:**
-```
-Imported 2 new account(s) (1 duplicate skipped)
+Before apply, the plugin creates an automatic timestamped pre-import backup when existing accounts are present.
 
-Total accounts: 4
+---
+
+### codex-dashboard
+
+Show live account eligibility, retry budget usage, refresh queue metrics, and the recommended next step.
+
+```
+codex-dashboard
 ```
 
 ---
@@ -457,17 +537,37 @@ Total accounts: 4
 
 | Tool | What It Does | Example |
 |------|--------------|---------|
-| `codex-list` | List all accounts | "list my accounts" |
-| `codex-switch` | Switch active account | "switch to account 2" |
-| `codex-status` | Show rate limits & health | "show account status" |
-| `codex-metrics` | Show runtime metrics | "show plugin metrics" |
-| `codex-health` | Validate tokens (read-only) | "check account health" |
-| `codex-refresh` | Refresh & save tokens | "refresh my tokens" |
-| `codex-remove` | Remove an account | "remove account 3" |
-| `codex-export` | Export accounts to file | "export my accounts" |
-| `codex-import` | Import accounts from file | "import accounts from backup" |
+| `codex-help` | Command guide by topic | `codex-help topic="setup"` |
+| `codex-setup` | Readiness checklist/wizard | `codex-setup wizard=true` |
+| `codex-next` | Best next action | `codex-next` |
+| `codex-doctor` | Diagnostics and optional safe fixes | `codex-doctor fix=true` |
+| `codex-list` | List/filter accounts | `codex-list tag="work"` |
+| `codex-switch` | Switch active account | `codex-switch index=2` |
+| `codex-label` | Set/clear display label | `codex-label index=2 label="Work"` |
+| `codex-tag` | Set/clear tag list | `codex-tag index=2 tags="work,team-a"` |
+| `codex-note` | Set/clear account note | `codex-note index=2 note="night backup"` |
+| `codex-status` | Per-account health/rate limit detail | `codex-status` |
+| `codex-dashboard` | Live selection and retry view | `codex-dashboard` |
+| `codex-metrics` | Runtime metrics summary | `codex-metrics` |
+| `codex-health` | Validate token health (read-only) | `codex-health` |
+| `codex-refresh` | Refresh and persist tokens | `codex-refresh` |
+| `codex-remove` | Remove account entry | `codex-remove index=3` |
+| `codex-export` | Export account backups | `codex-export` |
+| `codex-import` | Dry-run or apply imports | `codex-import path="~/backup/accounts.json" dryRun=true` |
 
 ---
+
+### Sample Output (codex-list)
+
+```
+Codex Accounts (3):
+
+  [1] Account 1 (user@gmail.com, workspace:Work, tags:work,team-a)  active
+  [2] Account 2 (backup@email.com, tags:backup)                      ok
+  [3] Account 3 (personal@email.com)                                 rate-limited
+
+Storage: ~/.opencode/openai-codex-accounts.json
+```
 
 ## Rotation Behavior
 
@@ -724,11 +824,14 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 |--------|---------|--------------|
 | `perProjectAccounts` | `true` | Each project gets its own account storage namespace under `~/.opencode/projects/` |
 | `toastDurationMs` | `5000` | How long toast notifications stay visible (ms) |
+| `beginnerSafeMode` | `false` | Beginner-safe retry profile: conservative retry budget, disables all-accounts wait/retry, and caps all-accounts retries |
 
 ### Retry Behavior
 
 | Option | Default | What It Does |
 |--------|---------|--------------|
+| `retryProfile` | `balanced` | Global retry budget profile (`conservative`, `balanced`, `aggressive`) |
+| `retryBudgetOverrides` | `{}` | Per-class retry budget overrides (`authRefresh`, `network`, `server`, `rateLimitShort`, `rateLimitGlobal`, `emptyResponse`) |
 | `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
 | `retryAllAccountsMaxWaitMs` | `0` | Max wait time (0 = unlimited) |
 | `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts |
@@ -744,6 +847,11 @@ Default unsupported-model fallback chain (used when `unsupportedCodexPolicy` is 
 - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
 - `gpt-5.2-codex -> gpt-5-codex`
 - `gpt-5.1-codex -> gpt-5-codex`
+
+When `beginnerSafeMode` is enabled, runtime behavior is intentionally conservative:
+- Retry profile is forced to `conservative`
+- `retryAllAccountsRateLimited` is forced `false`
+- `retryAllAccountsMaxRetries` is capped to `1`
 
 ### Environment Variables
 
@@ -761,6 +869,11 @@ CODEX_AUTH_PREWARM=0 opencode                    # Disable startup prewarm (prom
 CODEX_AUTH_FAST_SESSION=1 opencode               # Enable faster response defaults
 CODEX_AUTH_FAST_SESSION_STRATEGY=always opencode # Force fast mode for all prompts
 CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24 opencode # Tune fast-mode history window
+CODEX_AUTH_BEGINNER_SAFE_MODE=1 opencode         # Enable beginner-safe runtime profile
+CODEX_AUTH_RETRY_PROFILE=aggressive opencode     # Override retry profile (ignored when beginner safe mode is on)
+CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0 opencode     # Disable all-accounts wait-and-retry
+CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000 opencode  # Cap all-accounts wait duration
+CODEX_AUTH_RETRY_ALL_MAX_RETRIES=1 opencode      # Cap all-accounts retry attempts
 CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode # Enable generic unsupported-model fallback
 CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 opencode # Legacy fallback toggle (prefer policy var above)
 CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode    # Disable only the legacy gpt-5.3 -> gpt-5.2 edge

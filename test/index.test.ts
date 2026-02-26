@@ -47,6 +47,19 @@ vi.mock("../lib/refresh-queue.js", () => ({
 		refresh: "refreshed-refresh",
 		expires: Date.now() + 3600_000,
 	})),
+	getRefreshQueueMetrics: vi.fn(() => ({
+		started: 0,
+		deduplicated: 0,
+		rotationReused: 0,
+		succeeded: 0,
+		failed: 0,
+		exceptions: 0,
+		rotated: 0,
+		staleEvictions: 0,
+		lastDurationMs: 0,
+		lastFailureReason: null,
+		pending: 0,
+	})),
 }));
 
 vi.mock("../lib/auth/browser.js", () => ({
@@ -72,6 +85,8 @@ vi.mock("../lib/config.js", () => ({
 	getFastSession: () => false,
 	getFastSessionStrategy: () => "hybrid",
 	getFastSessionMaxInputItems: () => 30,
+	getRetryProfile: () => "balanced",
+	getRetryBudgetOverrides: () => ({}),
 	getRateLimitToastDebounceMs: () => 5000,
 	getRetryAllAccountsMaxRetries: () => 3,
 	getRetryAllAccountsMaxWaitMs: () => 30000,
@@ -93,6 +108,7 @@ vi.mock("../lib/config.js", () => ({
 	getCodexTuiV2: () => false,
 	getCodexTuiColorProfile: () => "ansi16",
 	getCodexTuiGlyphMode: () => "ascii",
+	getBeginnerSafeMode: () => false,
 	loadPluginConfig: () => ({}),
 }));
 
@@ -228,6 +244,8 @@ vi.mock("../lib/storage.js", () => ({
 	setStoragePath: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
 	importAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
+	previewImportAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
+	createTimestampedBackupPath: vi.fn((prefix?: string) => `/tmp/${prefix ?? "codex-backup"}-20260101-000000.json`),
 	loadFlaggedAccounts: vi.fn(async () => ({ version: 1, accounts: [] })),
 	saveFlaggedAccounts: vi.fn(async () => {}),
 	clearFlaggedAccounts: vi.fn(async () => {}),
@@ -266,6 +284,19 @@ vi.mock("../lib/accounts.js", () => {
 
 		getCurrentOrNextForFamilyHybrid() {
 			return this.accounts[0] ?? null;
+		}
+
+		getSelectionExplainability() {
+			return this.accounts.map((account, index) => ({
+				index,
+				enabled: true,
+				isCurrentForFamily: index === 0,
+				eligible: true,
+				reasons: ["eligible"],
+				healthScore: 100,
+				tokensAvailable: 50,
+				lastUsed: Date.now(),
+			}));
 		}
 
 		recordSuccess() {}
@@ -339,6 +370,7 @@ vi.mock("../lib/accounts.js", () => {
 });
 
 type ToolExecute<T = void> = { execute: (args: T) => Promise<string> };
+type OptionalToolExecute<T> = { execute: (args?: T) => Promise<string> };
 type PluginType = {
 	event: (input: { event: { type: string; properties?: unknown } }) => Promise<void>;
 	auth: {
@@ -351,15 +383,23 @@ type PluginType = {
 		}>;
 	};
 	tool: {
-		"codex-list": ToolExecute;
-		"codex-switch": ToolExecute<{ index: number }>;
+		"codex-list": OptionalToolExecute<{ tag?: string }>;
+		"codex-switch": OptionalToolExecute<{ index?: number }>;
 		"codex-status": ToolExecute;
 		"codex-metrics": ToolExecute;
+		"codex-help": ToolExecute<{ topic?: string }>;
+		"codex-setup": OptionalToolExecute<{ wizard?: boolean }>;
+		"codex-doctor": OptionalToolExecute<{ deep?: boolean; fix?: boolean }>;
+		"codex-next": ToolExecute;
+		"codex-label": ToolExecute<{ index?: number; label: string }>;
+		"codex-tag": ToolExecute<{ index?: number; tags: string }>;
+		"codex-note": ToolExecute<{ index?: number; note: string }>;
+		"codex-dashboard": ToolExecute;
 		"codex-health": ToolExecute;
-		"codex-remove": ToolExecute<{ index: number }>;
+		"codex-remove": OptionalToolExecute<{ index?: number }>;
 		"codex-refresh": ToolExecute;
-		"codex-export": ToolExecute<{ path: string; force?: boolean }>;
-		"codex-import": ToolExecute<{ path: string }>;
+		"codex-export": ToolExecute<{ path?: string; force?: boolean; timestamped?: boolean }>;
+		"codex-import": ToolExecute<{ path: string; dryRun?: boolean }>;
 	};
 };
 
@@ -406,6 +446,14 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(plugin.tool["codex-switch"]).toBeDefined();
 			expect(plugin.tool["codex-status"]).toBeDefined();
 			expect(plugin.tool["codex-metrics"]).toBeDefined();
+			expect(plugin.tool["codex-help"]).toBeDefined();
+			expect(plugin.tool["codex-setup"]).toBeDefined();
+			expect(plugin.tool["codex-doctor"]).toBeDefined();
+			expect(plugin.tool["codex-next"]).toBeDefined();
+			expect(plugin.tool["codex-label"]).toBeDefined();
+			expect(plugin.tool["codex-tag"]).toBeDefined();
+			expect(plugin.tool["codex-note"]).toBeDefined();
+			expect(plugin.tool["codex-dashboard"]).toBeDefined();
 			expect(plugin.tool["codex-health"]).toBeDefined();
 			expect(plugin.tool["codex-remove"]).toBeDefined();
 			expect(plugin.tool["codex-refresh"]).toBeDefined();
@@ -551,6 +599,16 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-list"].execute();
 			expect(result).toContain("cooldown");
 		});
+
+		it("filters accounts by tag", async () => {
+			mockStorage.accounts = [
+				{ refreshToken: "r1", email: "user1@example.com", accountTags: ["work"] },
+				{ refreshToken: "r2", email: "user2@example.com", accountTags: ["personal"] },
+			];
+			const result = await plugin.tool["codex-list"].execute({ tag: "work" });
+			expect(result).toContain("user1@example.com");
+			expect(result).not.toContain("user2@example.com");
+		});
 	});
 
 	describe("codex-switch tool", () => {
@@ -558,6 +616,13 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [];
 			const result = await plugin.tool["codex-switch"].execute({ index: 1 });
 			expect(result).toContain("No Codex accounts configured");
+		});
+
+		it("returns guidance when index is omitted in non-interactive mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-switch"].execute();
+			expect(result).toContain("Missing account number");
+			expect(result).toContain("codex-switch <index>");
 		});
 
 		it("returns error for invalid index", async () => {
@@ -625,6 +690,185 @@ describe("OpenAIOAuthPlugin", () => {
 		});
 	});
 
+	describe("codex-help tool", () => {
+		it("shows the default help overview", async () => {
+			const result = await plugin.tool["codex-help"].execute({ topic: "" });
+			expect(result).toContain("Codex Help");
+			expect(result).toContain("Quickstart");
+			expect(result).toContain("codex-doctor");
+			expect(result).toContain("codex-setup --wizard");
+		});
+
+		it("filters by topic", async () => {
+			const result = await plugin.tool["codex-help"].execute({ topic: "backup" });
+			expect(result).toContain("Backup and migration");
+			expect(result).toContain("codex-export");
+		});
+
+		it("handles unknown topics", async () => {
+			const result = await plugin.tool["codex-help"].execute({ topic: "unknown-topic" });
+			expect(result).toContain("Unknown topic");
+			expect(result).toContain("Available topics");
+		});
+	});
+
+	describe("codex-setup tool", () => {
+		it("shows checklist with login guidance when no accounts exist", async () => {
+			mockStorage.accounts = [];
+			const result = await plugin.tool["codex-setup"].execute();
+			expect(result).toContain("Setup Checklist");
+			expect(result).toContain("opencode auth login");
+			expect(result).toContain("codex-setup --wizard");
+		});
+
+		it("shows healthy account progress when account exists", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-setup"].execute();
+			expect(result).toContain("Healthy accounts");
+			expect(result).toContain("Recommended next step");
+		});
+
+		it("falls back to checklist when wizard is requested in non-interactive test environment", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-setup"].execute({ wizard: true });
+			expect(result).toContain("Interactive wizard mode is unavailable");
+			expect(result).toContain("Showing checklist view instead");
+			expect(result).toContain("Setup Checklist");
+		});
+	});
+
+	describe("codex-doctor tool", () => {
+		it("reports diagnostics when no accounts exist", async () => {
+			mockStorage.accounts = [];
+			const result = await plugin.tool["codex-doctor"].execute({ deep: false });
+			expect(result).toContain("Codex Doctor");
+			expect(result).toContain("No accounts are configured");
+		});
+
+		it("includes technical snapshot in deep mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ deep: true });
+			expect(result).toContain("Technical snapshot");
+			expect(result).toContain("Storage:");
+		});
+
+		it("applies safe auto-fixes when fix mode is enabled", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ fix: true });
+			expect(result).toContain("Auto-fix");
+			expect(result).toContain("Refreshed");
+		});
+
+		it("reports when no eligible account exists for auto-switch during fix mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const { AccountManager } = await import("../lib/accounts.js");
+			vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValue({
+				getSelectionExplainability: () => [
+					{
+						index: 0,
+						enabled: true,
+						isCurrentForFamily: true,
+						eligible: false,
+						reasons: ["rate-limited"],
+						healthScore: 0,
+						tokensAvailable: 0,
+						lastUsed: Date.now(),
+					},
+				],
+			} as unknown as InstanceType<typeof AccountManager>);
+
+			const result = await plugin.tool["codex-doctor"].execute({ fix: true });
+			expect(result).toContain("Auto-fix");
+			expect(result).toContain("No eligible account available for auto-switch");
+		});
+	});
+
+	describe("codex-next tool", () => {
+		it("recommends login when no accounts exist", async () => {
+			mockStorage.accounts = [];
+			const result = await plugin.tool["codex-next"].execute();
+			expect(result).toContain("opencode auth login");
+		});
+
+		it("recommends dashboard for healthy setup", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-next"].execute();
+			expect(result).toContain("codex-dashboard");
+		});
+	});
+
+	describe("codex-label tool", () => {
+		it("returns error when no accounts", async () => {
+			mockStorage.accounts = [];
+			const result = await plugin.tool["codex-label"].execute({ index: 1, label: "Work" });
+			expect(result).toContain("No Codex accounts configured");
+		});
+
+		it("returns guidance when index is omitted in non-interactive mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-label"].execute({ label: "Work" });
+			expect(result).toContain("Missing account number");
+			expect(result).toContain("codex-label <index> <label>");
+		});
+
+		it("returns error for invalid account index", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-label"].execute({ index: 9, label: "Work" });
+			expect(result).toContain("Invalid account number");
+		});
+
+		it("sets a label on the selected account", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-label"].execute({ index: 1, label: "Work Laptop" });
+			expect(result).toContain("Set label");
+			expect(mockStorage.accounts[0]?.accountLabel).toBe("Work Laptop");
+		});
+
+		it("clears a label when blank input is provided", async () => {
+			mockStorage.accounts = [
+				{ refreshToken: "r1", email: "user@example.com", accountLabel: "Personal" },
+			];
+			const result = await plugin.tool["codex-label"].execute({ index: 1, label: "   " });
+			expect(result).toContain("Cleared label");
+			expect(mockStorage.accounts[0]?.accountLabel).toBeUndefined();
+		});
+	});
+
+	describe("codex-tag tool", () => {
+		it("sets tags for an account", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-tag"].execute({ index: 1, tags: "work, team-a" });
+			expect(result).toContain("Updated tags");
+			expect(mockStorage.accounts[0]?.accountTags).toEqual(["work", "team-a"]);
+		});
+
+		it("returns guidance when index is omitted in non-interactive mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-tag"].execute({ tags: "work" });
+			expect(result).toContain("Missing account number");
+			expect(result).toContain("codex-tag <index> <tag1,tag2>");
+		});
+	});
+
+	describe("codex-note tool", () => {
+		it("sets and clears account note", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const setResult = await plugin.tool["codex-note"].execute({ index: 1, note: "Primary laptop" });
+			expect(setResult).toContain("Saved note");
+			expect(mockStorage.accounts[0]?.accountNote).toBe("Primary laptop");
+			const clearResult = await plugin.tool["codex-note"].execute({ index: 1, note: " " });
+			expect(clearResult).toContain("Cleared note");
+			expect(mockStorage.accounts[0]?.accountNote).toBeUndefined();
+		});
+
+		it("returns guidance when index is omitted in non-interactive mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-note"].execute({ note: "Primary" });
+			expect(result).toContain("Missing account number");
+			expect(result).toContain("codex-note <index> <note>");
+		});
+	});
+
 	describe("codex-health tool", () => {
 		it("returns error when no accounts", async () => {
 			mockStorage.accounts = [];
@@ -647,6 +891,13 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [];
 			const result = await plugin.tool["codex-remove"].execute({ index: 1 });
 			expect(result).toContain("No Codex accounts configured");
+		});
+
+		it("returns guidance when index is omitted in non-interactive mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-remove"].execute();
+			expect(result).toContain("Missing account number");
+			expect(result).toContain("codex-remove <index>");
 		});
 
 		it("returns error for invalid index", async () => {
@@ -698,6 +949,13 @@ describe("OpenAIOAuthPlugin", () => {
 			});
 			expect(result).toContain("Exported");
 		});
+
+		it("exports to timestamped path when path is omitted", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1" }];
+			const result = await plugin.tool["codex-export"].execute({});
+			expect(result).toContain("Exported");
+			expect(result).toContain("codex-backup");
+		});
 	});
 
 	describe("codex-import tool", () => {
@@ -707,6 +965,28 @@ describe("OpenAIOAuthPlugin", () => {
 			});
 			expect(result).toContain("Import complete");
 			expect(result).toContain("New accounts: 2");
+		});
+
+		it("supports dry-run preview mode", async () => {
+			const result = await plugin.tool["codex-import"].execute({
+				path: "/tmp/backup.json",
+				dryRun: true,
+			});
+			expect(result).toContain("Import preview");
+		});
+
+		it("skips pre-import backup when no accounts exist yet", async () => {
+			mockStorage.accounts = [];
+			const storageModule = await import("../lib/storage.js");
+			vi.mocked(storageModule.exportAccounts).mockImplementationOnce(async () => {
+				throw new Error("No accounts to export");
+			});
+
+			const result = await plugin.tool["codex-import"].execute({
+				path: "/tmp/backup.json",
+			});
+			expect(result).toContain("Import complete");
+			expect(result).toContain("Auto-backup: skipped");
 		});
 	});
 });
@@ -1132,6 +1412,28 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 					}
 					return null;
 				},
+				getSelectionExplainability: () => [
+					{
+						index: 0,
+						enabled: true,
+						isCurrentForFamily: true,
+						eligible: true,
+						reasons: ["eligible"],
+						healthScore: 100,
+						tokensAvailable: 50,
+						lastUsed: Date.now(),
+					},
+					{
+						index: 1,
+						enabled: true,
+						isCurrentForFamily: false,
+						eligible: true,
+						reasons: ["eligible"],
+						healthScore: 100,
+						tokensAvailable: 50,
+						lastUsed: Date.now(),
+					},
+				],
 				toAuthDetails: (account: { accountId?: string }) => ({
 					type: "oauth" as const,
 					access: `access-${account.accountId ?? "unknown"}`,

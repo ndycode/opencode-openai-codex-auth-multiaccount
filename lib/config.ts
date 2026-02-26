@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
+import type { RetryBudgetOverrides, RetryProfile } from "./request/retry-budget.js";
 import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
@@ -10,6 +11,7 @@ const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
+const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -23,9 +25,12 @@ const DEFAULT_CONFIG: PluginConfig = {
 	codexTuiV2: true,
 	codexTuiColorProfile: "truecolor",
 	codexTuiGlyphMode: "ascii",
+	beginnerSafeMode: false,
 	fastSession: false,
 	fastSessionStrategy: "hybrid",
 	fastSessionMaxInputItems: 30,
+	retryProfile: "balanced",
+	retryBudgetOverrides: {},
 	retryAllAccountsRateLimited: true,
 	retryAllAccountsMaxWaitMs: 0,
 	retryAllAccountsMaxRetries: Infinity,
@@ -219,6 +224,14 @@ export function getFastSession(pluginConfig: PluginConfig): boolean {
 	);
 }
 
+export function getBeginnerSafeMode(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_BEGINNER_SAFE_MODE",
+		pluginConfig.beginnerSafeMode,
+		false,
+	);
+}
+
 export function getFastSessionStrategy(pluginConfig: PluginConfig): "hybrid" | "always" {
 	const env = (process.env.CODEX_AUTH_FAST_SESSION_STRATEGY ?? "").trim().toLowerCase();
 	if (env === "always") return "always";
@@ -233,6 +246,45 @@ export function getFastSessionMaxInputItems(pluginConfig: PluginConfig): number 
 		30,
 		{ min: 8 },
 	);
+}
+
+export function getRetryProfile(pluginConfig: PluginConfig): RetryProfile {
+	return resolveStringSetting(
+		"CODEX_AUTH_RETRY_PROFILE",
+		pluginConfig.retryProfile,
+		"balanced",
+		RETRY_PROFILES,
+	);
+}
+
+function normalizeRetryBudgetValue(value: unknown): number | undefined {
+	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+	if (value < 0) return undefined;
+	return Math.floor(value);
+}
+
+export function getRetryBudgetOverrides(
+	pluginConfig: PluginConfig,
+): RetryBudgetOverrides {
+	const source = pluginConfig.retryBudgetOverrides;
+	if (!isRecord(source)) return {};
+
+	const normalized: RetryBudgetOverrides = {};
+	const authRefresh = normalizeRetryBudgetValue(source.authRefresh);
+	const network = normalizeRetryBudgetValue(source.network);
+	const server = normalizeRetryBudgetValue(source.server);
+	const rateLimitShort = normalizeRetryBudgetValue(source.rateLimitShort);
+	const rateLimitGlobal = normalizeRetryBudgetValue(source.rateLimitGlobal);
+	const emptyResponse = normalizeRetryBudgetValue(source.emptyResponse);
+
+	if (authRefresh !== undefined) normalized.authRefresh = authRefresh;
+	if (network !== undefined) normalized.network = network;
+	if (server !== undefined) normalized.server = server;
+	if (rateLimitShort !== undefined) normalized.rateLimitShort = rateLimitShort;
+	if (rateLimitGlobal !== undefined) normalized.rateLimitGlobal = rateLimitGlobal;
+	if (emptyResponse !== undefined) normalized.emptyResponse = emptyResponse;
+
+	return normalized;
 }
 
 export function getRetryAllAccountsRateLimited(pluginConfig: PluginConfig): boolean {

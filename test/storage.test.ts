@@ -18,6 +18,8 @@ import {
   formatStorageErrorHint,
   exportAccounts,
   importAccounts,
+  previewImportAccounts,
+  createTimestampedBackupPath,
   withAccountStorageTransaction,
 } from "../lib/storage.js";
 
@@ -159,6 +161,38 @@ describe("storage", () => {
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(2);
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
+    });
+
+    it("should preview import results without applying changes", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [{ accountId: "preview", refreshToken: "ref2", addedAt: 3, lastUsed: 4 }],
+        }),
+      );
+
+      const preview = await previewImportAccounts(exportPath);
+      expect(preview.imported).toBe(1);
+      expect(preview.total).toBe(2);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.accountId).toBe("existing");
+    });
+
+    it("creates timestamped backup paths in storage backups directory", () => {
+      const path = createTimestampedBackupPath();
+      expect(path).toContain("backups");
+      expect(path).toContain("codex-backup-");
+      expect(path.endsWith(".json")).toBe(true);
     });
 
     it("collapses same-refresh imports when accountId differs", async () => {
