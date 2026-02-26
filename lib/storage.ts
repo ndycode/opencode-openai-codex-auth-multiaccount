@@ -34,6 +34,34 @@ export interface FlaggedAccountStorageV1 {
 	accounts: FlaggedAccountMetadataV1[];
 }
 
+export type ImportBackupMode = "none" | "best-effort" | "required";
+
+export interface ImportAccountsOptions {
+	/**
+	 * Optional prefix used for pre-import backup file names.
+	 * Only applied when backupMode is not "none".
+	 */
+	preImportBackupPrefix?: string;
+	/**
+	 * Backup policy before import apply:
+	 * - none: do not create a pre-import backup
+	 * - best-effort: attempt backup, continue on failure
+	 * - required: backup must succeed or import aborts
+	 */
+	backupMode?: ImportBackupMode;
+}
+
+export type ImportBackupStatus = "created" | "skipped" | "failed";
+
+export interface ImportAccountsResult {
+	imported: number;
+	total: number;
+	skipped: number;
+	backupStatus: ImportBackupStatus;
+	backupPath?: string;
+	backupError?: string;
+}
+
 /**
  * Custom error class for storage operations with platform-aware hints.
  */
@@ -1094,16 +1122,59 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
  * @param filePath - Source file path
  * @throws Error if file is invalid or would exceed MAX_ACCOUNTS
  */
-export async function importAccounts(filePath: string): Promise<{ imported: number; total: number; skipped: number }> {
+export async function importAccounts(
+	filePath: string,
+	options: ImportAccountsOptions = {},
+): Promise<ImportAccountsResult> {
   const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
+  const backupMode = options.backupMode ?? "none";
+  const backupPrefix = options.preImportBackupPrefix ?? "codex-pre-import-backup";
   
-  const { imported: importedCount, total, skipped: skippedCount } =
+  const {
+    imported: importedCount,
+    total,
+    skipped: skippedCount,
+    backupStatus,
+    backupPath,
+    backupError,
+  } =
     await withAccountStorageTransaction(async (existing, persist) => {
-      const existingAccounts = existing?.accounts ?? [];
-      const existingActiveIndex = existing?.activeIndex ?? 0;
+      const existingStorage: AccountStorageV3 =
+        existing ??
+        ({
+          version: 3,
+          accounts: [],
+          activeIndex: 0,
+          activeIndexByFamily: {},
+        } satisfies AccountStorageV3);
+      const existingAccounts = existingStorage.accounts;
+      const existingActiveIndex = existingStorage.activeIndex;
       const clampedExistingActiveIndex = clampIndex(existingActiveIndex, existingAccounts.length);
       const existingActiveKeys = extractActiveKeys(existingAccounts, clampedExistingActiveIndex);
-      const existingActiveIndexByFamily = existing?.activeIndexByFamily ?? {};
+      const existingActiveIndexByFamily = existingStorage.activeIndexByFamily ?? {};
+
+      let backupStatus: ImportBackupStatus = "skipped";
+      let backupPath: string | undefined;
+      let backupError: string | undefined;
+      if (backupMode !== "none" && existingAccounts.length > 0) {
+        backupPath = createTimestampedBackupPath(backupPrefix);
+        try {
+          await fs.mkdir(dirname(backupPath), { recursive: true });
+          const backupContent = JSON.stringify(existingStorage, null, 2);
+          await fs.writeFile(backupPath, backupContent, { encoding: "utf-8", mode: 0o600 });
+          backupStatus = "created";
+        } catch (error) {
+          backupStatus = "failed";
+          backupError = error instanceof Error ? error.message : String(error);
+          if (backupMode === "required") {
+            throw new Error(`Pre-import backup failed: ${backupError}`);
+          }
+          log.warn("Pre-import backup failed; continuing import apply", {
+            path: backupPath,
+            error: backupError,
+          });
+        }
+      }
 
       const merged = [...existingAccounts, ...normalized.accounts];
 
@@ -1154,10 +1225,32 @@ export async function importAccounts(filePath: string): Promise<{ imported: numb
 
       const imported = deduplicatedAccounts.length - existingAccounts.length;
       const skipped = normalized.accounts.length - imported;
-      return { imported, total: deduplicatedAccounts.length, skipped };
+      return {
+        imported,
+        total: deduplicatedAccounts.length,
+        skipped,
+        backupStatus,
+        backupPath,
+        backupError,
+      };
     });
 
-  log.info("Imported accounts", { path: resolvedPath, imported: importedCount, skipped: skippedCount, total });
+  log.info("Imported accounts", {
+    path: resolvedPath,
+    imported: importedCount,
+    skipped: skippedCount,
+    total,
+    backupStatus,
+    backupPath,
+    backupError,
+  });
 
-  return { imported: importedCount, total, skipped: skippedCount };
+  return {
+    imported: importedCount,
+    total,
+    skipped: skippedCount,
+    backupStatus,
+    backupPath,
+    backupError,
+  };
 }

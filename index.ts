@@ -5275,7 +5275,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						? filePath
 						: shouldTimestamp
 							? createTimestampedBackupPath()
-							: createTimestampedBackupPath("codex-backup");
+							: "codex-backup.json";
 				try {
 					await exportAccounts(resolvedExportPath, force ?? true);
 					const storage = await loadAccounts();
@@ -5339,29 +5339,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 						].join("\n");
 					}
 
-					const existingStorage = await loadAccounts();
-					const hasExistingAccounts = (existingStorage?.accounts.length ?? 0) > 0;
-					const backupPath = hasExistingAccounts
-						? createTimestampedBackupPath("codex-pre-import-backup")
-						: null;
-					let backupSummary = "skipped (no existing accounts)";
-					let backupStatus: "ok" | "warning" = "warning";
-					if (backupPath) {
-						try {
-							await exportAccounts(backupPath, true);
-							backupSummary = backupPath;
-							backupStatus = "ok";
-						} catch (backupError) {
-							const backupErrorMessage =
-								backupError instanceof Error ? backupError.message : String(backupError);
-							logWarn("Pre-import backup failed; continuing import apply", {
-								path: backupPath,
-								error: backupErrorMessage,
-							});
-							backupSummary = `failed (${backupErrorMessage})`;
-						}
-					}
-					const result = await importAccounts(filePath);
+					const result = await importAccounts(filePath, {
+						preImportBackupPrefix: "codex-pre-import-backup",
+						backupMode: "required",
+					});
+					const backupSummary =
+						result.backupStatus === "created"
+							? result.backupPath ?? "created"
+							: result.backupStatus === "failed"
+								? `failed (${result.backupError ?? "unknown error"})`
+								: "skipped (no existing accounts)";
+					const backupStatus: "ok" | "warning" =
+						result.backupStatus === "created" ? "ok" : "warning";
 					invalidateAccountManagerCache();
 					const lines = [`Import complete.`, ``];
 					lines.push(`Preview: +${preview.imported} new, ${preview.skipped} skipped, ${preview.total} total`);

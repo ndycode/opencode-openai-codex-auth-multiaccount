@@ -471,13 +471,13 @@ codex-refresh
 
 Remove an account entry. If `index` is omitted and your terminal supports menus, an interactive picker opens.
 
-```
+```text
 codex-remove index=3
 ```
 
 or:
 
-```
+```text
 codex-remove
 ```
 
@@ -519,7 +519,7 @@ Apply import:
 codex-import path="~/backup/accounts.json"
 ```
 
-Before apply, the plugin creates an automatic timestamped pre-import backup when existing accounts are present.
+Before apply, the plugin creates an automatic timestamped pre-import backup when existing accounts are present. If backup creation fails, import apply is aborted.
 
 ---
 
@@ -559,7 +559,7 @@ codex-dashboard
 
 ### Sample Output (codex-list)
 
-```
+```text
 Codex Accounts (3):
 
   [1] Account 1 (user@gmail.com, workspace:Work, tags:work,team-a)  active

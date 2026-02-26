@@ -243,7 +243,13 @@ vi.mock("../lib/storage.js", () => ({
 	clearAccounts: vi.fn(async () => {}),
 	setStoragePath: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
-	importAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
+	importAccounts: vi.fn(async () => ({
+		imported: 2,
+		skipped: 1,
+		total: 5,
+		backupStatus: "created",
+		backupPath: "/tmp/codex-pre-import-backup-20260101-000000000-deadbe.json",
+	})),
 	previewImportAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
 	createTimestampedBackupPath: vi.fn((prefix?: string) => `/tmp/${prefix ?? "codex-backup"}-20260101-000000.json`),
 	loadFlaggedAccounts: vi.fn(async () => ({ version: 1, accounts: [] })),
@@ -964,15 +970,32 @@ describe("OpenAIOAuthPlugin", () => {
 				true,
 			);
 		});
+
+		it("uses non-timestamped default path when timestamped=false", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1" }];
+			const storageModule = await import("../lib/storage.js");
+			const result = await plugin.tool["codex-export"].execute({ timestamped: false });
+			expect(result).toContain("codex-backup.json");
+			expect(storageModule.createTimestampedBackupPath).not.toHaveBeenCalled();
+			expect(storageModule.exportAccounts).toHaveBeenCalledWith("codex-backup.json", true);
+		});
 	});
 
 	describe("codex-import tool", () => {
 		it("imports accounts from file", async () => {
+			const storageModule = await import("../lib/storage.js");
 			const result = await plugin.tool["codex-import"].execute({
 				path: "/tmp/backup.json",
 			});
 			expect(result).toContain("Import complete");
 			expect(result).toContain("New accounts: 2");
+			expect(result).toContain(
+				"Auto-backup: /tmp/codex-pre-import-backup-20260101-000000000-deadbe.json",
+			);
+			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json", {
+				preImportBackupPrefix: "codex-pre-import-backup",
+				backupMode: "required",
+			});
 		});
 
 		it("supports dry-run preview mode", async () => {
@@ -991,22 +1014,62 @@ describe("OpenAIOAuthPlugin", () => {
 		it("skips pre-import backup when no accounts exist yet", async () => {
 			mockStorage.accounts = [];
 			const storageModule = await import("../lib/storage.js");
+			vi.mocked(storageModule.importAccounts).mockResolvedValueOnce({
+				imported: 2,
+				skipped: 1,
+				total: 5,
+				backupStatus: "skipped",
+			});
 
 			const result = await plugin.tool["codex-import"].execute({
 				path: "/tmp/backup.json",
 			});
 			expect(result).toContain("Import complete");
 			expect(result).toContain("Auto-backup: skipped");
-			expect(storageModule.createTimestampedBackupPath).not.toHaveBeenCalled();
 			expect(storageModule.exportAccounts).not.toHaveBeenCalled();
-			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json");
+			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json", {
+				preImportBackupPrefix: "codex-pre-import-backup",
+				backupMode: "required",
+			});
 		});
 
-		it("continues import when pre-import backup fails", async () => {
+		it("fails import when required pre-import backup cannot be created", async () => {
 			mockStorage.accounts = [{ refreshToken: "r1" }];
 			const storageModule = await import("../lib/storage.js");
-			vi.mocked(storageModule.exportAccounts).mockRejectedValueOnce(
-				new Error("backup locked by antivirus"),
+			vi.mocked(storageModule.importAccounts).mockRejectedValueOnce(
+				new Error("Pre-import backup failed: backup locked by antivirus"),
+			);
+
+			const result = await plugin.tool["codex-import"].execute({
+				path: "/tmp/backup.json",
+			});
+
+			expect(result).toContain("Import failed");
+			expect(result).toContain("Pre-import backup failed");
+		});
+
+		it("delegates backup+apply sequencing to storage import to avoid race windows", async () => {
+			mockStorage.accounts = [{ refreshToken: "s1" }];
+			const storageModule = await import("../lib/storage.js");
+			const observedSnapshots: string[] = [];
+			vi.mocked(storageModule.importAccounts).mockImplementationOnce(
+				async (_path, _options) => {
+					observedSnapshots.push(
+						mockStorage.accounts.map((account) => account.refreshToken).join(","),
+					);
+					mockStorage.accounts = [{ refreshToken: "s2" }];
+					observedSnapshots.push(
+						mockStorage.accounts.map((account) => account.refreshToken).join(","),
+					);
+					return {
+						imported: 1,
+						skipped: 0,
+						total: 1,
+						backupStatus: "created",
+						backupPath:
+							"/tmp/codex-pre-import-backup-20260101-000000000-deadbe.json",
+					};
+				},
 			);
 
 			const result = await plugin.tool["codex-import"].execute({
@@ -1014,11 +1077,15 @@ describe("OpenAIOAuthPlugin", () => {
 			});
 
 			expect(result).toContain("Import complete");
-			expect(result).toContain("Auto-backup: failed (backup locked by antivirus)");
-			expect(storageModule.createTimestampedBackupPath).toHaveBeenCalledWith(
-				"codex-pre-import-backup",
+			expect(result).toContain(
+				"Auto-backup: /tmp/codex-pre-import-backup-20260101-000000000-deadbe.json",
 			);
-			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json");
+			expect(storageModule.exportAccounts).not.toHaveBeenCalled();
+			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json", {
+				preImportBackupPrefix: "codex-pre-import-backup",
+				backupMode: "required",
+			});
+			expect(observedSnapshots).toEqual(["s1", "s2"]);
 		});
 	});
 });
