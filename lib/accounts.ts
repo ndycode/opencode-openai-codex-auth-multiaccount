@@ -474,7 +474,7 @@ export class AccountManager {
 				tokensAvailable,
 				rateLimitedUntil,
 				coolingDownUntil,
-				cooldownReason: account.cooldownReason,
+				cooldownReason: coolingDownUntil !== undefined ? account.cooldownReason : undefined,
 				lastUsed: account.lastUsed,
 			};
 		});

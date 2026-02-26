@@ -96,6 +96,13 @@ describe("PluginConfigSchema", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	it("rejects non-integer retry budget override values", () => {
+		const result = PluginConfigSchema.safeParse({
+			retryBudgetOverrides: { network: 1.5 },
+		});
+		expect(result.success).toBe(false);
+	});
 });
 
 describe("AccountMetadataV3Schema", () => {
@@ -148,9 +155,46 @@ describe("AccountMetadataV3Schema", () => {
 		expect(result.success).toBe(false);
 	});
 
-	it("rejects empty account tag entries", () => {
-		const result = AccountMetadataV3Schema.safeParse({ ...validAccount, accountTags: [""] });
-		expect(result.success).toBe(false);
+	it("normalizes account tags by trimming, lowercasing, and filtering blanks", () => {
+		const result = AccountMetadataV3Schema.safeParse({
+			...validAccount,
+			accountTags: [" Work ", "", "TEAM-A", "work"],
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.accountTags).toEqual(["work", "team-a"]);
+		}
+	});
+
+	it("normalizes empty account tags to undefined", () => {
+		const result = AccountMetadataV3Schema.safeParse({
+			...validAccount,
+			accountTags: ["", "   "],
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.accountTags).toBeUndefined();
+		}
+	});
+
+	it("normalizes account note by trimming and dropping empty values", () => {
+		const withNote = AccountMetadataV3Schema.safeParse({
+			...validAccount,
+			accountNote: "  primary workspace  ",
+		});
+		expect(withNote.success).toBe(true);
+		if (withNote.success) {
+			expect(withNote.data.accountNote).toBe("primary workspace");
+		}
+
+		const withoutNote = AccountMetadataV3Schema.safeParse({
+			...validAccount,
+			accountNote: "   ",
+		});
+		expect(withoutNote.success).toBe(true);
+		if (withoutNote.success) {
+			expect(withoutNote.data.accountNote).toBeUndefined();
+		}
 	});
 });
 

@@ -1844,7 +1844,7 @@ describe("AccountManager", () => {
       manager.markRateLimited(rateLimited, 60_000, "codex");
       getTokenTracker().drain(2, "codex", 100);
 
-      const explainability = manager.getSelectionExplainability("codex", undefined, Date.now());
+      const explainability = manager.getSelectionExplainability("codex", undefined, now);
       const byIndex = new Map(explainability.map((entry) => [entry.index, entry]));
 
       expect(byIndex.get(0)?.eligible).toBe(false);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { promises as fs, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { 
   deduplicateAccounts,
@@ -181,6 +181,7 @@ describe("storage", () => {
 
       const preview = await previewImportAccounts(exportPath);
       expect(preview.imported).toBe(1);
+      expect(preview.skipped).toBe(0);
       expect(preview.total).toBe(2);
 
       const loaded = await loadAccounts();
@@ -190,9 +191,15 @@ describe("storage", () => {
 
     it("creates timestamped backup paths in storage backups directory", () => {
       const path = createTimestampedBackupPath();
-      expect(path).toContain("backups");
-      expect(path).toContain("codex-backup-");
+      const expectedBackupDir = join(dirname(testStoragePath), "backups");
+      expect(dirname(path)).toBe(expectedBackupDir);
+      expect(basename(path)).toMatch(/^codex-backup-\d{8}-\d{9}-[a-f0-9]{6}\.json$/);
       expect(path.endsWith(".json")).toBe(true);
+    });
+
+    it("sanitizes backup filename prefix to prevent unsafe path fragments", () => {
+      const path = createTimestampedBackupPath("../unsafe/../name");
+      expect(basename(path)).toMatch(/^unsafe-name-\d{8}-\d{9}-[a-f0-9]{6}\.json$/);
     });
 
     it("collapses same-refresh imports when accountId differs", async () => {

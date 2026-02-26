@@ -122,6 +122,8 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 }
 ```
 
+The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bounded override; the default remains `Infinity` when the key is omitted.
+
 ### options
 
 | option | default | what it does |
@@ -317,9 +319,9 @@ result: project uses `high`, other projects use `medium`.
 | `~/.opencode/auth/openai.json` | oauth tokens |
 | `~/.opencode/openai-codex-accounts.json` | global account storage |
 | `~/.opencode/projects/<project-key>/openai-codex-accounts.json` | per-project account storage |
-| `~/.opencode/backups/codex-backup-YYYYMMDD-HHMMSS.json` | timestamped export backup (global storage mode) |
-| `~/.opencode/projects/<project-key>/backups/codex-backup-YYYYMMDD-HHMMSS.json` | timestamped export backup (per-project storage mode) |
-| `.../backups/codex-pre-import-backup-YYYYMMDD-HHMMSS.json` | automatic snapshot created before non-dry-run imports when existing accounts are present |
+| `~/.opencode/backups/codex-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | timestamped export backup (global storage mode) |
+| `~/.opencode/projects/<project-key>/backups/codex-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | timestamped export backup (per-project storage mode) |
+| `.../backups/codex-pre-import-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | automatic snapshot created before non-dry-run imports when existing accounts are present |
 | `~/.opencode/logs/codex-plugin/` | debug logs |
 
 ---

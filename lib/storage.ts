@@ -1,4 +1,5 @@
 import { promises as fs, existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
 import { createLogger } from "./logger.js";
@@ -984,13 +985,25 @@ function formatBackupTimestamp(date: Date = new Date()): string {
 	const hh = String(date.getHours()).padStart(2, "0");
 	const min = String(date.getMinutes()).padStart(2, "0");
 	const ss = String(date.getSeconds()).padStart(2, "0");
-	return `${yyyy}${mm}${dd}-${hh}${min}${ss}`;
+	const mmm = String(date.getMilliseconds()).padStart(3, "0");
+	return `${yyyy}${mm}${dd}-${hh}${min}${ss}${mmm}`;
+}
+
+function sanitizeBackupPrefix(prefix: string): string {
+	const trimmed = prefix.trim();
+	const safe = trimmed
+		.replace(/[^a-zA-Z0-9_-]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	return safe.length > 0 ? safe : "codex-backup";
 }
 
 export function createTimestampedBackupPath(prefix = "codex-backup"): string {
 	const storagePath = getStoragePath();
 	const backupDir = join(dirname(storagePath), "backups");
-	return join(backupDir, `${prefix}-${formatBackupTimestamp()}.json`);
+	const safePrefix = sanitizeBackupPrefix(prefix);
+	const nonce = randomBytes(3).toString("hex");
+	return join(backupDir, `${safePrefix}-${formatBackupTimestamp()}-${nonce}.json`);
 }
 
 async function readAndNormalizeImportFile(filePath: string): Promise<{

@@ -52,7 +52,7 @@ const RETRY_BUDGET_CLASSES: RetryBudgetClass[] = [
 	"emptyResponse",
 ];
 
-function normalizeRetryBudgetValue(value: unknown): number | undefined {
+export function normalizeRetryBudgetValue(value: unknown): number | undefined {
 	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
 	if (value < 0) return undefined;
 	return Math.floor(value);
@@ -87,8 +87,11 @@ function createUsedCounters(): RetryBudgetLimits {
 
 export class RetryBudgetTracker {
 	private readonly used: RetryBudgetLimits = createUsedCounters();
+	private readonly limits: RetryBudgetLimits;
 
-	constructor(private readonly limits: RetryBudgetLimits) {}
+	constructor(limits: RetryBudgetLimits) {
+		this.limits = { ...limits };
+	}
 
 	consume(bucket: RetryBudgetClass): boolean {
 		const limit = this.limits[bucket];

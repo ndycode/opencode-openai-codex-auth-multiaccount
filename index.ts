@@ -1383,8 +1383,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const commandMap: Record<Exclude<SetupWizardChoice, "checklist" | "next" | "exit">, string> = {
 					"add-account": "opencode auth login",
 					health: "codex-health",
-					switch: "codex-switch <index>",
-					label: "codex-label <index> <label>",
+					switch: "codex-switch index=2",
+					label: "codex-label index=2 label=\"Work\"",
 					doctor: "codex-doctor",
 					dashboard: "codex-dashboard",
 					metrics: "codex-metrics",
@@ -2010,6 +2010,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Auth refresh failed for account ${account.index + 1}`,
 					)
 				) {
+					accountManager.refundToken(account, modelFamily, model);
 					return new Response(
 						JSON.stringify({
 							error: {
@@ -2154,6 +2155,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										`Network error on account ${account.index + 1}: ${errorMsg}`,
 									)
 								) {
+									accountManager.refundToken(account, modelFamily, model);
 									return new Response(
 										JSON.stringify({
 											error: {
@@ -3585,10 +3587,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								...formatUiHeader(ui, "Codex accounts"),
 								"",
 								formatUiItem(ui, `No accounts found for tag: ${normalizedTag}`, "warning"),
-								formatUiItem(ui, "Use codex-tag <index> <tag1,tag2> to add tags.", "accent"),
+								formatUiItem(ui, "Use codex-tag index=2 tags=\"work,team-a\" to add tags.", "accent"),
 							].join("\n");
 						}
-						return `No accounts found for tag: ${normalizedTag}\n\nUse codex-tag <index> <tag1,tag2> to add tags.`;
+						return `No accounts found for tag: ${normalizedTag}\n\nUse codex-tag index=2 tags="work,team-a" to add tags.`;
 					}
 					if (ui.v2Enabled) {
 						const lines: string[] = [
@@ -3628,17 +3630,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push("");
 						lines.push(...formatUiSection(ui, "Commands"));
 						lines.push(formatUiItem(ui, "Add account: opencode auth login", "accent"));
-						lines.push(formatUiItem(ui, "Switch account: codex-switch <index>"));
+						lines.push(formatUiItem(ui, "Switch account: codex-switch index=2"));
 						lines.push(formatUiItem(ui, "Detailed status: codex-status"));
 						lines.push(formatUiItem(ui, "Live dashboard: codex-dashboard"));
 						lines.push(formatUiItem(ui, "Runtime metrics: codex-metrics"));
-						lines.push(formatUiItem(ui, "Set account tags: codex-tag <index> <tag1,tag2>"));
-						lines.push(formatUiItem(ui, "Set account note: codex-note <index> <note>"));
+						lines.push(formatUiItem(ui, "Set account tags: codex-tag index=2 tags=\"work,team-a\""));
+						lines.push(formatUiItem(ui, "Set account note: codex-note index=2 note=\"weekday primary\""));
 						lines.push(formatUiItem(ui, "Doctor checks: codex-doctor"));
 						lines.push(formatUiItem(ui, "Onboarding checklist: codex-setup"));
 						lines.push(formatUiItem(ui, "Guided setup wizard: codex-setup --wizard"));
 						lines.push(formatUiItem(ui, "Best next action: codex-next"));
-						lines.push(formatUiItem(ui, "Rename account label: codex-label <index> <label>"));
+						lines.push(formatUiItem(ui, "Rename account label: codex-label index=2 label=\"Work\""));
 						lines.push(formatUiItem(ui, "Command guide: codex-help"));
 						return lines.join("\n");
 					}
@@ -3737,7 +3739,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										...formatUiHeader(ui, "Switch account"),
 										"",
 										formatUiItem(ui, "No account selected.", "warning"),
-										formatUiItem(ui, "Run again and pick an account, or pass codex-switch <index>.", "muted"),
+										formatUiItem(ui, "Run again and pick an account, or pass codex-switch index=2.", "muted"),
 									].join("\n");
 								}
 								return "No account selected.";
@@ -3747,10 +3749,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									...formatUiHeader(ui, "Switch account"),
 									"",
 									formatUiItem(ui, "Missing account number.", "warning"),
-									formatUiItem(ui, "Use: codex-switch <index>", "accent"),
+									formatUiItem(ui, "Use: codex-switch index=2", "accent"),
 								].join("\n");
 							}
-							return "Missing account number. Use: codex-switch <index>";
+							return "Missing account number. Use: codex-switch index=2";
 						}
 						resolvedIndex = selectedIndex + 1;
 					}
@@ -4184,13 +4186,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 							title: "Daily account operations",
 							lines: [
 								"List accounts: codex-list",
-								"Switch active account: codex-switch <index>",
+								"Switch active account: codex-switch index=2",
 								"Show detailed status: codex-status",
-								"Set account label: codex-label <index> <label>",
-								"Set account tags: codex-tag <index> <tag1,tag2>",
-								"Set account note: codex-note <index> <note>",
-								"Filter by tag: codex-list --tag=<tag>",
-								"Remove account: codex-remove <index>",
+								"Set account label: codex-label index=2 label=\"Work\"",
+								"Set account tags: codex-tag index=2 tags=\"work,team-a\"",
+								"Set account note: codex-note index=2 note=\"weekday primary\"",
+								"Filter by tag: codex-list tag=\"work\"",
+								"Remove account: codex-remove index=2",
 							],
 						},
 						{
@@ -4562,7 +4564,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										...formatUiHeader(ui, "Set account label"),
 										"",
 										formatUiItem(ui, "No account selected.", "warning"),
-										formatUiItem(ui, "Run again and pick an account, or pass codex-label <index> <label>.", "muted"),
+										formatUiItem(ui, "Run again and pick an account, or pass codex-label index=2 label=\"Work\".", "muted"),
 									].join("\n");
 								}
 								return "No account selected.";
@@ -4572,10 +4574,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									...formatUiHeader(ui, "Set account label"),
 									"",
 									formatUiItem(ui, "Missing account number.", "warning"),
-									formatUiItem(ui, "Use: codex-label <index> <label>", "accent"),
+									formatUiItem(ui, "Use: codex-label index=2 label=\"Work\"", "accent"),
 								].join("\n");
 							}
-							return "Missing account number. Use: codex-label <index> <label>";
+							return "Missing account number. Use: codex-label index=2 label=\"Work\"";
 						}
 						resolvedIndex = selectedIndex + 1;
 					}
@@ -4703,7 +4705,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									  ].join("\n")
 									: "No account selected.";
 							}
-							return "Missing account number. Use: codex-tag <index> <tag1,tag2>";
+							return "Missing account number. Use: codex-tag index=2 tags=\"work,team-a\"";
 						}
 						resolvedIndex = selectedIndex + 1;
 					}
@@ -4779,7 +4781,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						const selectedIndex = await promptAccountIndexSelection(ui, storage, "Set account note");
 						if (selectedIndex === null) {
 							if (supportsInteractiveMenus()) return "No account selected.";
-							return "Missing account number. Use: codex-note <index> <note>";
+							return "Missing account number. Use: codex-note index=2 note=\"weekday primary\"";
 						}
 						resolvedIndex = selectedIndex + 1;
 					}
@@ -5046,7 +5048,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										...formatUiHeader(ui, "Remove account"),
 										"",
 										formatUiItem(ui, "No account selected.", "warning"),
-										formatUiItem(ui, "Run again and pick an account, or pass codex-remove <index>.", "muted"),
+										formatUiItem(ui, "Run again and pick an account, or pass codex-remove index=2.", "muted"),
 									].join("\n");
 								}
 								return "No account selected.";
@@ -5056,10 +5058,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									...formatUiHeader(ui, "Remove account"),
 									"",
 									formatUiItem(ui, "Missing account number.", "warning"),
-									formatUiItem(ui, "Use: codex-remove <index>", "accent"),
+									formatUiItem(ui, "Use: codex-remove index=2", "accent"),
 								].join("\n");
 							}
-							return "Missing account number. Use: codex-remove <index>";
+							return "Missing account number. Use: codex-remove index=2";
 						}
 						resolvedIndex = selectedIndex + 1;
 					}
@@ -5342,18 +5344,28 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const backupPath = hasExistingAccounts
 						? createTimestampedBackupPath("codex-pre-import-backup")
 						: null;
+					let backupSummary = "skipped (no existing accounts)";
+					let backupStatus: "ok" | "warning" = "warning";
 					if (backupPath) {
-						await exportAccounts(backupPath, true);
+						try {
+							await exportAccounts(backupPath, true);
+							backupSummary = backupPath;
+							backupStatus = "ok";
+						} catch (backupError) {
+							const backupErrorMessage =
+								backupError instanceof Error ? backupError.message : String(backupError);
+							logWarn("Pre-import backup failed; continuing import apply", {
+								path: backupPath,
+								error: backupErrorMessage,
+							});
+							backupSummary = `failed (${backupErrorMessage})`;
+						}
 					}
 					const result = await importAccounts(filePath);
 					invalidateAccountManagerCache();
 					const lines = [`Import complete.`, ``];
 					lines.push(`Preview: +${preview.imported} new, ${preview.skipped} skipped, ${preview.total} total`);
-					lines.push(
-						backupPath
-							? `Auto-backup: ${backupPath}`
-							: "Auto-backup: skipped (no existing accounts)",
-					);
+					lines.push(`Auto-backup: ${backupSummary}`);
 					if (result.imported > 0) {
 						lines.push(`New accounts: ${result.imported}`);
 					}
@@ -5370,8 +5382,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 							formatUiKeyValue(
 								ui,
 								"Auto-backup",
-								backupPath ?? "skipped (no existing accounts)",
-								backupPath ? "muted" : "warning",
+								backupSummary,
+								backupStatus === "ok" ? "muted" : "warning",
 							),
 							formatUiKeyValue(ui, "Preview", `+${preview.imported}, skipped=${preview.skipped}, total=${preview.total}`, "muted"),
 							formatUiKeyValue(ui, "New accounts", String(result.imported), result.imported > 0 ? "success" : "muted"),

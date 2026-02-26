@@ -119,7 +119,7 @@ export function buildBeginnerChecklist(
 						? "Active account is set"
 						: "No active account is selected"
 					: "Requires at least one account",
-			command: "codex-switch <index>",
+			command: "codex-switch index=2",
 		},
 		{
 			id: "healthy-account",
@@ -141,7 +141,7 @@ export function buildBeginnerChecklist(
 					: summary.unlabeled === 0
 						? "All accounts already have labels"
 						: `${summary.unlabeled} account(s) still unlabeled`,
-			command: "codex-label <index> <label>",
+			command: "codex-label index=2 label=\"Work\"",
 		},
 		{
 			id: "learn-commands",
@@ -293,7 +293,7 @@ export function recommendBeginnerNextAction(input: {
 		return "Run `codex-health`, then re-login or switch to a healthy account.";
 	}
 	if (summary.rateLimited > 0) {
-		return "Use `codex-switch <index>` to move away from rate-limited accounts.";
+		return "Use `codex-switch index=2` to move away from rate-limited accounts.";
 	}
 	if (summary.coolingDown > 0) {
 		return "Wait for cooldown expiry or switch to another account with `codex-switch`.";
@@ -302,7 +302,7 @@ export function recommendBeginnerNextAction(input: {
 		return "Run `codex-refresh` to refresh tokens and verify account health.";
 	}
 	if (summary.total > 1 && summary.unlabeled > 0) {
-		return "Label accounts with `codex-label <index> <label>` for easier switching.";
+		return "Label accounts with `codex-label index=2 label=\"Work\"` for easier switching.";
 	}
 	return "Open `codex-dashboard` for live health and retry visibility.";
 }

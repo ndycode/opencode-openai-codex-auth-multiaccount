@@ -284,13 +284,13 @@ The plugin provides built-in tools for managing your OpenAI accounts. These are 
 
 List all configured accounts with status badges.
 
-```
+```text
 codex-list
 ```
 
 Filter by tag:
 
-```
+```text
 codex-list tag="work"
 ```
 
@@ -302,13 +302,13 @@ Shows account labels, IDs, tags, active state, and rate-limit/cooldown markers.
 
 Switch to a different account. If `index` is omitted and your terminal supports menus, an interactive picker opens.
 
-```
+```text
 codex-switch index=2
 ```
 
 or:
 
-```
+```text
 codex-switch
 ```
 
@@ -318,13 +318,13 @@ codex-switch
 
 Set or clear a display label for an account. Useful for workspace naming.
 
-```
+```text
 codex-label index=2 label="Work"
 ```
 
 Clear:
 
-```
+```text
 codex-label index=2 label=""
 ```
 
@@ -336,13 +336,13 @@ If `index` is omitted in interactive terminals, a picker opens.
 
 Set or clear comma-separated tags for filtering and grouping.
 
-```
+```text
 codex-tag index=2 tags="work,team-a"
 ```
 
 Clear:
 
-```
+```text
 codex-tag index=2 tags=""
 ```
 
@@ -354,13 +354,13 @@ Use tags with `codex-list tag="work"`.
 
 Set or clear a short per-account note for reminders.
 
-```
+```text
 codex-note index=2 note="primary for weekday daytime usage"
 ```
 
 Clear:
 
-```
+```text
 codex-note index=2 note=""
 ```
 
@@ -370,7 +370,7 @@ codex-note index=2 note=""
 
 Show beginner-friendly command guidance. Optional topic filter:
 
-```
+```text
 codex-help
 codex-help topic="backup"
 ```
@@ -383,13 +383,13 @@ Available topics: `setup`, `switch`, `health`, `backup`, `dashboard`, `metrics`.
 
 Show readiness checklist for first-run onboarding and account health.
 
-```
+```text
 codex-setup
 ```
 
 Open guided wizard (menu-driven when terminal supports it, checklist fallback otherwise):
 
-```
+```text
 codex-setup wizard=true
 ```
 
@@ -399,7 +399,7 @@ codex-setup wizard=true
 
 Run diagnostics with actionable findings.
 
-```
+```text
 codex-doctor
 codex-doctor deep=true
 ```
@@ -409,7 +409,7 @@ Apply safe auto-fixes (`--fix` equivalent):
 - Persists refreshed credentials
 - Switches active account to the healthiest eligible account
 
-```
+```text
 codex-doctor fix=true
 ```
 
@@ -419,7 +419,7 @@ codex-doctor fix=true
 
 Show the single most recommended next action based on current account/runtime state.
 
-```
+```text
 codex-next
 ```
 
@@ -429,7 +429,7 @@ codex-next
 
 Show detailed status including rate limits and health scores.
 
-```
+```text
 codex-status
 ```
 
@@ -439,7 +439,7 @@ codex-status
 
 Show live runtime metrics (request counts, latency, errors, retries, and safe mode).
 
-```
+```text
 codex-metrics
 ```
 
@@ -449,7 +449,7 @@ codex-metrics
 
 Check if all account tokens are still valid (read-only check).
 
-```
+```text
 codex-health
 ```
 
@@ -459,7 +459,7 @@ codex-health
 
 Refresh all OAuth tokens and save them to disk. Use this after long idle periods.
 
-```
+```text
 codex-refresh
 ```
 
@@ -489,13 +489,13 @@ Export accounts to JSON for backup/migration.
 
 Explicit path:
 
-```
+```text
 codex-export path="~/backup/accounts.json"
 ```
 
 Auto timestamped backup path (default behavior when `path` is omitted):
 
-```
+```text
 codex-export
 ```
 
@@ -509,13 +509,13 @@ Import accounts from a JSON file (dedupe-aware merge).
 
 Dry-run preview (no writes):
 
-```
+```text
 codex-import path="~/backup/accounts.json" dryRun=true
 ```
 
 Apply import:
 
-```
+```text
 codex-import path="~/backup/accounts.json"
 ```
 
@@ -527,7 +527,7 @@ Before apply, the plugin creates an automatic timestamped pre-import backup when
 
 Show live account eligibility, retry budget usage, refresh queue metrics, and the recommended next step.
 
-```
+```text
 codex-dashboard
 ```
 

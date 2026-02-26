@@ -28,6 +28,7 @@ The current codebase includes dedicated tests for the beginner operations layer 
 Recommended validation command before release:
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 ```

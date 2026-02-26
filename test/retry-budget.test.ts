@@ -42,5 +42,18 @@ describe("retry-budget", () => {
 		expect(tracker.getRemaining("network")).toBe(0);
 		expect(tracker.getUsage().network).toBe(1);
 	});
-});
 
+	it("clones constructor limits to avoid external mutation", () => {
+		const limits: RetryBudgetLimits = {
+			authRefresh: 1,
+			network: 2,
+			server: 3,
+			rateLimitShort: 4,
+			rateLimitGlobal: 5,
+			emptyResponse: 6,
+		};
+		const tracker = new RetryBudgetTracker(limits);
+		limits.network = 0;
+		expect(tracker.getLimits().network).toBe(2);
+	});
+});

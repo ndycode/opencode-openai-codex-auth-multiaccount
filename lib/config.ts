@@ -2,7 +2,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
-import type { RetryBudgetOverrides, RetryProfile } from "./request/retry-budget.js";
+import {
+	normalizeRetryBudgetValue,
+	type RetryBudgetOverrides,
+	type RetryProfile,
+} from "./request/retry-budget.js";
 import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
@@ -255,12 +259,6 @@ export function getRetryProfile(pluginConfig: PluginConfig): RetryProfile {
 		"balanced",
 		RETRY_PROFILES,
 	);
-}
-
-function normalizeRetryBudgetValue(value: unknown): number | undefined {
-	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-	if (value < 0) return undefined;
-	return Math.floor(value);
 }
 
 export function getRetryBudgetOverrides(

@@ -622,7 +622,7 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-switch"].execute();
 			expect(result).toContain("Missing account number");
-			expect(result).toContain("codex-switch <index>");
+			expect(result).toContain("codex-switch index=2");
 		});
 
 		it("returns error for invalid index", async () => {
@@ -808,7 +808,7 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-label"].execute({ label: "Work" });
 			expect(result).toContain("Missing account number");
-			expect(result).toContain("codex-label <index> <label>");
+			expect(result).toContain("codex-label index=2 label=\"Work\"");
 		});
 
 		it("returns error for invalid account index", async () => {
@@ -846,7 +846,7 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-tag"].execute({ tags: "work" });
 			expect(result).toContain("Missing account number");
-			expect(result).toContain("codex-tag <index> <tag1,tag2>");
+			expect(result).toContain("codex-tag index=2 tags=\"work,team-a\"");
 		});
 	});
 
@@ -865,7 +865,7 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-note"].execute({ note: "Primary" });
 			expect(result).toContain("Missing account number");
-			expect(result).toContain("codex-note <index> <note>");
+			expect(result).toContain("codex-note index=2 note=\"weekday primary\"");
 		});
 	});
 
@@ -897,7 +897,7 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-remove"].execute();
 			expect(result).toContain("Missing account number");
-			expect(result).toContain("codex-remove <index>");
+			expect(result).toContain("codex-remove index=2");
 		});
 
 		it("returns error for invalid index", async () => {
@@ -944,17 +944,25 @@ describe("OpenAIOAuthPlugin", () => {
 	describe("codex-export tool", () => {
 		it("exports accounts to file", async () => {
 			mockStorage.accounts = [{ refreshToken: "r1" }];
+			const storageModule = await import("../lib/storage.js");
 			const result = await plugin.tool["codex-export"].execute({
 				path: "/tmp/backup.json",
 			});
 			expect(result).toContain("Exported");
+			expect(storageModule.exportAccounts).toHaveBeenCalledWith("/tmp/backup.json", true);
 		});
 
 		it("exports to timestamped path when path is omitted", async () => {
 			mockStorage.accounts = [{ refreshToken: "r1" }];
+			const storageModule = await import("../lib/storage.js");
 			const result = await plugin.tool["codex-export"].execute({});
 			expect(result).toContain("Exported");
 			expect(result).toContain("codex-backup");
+			expect(storageModule.createTimestampedBackupPath).toHaveBeenCalledWith();
+			expect(storageModule.exportAccounts).toHaveBeenCalledWith(
+				"/tmp/codex-backup-20260101-000000.json",
+				true,
+			);
 		});
 	});
 
@@ -968,25 +976,49 @@ describe("OpenAIOAuthPlugin", () => {
 		});
 
 		it("supports dry-run preview mode", async () => {
+			const storageModule = await import("../lib/storage.js");
 			const result = await plugin.tool["codex-import"].execute({
 				path: "/tmp/backup.json",
 				dryRun: true,
 			});
 			expect(result).toContain("Import preview");
+			expect(storageModule.previewImportAccounts).toHaveBeenCalledWith("/tmp/backup.json");
+			expect(storageModule.importAccounts).not.toHaveBeenCalled();
+			expect(storageModule.exportAccounts).not.toHaveBeenCalled();
+			expect(storageModule.createTimestampedBackupPath).not.toHaveBeenCalled();
 		});
 
 		it("skips pre-import backup when no accounts exist yet", async () => {
 			mockStorage.accounts = [];
 			const storageModule = await import("../lib/storage.js");
-			vi.mocked(storageModule.exportAccounts).mockImplementationOnce(async () => {
-				throw new Error("No accounts to export");
-			});
 
 			const result = await plugin.tool["codex-import"].execute({
 				path: "/tmp/backup.json",
 			});
 			expect(result).toContain("Import complete");
 			expect(result).toContain("Auto-backup: skipped");
+			expect(storageModule.createTimestampedBackupPath).not.toHaveBeenCalled();
+			expect(storageModule.exportAccounts).not.toHaveBeenCalled();
+			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json");
+		});
+
+		it("continues import when pre-import backup fails", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1" }];
+			const storageModule = await import("../lib/storage.js");
+			vi.mocked(storageModule.exportAccounts).mockRejectedValueOnce(
+				new Error("backup locked by antivirus"),
+			);
+
+			const result = await plugin.tool["codex-import"].execute({
+				path: "/tmp/backup.json",
+			});
+
+			expect(result).toContain("Import complete");
+			expect(result).toContain("Auto-backup: failed (backup locked by antivirus)");
+			expect(storageModule.createTimestampedBackupPath).toHaveBeenCalledWith(
+				"codex-pre-import-backup",
+			);
+			expect(storageModule.importAccounts).toHaveBeenCalledWith("/tmp/backup.json");
 		});
 	});
 });
