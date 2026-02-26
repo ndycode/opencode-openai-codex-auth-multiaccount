@@ -1137,7 +1137,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					if (existingIndex >= 0) {
 						const existingAccount = workingStorage.accounts[existingIndex];
 						if (existingAccount) {
-							existingAccount.email = inferredEmail;
+							if (inferredEmail) {
+								existingAccount.email = inferredEmail;
+							}
 							existingAccount.refreshToken = codexAccount.refreshToken;
 							existingAccount.accessToken = codexAccount.accessToken;
 							existingAccount.expiresAt = codexAccount.expiresAt;

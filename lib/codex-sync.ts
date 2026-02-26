@@ -475,6 +475,7 @@ async function writeJsonAtomicWithBackup(
 		if (await fileExists(path)) {
 			backupPath = createBackupPath(path);
 			await fs.copyFile(path, backupPath);
+			await fs.chmod(backupPath, 0o600);
 		}
 
 		const content = JSON.stringify(data, null, 2);
@@ -565,6 +566,23 @@ export async function writeCodexAuthJsonSession(
 	options?: CodexPathOptions,
 ): Promise<CodexWriteResult> {
 	const path = getCodexAuthJsonPath(options);
+	const accessToken = getNonEmptyString(payload.accessToken);
+	if (!accessToken) {
+		throw new CodexSyncError(
+			`Invalid sync payload for ${path}: accessToken is required`,
+			"missing-tokens",
+			path,
+		);
+	}
+	const refreshToken = getNonEmptyString(payload.refreshToken);
+	if (!refreshToken) {
+		throw new CodexSyncError(
+			`Invalid sync payload for ${path}: refreshToken is required`,
+			"missing-refresh-token",
+			path,
+		);
+	}
+
 	let existing: Record<string, unknown> = {};
 
 	if (await fileExists(path)) {
@@ -580,9 +598,9 @@ export async function writeCodexAuthJsonSession(
 	}
 
 	const tokens = isRecord(existing.tokens) ? { ...existing.tokens } : {};
-	tokens.access_token = payload.accessToken;
-	tokens.refresh_token = payload.refreshToken;
-	const accountId = payload.accountId ?? extractAccountId(payload.accessToken);
+	tokens.access_token = accessToken;
+	tokens.refresh_token = refreshToken;
+	const accountId = payload.accountId ?? extractAccountId(accessToken);
 	if (accountId) {
 		tokens.account_id = accountId;
 	} else {
@@ -615,9 +633,30 @@ export async function writeCodexMultiAuthPool(
 	options?: CodexPathOptions,
 ): Promise<CodexPoolWriteResult> {
 	const path = getCodexMultiAuthPoolPath(options);
+	const accessToken = getNonEmptyString(payload.accessToken);
+	if (!accessToken) {
+		throw new CodexSyncError(
+			`Invalid sync payload for ${path}: accessToken is required`,
+			"missing-tokens",
+			path,
+		);
+	}
+	const refreshToken = getNonEmptyString(payload.refreshToken);
+	if (!refreshToken) {
+		throw new CodexSyncError(
+			`Invalid sync payload for ${path}: refreshToken is required`,
+			"missing-refresh-token",
+			path,
+		);
+	}
+
 	const existing = await loadPoolStorage(path);
 	const existingAccounts = existing?.accounts ?? [];
-	const candidate = buildPoolAccountPayload(payload);
+	const candidate = buildPoolAccountPayload({
+		...payload,
+		accessToken,
+		refreshToken,
+	});
 	const identityKeys = collectSyncIdentityKeys(candidate);
 	const existingIndex = findSyncIndexByIdentity(existingAccounts, identityKeys);
 

@@ -236,6 +236,7 @@ describe("codex-sync", () => {
 	it("writes auth.json with backup and preserves unrelated keys", async () => {
 		const codexDir = await createCodexDir("codex-sync-auth-write");
 		const authPath = join(codexDir, "auth.json");
+		const chmodSpy = vi.spyOn(nodeFs, "chmod");
 		await writeFile(
 			authPath,
 			JSON.stringify(
@@ -273,7 +274,9 @@ describe("codex-sync", () => {
 		if (result.backupPath) {
 			const backupStats = await stat(result.backupPath);
 			expect(backupStats.isFile()).toBe(true);
+			expect(chmodSpy).toHaveBeenCalledWith(result.backupPath, 0o600);
 		}
+		chmodSpy.mockRestore();
 
 		const saved = JSON.parse(await readFile(authPath, "utf-8")) as Record<string, unknown>;
 		expect(saved.auth_mode).toBe("chatgpt");
@@ -282,6 +285,44 @@ describe("codex-sync", () => {
 		expect(savedTokens.access_token).toBe(accessToken);
 		expect(savedTokens.refresh_token).toBe("new-refresh");
 		expect(savedTokens.account_id).toBe("new-account");
+	});
+
+	it("rejects empty accessToken for auth.json writes", async () => {
+		const codexDir = await createCodexDir("codex-sync-auth-empty-access");
+		await expect(
+			writeCodexAuthJsonSession(
+				{
+					accessToken: "",
+					refreshToken: "refresh-token",
+				},
+				{ codexDir },
+			),
+		).rejects.toMatchObject({
+			name: "CodexSyncError",
+			code: "missing-tokens",
+		} satisfies Partial<CodexSyncError>);
+	});
+
+	it("rejects empty refreshToken for auth.json writes", async () => {
+		const codexDir = await createCodexDir("codex-sync-auth-empty-refresh");
+		const accessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "account-with-refresh-validation",
+			},
+		});
+		await expect(
+			writeCodexAuthJsonSession(
+				{
+					accessToken,
+					refreshToken: "",
+				},
+				{ codexDir },
+			),
+		).rejects.toMatchObject({
+			name: "CodexSyncError",
+			code: "missing-refresh-token",
+		} satisfies Partial<CodexSyncError>);
 	});
 
 	it("retries rename on transient Windows lock errors during atomic writes", async () => {
@@ -408,6 +449,44 @@ describe("codex-sync", () => {
 		expect(savedTokens.refresh_token).toBe("new-refresh-only");
 		expect(savedTokens).not.toHaveProperty("account_id");
 		expect(savedTokens).not.toHaveProperty("id_token");
+	});
+
+	it("rejects empty accessToken for pool writes", async () => {
+		const codexDir = await createCodexDir("codex-sync-pool-empty-access");
+		await expect(
+			writeCodexMultiAuthPool(
+				{
+					accessToken: "",
+					refreshToken: "pool-refresh-token",
+				},
+				{ codexDir },
+			),
+		).rejects.toMatchObject({
+			name: "CodexSyncError",
+			code: "missing-tokens",
+		} satisfies Partial<CodexSyncError>);
+	});
+
+	it("rejects empty refreshToken for pool writes", async () => {
+		const codexDir = await createCodexDir("codex-sync-pool-empty-refresh");
+		const accessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "pool-account-refresh-validation",
+			},
+		});
+		await expect(
+			writeCodexMultiAuthPool(
+				{
+					accessToken,
+					refreshToken: "",
+				},
+				{ codexDir },
+			),
+		).rejects.toMatchObject({
+			name: "CodexSyncError",
+			code: "missing-refresh-token",
+		} satisfies Partial<CodexSyncError>);
 	});
 
 	it("updates existing account in codex multi-auth pool and sets active index", async () => {
