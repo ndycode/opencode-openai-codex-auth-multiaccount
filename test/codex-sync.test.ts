@@ -4,8 +4,11 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	buildSyncFamilyIndexMap,
+	collectSyncIdentityKeys,
 	CodexSyncError,
 	discoverCodexAuthSource,
+	findSyncIndexByIdentity,
 	loadCodexCliTokenCacheEntriesByEmail,
 	readCodexCurrentAccount,
 	writeCodexAuthJsonSession,
@@ -35,6 +38,40 @@ afterEach(async () => {
 });
 
 describe("codex-sync", () => {
+	it("builds sync family index map for all model families", () => {
+		const map = buildSyncFamilyIndexMap(3);
+		const values = Object.values(map);
+		expect(values.length).toBeGreaterThan(0);
+		expect(values.every((value) => value === 3)).toBe(true);
+	});
+
+	it("collects normalized sync identity keys", () => {
+		const keys = collectSyncIdentityKeys({
+			organizationId: " org-1 ",
+			accountId: " acc-1 ",
+			refreshToken: " refresh-1 ",
+		});
+		expect(keys).toEqual([
+			"organizationId:org-1",
+			"accountId:acc-1",
+			"refreshToken:refresh-1",
+		]);
+	});
+
+	it("finds sync index by any identity key", () => {
+		const accounts = [
+			{ organizationId: "org-1", accountId: "acc-1", refreshToken: "refresh-1" },
+			{ organizationId: "org-2", accountId: "acc-2", refreshToken: "refresh-2" },
+		];
+		const byAccountId = findSyncIndexByIdentity(accounts, ["accountId:acc-2"]);
+		const byRefresh = findSyncIndexByIdentity(accounts, ["refreshToken:refresh-1"]);
+		const missing = findSyncIndexByIdentity(accounts, ["accountId:not-found"]);
+
+		expect(byAccountId).toBe(1);
+		expect(byRefresh).toBe(0);
+		expect(missing).toBe(-1);
+	});
+
 	it("prefers auth.json over legacy accounts.json during discovery", async () => {
 		const codexDir = await createCodexDir("codex-sync-discovery");
 		await writeFile(join(codexDir, "auth.json"), JSON.stringify({ auth_mode: "chatgpt" }), "utf-8");

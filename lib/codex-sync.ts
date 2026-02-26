@@ -94,6 +94,12 @@ export interface CodexPoolWriteResult extends CodexWriteResult {
 	updated: boolean;
 }
 
+export interface SyncIdentityAccountLike {
+	organizationId?: string;
+	accountId?: string;
+	refreshToken?: string;
+}
+
 function resolveCodexDir(options?: CodexPathOptions): string {
 	const override = options?.codexDir?.trim() || process.env.CODEX_AUTH_CLI_DIR?.trim();
 	if (override) return override;
@@ -490,7 +496,7 @@ async function writeJsonAtomicWithBackup(
 	}
 }
 
-function createFamilyIndexMap(index: number): Partial<Record<ModelFamily, number>> {
+export function buildSyncFamilyIndexMap(index: number): Partial<Record<ModelFamily, number>> {
 	const map: Partial<Record<ModelFamily, number>> = {};
 	for (const family of MODEL_FAMILIES) {
 		map[family] = index;
@@ -498,26 +504,26 @@ function createFamilyIndexMap(index: number): Partial<Record<ModelFamily, number
 	return map;
 }
 
-function toIdentityKeys(
-	account: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">,
-): string[] {
+export function collectSyncIdentityKeys(account: SyncIdentityAccountLike | undefined): string[] {
 	const keys: string[] = [];
-	const organizationId = getNonEmptyString(account.organizationId);
+	const organizationId = getNonEmptyString(account?.organizationId);
 	if (organizationId) keys.push(`organizationId:${organizationId}`);
-	const accountId = getNonEmptyString(account.accountId);
+	const accountId = getNonEmptyString(account?.accountId);
 	if (accountId) keys.push(`accountId:${accountId}`);
-	const refreshToken = getNonEmptyString(account.refreshToken);
+	const refreshToken = getNonEmptyString(account?.refreshToken);
 	if (refreshToken) keys.push(`refreshToken:${refreshToken}`);
 	return keys;
 }
 
-function findIndexByIdentity(
-	accounts: Pick<AccountMetadataV3, "organizationId" | "accountId" | "refreshToken">[],
+export function findSyncIndexByIdentity(
+	accounts: SyncIdentityAccountLike[],
 	identityKeys: string[],
 ): number {
 	if (identityKeys.length === 0) return -1;
 	for (const key of identityKeys) {
-		const index = accounts.findIndex((candidate) => toIdentityKeys(candidate).includes(key));
+		const index = accounts.findIndex((candidate) =>
+			collectSyncIdentityKeys(candidate).includes(key),
+		);
 		if (index >= 0) return index;
 	}
 	return -1;
@@ -612,8 +618,8 @@ export async function writeCodexMultiAuthPool(
 	const existing = await loadPoolStorage(path);
 	const existingAccounts = existing?.accounts ?? [];
 	const candidate = buildPoolAccountPayload(payload);
-	const identityKeys = toIdentityKeys(candidate);
-	const existingIndex = findIndexByIdentity(existingAccounts, identityKeys);
+	const identityKeys = collectSyncIdentityKeys(candidate);
+	const existingIndex = findSyncIndexByIdentity(existingAccounts, identityKeys);
 
 	const merged = [...existingAccounts, candidate];
 	const candidateIndex = merged.length - 1;
@@ -622,19 +628,19 @@ export async function writeCodexMultiAuthPool(
 			version: 3,
 			accounts: merged,
 			activeIndex: candidateIndex,
-			activeIndexByFamily: createFamilyIndexMap(candidateIndex),
+			activeIndexByFamily: buildSyncFamilyIndexMap(candidateIndex),
 		}) ??
 		({
 			version: 3 as const,
 			accounts: merged,
 			activeIndex: candidateIndex,
-			activeIndexByFamily: createFamilyIndexMap(candidateIndex),
+			activeIndexByFamily: buildSyncFamilyIndexMap(candidateIndex),
 		});
 
-	const normalizedIdentityIndex = findIndexByIdentity(normalized.accounts, identityKeys);
+	const normalizedIdentityIndex = findSyncIndexByIdentity(normalized.accounts, identityKeys);
 	if (normalizedIdentityIndex >= 0) {
 		normalized.activeIndex = normalizedIdentityIndex;
-		normalized.activeIndexByFamily = createFamilyIndexMap(normalizedIdentityIndex);
+		normalized.activeIndexByFamily = buildSyncFamilyIndexMap(normalizedIdentityIndex);
 	}
 
 	const writeResult = await writeJsonAtomicWithBackup(path, normalized as unknown as Record<string, unknown>);

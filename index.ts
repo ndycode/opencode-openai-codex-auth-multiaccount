@@ -26,6 +26,7 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
+import { promises as fs } from "node:fs";
 import {
         createAuthorizationFlow,
         exchangeAuthorizationCode,
@@ -171,10 +172,14 @@ import {
 import { prewarmOpenCodeCodexPrompt } from "./lib/prompts/opencode-codex.js";
 import {
 	CodexSyncError,
+	buildSyncFamilyIndexMap,
+	collectSyncIdentityKeys,
+	findSyncIndexByIdentity,
 	readCodexCurrentAccount,
 	writeCodexAuthJsonSession,
 	writeCodexMultiAuthPool,
 	type CodexSyncAccountPayload,
+	type CodexWriteResult,
 } from "./lib/codex-sync.js";
 import { auditLog, AuditAction, AuditOutcome } from "./lib/audit.js";
 import type {
@@ -993,45 +998,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			notes: string[];
 		};
 
-		const buildSyncFamilyIndexMap = (index: number): Partial<Record<ModelFamily, number>> => {
-			const next: Partial<Record<ModelFamily, number>> = {};
-			for (const family of MODEL_FAMILIES) {
-				next[family] = index;
-			}
-			return next;
-		};
-
-		const collectSyncIdentityKeys = (
-			account: {
-				organizationId?: string;
-				accountId?: string;
-				refreshToken?: string;
-			} | undefined,
-		): string[] => {
-			const keys: string[] = [];
-			const organizationId = account?.organizationId?.trim();
-			if (organizationId) keys.push(`organizationId:${organizationId}`);
-			const accountId = account?.accountId?.trim();
-			if (accountId) keys.push(`accountId:${accountId}`);
-			const refreshToken = account?.refreshToken?.trim();
-			if (refreshToken) keys.push(`refreshToken:${refreshToken}`);
-			return keys;
-		};
-
-		const findSyncIndexByIdentity = (
-			accounts: Array<{ organizationId?: string; accountId?: string; refreshToken?: string }>,
-			identityKeys: string[],
-		): number => {
-			if (identityKeys.length === 0) return -1;
-			for (const key of identityKeys) {
-				const index = accounts.findIndex((account) =>
-					collectSyncIdentityKeys(account).includes(key),
-				);
-				if (index >= 0) return index;
-			}
-			return -1;
-		};
-
 		const buildSyncSummaryLines = (summary: SyncSummary): string[] => {
 			const directionLabel =
 				summary.direction === "pull" ? "Codex -> plugin" : "plugin -> Codex";
@@ -1091,6 +1057,41 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				lines.push(formatUiItem(ui, note, "muted"));
 			}
 			return lines.join("\n");
+		};
+
+		const rollbackPartialCodexAuthWrite = async (
+			authWrite: CodexWriteResult | undefined,
+		): Promise<string | null> => {
+			if (!authWrite) return null;
+
+			try {
+				if (authWrite.backupPath) {
+					await fs.copyFile(authWrite.backupPath, authWrite.path);
+					try {
+						await fs.unlink(authWrite.backupPath);
+					} catch {
+						// Best-effort cleanup of backup created by failed sync push.
+					}
+				} else {
+					try {
+						await fs.unlink(authWrite.path);
+					} catch (error) {
+						const code = (error as NodeJS.ErrnoException).code;
+						if (code !== "ENOENT") {
+							throw error;
+						}
+					}
+				}
+				return null;
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				logWarn("Failed to rollback partial Codex auth.json write", {
+					error: message,
+					path: authWrite.path,
+					backupPath: authWrite.backupPath,
+				});
+				return message;
+			}
 		};
 
 		const syncFromCodexToPlugin = async (): Promise<SyncSummary> => {
@@ -1298,8 +1299,30 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					enabled: activeAccount.enabled,
 				};
 
-				const authWrite = await writeCodexAuthJsonSession(payload);
-				const poolWrite = await writeCodexMultiAuthPool(payload);
+				let authWrite: Awaited<ReturnType<typeof writeCodexAuthJsonSession>> | undefined;
+				let poolWrite: Awaited<ReturnType<typeof writeCodexMultiAuthPool>> | undefined;
+				try {
+					authWrite = await writeCodexAuthJsonSession(payload);
+					poolWrite = await writeCodexMultiAuthPool(payload);
+				} catch (writeError) {
+					const rollbackError = await rollbackPartialCodexAuthWrite(authWrite);
+					if (rollbackError) {
+						const writeMessage =
+							writeError instanceof Error ? writeError.message : String(writeError);
+						throw new Error(
+							`Failed to sync plugin account to Codex (${writeMessage}). Rollback of auth.json also failed: ${rollbackError}`,
+							{
+								cause: writeError instanceof Error ? writeError : undefined,
+							},
+						);
+					}
+					throw writeError;
+				}
+
+				if (!authWrite || !poolWrite) {
+					throw new Error("Codex sync write did not complete.");
+				}
+
 				const backupPaths = [authWrite.backupPath, poolWrite.backupPath].filter(
 					(path): path is string => typeof path === "string" && path.length > 0,
 				);
