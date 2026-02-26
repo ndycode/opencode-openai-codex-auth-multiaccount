@@ -378,23 +378,38 @@ function parseLegacyCacheEntries(path: string, record: Record<string, unknown>):
 export async function loadCodexCliTokenCacheEntriesByEmail(
 	options?: CodexPathOptions,
 ): Promise<CodexCliTokenCacheEntryByEmail[]> {
-	const source = await discoverCodexAuthSource(options);
-	if (!source) return [];
+	const authPath = getCodexAuthJsonPath(options);
+	const legacyPath = getCodexLegacyAccountsPath(options);
+	const sourceCandidates: CodexAuthSource[] = [];
 
-	try {
-		const record = await readJsonRecord(source.path);
-		if (source.type === "auth.json") {
-			return parseAuthJsonCacheEntries(source.path, record);
-		}
-		return parseLegacyCacheEntries(source.path, record);
-	} catch (error) {
-		log.debug("Failed to load Codex CLI token cache entries", {
-			error: String(error),
-			sourceType: source.type,
-			sourcePath: source.path,
-		});
-		return [];
+	if (await fileExists(authPath)) {
+		sourceCandidates.push({ type: "auth.json", path: authPath });
 	}
+	if (await fileExists(legacyPath)) {
+		sourceCandidates.push({ type: "accounts.json", path: legacyPath });
+	}
+	if (sourceCandidates.length === 0) return [];
+
+	for (const source of sourceCandidates) {
+		try {
+			const record = await readJsonRecord(source.path);
+			const entries =
+				source.type === "auth.json"
+					? parseAuthJsonCacheEntries(source.path, record)
+					: parseLegacyCacheEntries(source.path, record);
+			if (entries.length > 0) {
+				return entries;
+			}
+		} catch (error) {
+			log.debug("Failed to load Codex CLI token cache entries from source", {
+				error: String(error),
+				sourceType: source.type,
+				sourcePath: source.path,
+			});
+		}
+	}
+
+	return [];
 }
 
 function formatBackupTimestamp(value: Date): string {
@@ -564,9 +579,13 @@ export async function writeCodexAuthJsonSession(
 	const accountId = payload.accountId ?? extractAccountId(payload.accessToken);
 	if (accountId) {
 		tokens.account_id = accountId;
+	} else {
+		delete tokens.account_id;
 	}
 	if (payload.idToken) {
 		tokens.id_token = payload.idToken;
+	} else {
+		delete tokens.id_token;
 	}
 
 	const next: Record<string, unknown> = {

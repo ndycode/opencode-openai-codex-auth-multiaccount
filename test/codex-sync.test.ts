@@ -141,6 +141,60 @@ describe("codex-sync", () => {
 		expect(entries[0]?.accountId).toBe("legacy-acc");
 	});
 
+	it("falls back to legacy cache entries when auth.json is unusable", async () => {
+		const codexDir = await createCodexDir("codex-sync-cache-fallback");
+		await writeFile(
+			join(codexDir, "auth.json"),
+			JSON.stringify(
+				{
+					auth_mode: "chatgpt",
+					tokens: {
+						refresh_token: "missing-access-token",
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const legacyAccessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "legacy-fallback-acc",
+			},
+			email: "legacy-fallback@example.com",
+		});
+		await writeFile(
+			join(codexDir, "accounts.json"),
+			JSON.stringify(
+				{
+					accounts: [
+						{
+							email: "legacy-fallback@example.com",
+							accountId: "legacy-fallback-acc",
+							auth: {
+								tokens: {
+									access_token: legacyAccessToken,
+									refresh_token: "legacy-fallback-refresh",
+								},
+							},
+						},
+					],
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const entries = await loadCodexCliTokenCacheEntriesByEmail({ codexDir });
+		expect(entries).toHaveLength(1);
+		expect(entries[0]?.sourceType).toBe("accounts.json");
+		expect(entries[0]?.email).toBe("legacy-fallback@example.com");
+		expect(entries[0]?.accountId).toBe("legacy-fallback-acc");
+	});
+
 	it("writes auth.json with backup and preserves unrelated keys", async () => {
 		const codexDir = await createCodexDir("codex-sync-auth-write");
 		const authPath = join(codexDir, "auth.json");
@@ -190,6 +244,46 @@ describe("codex-sync", () => {
 		expect(savedTokens.access_token).toBe(accessToken);
 		expect(savedTokens.refresh_token).toBe("new-refresh");
 		expect(savedTokens.account_id).toBe("new-account");
+	});
+
+	it("clears stale account and id token keys when payload omits them", async () => {
+		const codexDir = await createCodexDir("codex-sync-clear-stale-token-keys");
+		const authPath = join(codexDir, "auth.json");
+		await writeFile(
+			authPath,
+			JSON.stringify(
+				{
+					auth_mode: "chatgpt",
+					tokens: {
+						access_token: "old-access",
+						refresh_token: "old-refresh",
+						account_id: "old-account-id",
+						id_token: "old-id-token",
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const accessToken = createJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+		await writeCodexAuthJsonSession(
+			{
+				accessToken,
+				refreshToken: "new-refresh-only",
+			},
+			{ codexDir },
+		);
+
+		const saved = JSON.parse(await readFile(authPath, "utf-8")) as {
+			tokens?: Record<string, unknown>;
+		};
+		const savedTokens = saved.tokens ?? {};
+		expect(savedTokens.access_token).toBe(accessToken);
+		expect(savedTokens.refresh_token).toBe("new-refresh-only");
+		expect(savedTokens).not.toHaveProperty("account_id");
+		expect(savedTokens).not.toHaveProperty("id_token");
 	});
 
 	it("updates existing account in codex multi-auth pool and sets active index", async () => {

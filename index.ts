@@ -1131,28 +1131,52 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						workingStorage.accounts,
 						identityKeys,
 					);
-					created = existingIndex >= 0 ? 0 : 1;
-					updated = existingIndex >= 0 ? 1 : 0;
+					const now = Date.now();
+					let candidateIndex = existingIndex;
+					if (existingIndex >= 0) {
+						const existingAccount = workingStorage.accounts[existingIndex];
+						if (existingAccount) {
+							existingAccount.email = inferredEmail;
+							existingAccount.refreshToken = codexAccount.refreshToken;
+							existingAccount.accessToken = codexAccount.accessToken;
+							existingAccount.expiresAt = codexAccount.expiresAt;
+							existingAccount.enabled = true;
+							existingAccount.lastUsed = now;
+							if (inferredAccountId) {
+								existingAccount.accountId = inferredAccountId;
+								existingAccount.accountIdSource = "token";
+							}
+						}
+						created = 0;
+						updated = 1;
+					} else {
+						workingStorage.accounts.push({
+							accountId: inferredAccountId,
+							accountIdSource: inferredAccountId ? "token" : undefined,
+							email: inferredEmail,
+							refreshToken: codexAccount.refreshToken,
+							accessToken: codexAccount.accessToken,
+							expiresAt: codexAccount.expiresAt,
+							enabled: true,
+							addedAt: now,
+							lastUsed: now,
+						});
+						candidateIndex = workingStorage.accounts.length - 1;
+						created = 1;
+						updated = 0;
+					}
 
-					workingStorage.accounts.push({
-						accountId: inferredAccountId,
-						accountIdSource: inferredAccountId ? "token" : undefined,
-						email: inferredEmail,
-						refreshToken: codexAccount.refreshToken,
-						accessToken: codexAccount.accessToken,
-						expiresAt: codexAccount.expiresAt,
-						enabled: true,
-						addedAt: Date.now(),
-						lastUsed: Date.now(),
-					});
-
-					const candidateIndex = workingStorage.accounts.length - 1;
 					workingStorage.activeIndex = candidateIndex;
 					workingStorage.activeIndexByFamily = buildSyncFamilyIndexMap(candidateIndex);
 					await persist(workingStorage);
 				});
 
 				const reloadedStorage = await loadAccounts();
+				if (reloadedStorage) {
+					const reloadedManager = await AccountManager.loadFromDisk();
+					cachedAccountManager = reloadedManager;
+					accountManagerPromise = Promise.resolve(reloadedManager);
+				}
 				const totalAccounts = reloadedStorage?.accounts.length ?? 0;
 				const activeIndex = reloadedStorage
 					? resolveActiveIndex(reloadedStorage, "codex")
