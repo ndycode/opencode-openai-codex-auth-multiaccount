@@ -16,9 +16,19 @@ export const PluginConfigSchema = z.object({
 	codexTuiV2: z.boolean().optional(),
 	codexTuiColorProfile: z.enum(["truecolor", "ansi16", "ansi256"]).optional(),
 	codexTuiGlyphMode: z.enum(["ascii", "unicode", "auto"]).optional(),
+	beginnerSafeMode: z.boolean().optional(),
 	fastSession: z.boolean().optional(),
 	fastSessionStrategy: z.enum(["hybrid", "always"]).optional(),
 	fastSessionMaxInputItems: z.number().min(8).max(200).optional(),
+	retryProfile: z.enum(["conservative", "balanced", "aggressive"]).optional(),
+	retryBudgetOverrides: z.object({
+		authRefresh: z.number().int().min(0).optional(),
+		network: z.number().int().min(0).optional(),
+		server: z.number().int().min(0).optional(),
+		rateLimitShort: z.number().int().min(0).optional(),
+		rateLimitGlobal: z.number().int().min(0).optional(),
+		emptyResponse: z.number().int().min(0).optional(),
+	}).optional(),
 	retryAllAccountsRateLimited: z.boolean().optional(),
 	retryAllAccountsMaxWaitMs: z.number().min(0).optional(),
 	retryAllAccountsMaxRetries: z.number().min(0).optional(),
@@ -78,6 +88,20 @@ export const RateLimitStateV3Schema = z.record(z.string(), z.number().optional()
 
 export type RateLimitStateV3FromSchema = z.infer<typeof RateLimitStateV3Schema>;
 
+const AccountTagsSchema = z.array(z.string()).optional().transform((value) => {
+	if (!value) return undefined;
+	const normalized = value
+		.map((entry) => entry.trim().toLowerCase())
+		.filter((entry) => entry.length > 0);
+	return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+});
+
+const AccountNoteSchema = z.string().optional().transform((value) => {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
+});
+
 /**
  * Account metadata V3 - current storage format.
  */
@@ -86,6 +110,8 @@ export const AccountMetadataV3Schema = z.object({
 	organizationId: z.string().optional(),
 	accountIdSource: AccountIdSourceSchema.optional(),
 	accountLabel: z.string().optional(),
+	accountTags: AccountTagsSchema,
+	accountNote: AccountNoteSchema,
 	email: z.string().optional(),
 	refreshToken: z.string().min(1), // Required, non-empty
 	accessToken: z.string().optional(),
@@ -131,6 +157,8 @@ export const AccountMetadataV1Schema = z.object({
 	organizationId: z.string().optional(),
 	accountIdSource: AccountIdSourceSchema.optional(),
 	accountLabel: z.string().optional(),
+	accountTags: AccountTagsSchema,
+	accountNote: AccountNoteSchema,
 	email: z.string().optional(),
 	refreshToken: z.string().min(1),
 	accessToken: z.string().optional(),

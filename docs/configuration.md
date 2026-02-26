@@ -99,13 +99,20 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "codexTuiV2": true,
   "codexTuiColorProfile": "truecolor",
   "codexTuiGlyphMode": "ascii",
+  "beginnerSafeMode": false,
   "fastSession": false,
   "fastSessionStrategy": "hybrid",
   "fastSessionMaxInputItems": 30,
+  "retryProfile": "balanced",
+  "retryBudgetOverrides": {
+    "network": 2,
+    "server": 2
+  },
   "perProjectAccounts": true,
   "toastDurationMs": 5000,
   "retryAllAccountsRateLimited": true,
   "retryAllAccountsMaxWaitMs": 0,
+  "retryAllAccountsMaxRetries": 3,
   "unsupportedCodexPolicy": "strict",
   "fallbackOnUnsupportedCodexModel": false,
   "fallbackToGpt52OnUnsupportedGpt53": true,
@@ -114,6 +121,8 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   }
 }
 ```
+
+The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bounded override; the default remains `Infinity` when the key is omitted.
 
 ### options
 
@@ -124,9 +133,12 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | `codexTuiV2` | `true` | enables codex-style terminal ui output (set `false` to keep legacy output) |
 | `codexTuiColorProfile` | `truecolor` | terminal color profile for codex ui (`truecolor`, `ansi256`, `ansi16`) |
 | `codexTuiGlyphMode` | `ascii` | glyph set for codex ui (`ascii`, `unicode`, `auto`) |
+| `beginnerSafeMode` | `false` | enables conservative beginner-safe runtime behavior for retries and recovery |
 | `fastSession` | `false` | forces low-latency settings per request (`reasoningEffort=none/low`, `reasoningSummary=auto`, `textVerbosity=low`) |
 | `fastSessionStrategy` | `hybrid` | `hybrid` speeds simple turns and keeps full-depth for complex prompts; `always` forces fast mode every turn |
 | `fastSessionMaxInputItems` | `30` | max input items kept when fast mode is applied |
+| `retryProfile` | `balanced` | retry budget profile for request classes (`conservative`, `balanced`, `aggressive`) |
+| `retryBudgetOverrides` | `{}` | optional per-class budget overrides (`authRefresh`, `network`, `server`, `rateLimitShort`, `rateLimitGlobal`, `emptyResponse`) |
 | `perProjectAccounts` | `true` | each project gets its own account storage |
 | `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
 | `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
@@ -142,6 +154,15 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 | `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
 | `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
 | `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
+
+### beginner safe mode behavior
+
+when `beginnerSafeMode` is enabled (`true` or `CODEX_AUTH_BEGINNER_SAFE_MODE=1`), the plugin applies a safer retry profile automatically:
+- forces `retryProfile` to `conservative`
+- forces `retryAllAccountsRateLimited` to `false`
+- caps `retryAllAccountsMaxRetries` to at most `1`
+
+this mode is intended for beginners who prefer quick failures + clearer recovery actions over long retry loops.
 
 ### unsupported-model behavior + fallback chain
 
@@ -193,6 +214,8 @@ override any config with env vars:
 | `CODEX_AUTH_FAST_SESSION=1` | enable fast-session defaults |
 | `CODEX_AUTH_FAST_SESSION_STRATEGY=always` | force fast mode on every prompt |
 | `CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24` | tune max retained input items in fast mode |
+| `CODEX_AUTH_BEGINNER_SAFE_MODE=1` | enable beginner-safe retry behavior |
+| `CODEX_AUTH_RETRY_PROFILE=aggressive` | override retry profile (`conservative`, `balanced`, `aggressive`) |
 | `CODEX_AUTH_PER_PROJECT_ACCOUNTS=0` | disable per-project accounts |
 | `CODEX_AUTH_TOAST_DURATION_MS=8000` | set toast duration |
 | `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | disable wait-and-retry |
@@ -296,6 +319,9 @@ result: project uses `high`, other projects use `medium`.
 | `~/.opencode/auth/openai.json` | oauth tokens |
 | `~/.opencode/openai-codex-accounts.json` | global account storage |
 | `~/.opencode/projects/<project-key>/openai-codex-accounts.json` | per-project account storage |
+| `~/.opencode/backups/codex-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | timestamped export backup (global storage mode) |
+| `~/.opencode/projects/<project-key>/backups/codex-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | timestamped export backup (per-project storage mode) |
+| `.../backups/codex-pre-import-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | automatic snapshot created before non-dry-run imports when existing accounts are present |
 | `~/.opencode/logs/codex-plugin/` | debug logs |
 
 ---

@@ -30,8 +30,10 @@ This plugin bridges OpenCode and the ChatGPT Codex backend with explicit mode co
 5. **Per-Model Configuration** - Enables quality presets with quick switching.
 6. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults.
 7. **Entitlement-Aware Fallback Flow** - Unsupported models try remaining accounts/workspaces first, then optional fallback chain if enabled.
+8. **Beginner Operations Layer** - Setup checklist/wizard, guided doctor flow, next-step recommender, and startup preflight summaries.
+9. **Safety-First Account Backup Flow** - Timestamped exports, import dry-run previews, and pre-import snapshots before apply when existing accounts are present.
 
-**Testing**: 1689 tests plus integration coverage.
+**Testing**: 1,767 tests plus integration coverage.
 
 ---
 

@@ -672,6 +672,23 @@ const modelConfig = getModelConfig(originalModel, userConfig);  // Lookup "gpt-5
 
 ---
 
+## Account Metadata Fields (Storage)
+
+In addition to OpenCode model config fields, account storage now includes user-facing metadata used by `codex-*` account tools:
+
+| Field | Type | Purpose | Updated By |
+|-------|------|---------|------------|
+| `accountLabel` | `string` | Friendly workspace/account label for display | `codex-label` |
+| `accountTags` | `string[]` | Lowercase grouping tags for filtering (`codex-list tag=...`) | `codex-tag` |
+| `accountNote` | `string` | Short per-account reminder text | `codex-note` |
+
+Notes:
+- `accountTags` are normalized (trimmed, lowercased, deduplicated).
+- Empty label/tag/note inputs clear the corresponding field.
+- These fields persist in V3 storage and migrate through normalization paths.
+
+---
+
 ## See Also
 
 - [CONFIG_FLOW.md](./CONFIG_FLOW.md) - Complete config system guide

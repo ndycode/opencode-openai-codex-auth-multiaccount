@@ -176,6 +176,8 @@ export interface ManagedAccount {
 	organizationId?: string;
 	accountIdSource?: AccountIdSource;
 	accountLabel?: string;
+	accountTags?: string[];
+	accountNote?: string;
 	email?: string;
 	refreshToken: string;
 	enabled?: boolean;
@@ -189,6 +191,20 @@ export interface ManagedAccount {
 	coolingDownUntil?: number;
 	cooldownReason?: CooldownReason;
 	consecutiveAuthFailures?: number;
+}
+
+export interface AccountSelectionExplainability {
+	index: number;
+	enabled: boolean;
+	isCurrentForFamily: boolean;
+	eligible: boolean;
+	reasons: string[];
+	healthScore: number;
+	tokensAvailable: number;
+	rateLimitedUntil?: number;
+	coolingDownUntil?: number;
+	cooldownReason?: CooldownReason;
+	lastUsed: number;
 }
 
 export class AccountManager {
@@ -286,6 +302,8 @@ export class AccountManager {
 						organizationId: account.organizationId,
 						accountIdSource: account.accountIdSource,
 						accountLabel: account.accountLabel,
+						accountTags: account.accountTags,
+						accountNote: account.accountNote,
 						email: matchesFallback
 							? fallbackAccountEmail ?? sanitizeEmail(account.email)
 							: sanitizeEmail(account.email),
@@ -391,6 +409,75 @@ export class AccountManager {
 			...account,
 			rateLimitResetTimes: { ...account.rateLimitResetTimes },
 		}));
+	}
+
+	getSelectionExplainability(
+		family: ModelFamily,
+		model?: string | null,
+		now = nowMs(),
+	): AccountSelectionExplainability[] {
+		const quotaKey = model ? `${family}:${model}` : family;
+		const baseQuotaKey = getQuotaKey(family);
+		const modelQuotaKey = model ? getQuotaKey(family, model) : null;
+		const currentIndex = this.currentAccountIndexByFamily[family];
+		const healthTracker = getHealthTracker();
+		const tokenTracker = getTokenTracker();
+
+		return this.accounts.map((account) => {
+			clearExpiredRateLimits(account);
+			const enabled = account.enabled !== false;
+			const reasons: string[] = [];
+			let rateLimitedUntil: number | undefined;
+			const baseRateLimit = account.rateLimitResetTimes[baseQuotaKey];
+			const modelRateLimit = modelQuotaKey ? account.rateLimitResetTimes[modelQuotaKey] : undefined;
+			if (typeof baseRateLimit === "number" && baseRateLimit > now) {
+				rateLimitedUntil = baseRateLimit;
+			}
+			if (
+				typeof modelRateLimit === "number" &&
+				modelRateLimit > now &&
+				(rateLimitedUntil === undefined || modelRateLimit > rateLimitedUntil)
+			) {
+				rateLimitedUntil = modelRateLimit;
+			}
+
+			const coolingDownUntil =
+				typeof account.coolingDownUntil === "number" && account.coolingDownUntil > now
+					? account.coolingDownUntil
+					: undefined;
+
+			if (!enabled) reasons.push("disabled");
+			if (rateLimitedUntil !== undefined) reasons.push("rate-limited");
+			if (coolingDownUntil !== undefined) {
+				reasons.push(
+					account.cooldownReason ? `cooldown:${account.cooldownReason}` : "cooldown",
+				);
+			}
+
+			const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
+			if (tokensAvailable < 1) reasons.push("token-bucket-empty");
+
+			const eligible =
+				enabled &&
+				rateLimitedUntil === undefined &&
+				coolingDownUntil === undefined &&
+				tokensAvailable >= 1;
+			if (reasons.length === 0) reasons.push("eligible");
+
+			return {
+				index: account.index,
+				enabled,
+				isCurrentForFamily: currentIndex === account.index,
+				eligible,
+				reasons,
+				healthScore: healthTracker.getScore(account.index, quotaKey),
+				tokensAvailable,
+				rateLimitedUntil,
+				coolingDownUntil,
+				cooldownReason: coolingDownUntil !== undefined ? account.cooldownReason : undefined,
+				lastUsed: account.lastUsed,
+			};
+		});
 	}
 
 	setActiveIndex(index: number): ManagedAccount | null {
@@ -780,6 +867,8 @@ export class AccountManager {
 				organizationId: account.organizationId,
 				accountIdSource: account.accountIdSource,
 				accountLabel: account.accountLabel,
+				accountTags: account.accountTags,
+				accountNote: account.accountNote,
 				email: account.email,
 				refreshToken: account.refreshToken,
 				accessToken: account.access,

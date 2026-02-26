@@ -461,6 +461,54 @@ const tokens = await queue.queuedRefresh(refreshToken, async () => {
 
 ---
 
+## Beginner Operations & Safety Layer
+
+The plugin now includes a beginner-focused operational layer in `index.ts` and `lib/ui/beginner.ts`:
+
+1. **Startup preflight summary**
+   - Runs once per plugin loader lifecycle.
+   - Computes account readiness (`healthy`, `blocked`, `rate-limited`) and surfaces a single next action.
+   - Emits both toast + log summary.
+
+2. **Checklist and wizard flow**
+   - `codex-setup` renders a checklist (`add account`, `set active`, `verify health`, `label accounts`, `learn commands`).
+   - `codex-setup wizard=true` launches an interactive menu when terminal supports TTY interaction.
+   - Wizard gracefully falls back to checklist output when menus are unavailable.
+
+3. **Doctor + next-action diagnostics**
+   - `codex-doctor` maps runtime/account states into severity findings (`ok`, `warning`, `error`) with specific action text.
+   - `codex-doctor fix=true` performs safe remediation:
+     - refreshes tokens using queued refresh,
+     - persists refreshed credentials,
+     - switches active account to healthiest eligible account when beneficial.
+   - `codex-next` returns exactly one recommended next action.
+
+4. **Interactive index selection**
+   - `codex-switch`, `codex-label`, and `codex-remove` accept optional `index`.
+   - In interactive terminals, missing index opens a picker menu.
+   - In non-interactive contexts, commands return explicit usage guidance.
+
+---
+
+## Account Metadata + Backup Safety
+
+Storage schema now supports account metadata fields used by operational tooling:
+
+- `accountLabel` (existing)
+- `accountTags` (new): normalized lowercase tag array for grouping/filtering
+- `accountNote` (new): short reminder text
+
+Operational implications:
+
+1. `codex-list` supports tag filtering (`tag`) and shows tags in account labels.
+2. `codex-tag` and `codex-note` update metadata with persistence + manager cache reload.
+3. Export/import flow hardening:
+   - `codex-export` can auto-generate timestamped paths (`createTimestampedBackupPath()`),
+   - `codex-import` supports `dryRun` via `previewImportAccounts()`,
+   - non-dry-run imports create timestamped pre-import backups before applying changes when existing accounts are present.
+
+---
+
 ## Performance Considerations
 
 ### Token Usage

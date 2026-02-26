@@ -5,9 +5,12 @@ import {
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
+	getBeginnerSafeMode,
 	getFastSession,
 	getFastSessionStrategy,
 	getFastSessionMaxInputItems,
+	getRetryProfile,
+	getRetryBudgetOverrides,
 	getUnsupportedCodexPolicy,
 	getFallbackOnUnsupportedCodexModel,
 	getTokenRefreshSkewMs,
@@ -52,8 +55,10 @@ describe('Plugin Configuration', () => {
 		'CODEX_TUI_COLOR_PROFILE',
 		'CODEX_TUI_GLYPHS',
 		'CODEX_AUTH_FAST_SESSION',
+		'CODEX_AUTH_BEGINNER_SAFE_MODE',
 		'CODEX_AUTH_FAST_SESSION_STRATEGY',
 		'CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS',
+		'CODEX_AUTH_RETRY_PROFILE',
 		'CODEX_AUTH_REQUEST_TRANSFORM_MODE',
 		'CODEX_AUTH_UNSUPPORTED_MODEL_POLICY',
 		'CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL',
@@ -91,9 +96,12 @@ describe('Plugin Configuration', () => {
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
+				beginnerSafeMode: false,
 				fastSession: false,
 				fastSessionStrategy: 'hybrid',
 				fastSessionMaxInputItems: 30,
+				retryProfile: 'balanced',
+				retryBudgetOverrides: {},
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
@@ -132,9 +140,12 @@ describe('Plugin Configuration', () => {
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
+				beginnerSafeMode: false,
 				fastSession: false,
 				fastSessionStrategy: 'hybrid',
 				fastSessionMaxInputItems: 30,
+				retryProfile: 'balanced',
+				retryBudgetOverrides: {},
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
@@ -170,9 +181,12 @@ describe('Plugin Configuration', () => {
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
+				beginnerSafeMode: false,
 				fastSession: false,
 				fastSessionStrategy: 'hybrid',
 				fastSessionMaxInputItems: 30,
+				retryProfile: 'balanced',
+				retryBudgetOverrides: {},
 				retryAllAccountsRateLimited: true,
 				retryAllAccountsMaxWaitMs: 0,
 				retryAllAccountsMaxRetries: Infinity,
@@ -219,9 +233,12 @@ describe('Plugin Configuration', () => {
 		codexTuiV2: true,
 		codexTuiColorProfile: 'truecolor',
 		codexTuiGlyphMode: 'ascii',
+		beginnerSafeMode: false,
 		fastSession: false,
 		fastSessionStrategy: 'hybrid',
 		fastSessionMaxInputItems: 30,
+		retryProfile: 'balanced',
+		retryBudgetOverrides: {},
 		retryAllAccountsRateLimited: true,
 		retryAllAccountsMaxWaitMs: 0,
 		retryAllAccountsMaxRetries: Infinity,
@@ -262,9 +279,12 @@ describe('Plugin Configuration', () => {
 			codexTuiV2: true,
 			codexTuiColorProfile: 'truecolor',
 			codexTuiGlyphMode: 'ascii',
+			beginnerSafeMode: false,
 			fastSession: false,
 			fastSessionStrategy: 'hybrid',
 			fastSessionMaxInputItems: 30,
+			retryProfile: 'balanced',
+			retryBudgetOverrides: {},
 			retryAllAccountsRateLimited: true,
 			retryAllAccountsMaxWaitMs: 0,
 			retryAllAccountsMaxRetries: Infinity,
@@ -568,6 +588,57 @@ describe('Plugin Configuration', () => {
 		});
 	});
 
+	describe('getBeginnerSafeMode', () => {
+		it('should default to false', () => {
+			delete process.env.CODEX_AUTH_BEGINNER_SAFE_MODE;
+			expect(getBeginnerSafeMode({})).toBe(false);
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_BEGINNER_SAFE_MODE;
+			expect(getBeginnerSafeMode({ beginnerSafeMode: true })).toBe(true);
+		});
+
+		it('should prioritize env var over config', () => {
+			process.env.CODEX_AUTH_BEGINNER_SAFE_MODE = '1';
+			expect(getBeginnerSafeMode({ beginnerSafeMode: false })).toBe(true);
+			process.env.CODEX_AUTH_BEGINNER_SAFE_MODE = '0';
+			expect(getBeginnerSafeMode({ beginnerSafeMode: true })).toBe(false);
+		});
+	});
+
+	describe('retry profile and budget overrides', () => {
+		it('should default retry profile to balanced', () => {
+			delete process.env.CODEX_AUTH_RETRY_PROFILE;
+			expect(getRetryProfile({})).toBe('balanced');
+		});
+
+		it('should prioritize retry profile env over config', () => {
+			process.env.CODEX_AUTH_RETRY_PROFILE = 'aggressive';
+			expect(getRetryProfile({ retryProfile: 'conservative' })).toBe('aggressive');
+		});
+
+		it('should normalize retry budget overrides', () => {
+			const overrides = getRetryBudgetOverrides({
+				retryBudgetOverrides: {
+					authRefresh: 2.8,
+					network: -3,
+					server: 4,
+					rateLimitShort: 1,
+					rateLimitGlobal: 5,
+					emptyResponse: 2,
+				},
+			});
+			expect(overrides).toEqual({
+				authRefresh: 2,
+				server: 4,
+				rateLimitShort: 1,
+				rateLimitGlobal: 5,
+				emptyResponse: 2,
+			});
+		});
+	});
+
 	describe('getFastSessionStrategy', () => {
 		it('should default to hybrid', () => {
 			delete process.env.CODEX_AUTH_FAST_SESSION_STRATEGY;
@@ -669,3 +740,4 @@ describe('Plugin Configuration', () => {
 		});
 	});
 });
+
