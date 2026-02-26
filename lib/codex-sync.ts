@@ -549,16 +549,12 @@ function buildPoolAccountPayload(payload: CodexSyncAccountPayload): AccountMetad
 
 async function loadPoolStorage(path: string): Promise<AccountStorageV3 | null> {
 	if (!(await fileExists(path))) return null;
-	try {
-		const record = await readJsonRecord(path);
-		return normalizeAccountStorage(record);
-	} catch (error) {
-		log.debug("Failed to parse Codex multi-auth pool, defaulting to empty", {
-			error: String(error),
-			path,
-		});
-		return null;
+	const record = await readJsonRecord(path);
+	const normalized = normalizeAccountStorage(record);
+	if (!normalized) {
+		throw new CodexSyncError(`Invalid Codex multi-auth pool at ${path}`, "invalid-auth-file", path);
 	}
+	return normalized;
 }
 
 export async function writeCodexAuthJsonSession(

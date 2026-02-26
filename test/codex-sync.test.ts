@@ -237,54 +237,57 @@ describe("codex-sync", () => {
 		const codexDir = await createCodexDir("codex-sync-auth-write");
 		const authPath = join(codexDir, "auth.json");
 		const chmodSpy = vi.spyOn(nodeFs, "chmod");
-		await writeFile(
-			authPath,
-			JSON.stringify(
-				{
-					auth_mode: "chatgpt",
-					OPENAI_API_KEY: "keep-me",
-					tokens: {
-						access_token: "old-access",
-						refresh_token: "old-refresh",
+		try {
+			await writeFile(
+				authPath,
+				JSON.stringify(
+					{
+						auth_mode: "chatgpt",
+						OPENAI_API_KEY: "keep-me",
+						tokens: {
+							access_token: "old-access",
+							refresh_token: "old-refresh",
+						},
 					},
+					null,
+					2,
+				),
+				"utf-8",
+			);
+
+			const accessToken = createJwt({
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				"https://api.openai.com/auth": {
+					chatgpt_account_id: "new-account",
 				},
-				null,
-				2,
-			),
-			"utf-8",
-		);
+			});
+			const result = await writeCodexAuthJsonSession(
+				{
+					accessToken,
+					refreshToken: "new-refresh",
+					accountId: "new-account",
+				},
+				{ codexDir },
+			);
 
-		const accessToken = createJwt({
-			exp: Math.floor(Date.now() / 1000) + 3600,
-			"https://api.openai.com/auth": {
-				chatgpt_account_id: "new-account",
-			},
-		});
-		const result = await writeCodexAuthJsonSession(
-			{
-				accessToken,
-				refreshToken: "new-refresh",
-				accountId: "new-account",
-			},
-			{ codexDir },
-		);
+			expect(result.path).toBe(authPath);
+			expect(result.backupPath).toBeDefined();
+			if (result.backupPath) {
+				const backupStats = await stat(result.backupPath);
+				expect(backupStats.isFile()).toBe(true);
+				expect(chmodSpy).toHaveBeenCalledWith(result.backupPath, 0o600);
+			}
 
-		expect(result.path).toBe(authPath);
-		expect(result.backupPath).toBeDefined();
-		if (result.backupPath) {
-			const backupStats = await stat(result.backupPath);
-			expect(backupStats.isFile()).toBe(true);
-			expect(chmodSpy).toHaveBeenCalledWith(result.backupPath, 0o600);
+			const saved = JSON.parse(await readFile(authPath, "utf-8")) as Record<string, unknown>;
+			expect(saved.auth_mode).toBe("chatgpt");
+			expect(saved.OPENAI_API_KEY).toBe("keep-me");
+			const savedTokens = saved.tokens as Record<string, unknown>;
+			expect(savedTokens.access_token).toBe(accessToken);
+			expect(savedTokens.refresh_token).toBe("new-refresh");
+			expect(savedTokens.account_id).toBe("new-account");
+		} finally {
+			chmodSpy.mockRestore();
 		}
-		chmodSpy.mockRestore();
-
-		const saved = JSON.parse(await readFile(authPath, "utf-8")) as Record<string, unknown>;
-		expect(saved.auth_mode).toBe("chatgpt");
-		expect(saved.OPENAI_API_KEY).toBe("keep-me");
-		const savedTokens = saved.tokens as Record<string, unknown>;
-		expect(savedTokens.access_token).toBe(accessToken);
-		expect(savedTokens.refresh_token).toBe("new-refresh");
-		expect(savedTokens.account_id).toBe("new-account");
 	});
 
 	it("rejects empty accessToken for auth.json writes", async () => {
@@ -548,5 +551,34 @@ describe("codex-sync", () => {
 		expect(saved.accounts).toHaveLength(1);
 		expect(saved.accounts[0]?.accessToken).toBe(newAccess);
 		expect(saved.activeIndex).toBe(0);
+	});
+
+	it("fails closed when existing pool file is malformed", async () => {
+		const codexDir = await createCodexDir("codex-sync-pool-malformed");
+		const poolDir = join(codexDir, "multi-auth");
+		await mkdir(poolDir, { recursive: true });
+		const poolPath = join(poolDir, "openai-codex-accounts.json");
+		await writeFile(poolPath, "{not-json", "utf-8");
+
+		const accessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "pool-malformed-acc",
+			},
+		});
+
+		await expect(
+			writeCodexMultiAuthPool(
+				{
+					accessToken,
+					refreshToken: "pool-refresh",
+					accountId: "pool-malformed-acc",
+				},
+				{ codexDir },
+			),
+		).rejects.toMatchObject({
+			name: "CodexSyncError",
+			code: "invalid-auth-file",
+		} satisfies Partial<CodexSyncError>);
 	});
 });

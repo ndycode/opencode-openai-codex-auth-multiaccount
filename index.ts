@@ -1111,6 +1111,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 				let created = 0;
 				let updated = 0;
+				let previousActiveIndex = 0;
 
 				await withAccountStorageTransaction(async (loadedStorage, persist) => {
 					const workingStorage = loadedStorage
@@ -1127,6 +1128,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								activeIndex: 0,
 								activeIndexByFamily: {},
 						  };
+					previousActiveIndex = resolveActiveIndex(workingStorage, "codex");
 
 					const existingIndex = findSyncIndexByIdentity(
 						workingStorage.accounts,
@@ -1191,7 +1193,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					backupPaths: [],
 					totalAccounts,
 					activeIndex,
-					activeSwitched: true,
+					activeSwitched: previousActiveIndex !== activeIndex,
 					created,
 					updated,
 					notes: [],
