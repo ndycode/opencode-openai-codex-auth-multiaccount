@@ -79,7 +79,7 @@ For detailed setup, see [Getting Started](getting-started.md).
 | **Per-Model Config** | Different reasoning effort per model |
 | **Multi-Turn** | Full conversation history with stateless backend |
 | **Fast Session Mode** | Optional low-latency tuning for quick interactive turns |
-| **Comprehensive Tests** | 1,756 tests (80% coverage threshold) + integration tests |
+| **Comprehensive Tests** | 1,767 tests (80% coverage threshold) + integration tests |
 
 ---
 

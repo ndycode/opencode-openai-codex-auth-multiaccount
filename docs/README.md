@@ -33,7 +33,7 @@ This plugin bridges OpenCode and the ChatGPT Codex backend with explicit mode co
 8. **Beginner Operations Layer** - Setup checklist/wizard, guided doctor flow, next-step recommender, and startup preflight summaries.
 9. **Safety-First Account Backup Flow** - Timestamped exports, import dry-run previews, and pre-import snapshots before apply when existing accounts are present.
 
-**Testing**: 1,756 tests plus integration coverage.
+**Testing**: 1,767 tests plus integration coverage.
 
 ---
 

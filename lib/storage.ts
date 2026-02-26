@@ -117,6 +117,81 @@ function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
   return previousMutex.then(fn).finally(() => releaseLock());
 }
 
+const WINDOWS_RENAME_RETRY_ATTEMPTS = 5;
+const WINDOWS_RENAME_RETRY_BASE_DELAY_MS = 10;
+const PRE_IMPORT_BACKUP_WRITE_TIMEOUT_MS = 3_000;
+
+function isWindowsLockError(error: unknown): error is NodeJS.ErrnoException {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return code === "EPERM" || code === "EBUSY";
+}
+
+async function renameWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
+  let lastError: NodeJS.ErrnoException | null = null;
+
+  for (let attempt = 0; attempt < WINDOWS_RENAME_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await fs.rename(sourcePath, destinationPath);
+      return;
+    } catch (error) {
+      if (isWindowsLockError(error)) {
+        lastError = error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, WINDOWS_RENAME_RETRY_BASE_DELAY_MS * 2 ** attempt),
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+}
+
+async function writeFileWithTimeout(filePath: string, content: string, timeoutMs: number): Promise<void> {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fs.writeFile(filePath, content, {
+      encoding: "utf-8",
+      mode: 0o600,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      const timeoutError = Object.assign(
+        new Error(`Timed out writing file after ${timeoutMs}ms`),
+        { code: "ETIMEDOUT" },
+      );
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+async function writePreImportBackupFile(backupPath: string, snapshot: AccountStorageV3): Promise<void> {
+  const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const tempPath = `${backupPath}.${uniqueSuffix}.tmp`;
+
+  try {
+    await fs.mkdir(dirname(backupPath), { recursive: true });
+    const backupContent = JSON.stringify(snapshot, null, 2);
+    await writeFileWithTimeout(tempPath, backupContent, PRE_IMPORT_BACKUP_WRITE_TIMEOUT_MS);
+    await renameWithWindowsRetry(tempPath, backupPath);
+  } catch (error) {
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // Best effort temp-file cleanup.
+    }
+    throw error;
+  }
+}
+
 type AnyAccountStorage = AccountStorageV1 | AccountStorageV3;
 
 type AccountLike = {
@@ -740,23 +815,7 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
       throw emptyError;
     }
 
-    // Retry rename with exponential backoff for Windows EPERM/EBUSY
-    let lastError: NodeJS.ErrnoException | null = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await fs.rename(tempPath, path);
-        return;
-      } catch (renameError) {
-        const code = (renameError as NodeJS.ErrnoException).code;
-        if (code === "EPERM" || code === "EBUSY") {
-          lastError = renameError as NodeJS.ErrnoException;
-          await new Promise(r => setTimeout(r, 10 * Math.pow(2, attempt)));
-          continue;
-        }
-        throw renameError;
-      }
-    }
-    if (lastError) throw lastError;
+    await renameWithWindowsRetry(tempPath, path);
   } catch (error) {
     try {
       await fs.unlink(tempPath);
@@ -980,7 +1039,7 @@ export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Pro
 			await fs.mkdir(dirname(path), { recursive: true });
 			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
 			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-			await fs.rename(tempPath, path);
+			await renameWithWindowsRetry(tempPath, path);
 		} catch (error) {
 			try {
 				await fs.unlink(tempPath);
@@ -1159,9 +1218,7 @@ export async function importAccounts(
       if (backupMode !== "none" && existingAccounts.length > 0) {
         backupPath = createTimestampedBackupPath(backupPrefix);
         try {
-          await fs.mkdir(dirname(backupPath), { recursive: true });
-          const backupContent = JSON.stringify(existingStorage, null, 2);
-          await fs.writeFile(backupPath, backupContent, { encoding: "utf-8", mode: 0o600 });
+          await writePreImportBackupFile(backupPath, existingStorage);
           backupStatus = "created";
         } catch (error) {
           backupStatus = "failed";

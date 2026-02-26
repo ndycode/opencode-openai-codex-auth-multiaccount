@@ -523,6 +523,102 @@ describe("storage", () => {
       await fs.writeFile(exportPath, JSON.stringify({ invalid: "format" }));
       await expect(importAccounts(exportPath)).rejects.toThrow(/Invalid account storage format/);
     });
+
+    it("continues import in best-effort mode when pre-import backup write is locked", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [{ accountId: "imported", refreshToken: "ref-imported", addedAt: 2, lastUsed: 2 }],
+        }),
+      );
+
+      const originalWriteFile = fs.writeFile.bind(fs);
+      const writeSpy = vi.spyOn(fs, "writeFile").mockImplementation(async (path, data, options) => {
+        const filePath = String(path);
+        if (filePath.includes("codex-pre-import-backup") && filePath.endsWith(".tmp")) {
+          const err = new Error("backup locked by antivirus") as NodeJS.ErrnoException;
+          err.code = "EBUSY";
+          throw err;
+        }
+        return originalWriteFile(
+          path as Parameters<typeof fs.writeFile>[0],
+          data as Parameters<typeof fs.writeFile>[1],
+          options as Parameters<typeof fs.writeFile>[2],
+        );
+      });
+
+      let result: Awaited<ReturnType<typeof importAccounts>>;
+      try {
+        result = await importAccounts(exportPath, {
+          preImportBackupPrefix: "codex-pre-import-backup",
+          backupMode: "best-effort",
+        });
+      } finally {
+        writeSpy.mockRestore();
+      }
+
+      expect(result.backupStatus).toBe("failed");
+      expect(result.backupError).toContain("backup locked by antivirus");
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+      expect(loaded?.accounts.map((account) => account.accountId)).toContain("imported");
+    });
+
+    it("fails required import when pre-import backup write times out", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [{ accountId: "imported", refreshToken: "ref-imported", addedAt: 2, lastUsed: 2 }],
+        }),
+      );
+
+      const originalWriteFile = fs.writeFile.bind(fs);
+      const writeSpy = vi.spyOn(fs, "writeFile").mockImplementation(async (path, data, options) => {
+        const filePath = String(path);
+        if (filePath.includes("codex-pre-import-backup") && filePath.endsWith(".tmp")) {
+          const abortError = new Error("aborted");
+          abortError.name = "AbortError";
+          throw abortError;
+        }
+        return originalWriteFile(
+          path as Parameters<typeof fs.writeFile>[0],
+          data as Parameters<typeof fs.writeFile>[1],
+          options as Parameters<typeof fs.writeFile>[2],
+        );
+      });
+
+      try {
+        await expect(
+          importAccounts(exportPath, {
+            preImportBackupPrefix: "codex-pre-import-backup",
+            backupMode: "required",
+          }),
+        ).rejects.toThrow(/Pre-import backup failed: Timed out writing file/);
+      } finally {
+        writeSpy.mockRestore();
+      }
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.accountId).toBe("existing");
+    });
   });
 
   describe("filename migration (TDD)", () => {
@@ -1195,6 +1291,48 @@ describe("storage", () => {
       expect(loaded.accounts).toHaveLength(1);
       expect(loaded.accounts[0]?.organizationId).toBe("org-secondary");
       expect(loaded.accounts[0]?.accountIdSource).toBe("id_token");
+    });
+
+    it("retries flagged storage rename on EBUSY and succeeds", async () => {
+      const originalRename = fs.rename.bind(fs);
+      let attemptCount = 0;
+      const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (oldPath, newPath) => {
+        const destination = String(newPath);
+        if (destination.includes("openai-codex-flagged-accounts.json")) {
+          attemptCount += 1;
+          if (attemptCount <= 2) {
+            const err = new Error("EBUSY error") as NodeJS.ErrnoException;
+            err.code = "EBUSY";
+            throw err;
+          }
+        }
+        return originalRename(
+          oldPath as Parameters<typeof fs.rename>[0],
+          newPath as Parameters<typeof fs.rename>[1],
+        );
+      });
+
+      try {
+        await saveFlaggedAccounts({
+          version: 1,
+          accounts: [
+            {
+              refreshToken: "flagged-ebusy",
+              accountId: "flagged-ebusy-account",
+              flaggedAt: Date.now(),
+              addedAt: Date.now(),
+              lastUsed: Date.now(),
+            },
+          ],
+        });
+      } finally {
+        renameSpy.mockRestore();
+      }
+
+      expect(attemptCount).toBe(3);
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts).toHaveLength(1);
+      expect(loaded.accounts[0]?.refreshToken).toBe("flagged-ebusy");
     });
   });
 

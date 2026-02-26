@@ -2010,7 +2010,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Auth refresh failed for account ${account.index + 1}`,
 					)
 				) {
-					accountManager.refundToken(account, modelFamily, model);
 					return new Response(
 						JSON.stringify({
 							error: {
@@ -4613,7 +4612,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					const account = storage.accounts[targetIndex];
 					if (!account) {
-						return `Account ${index} not found.`;
+						return `Account ${resolvedIndex} not found.`;
 					}
 
 					const previousLabel = account.accountLabel?.trim() ?? "";
@@ -5086,7 +5085,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					const account = storage.accounts[targetIndex];
 					if (!account) {
-						return `Account ${index} not found.`;
+						return `Account ${resolvedIndex} not found.`;
 					}
 
 					const label = formatCommandAccountLabel(account, targetIndex);
