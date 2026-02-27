@@ -178,6 +178,10 @@ describe('Auth Module', () => {
 	});
 
 	describe('createAuthorizationFlow', () => {
+		it('uses loopback IPv4 redirect URI to match local callback binding', () => {
+			expect(REDIRECT_URI).toBe('http://127.0.0.1:1455/auth/callback');
+		});
+
 		it('should create authorization flow with PKCE', async () => {
 			const flow = await createAuthorizationFlow();
 

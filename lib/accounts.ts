@@ -571,6 +571,9 @@ export class AccountManager {
 	getCurrentOrNextForFamilyHybrid(family: ModelFamily, model?: string | null, options?: HybridSelectionOptions): ManagedAccount | null {
 		const count = this.accounts.length;
 		if (count === 0) return null;
+		const quotaKey = model ? `${family}:${model}` : family;
+		const healthTracker = getHealthTracker();
+		const tokenTracker = getTokenTracker();
 
 		const currentIndex = this.currentAccountIndexByFamily[family];
 		if (currentIndex >= 0 && currentIndex < count) {
@@ -582,7 +585,8 @@ export class AccountManager {
 				clearExpiredRateLimits(currentAccount);
 				if (
 					!isRateLimitedForFamily(currentAccount, family, model) &&
-					!this.isAccountCoolingDown(currentAccount)
+					!this.isAccountCoolingDown(currentAccount) &&
+					tokenTracker.getTokens(currentAccount.index, quotaKey) >= 1
 				) {
 					currentAccount.lastUsed = nowMs();
 					return currentAccount;
@@ -591,17 +595,16 @@ export class AccountManager {
 			}
 		}
 
-		const quotaKey = model ? `${family}:${model}` : family;
-		const healthTracker = getHealthTracker();
-		const tokenTracker = getTokenTracker();
-
 		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
 			.map((account): AccountWithMetrics | null => {
 				if (!account) return null;
 				if (account.enabled === false) return null;
 				clearExpiredRateLimits(account);
+				const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
 				const isAvailable =
-					!isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
+					!isRateLimitedForFamily(account, family, model) &&
+					!this.isAccountCoolingDown(account) &&
+					tokensAvailable >= 1;
 				return {
 					index: account.index,
 					isAvailable,

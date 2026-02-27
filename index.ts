@@ -2336,7 +2336,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									logWarn(
 										`Skipping account ${account.index + 1}: local token bucket depleted for ${modelFamily}${model ? `:${model}` : ""}`,
 									);
-									break;
+									continue;
 								}
 
 							while (true) {
