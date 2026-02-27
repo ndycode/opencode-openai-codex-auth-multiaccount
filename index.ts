@@ -602,7 +602,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						byEmailNoOrg: Map<string, number>;
 						byAccountIdOrgScoped: Map<string, number[]>;
 						byRefreshTokenOrgScoped: Map<string, number[]>;
-						byRefreshTokenGlobal: Map<string, number>;
+						byRefreshTokenGlobal: Map<string, number[]>;
 					};
 
 					const resolveUniqueOrgScopedMatch = (
@@ -629,7 +629,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const byEmailNoOrg = new Map<string, number>();
 						const byAccountIdOrgScoped = new Map<string, number[]>();
 						const byRefreshTokenOrgScoped = new Map<string, number[]>();
-						const byRefreshTokenGlobal = new Map<string, number>();
+						const byRefreshTokenGlobal = new Map<string, number[]>();
 
 						for (let i = 0; i < accounts.length; i += 1) {
 							const account = accounts[i];
@@ -640,9 +640,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							const refreshToken = account.refreshToken?.trim();
 							const email = account.email?.trim();
 
-							// Global refresh token index: first entry wins (keeps earliest/primary).
-							if (refreshToken && !byRefreshTokenGlobal.has(refreshToken)) {
-								byRefreshTokenGlobal.set(refreshToken, i);
+							// Track all refresh-token matches. Callers can require uniqueness
+							// so org variants that share a token do not collapse accidentally.
+							if (refreshToken) {
+								pushIndex(byRefreshTokenGlobal, refreshToken, i);
 							}
 
 							if (organizationId) {
@@ -722,9 +723,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							);
 							if (orgScoped !== undefined) return orgScoped;
 
-							// Absolute last resort: same refresh token = same human account.
-							// Catches org-scoped entries invisible to no-org lookups.
-							return identityIndexes.byRefreshTokenGlobal.get(result.refresh);
+							// Absolute last resort: only collapse when refresh token maps to a
+							// single account. Avoids merging distinct org-scoped variants.
+							return asUniqueIndex(identityIndexes.byRefreshTokenGlobal.get(result.refresh));
 						})();
 
 						if (existingIndex === undefined) {
@@ -821,28 +822,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					entry.fallbackIndex = i;
 				}
 
-				for (const entry of refreshMap.values()) {
-					const fallbackIndex = entry.fallbackIndex;
-					if (typeof fallbackIndex !== "number") continue;
-					const orgIndices = Array.from(entry.byOrg.values());
-					if (orgIndices.length === 0) continue;
-
-					const [firstOrgIndex, ...otherOrgIndices] = orgIndices;
-					if (typeof firstOrgIndex !== "number") continue;
-
-					let preferredOrgIndex = firstOrgIndex;
-					for (const orgIndex of otherOrgIndices) {
-						preferredOrgIndex = pickNewestAccountIndex(preferredOrgIndex, orgIndex);
-					}
-
-					mergeAccountRecords(preferredOrgIndex, fallbackIndex);
-					indicesToRemove.add(fallbackIndex);
-				}
-
-				if (indicesToRemove.size > 0) {
-					accounts = accounts.filter((_, index) => !indicesToRemove.has(index));
-				}
-			};
+			if (indicesToRemove.size > 0) {
+				accounts = accounts.filter((_, index) => !indicesToRemove.has(index));
+			}
+		};
 
 			const collectIdentityKeys = (
 				account: { organizationId?: string; accountId?: string; refreshToken?: string } | undefined,
