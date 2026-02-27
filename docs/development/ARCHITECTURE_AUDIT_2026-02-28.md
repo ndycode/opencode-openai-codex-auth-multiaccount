@@ -34,6 +34,7 @@
 - Remediation:
   - add resilient loader with warning telemetry;
   - serve a built-in minimal success page when file load fails.
+  - enforce `waitForCode(state)` contract by checking captured callback state before returning a code.
 
 ## Verification
 

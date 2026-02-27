@@ -14,6 +14,7 @@ vi.mock('node:http', () => {
 		unref: vi.fn(),
 		on: vi.fn(),
 		_lastCode: undefined as string | undefined,
+		_lastState: undefined as string | undefined,
 	};
 
 	return {
@@ -46,12 +47,14 @@ describe('OAuth Server Unit Tests', () => {
 	let mockServer: ReturnType<typeof http.createServer> & {
 		_handler?: (req: IncomingMessage, res: ServerResponse) => void;
 		_lastCode?: string;
+		_lastState?: string;
 	};
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockServer = http.createServer(() => {}) as typeof mockServer;
 		mockServer._lastCode = undefined;
+		mockServer._lastState = undefined;
 	});
 
 	afterEach(() => {
@@ -190,6 +193,7 @@ describe('OAuth Server Unit Tests', () => {
 			requestHandler(req, res);
 
 			expect(mockServer._lastCode).toBe('captured-code');
+			expect(mockServer._lastState).toBe('test-state');
 		});
 
 		it('should handle request handler errors gracefully', () => {
@@ -280,6 +284,7 @@ describe('OAuth Server Unit Tests', () => {
 			const result = await startLocalOAuthServer({ state: 'test-state' });
 			
 			mockServer._lastCode = 'the-code';
+			mockServer._lastState = 'test-state';
 			
 			const code = await result.waitForCode('test-state');
 			expect(code).toEqual({ code: 'the-code' });

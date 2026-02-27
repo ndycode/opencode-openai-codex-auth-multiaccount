@@ -66,7 +66,9 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			res.setHeader("X-Content-Type-Options", "nosniff");
 			res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'none'");
 			res.end(successHtml);
-			(server as http.Server & { _lastCode?: string })._lastCode = code;
+			const codeStore = server as http.Server & { _lastCode?: string; _lastState?: string };
+			codeStore._lastCode = code;
+			codeStore._lastState = state;
 	} catch (err) {
 		logError(`Request handler error: ${(err as Error)?.message ?? String(err)}`);
 		res.statusCode = 500;
@@ -93,8 +95,10 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 					const poll = () => new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
 					for (let i = 0; i < maxIterations; i++) {
 						if (pollAborted) return null;
-						const lastCode = (server as http.Server & { _lastCode?: string })._lastCode;
-						if (lastCode) return { code: lastCode };
+						const codeStore = server as http.Server & { _lastCode?: string; _lastState?: string };
+						const lastCode = codeStore._lastCode;
+						const lastState = codeStore._lastState;
+						if (lastCode && lastState === _expectedState) return { code: lastCode };
 						await poll();
 					}
 					logWarn("OAuth poll timeout after 5 minutes");
