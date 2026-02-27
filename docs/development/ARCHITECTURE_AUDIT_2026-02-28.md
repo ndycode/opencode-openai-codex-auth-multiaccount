@@ -27,6 +27,14 @@
   - enforce token availability during current-account reuse and hybrid eligibility filtering;
   - continue account traversal when local token consumption fails to avoid premature loop exit.
 
+### 4) OAuth Success-Page Single-Point Failure (Medium)
+
+- OAuth callback server loaded `oauth-success.html` synchronously at module import with no fallback.
+- If that asset was missing in a runtime package edge case, plugin startup could fail before auth flow execution.
+- Remediation:
+  - add resilient loader with warning telemetry;
+  - serve a built-in minimal success page when file load fails.
+
 ## Verification
 
 - `npm run lint` pass

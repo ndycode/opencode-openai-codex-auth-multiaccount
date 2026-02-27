@@ -26,6 +26,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
 - **oauth callback host alignment**: authorization redirect now uses `http://127.0.0.1:1455/auth/callback` to match the loopback server binding and avoid `localhost` resolver drift.
+- **oauth success-page resilience**: callback server now falls back to a built-in success HTML page when `oauth-success.html` is unavailable, preventing hard startup failure.
 - **hybrid account selection eligibility**: token-bucket depletion is now enforced during hybrid selection/current-account reuse, preventing premature request failures when other accounts remain eligible.
 
 ## [5.4.0] - 2026-02-28

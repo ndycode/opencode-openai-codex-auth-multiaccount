@@ -7,7 +7,32 @@ import { logError, logWarn } from "../logger.js";
 
 // Resolve path to oauth-success.html (one level up from auth/ subfolder)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const successHtml = fs.readFileSync(path.join(__dirname, "..", "oauth-success.html"), "utf-8");
+const SUCCESS_HTML_PATH = path.join(__dirname, "..", "oauth-success.html");
+const FALLBACK_SUCCESS_HTML = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Authorization Complete</title>
+  </head>
+  <body>
+    <h1>Authorization complete</h1>
+    <p>You can return to OpenCode.</p>
+  </body>
+</html>`;
+
+function loadSuccessHtml(): string {
+	try {
+		return fs.readFileSync(SUCCESS_HTML_PATH, "utf-8");
+	} catch (error) {
+		logWarn("oauth-success.html missing; using fallback success page", {
+			path: SUCCESS_HTML_PATH,
+			error: (error as Error)?.message ?? String(error),
+		});
+		return FALLBACK_SUCCESS_HTML;
+	}
+}
+
+const successHtml = loadSuccessHtml();
 
 /**
  * Start a small local HTTP server that waits for /auth/callback and returns the code
@@ -61,7 +86,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 						pollAborted = true;
 						server.close();
 					},
-				waitForCode: async () => {
+				waitForCode: async (_expectedState: string) => {
 					const POLL_INTERVAL_MS = 100;
 					const TIMEOUT_MS = 5 * 60 * 1000;
 					const maxIterations = Math.floor(TIMEOUT_MS / POLL_INTERVAL_MS);
