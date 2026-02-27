@@ -115,13 +115,10 @@ describe('Auth Module', () => {
 			expect(result).toEqual({});
 		});
 
-	it('should fall through to # split when valid URL has hash with no code/state params (line 44 false branch)', () => {
-		// URL parses successfully but hash contains no code= or state= params
-		// Line 44's false branch is hit (code && state both undefined)
-		// Falls through to line 51 which splits on #
+	it('should return empty object for valid URL hash fragments without OAuth params', () => {
 		const input = 'http://localhost:1455/auth/callback#invalid';
 		const result = parseAuthorizationInput(input);
-		expect(result).toEqual({ code: 'http://localhost:1455/auth/callback', state: 'invalid' });
+		expect(result).toEqual({});
 	});
 	});
 
@@ -178,6 +175,10 @@ describe('Auth Module', () => {
 	});
 
 	describe('createAuthorizationFlow', () => {
+		it('uses explicit loopback redirect URI to avoid localhost IPv6 ambiguity', () => {
+			expect(REDIRECT_URI).toBe('http://127.0.0.1:1455/auth/callback');
+		});
+
 		it('should create authorization flow with PKCE', async () => {
 			const flow = await createAuthorizationFlow();
 
