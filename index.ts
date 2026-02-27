@@ -909,10 +909,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						}
 					}
 
+					const fallbackAccountIdsToDelete: string[] = [];
 					for (const [accountId, fallbackIndex] of entry.fallbackByAccountId) {
 						if (collapseFallbackIndex(fallbackIndex)) {
-							entry.fallbackByAccountId.delete(accountId);
+							fallbackAccountIdsToDelete.push(accountId);
 						}
+					}
+					for (const accountId of fallbackAccountIdsToDelete) {
+						entry.fallbackByAccountId.delete(accountId);
 					}
 				};
 
