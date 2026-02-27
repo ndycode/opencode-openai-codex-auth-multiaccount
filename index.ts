@@ -782,7 +782,43 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 			const pruneRefreshTokenCollisions = (): void => {
 				const indicesToRemove = new Set<number>();
-				const refreshMap = new Map<string, { byOrg: Map<string, number>; fallbackIndex?: number }>();
+				const refreshMap = new Map<
+					string,
+					{ byOrg: Map<string, number>; preferredOrgIndex?: number; fallbackIndex?: number }
+				>();
+
+				const pickPreferredOrgIndex = (
+					existingIndex: number | undefined,
+					candidateIndex: number,
+				): number => {
+					if (existingIndex === undefined) return candidateIndex;
+					return pickNewestAccountIndex(existingIndex, candidateIndex);
+				};
+
+				const collapseFallbackIntoPreferredOrg = (entry: {
+					byOrg: Map<string, number>;
+					preferredOrgIndex?: number;
+					fallbackIndex?: number;
+				}): void => {
+					if (entry.preferredOrgIndex === undefined || entry.fallbackIndex === undefined) {
+						return;
+					}
+
+					const preferredOrgIndex = entry.preferredOrgIndex;
+					const fallbackIndex = entry.fallbackIndex;
+					if (preferredOrgIndex === fallbackIndex) {
+						entry.fallbackIndex = undefined;
+						return;
+					}
+
+					const target = accounts[preferredOrgIndex];
+					const source = accounts[fallbackIndex];
+					if (target && source) {
+						mergeAccountRecords(preferredOrgIndex, fallbackIndex);
+						indicesToRemove.add(fallbackIndex);
+						entry.fallbackIndex = undefined;
+					}
+				};
 
 				for (let i = 0; i < accounts.length; i += 1) {
 					const account = accounts[i];
@@ -792,7 +828,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const orgKey = account.organizationId?.trim() ?? "";
 					let entry = refreshMap.get(refreshToken);
 					if (!entry) {
-						entry = { byOrg: new Map<string, number>(), fallbackIndex: undefined };
+						entry = {
+							byOrg: new Map<string, number>(),
+							preferredOrgIndex: undefined,
+							fallbackIndex: undefined,
+						};
 						refreshMap.set(refreshToken, entry);
 					}
 
@@ -804,9 +844,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							mergeAccountRecords(newestIndex, obsoleteIndex);
 							indicesToRemove.add(obsoleteIndex);
 							entry.byOrg.set(orgKey, newestIndex);
+							entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, newestIndex);
+							collapseFallbackIntoPreferredOrg(entry);
 							continue;
 						}
 						entry.byOrg.set(orgKey, i);
+						entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, i);
+						collapseFallbackIntoPreferredOrg(entry);
 						continue;
 					}
 
@@ -817,9 +861,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						mergeAccountRecords(newestIndex, obsoleteIndex);
 						indicesToRemove.add(obsoleteIndex);
 						entry.fallbackIndex = newestIndex;
+						collapseFallbackIntoPreferredOrg(entry);
 						continue;
 					}
 					entry.fallbackIndex = i;
+					collapseFallbackIntoPreferredOrg(entry);
 				}
 
 			if (indicesToRemove.size > 0) {
@@ -893,7 +939,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 			const clampedActiveIndex = Math.max(0, Math.min(Math.floor(activeIndex), accounts.length - 1));
 			const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
-			for (const family of MODEL_FAMILIES) {
+			const familiesToPersist = replaceAll
+				? []
+				: MODEL_FAMILIES.filter((family) => {
+					const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
+					return typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex);
+				});
+			for (const family of familiesToPersist) {
 				const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
 				const remappedFamilyIndex = replaceAll
 					? undefined
