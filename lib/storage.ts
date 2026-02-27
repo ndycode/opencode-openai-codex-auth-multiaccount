@@ -462,28 +462,6 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
     entry.fallbackIndex = i;
   }
 
-  for (const entry of refreshMap.values()) {
-    const fallbackIndex = entry.fallbackIndex;
-    if (typeof fallbackIndex !== "number") continue;
-    const orgIndices = Array.from(entry.byOrg.values());
-    if (orgIndices.length === 0) continue;
-
-    const [firstOrgIndex, ...otherOrgIndices] = orgIndices;
-    if (typeof firstOrgIndex !== "number") continue;
-
-    let preferredOrgIndex = firstOrgIndex;
-    for (const orgIndex of otherOrgIndices) {
-      preferredOrgIndex = pickNewestAccountIndex(working, preferredOrgIndex, orgIndex);
-    }
-
-    const preferredOrg = working[preferredOrgIndex];
-    const fallback = working[fallbackIndex];
-    if (preferredOrg && fallback) {
-      working[preferredOrgIndex] = mergeAccountRecords(preferredOrg, fallback);
-    }
-    indicesToRemove.add(fallbackIndex);
-  }
-
   const result: T[] = [];
   for (let i = 0; i < working.length; i += 1) {
     if (indicesToRemove.has(i)) continue;
@@ -535,12 +513,6 @@ export function deduplicateAccountsByEmail<T extends { organizationId?: string; 
 
     const organizationId = account.organizationId?.trim();
     if (organizationId) {
-      indicesToKeep.add(i);
-      continue;
-    }
-
-    const accountId = account.accountId?.trim();
-    if (accountId) {
       indicesToKeep.add(i);
       continue;
     }
