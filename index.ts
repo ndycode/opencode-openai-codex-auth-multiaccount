@@ -624,13 +624,63 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 
 					type IdentityIndexes = {
-						byOrganizationId: Map<string, number>;
+						byOrganizationId: Map<string, number[]>;
 						byAccountIdNoOrg: Map<string, number>;
 						byRefreshTokenNoOrg: Map<string, number[]>;
 						byEmailNoOrg: Map<string, number>;
 						byAccountIdOrgScoped: Map<string, number[]>;
 						byRefreshTokenOrgScoped: Map<string, number[]>;
 						byRefreshTokenGlobal: Map<string, number[]>;
+					};
+
+					const resolveOrganizationMatch = (
+						indexes: IdentityIndexes,
+						organizationId: string,
+						candidateAccountId: string | undefined,
+					): number | undefined => {
+						const matches = indexes.byOrganizationId.get(organizationId);
+						if (!matches || matches.length === 0) return undefined;
+
+						const candidateId = candidateAccountId?.trim() || undefined;
+						let newestNoAccountId: number | undefined;
+						let newestExactAccountId: number | undefined;
+						let newestAnyNonEmptyAccountId: number | undefined;
+						let nonEmptyAccountIdCount = 0;
+
+						for (const index of matches) {
+							const existing = accounts[index];
+							if (!existing) continue;
+							const existingAccountId = normalizeStoredAccountId(existing);
+							if (!existingAccountId) {
+								newestNoAccountId =
+									typeof newestNoAccountId === "number"
+										? pickNewestAccountIndex(newestNoAccountId, index)
+										: index;
+								continue;
+							}
+							nonEmptyAccountIdCount += 1;
+							newestAnyNonEmptyAccountId =
+								typeof newestAnyNonEmptyAccountId === "number"
+									? pickNewestAccountIndex(newestAnyNonEmptyAccountId, index)
+									: index;
+							if (candidateId && existingAccountId === candidateId) {
+								newestExactAccountId =
+									typeof newestExactAccountId === "number"
+										? pickNewestAccountIndex(newestExactAccountId, index)
+										: index;
+							}
+						}
+
+						if (candidateId) {
+							return newestExactAccountId ?? newestNoAccountId;
+						}
+						if (typeof newestNoAccountId === "number") {
+							return newestNoAccountId;
+						}
+						if (nonEmptyAccountIdCount === 1) {
+							return newestAnyNonEmptyAccountId;
+						}
+						return undefined;
 					};
 
 					const resolveNoOrgRefreshMatch = (
@@ -683,7 +733,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					};
 
 					const buildIdentityIndexes = (): IdentityIndexes => {
-						const byOrganizationId = new Map<string, number>();
+						const byOrganizationId = new Map<string, number[]>();
 						const byAccountIdNoOrg = new Map<string, number>();
 						const byRefreshTokenNoOrg = new Map<string, number[]>();
 						const byEmailNoOrg = new Map<string, number>();
@@ -707,7 +757,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							}
 
 							if (organizationId) {
-								byOrganizationId.set(organizationId, i);
+								pushIndex(byOrganizationId, organizationId, i);
 								if (accountId) {
 									pushIndex(byAccountIdOrgScoped, accountId, i);
 								}
@@ -755,7 +805,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 						const existingIndex = (() => {
 							if (organizationId) {
-								return identityIndexes.byOrganizationId.get(organizationId);
+								return resolveOrganizationMatch(
+									identityIndexes,
+									organizationId,
+									normalizedAccountId,
+								);
 							}
 							if (normalizedAccountId) {
 								const byAccountId = identityIndexes.byAccountIdNoOrg.get(normalizedAccountId);
@@ -859,7 +913,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const refreshMap = new Map<
 					string,
 					{
-						byOrg: Map<string, number>;
+						byOrg: Map<string, number[]>;
 						preferredOrgIndex?: number;
 						fallbackNoAccountIdIndex?: number;
 						fallbackByAccountId: Map<string, number>;
@@ -875,7 +929,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				};
 
 				const collapseFallbackIntoPreferredOrg = (entry: {
-					byOrg: Map<string, number>;
+					byOrg: Map<string, number[]>;
 					preferredOrgIndex?: number;
 					fallbackNoAccountIdIndex?: number;
 					fallbackByAccountId: Map<string, number>;
@@ -929,7 +983,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					let entry = refreshMap.get(refreshToken);
 					if (!entry) {
 						entry = {
-							byOrg: new Map<string, number>(),
+							byOrg: new Map<string, number[]>(),
 							preferredOrgIndex: undefined,
 							fallbackNoAccountIdIndex: undefined,
 							fallbackByAccountId: new Map<string, number>(),
@@ -938,18 +992,35 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 
 					if (orgKey) {
-						const existingIndex = entry.byOrg.get(orgKey);
+						const orgMatches = entry.byOrg.get(orgKey) ?? [];
+						const existingIndex = resolveOrganizationMatch(
+							{
+								byOrganizationId: new Map([[orgKey, orgMatches]]),
+								byAccountIdNoOrg: new Map(),
+								byRefreshTokenNoOrg: new Map(),
+								byEmailNoOrg: new Map(),
+								byAccountIdOrgScoped: new Map(),
+								byRefreshTokenOrgScoped: new Map(),
+								byRefreshTokenGlobal: new Map(),
+							},
+							orgKey,
+							normalizeStoredAccountId(account),
+						);
 						if (existingIndex !== undefined) {
 							const newestIndex = pickNewestAccountIndex(existingIndex, i);
 							const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
 							mergeAccountRecords(newestIndex, obsoleteIndex);
 							indicesToRemove.add(obsoleteIndex);
-							entry.byOrg.set(orgKey, newestIndex);
+							const nextOrgMatches = orgMatches.filter(
+								(index) => index !== obsoleteIndex && index !== newestIndex,
+							);
+							nextOrgMatches.push(newestIndex);
+							entry.byOrg.set(orgKey, nextOrgMatches);
 							entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, newestIndex);
 							collapseFallbackIntoPreferredOrg(entry);
 							continue;
 						}
-						entry.byOrg.set(orgKey, i);
+						entry.byOrg.set(orgKey, [...orgMatches, i]);
 						entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, i);
 						collapseFallbackIntoPreferredOrg(entry);
 						continue;

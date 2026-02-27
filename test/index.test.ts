@@ -1916,7 +1916,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		]);
 	});
 
-	it("collapses duplicate organization candidates during persistence", async () => {
+	it("preserves duplicate organization candidates when accountId differs", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -1958,13 +1958,14 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const organizationEntries = mockStorage.accounts.filter(
 			(account) => account.organizationId === "organization-shared",
 		);
-		expect(organizationEntries).toHaveLength(1);
-		expect(organizationEntries[0]?.accountId).toBe("org-variant-b");
-		expect(mockStorage.accounts).toHaveLength(2);
+		expect(organizationEntries).toHaveLength(2);
+		const organizationAccountIds = organizationEntries.map((account) => account.accountId).sort();
+		expect(organizationAccountIds).toEqual(["org-variant-a", "org-variant-b"]);
+		expect(mockStorage.accounts).toHaveLength(3);
 		expect(mockStorage.accounts.some((account) => account.accountId === "token-personal")).toBe(true);
 	});
 
-	it("preserves entries with different accountId values even when they share the same refresh token (org-scoped vs no-org)", async () => {
+	it("preserves org/no-org shared-refresh entries with different accountId values in pre-populated storage", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -2216,7 +2217,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				},
 			},
 			{
-				accountId: "token-shared",
+				accountId: "org-shared",
 				organizationId: "org-keep",
 				email: "token@example.com",
 				refreshToken: "shared-refresh",
@@ -2252,11 +2253,12 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		const mergedOrg = mockStorage.accounts.find(
+		const mergedOrgEntries = mockStorage.accounts.filter(
 			(account) => account.organizationId === "org-keep",
 		);
-		expect(mergedOrg).toBeDefined();
-		expect(mergedOrg?.accountId).toBe("token-shared");
+		expect(mergedOrgEntries).toHaveLength(1);
+		const mergedOrg = mergedOrgEntries[0];
+		expect(mergedOrg?.accountId).toBe("org-shared");
 		expect(mergedOrg?.rateLimitResetTimes?.codex).toBe(9_000);
 		expect(mergedOrg?.rateLimitResetTimes?.["codex-max"]).toBe(5_000);
 		expect(mergedOrg?.rateLimitResetTimes?.["gpt-5.1"]).toBe(8_000);
@@ -2277,7 +2279,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				lastUsed: 10,
 			},
 			{
-				accountId: "token-shared",
+				accountId: "org-shared",
 				organizationId: "org-keep",
 				email: "token@example.com",
 				refreshToken: "shared-refresh",
@@ -2312,14 +2314,69 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		const mergedOrg = mockStorage.accounts.find(
+		const mergedOrgEntries = mockStorage.accounts.filter(
 			(account) => account.organizationId === "org-keep",
 		);
-		expect(mergedOrg).toBeDefined();
-		expect(mergedOrg?.accountId).toBe("token-shared");
+		expect(mergedOrgEntries).toHaveLength(1);
+		const mergedOrg = mergedOrgEntries[0];
+		expect(mergedOrg?.accountId).toBe("org-shared");
 		expect(mergedOrg?.enabled).toBe(false);
 		expect(mergedOrg?.coolingDownUntil).toBe(12_000);
 		expect(mergedOrg?.cooldownReason).toBe("auth-failure");
+	});
+
+	it("preserves same-organization entries when accountId differs", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		mockStorage.accounts = [
+			{
+				accountId: "org-shared-a",
+				organizationId: "org-keep",
+				email: "org-a@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: 10,
+				lastUsed: 10,
+			},
+			{
+				accountId: "org-shared-b",
+				organizationId: "org-keep",
+				email: "org-b@example.com",
+				refreshToken: "shared-refresh",
+				addedAt: 20,
+				lastUsed: 20,
+			},
+		];
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-unrelated-preserve",
+			refresh: "refresh-unrelated-preserve",
+			expires: Date.now() + 300_000,
+			idToken: "id-unrelated-preserve",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([]);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-unrelated-preserve" ? "unrelated-preserve" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		const orgEntries = mockStorage.accounts.filter(
+			(account) => account.organizationId === "org-keep",
+		);
+		expect(orgEntries).toHaveLength(2);
+		const accountIds = orgEntries.map((account) => account.accountId).sort();
+		expect(accountIds).toEqual(["org-shared-a", "org-shared-b"]);
 	});
 
 	it("persists non-team login and updates same record via accountId/refresh fallback", async () => {
