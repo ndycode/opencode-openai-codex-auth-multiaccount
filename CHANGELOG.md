@@ -6,14 +6,6 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ### added
 
-### changed
-
-### fixed
-
-## [5.4.0] - 2026-02-28
-
-### added
-
 - **beginner operations toolkit**: added `codex-help`, `codex-setup` (with `wizard` mode + fallback), `codex-doctor` (`fix` mode), and `codex-next` for guided onboarding and recovery.
 - **account metadata commands**: added `codex-tag` and `codex-note`, plus `codex-list` tag filtering.
 - **interactive account pickers**: `codex-switch`, `codex-label`, and `codex-remove` now support optional index with interactive selection in compatible terminals.
@@ -29,12 +21,22 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ### fixed
 
-- **organization-scoped account preservation**: org-different variants sharing a refresh token now preserve distinct identity entries during storage collision resolution.
-- **no-org duplicate collapse alignment**: fallback no-org duplicates now collapse consistently across storage, authorize, and prune operations.
-- **active-index remap stability**: index remapping during collision pruning/dedupe maintains stable active-index selection after account deduplication.
 - **non-interactive command guidance**: optional-index commands provide explicit usage guidance when interactive menus are unavailable.
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
+
+## [5.4.0] - 2026-02-28
+
+### changed
+
+- **organization/account identity matching hardening**: org-scoped matching and collision pruning now enforce accountId-aware compatibility to preserve distinct same-org workspace identities.
+- **id-token organization binding source strictness**: id-token candidate org binding now prioritizes `idToken['https://api.openai.com/auth'].organizations[0].id`.
+
+### fixed
+
+- **organization-scoped account preservation**: org-different variants sharing a refresh token now preserve distinct identity entries during storage collision resolution.
+- **no-org duplicate collapse alignment**: fallback no-org duplicates now collapse consistently across storage, authorize, and prune operations.
+- **active-index remap stability**: index remapping during collision pruning/dedupe maintains stable active-index selection after account deduplication.
 
 ## [5.3.0] - 2026-02-22
 
