@@ -749,6 +749,13 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Setup Checklist");
 		});
 
+		it("supports explicit checklist mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-setup"].execute({ mode: "checklist" });
+			expect(result).toContain("Setup Checklist");
+			expect(result).toContain("Recommended next step");
+		});
+
 		it("rejects invalid setup mode values", async () => {
 			const result = await plugin.tool["codex-setup"].execute({ mode: "invalid-mode" });
 			expect(result).toContain("Invalid mode");
@@ -786,9 +793,23 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Technical snapshot");
 		});
 
+		it("supports standard doctor mode without deep snapshot", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "standard" });
+			expect(result).toContain("Codex Doctor");
+			expect(result).not.toContain("Technical snapshot");
+		});
+
 		it("applies safe auto-fixes when fix mode is enabled", async () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-doctor"].execute({ fix: true });
+			expect(result).toContain("Auto-fix");
+			expect(result).toContain("Refreshed");
+		});
+
+		it("applies safe auto-fixes with explicit fix mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "fix" });
 			expect(result).toContain("Auto-fix");
 			expect(result).toContain("Refreshed");
 		});
