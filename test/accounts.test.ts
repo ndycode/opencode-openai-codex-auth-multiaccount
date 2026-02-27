@@ -432,6 +432,8 @@ describe("AccountManager", () => {
   });
 
   describe("removeAccount", () => {
+    // Note: Tests in this block cover in-memory manager behavior.
+    // Canonical persistence dedupes no-org entries; org-different entries are preserved.
     it("removes an account and updates indices", () => {
       const now = Date.now();
       const stored = {
@@ -506,7 +508,8 @@ describe("AccountManager", () => {
       expect(manager.getCurrentAccount()).toBe(null);
     });
 
-    it("removes only targeted workspace when email/token are shared", () => {
+    it("removes only targeted workspace when email/token are shared (manager-level, no orgId)", () => {
+      // Note: In-memory manager can hold multiple entries; canonical dedupe would collapse no-org duplicates
       const now = Date.now();
       const stored = {
         version: 3 as const,
@@ -932,6 +935,8 @@ describe("AccountManager", () => {
   });
 
   describe("setActiveIndex", () => {
+    // Note: Tests in this block cover in-memory manager behavior.
+    // Canonical persistence dedupes no-org entries; org-different entries are preserved.
     it("sets active index and returns account", () => {
       const now = Date.now();
       const stored = {
@@ -967,7 +972,8 @@ describe("AccountManager", () => {
       expect(manager.setActiveIndex(Infinity)).toBeNull();
     });
 
-    it("switches between distinct workspace accounts sharing email and token", () => {
+    it("switches between distinct workspace accounts sharing email and token (manager-level, no orgId)", () => {
+      // Note: In-memory manager can hold multiple entries; canonical dedupe would collapse no-org duplicates
       const now = Date.now();
       const stored = {
         version: 3 as const,

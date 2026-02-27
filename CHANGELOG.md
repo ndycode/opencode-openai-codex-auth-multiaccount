@@ -21,6 +21,9 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ### fixed
 
+- **organization-scoped account preservation**: org-different variants sharing a refresh token now preserve distinct identity entries during storage collision resolution.
+- **no-org duplicate collapse alignment**: fallback no-org duplicates now collapse consistently across storage, authorize, and prune operations.
+- **active-index remap stability**: index remapping during collision pruning/dedupe maintains stable active-index selection after account deduplication.
 - **non-interactive command guidance**: optional-index commands provide explicit usage guidance when interactive menus are unavailable.
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
