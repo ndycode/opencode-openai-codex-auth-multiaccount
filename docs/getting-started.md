@@ -171,7 +171,7 @@ codex-next
 If your terminal supports menus, you can use guided onboarding:
 
 ```text
-codex-setup wizard=true
+codex-setup mode="wizard"
 ```
 
 Notes:
