@@ -6,6 +6,14 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ### added
 
+### changed
+
+### fixed
+
+## [5.4.0] - 2026-02-28
+
+### added
+
 - **beginner operations toolkit**: added `codex-help`, `codex-setup` (with `wizard` mode + fallback), `codex-doctor` (`fix` mode), and `codex-next` for guided onboarding and recovery.
 - **account metadata commands**: added `codex-tag` and `codex-note`, plus `codex-list` tag filtering.
 - **interactive account pickers**: `codex-switch`, `codex-label`, and `codex-remove` now support optional index with interactive selection in compatible terminals.
