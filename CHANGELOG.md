@@ -18,12 +18,15 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **account storage schema**: V3 account metadata now includes optional `accountTags` and `accountNote`.
 - **docs refresh for operational flows**: README + docs portal/development guides updated to reflect beginner commands, safe mode, interactive picker behavior, and backup/import safeguards.
 - **test matrix expansion**: coverage now includes beginner UI helpers, safe-fix diagnostics edge cases, tag/note command behavior, and timestamped backup/import preview utilities.
+- **dependency security baseline**: refreshed lockfile dependency graph via `npm audit fix` to remove all known high/moderate advisories in the audited tree.
 
 ### fixed
 
 - **non-interactive command guidance**: optional-index commands provide explicit usage guidance when interactive menus are unavailable.
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
+- **oauth callback host alignment**: authorization redirect now uses `http://127.0.0.1:1455/auth/callback` to match the loopback server binding and avoid `localhost` resolver drift.
+- **hybrid account selection eligibility**: token-bucket depletion is now enforced during hybrid selection/current-account reuse, preventing premature request failures when other accounts remain eligible.
 
 ## [5.4.0] - 2026-02-28
 
