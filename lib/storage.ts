@@ -461,6 +461,12 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
         remainingFallbacks.push(fallbackIndex);
         continue;
       }
+      const preferredAccountId = getAccountIdKey(currentPreferred);
+      const sourceAccountId = getAccountIdKey(source);
+      if (!preferredAccountId && sourceAccountId) {
+        remainingFallbacks.push(fallbackIndex);
+        continue;
+      }
 
       if (!canMergeByRefreshToken(currentPreferred, source)) {
         remainingFallbacks.push(fallbackIndex);

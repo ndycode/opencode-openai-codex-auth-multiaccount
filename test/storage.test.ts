@@ -1077,6 +1077,39 @@ describe("storage", () => {
       expect(result?.accounts.map((account) => account.organizationId).sort()).toEqual(["org-1", "org-2"]);
     });
 
+    it("does not bind org-scoped entry with empty accountId to fallback accountId based on order", () => {
+      const firstOrder = normalizeAccountStorage({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          { organizationId: "org-1", refreshToken: "shared-refresh", addedAt: 1, lastUsed: 1 },
+          { accountId: "workspace-a", refreshToken: "shared-refresh", addedAt: 2, lastUsed: 2 },
+          { accountId: "workspace-b", refreshToken: "shared-refresh", addedAt: 3, lastUsed: 3 },
+        ],
+      });
+      const secondOrder = normalizeAccountStorage({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          { organizationId: "org-1", refreshToken: "shared-refresh", addedAt: 1, lastUsed: 1 },
+          { accountId: "workspace-b", refreshToken: "shared-refresh", addedAt: 2, lastUsed: 2 },
+          { accountId: "workspace-a", refreshToken: "shared-refresh", addedAt: 3, lastUsed: 3 },
+        ],
+      });
+
+      for (const normalized of [firstOrder, secondOrder]) {
+        expect(normalized?.accounts).toHaveLength(3);
+        const orgScoped = normalized?.accounts.find((account) => account.organizationId === "org-1");
+        expect(orgScoped).toBeDefined();
+        expect(orgScoped?.accountId).toBeUndefined();
+        const noOrgAccountIds = normalized?.accounts
+          .filter((account) => !account.organizationId)
+          .map((account) => account.accountId)
+          .sort();
+        expect(noOrgAccountIds).toEqual(["workspace-a", "workspace-b"]);
+      }
+    });
+
     it("retains legacy no-organization dedupe semantics", () => {
       const data = {
         version: 3,
