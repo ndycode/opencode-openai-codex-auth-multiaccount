@@ -202,10 +202,11 @@ describe("storage", () => {
       expect(basename(path)).toMatch(/^unsafe-name-\d{8}-\d{9}-[a-f0-9]{6}\.json$/);
     });
 
-    it("collapses same-refresh imports when accountId differs", async () => {
+    it("collapses same-refresh no-organization imports when accountId differs (legacy fallback)", async () => {
       await saveAccounts({
         version: 3,
         activeIndex: 0,
+        activeIndexByFamily: { codex: 0, "gpt-5.1": 0 },
         accounts: [
           {
             accountId: "workspace-a",
@@ -239,6 +240,8 @@ describe("storage", () => {
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(1);
       expect(loaded?.accounts[0]?.accountId).toBe("workspace-b");
+      expect(loaded?.activeIndex).toBe(0);
+      expect(loaded?.activeIndexByFamily?.codex).toBe(0);
     });
 
     it("collapses same-organization records to newest during import and remaps active keys", async () => {
@@ -294,9 +297,10 @@ describe("storage", () => {
       expect(org1?.refreshToken).toBe("refresh-new");
       expect(loaded?.activeIndex).toBe(1);
       expect(loaded?.activeIndexByFamily?.codex).toBe(1);
+      expect(loaded?.activeIndexByFamily?.["gpt-5.1"]).toBe(1);
     });
 
-    it("preserves same refresh token across different organizations during import", async () => {
+    it("preserves same refresh token across different organizationId values during import", async () => {
       await fs.writeFile(
         exportPath,
         JSON.stringify({
@@ -325,6 +329,7 @@ describe("storage", () => {
 
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(2);
+      expect(loaded?.accounts.every((account) => account.refreshToken === "shared-refresh")).toBe(true);
       const organizationIds = loaded?.accounts
         .map((account) => account.organizationId)
         .filter((organizationId): organizationId is string => typeof organizationId === "string");

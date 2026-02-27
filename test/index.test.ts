@@ -2064,7 +2064,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.accounts[0]?.accessToken).toBe("access-no-org-update");
 	});
 
-	it("does not merge ambiguous org-scoped matches when organization metadata is missing", async () => {
+	it("preserves org-scoped variants when organizationId differs despite shared account/refresh context", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -2113,10 +2113,16 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.accounts).toHaveLength(2);
 		const orgScopedEntries = mockStorage.accounts.filter((account) => account.organizationId);
 		expect(orgScopedEntries).toHaveLength(2);
+		expect(orgScopedEntries.map((account) => account.organizationId).sort()).toEqual([
+			"org-a",
+			"org-b",
+		]);
 		expect(orgScopedEntries.some((account) => account.accessToken === "access-ambiguous")).toBe(true);
+		expect(mockStorage.activeIndex).toBe(0);
+		expect(mockStorage.activeIndexByFamily).toEqual({});
 	});
 
-	it("remaps active indices to merged org account when fallback variant is pruned", async () => {
+	it("allows no-org fallback collision collapse and safely remaps active indices", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -2180,9 +2186,9 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.accounts).toHaveLength(3);
 		expect(mockStorage.accounts.some((account) => account.accountId === "token-shared")).toBe(false);
 		expect(mockStorage.accounts[1]?.accountId).toBe("org-shared");
+		expect(mockStorage.accounts[1]?.organizationId).toBe("org-keep");
 		expect(mockStorage.activeIndex).toBe(1);
-		expect(mockStorage.activeIndexByFamily.codex).toBe(1);
-		expect(mockStorage.activeIndexByFamily["gpt-5.1"]).toBe(1);
+		expect(mockStorage.activeIndexByFamily).toEqual({ codex: 1, "gpt-5.1": 1 });
 	});
 
 	it("keeps latest rate-limit reset windows when collapsing refresh-token duplicates", async () => {
