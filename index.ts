@@ -594,15 +594,85 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				};
 			};
 
+			const normalizeStoredAccountId = (
+				account: { accountId?: string } | undefined,
+			): string | undefined => {
+				const accountId = account?.accountId?.trim();
+				return accountId && accountId.length > 0 ? accountId : undefined;
+			};
+
+			const hasDistinctNonEmptyAccountIds = (
+				left: { accountId?: string } | undefined,
+				right: { accountId?: string } | undefined,
+			): boolean => {
+				const leftId = normalizeStoredAccountId(left);
+				const rightId = normalizeStoredAccountId(right);
+				return !!leftId && !!rightId && leftId !== rightId;
+			};
+
+			const canCollapseWithCandidateAccountId = (
+				existing: { accountId?: string } | undefined,
+				candidateAccountId: string | undefined,
+			): boolean => {
+				const existingAccountId = normalizeStoredAccountId(existing);
+				const normalizedCandidate = candidateAccountId?.trim() || undefined;
+				if (!existingAccountId || !normalizedCandidate) {
+					return true;
+				}
+				return existingAccountId === normalizedCandidate;
+			};
+
 
 					type IdentityIndexes = {
 						byOrganizationId: Map<string, number>;
 						byAccountIdNoOrg: Map<string, number>;
-						byRefreshTokenNoOrg: Map<string, number>;
+						byRefreshTokenNoOrg: Map<string, number[]>;
 						byEmailNoOrg: Map<string, number>;
 						byAccountIdOrgScoped: Map<string, number[]>;
 						byRefreshTokenOrgScoped: Map<string, number[]>;
 						byRefreshTokenGlobal: Map<string, number[]>;
+					};
+
+					const pickNewestFromIndices = (indices: number[]): number | undefined => {
+						if (indices.length === 0) return undefined;
+						const first = indices[0];
+						if (typeof first !== "number") return undefined;
+						let newestIndex = first;
+						for (let i = 1; i < indices.length; i += 1) {
+							const candidate = indices[i];
+							if (typeof candidate !== "number") continue;
+							newestIndex = pickNewestAccountIndex(newestIndex, candidate);
+						}
+						return newestIndex;
+					};
+
+					const resolveNoOrgRefreshMatch = (
+						indexes: IdentityIndexes,
+						refreshToken: string,
+						candidateAccountId: string | undefined,
+					): number | undefined => {
+						const candidateId = candidateAccountId?.trim() || undefined;
+						const matches = indexes.byRefreshTokenNoOrg.get(refreshToken);
+						if (!matches || matches.length === 0) return undefined;
+
+						const withNoAccountId = matches.filter((index) => {
+							const existing = accounts[index];
+							return !normalizeStoredAccountId(existing);
+						});
+
+						if (!candidateId) {
+							return pickNewestFromIndices(withNoAccountId);
+						}
+
+						const exactMatches = matches.filter((index) => {
+							const existing = accounts[index];
+							return normalizeStoredAccountId(existing) === candidateId;
+						});
+						if (exactMatches.length > 0) {
+							return pickNewestFromIndices(exactMatches);
+						}
+
+						return pickNewestFromIndices(withNoAccountId);
 					};
 
 					const resolveUniqueOrgScopedMatch = (
@@ -625,7 +695,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const buildIdentityIndexes = (): IdentityIndexes => {
 						const byOrganizationId = new Map<string, number>();
 						const byAccountIdNoOrg = new Map<string, number>();
-						const byRefreshTokenNoOrg = new Map<string, number>();
+						const byRefreshTokenNoOrg = new Map<string, number[]>();
 						const byEmailNoOrg = new Map<string, number>();
 						const byAccountIdOrgScoped = new Map<string, number[]>();
 						const byRefreshTokenOrgScoped = new Map<string, number[]>();
@@ -661,7 +731,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								byAccountIdNoOrg.set(accountId, i);
 							}
 							if (refreshToken) {
-								byRefreshTokenNoOrg.set(refreshToken, i);
+								pushIndex(byRefreshTokenNoOrg, refreshToken, i);
 							}
 							if (email) {
 								byEmailNoOrg.set(email, i);
@@ -704,17 +774,21 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								}
 							}
 
-							const byRefreshToken = identityIndexes.byRefreshTokenNoOrg.get(result.refresh);
+							const byRefreshToken = resolveNoOrgRefreshMatch(
+								identityIndexes,
+								result.refresh,
+								normalizedAccountId,
+							);
 							if (byRefreshToken !== undefined) {
 								return byRefreshToken;
 							}
 
-							if (accountEmail) {
-								const byEmail = identityIndexes.byEmailNoOrg.get(accountEmail);
-								if (byEmail !== undefined) {
-									return byEmail;
-								}
+						if (accountEmail && !normalizedAccountId) {
+							const byEmail = identityIndexes.byEmailNoOrg.get(accountEmail);
+							if (byEmail !== undefined) {
+								return byEmail;
 							}
+						}
 
 							const orgScoped = resolveUniqueOrgScopedMatch(
 								identityIndexes,
@@ -723,10 +797,20 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							);
 							if (orgScoped !== undefined) return orgScoped;
 
-							// Absolute last resort: only collapse when refresh token maps to a
-							// single account. Avoids merging distinct org-scoped variants.
-							return asUniqueIndex(identityIndexes.byRefreshTokenGlobal.get(result.refresh));
-						})();
+						// Absolute last resort: only collapse when refresh token maps to a
+						// single compatible account. Avoids merging distinct workspace variants.
+						const globalRefreshMatch = asUniqueIndex(
+							identityIndexes.byRefreshTokenGlobal.get(result.refresh),
+						);
+						if (globalRefreshMatch === undefined) {
+							return undefined;
+						}
+						const existing = accounts[globalRefreshMatch];
+						if (!canCollapseWithCandidateAccountId(existing, normalizedAccountId)) {
+							return undefined;
+						}
+						return globalRefreshMatch;
+					})();
 
 						if (existingIndex === undefined) {
 							accounts.push({
@@ -784,7 +868,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const indicesToRemove = new Set<number>();
 				const refreshMap = new Map<
 					string,
-					{ byOrg: Map<string, number>; preferredOrgIndex?: number; fallbackIndex?: number }
+					{
+						byOrg: Map<string, number>;
+						preferredOrgIndex?: number;
+						fallbackNoAccountIdIndex?: number;
+						fallbackByAccountId: Map<string, number>;
+					}
 				>();
 
 				const pickPreferredOrgIndex = (
@@ -798,25 +887,37 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const collapseFallbackIntoPreferredOrg = (entry: {
 					byOrg: Map<string, number>;
 					preferredOrgIndex?: number;
-					fallbackIndex?: number;
+					fallbackNoAccountIdIndex?: number;
+					fallbackByAccountId: Map<string, number>;
 				}): void => {
-					if (entry.preferredOrgIndex === undefined || entry.fallbackIndex === undefined) {
+					if (entry.preferredOrgIndex === undefined) {
 						return;
 					}
 
 					const preferredOrgIndex = entry.preferredOrgIndex;
-					const fallbackIndex = entry.fallbackIndex;
-					if (preferredOrgIndex === fallbackIndex) {
-						entry.fallbackIndex = undefined;
-						return;
-					}
-
-					const target = accounts[preferredOrgIndex];
-					const source = accounts[fallbackIndex];
-					if (target && source) {
+					const collapseFallbackIndex = (fallbackIndex: number): boolean => {
+						if (preferredOrgIndex === fallbackIndex) return true;
+						const target = accounts[preferredOrgIndex];
+						const source = accounts[fallbackIndex];
+						if (!target || !source) return true;
+						if (hasDistinctNonEmptyAccountIds(target, source)) {
+							return false;
+						}
 						mergeAccountRecords(preferredOrgIndex, fallbackIndex);
 						indicesToRemove.add(fallbackIndex);
-						entry.fallbackIndex = undefined;
+						return true;
+					};
+
+					if (typeof entry.fallbackNoAccountIdIndex === "number") {
+						if (collapseFallbackIndex(entry.fallbackNoAccountIdIndex)) {
+							entry.fallbackNoAccountIdIndex = undefined;
+						}
+					}
+
+					for (const [accountId, fallbackIndex] of entry.fallbackByAccountId) {
+						if (collapseFallbackIndex(fallbackIndex)) {
+							entry.fallbackByAccountId.delete(accountId);
+						}
 					}
 				};
 
@@ -831,7 +932,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						entry = {
 							byOrg: new Map<string, number>(),
 							preferredOrgIndex: undefined,
-							fallbackIndex: undefined,
+							fallbackNoAccountIdIndex: undefined,
+							fallbackByAccountId: new Map<string, number>(),
 						};
 						refreshMap.set(refreshToken, entry);
 					}
@@ -854,17 +956,34 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						continue;
 					}
 
-					const existingFallback = entry.fallbackIndex;
+					const fallbackAccountId = normalizeStoredAccountId(account);
+					if (fallbackAccountId) {
+						const existingFallback = entry.fallbackByAccountId.get(fallbackAccountId);
+						if (typeof existingFallback === "number") {
+							const newestIndex = pickNewestAccountIndex(existingFallback, i);
+							const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
+							mergeAccountRecords(newestIndex, obsoleteIndex);
+							indicesToRemove.add(obsoleteIndex);
+							entry.fallbackByAccountId.set(fallbackAccountId, newestIndex);
+							collapseFallbackIntoPreferredOrg(entry);
+							continue;
+						}
+						entry.fallbackByAccountId.set(fallbackAccountId, i);
+						collapseFallbackIntoPreferredOrg(entry);
+						continue;
+					}
+
+					const existingFallback = entry.fallbackNoAccountIdIndex;
 					if (typeof existingFallback === "number") {
 						const newestIndex = pickNewestAccountIndex(existingFallback, i);
 						const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
 						mergeAccountRecords(newestIndex, obsoleteIndex);
 						indicesToRemove.add(obsoleteIndex);
-						entry.fallbackIndex = newestIndex;
+						entry.fallbackNoAccountIdIndex = newestIndex;
 						collapseFallbackIntoPreferredOrg(entry);
 						continue;
 					}
-					entry.fallbackIndex = i;
+					entry.fallbackNoAccountIdIndex = i;
 					collapseFallbackIntoPreferredOrg(entry);
 				}
 

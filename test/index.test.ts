@@ -1960,15 +1960,17 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		);
 		expect(organizationEntries).toHaveLength(1);
 		expect(organizationEntries[0]?.accountId).toBe("org-variant-b");
-		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts).toHaveLength(2);
+		expect(mockStorage.accounts.some((account) => account.accountId === "token-personal")).toBe(true);
 	});
 
-	it("collapses org-scoped primary and no-org token variant sharing the same refresh token into one entry", async () => {
+	it("preserves entries with different accountId values even when they share the same refresh token (org-scoped vs no-org)", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
 		// Simulate a single OAuth login that produces an org candidate + a token candidate.
 		// Both share the same refresh token (same human account).
+		// Since accountId values differ, both should be preserved.
 		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
 			type: "success",
 			access: "access-holly",
@@ -2004,10 +2006,13 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		// Both variants share the same refresh token so they must collapse to a single entry.
-		expect(mockStorage.accounts).toHaveLength(1);
-		expect(mockStorage.accounts[0]?.refreshToken).toBe("refresh-holly-shared");
-		expect(mockStorage.accounts[0]?.email).toBeDefined();
+		// accountId values differ ("org-QA1bZCn6zb57FT6TXLZWMPO3" vs "e4692e53-2f30-42a0-b8df-3a685d3c2a4a")
+		// so both entries should be preserved despite sharing the same refreshToken.
+		expect(mockStorage.accounts).toHaveLength(2);
+		const accountIds = mockStorage.accounts.map((account) => account.accountId);
+		expect(accountIds).toContain("org-QA1bZCn6zb57FT6TXLZWMPO3");
+		expect(accountIds).toContain("e4692e53-2f30-42a0-b8df-3a685d3c2a4a");
+		expect(mockStorage.accounts.every((account) => account.refreshToken === "refresh-holly-shared")).toBe(true);
 	});
 
 	it("updates a unique org-scoped entry when later login lacks organization metadata", async () => {
@@ -2122,7 +2127,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.activeIndexByFamily).toEqual({});
 	});
 
-	it("allows no-org fallback collision collapse and safely remaps active indices", async () => {
+	it("preserves entries with different accountId values even when they share the same refresh token (org-scoped vs no-org)", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -2183,15 +2188,17 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		expect(mockStorage.accounts).toHaveLength(3);
-		expect(mockStorage.accounts.some((account) => account.accountId === "token-shared")).toBe(false);
-		expect(mockStorage.accounts[1]?.accountId).toBe("org-shared");
-		expect(mockStorage.accounts[1]?.organizationId).toBe("org-keep");
-		expect(mockStorage.activeIndex).toBe(1);
-		expect(mockStorage.activeIndexByFamily).toEqual({ codex: 1, "gpt-5.1": 1 });
+		// accountId values differ ("org-shared" vs "token-shared") so both should be preserved
+		// despite sharing the same refreshToken. Active index should still be remapped correctly.
+		expect(mockStorage.accounts).toHaveLength(4);
+		const accountIds = mockStorage.accounts.map((account) => account.accountId);
+		expect(accountIds).toContain("org-shared");
+		expect(accountIds).toContain("token-shared");
+		expect(mockStorage.activeIndex).toBe(2);
+		expect(mockStorage.activeIndexByFamily).toEqual({ codex: 2, "gpt-5.1": 2 });
 	});
 
-	it("keeps latest rate-limit reset windows when collapsing refresh-token duplicates", async () => {
+	it("keeps latest rate-limit reset windows when collapsing same-organization duplicates", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -2210,6 +2217,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			},
 			{
 				accountId: "token-shared",
+				organizationId: "org-keep",
 				email: "token@example.com",
 				refreshToken: "shared-refresh",
 				addedAt: 20,
@@ -2244,15 +2252,17 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		expect(mockStorage.accounts.some((account) => account.accountId === "token-shared")).toBe(false);
-		const mergedOrg = mockStorage.accounts.find((account) => account.accountId === "org-shared");
+		const mergedOrg = mockStorage.accounts.find(
+			(account) => account.organizationId === "org-keep",
+		);
 		expect(mergedOrg).toBeDefined();
+		expect(mergedOrg?.accountId).toBe("token-shared");
 		expect(mergedOrg?.rateLimitResetTimes?.codex).toBe(9_000);
 		expect(mergedOrg?.rateLimitResetTimes?.["codex-max"]).toBe(5_000);
 		expect(mergedOrg?.rateLimitResetTimes?.["gpt-5.1"]).toBe(8_000);
 	});
 
-	it("keeps restrictive enabled/cooldown metadata when collapsing refresh-token duplicates", async () => {
+	it("keeps restrictive enabled/cooldown metadata when collapsing same-organization duplicates", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 
@@ -2268,6 +2278,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			},
 			{
 				accountId: "token-shared",
+				organizationId: "org-keep",
 				email: "token@example.com",
 				refreshToken: "shared-refresh",
 				enabled: false,
@@ -2301,9 +2312,11 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 
-		expect(mockStorage.accounts.some((account) => account.accountId === "token-shared")).toBe(false);
-		const mergedOrg = mockStorage.accounts.find((account) => account.accountId === "org-shared");
+		const mergedOrg = mockStorage.accounts.find(
+			(account) => account.organizationId === "org-keep",
+		);
 		expect(mergedOrg).toBeDefined();
+		expect(mergedOrg?.accountId).toBe("token-shared");
 		expect(mergedOrg?.enabled).toBe(false);
 		expect(mergedOrg?.coolingDownUntil).toBe(12_000);
 		expect(mergedOrg?.cooldownReason).toBe("auth-failure");

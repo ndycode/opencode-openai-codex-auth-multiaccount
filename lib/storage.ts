@@ -412,10 +412,24 @@ function mergeAccountRecords<T extends AccountLike>(target: T, source: T): T {
 function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[]): T[] {
   const working = [...accounts];
   const indicesToRemove = new Set<number>();
+  const getAccountIdKey = (account: T | undefined): string => account?.accountId?.trim() ?? "";
+  const canMergeByRefreshToken = (
+    left: T | undefined,
+    right: T | undefined,
+  ): boolean => {
+    if (!left || !right) return false;
+    const leftAccountId = getAccountIdKey(left);
+    const rightAccountId = getAccountIdKey(right);
+    if (leftAccountId && rightAccountId && leftAccountId !== rightAccountId) {
+      return false;
+    }
+    return true;
+  };
+
   const refreshMap = new Map<string, {
     byOrg: Map<string, number>;
     preferredOrgIndex?: number;
-    fallbackIndex?: number;
+    fallbackIndices: number[];
   }>();
 
   const pickPreferredOrgIndex = (
@@ -430,27 +444,37 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
     entry: {
       byOrg: Map<string, number>;
       preferredOrgIndex?: number;
-      fallbackIndex?: number;
+      fallbackIndices: number[];
     },
   ): void => {
-    if (entry.preferredOrgIndex === undefined || entry.fallbackIndex === undefined) {
+    if (entry.preferredOrgIndex === undefined || entry.fallbackIndices.length === 0) {
       return;
     }
 
     const preferredOrgIndex = entry.preferredOrgIndex;
-    const fallbackIndex = entry.fallbackIndex;
-    if (preferredOrgIndex === fallbackIndex) {
-      entry.fallbackIndex = undefined;
-      return;
-    }
-
     const target = working[preferredOrgIndex];
-    const source = working[fallbackIndex];
-    if (target && source) {
-      working[preferredOrgIndex] = mergeAccountRecords(target, source);
+    if (!target) return;
+
+    const remainingFallbacks: number[] = [];
+    for (const fallbackIndex of entry.fallbackIndices) {
+      if (fallbackIndex === preferredOrgIndex) continue;
+      const source = working[fallbackIndex];
+      if (!source) continue;
+
+      if (!canMergeByRefreshToken(target, source)) {
+        remainingFallbacks.push(fallbackIndex);
+        continue;
+      }
+
+      const mergeTarget = working[preferredOrgIndex];
+      if (!mergeTarget) {
+        remainingFallbacks.push(fallbackIndex);
+        continue;
+      }
+      working[preferredOrgIndex] = mergeAccountRecords(mergeTarget, source);
       indicesToRemove.add(fallbackIndex);
-      entry.fallbackIndex = undefined;
     }
+    entry.fallbackIndices = remainingFallbacks;
   };
 
   for (let i = 0; i < working.length; i += 1) {
@@ -466,7 +490,7 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
       entry = {
         byOrg: new Map<string, number>(),
         preferredOrgIndex: undefined,
-        fallbackIndex: undefined,
+        fallbackIndices: [],
       };
       refreshMap.set(refreshToken, entry);
     }
@@ -493,8 +517,17 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
       continue;
     }
 
-    const existingFallback = entry.fallbackIndex;
-    if (typeof existingFallback === "number") {
+    let merged = false;
+    for (let j = 0; j < entry.fallbackIndices.length; j += 1) {
+      const existingFallback = entry.fallbackIndices[j];
+      if (existingFallback === undefined) {
+        continue;
+      }
+      const existingAccount = working[existingFallback];
+      if (!existingAccount || !canMergeByRefreshToken(existingAccount, account)) {
+        continue;
+      }
+
       const newestIndex = pickNewestAccountIndex(working, existingFallback, i);
       const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
       const target = working[newestIndex];
@@ -503,11 +536,15 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
         working[newestIndex] = mergeAccountRecords(target, source);
       }
       indicesToRemove.add(obsoleteIndex);
-      entry.fallbackIndex = newestIndex;
-      collapseFallbackIntoPreferredOrg(entry);
-      continue;
+      entry.fallbackIndices[j] = newestIndex;
+      merged = true;
+      break;
     }
-    entry.fallbackIndex = i;
+
+    if (!merged) {
+      entry.fallbackIndices.push(i);
+    }
+
     collapseFallbackIntoPreferredOrg(entry);
   }
 
@@ -562,6 +599,12 @@ export function deduplicateAccountsByEmail<T extends { organizationId?: string; 
 
     const organizationId = account.organizationId?.trim();
     if (organizationId) {
+      indicesToKeep.add(i);
+      continue;
+    }
+
+    const accountId = account.accountId?.trim();
+    if (accountId) {
       indicesToKeep.add(i);
       continue;
     }

@@ -694,6 +694,124 @@ describe("Token Utils Module", () => {
 			expect(candidate).toBeDefined();
 			expect(candidate?.label).toContain("[id:a]");
 		});
+
+		describe("canonical organizationId priority (hotfix 5.4)", () => {
+			it("prioritizes organizationId from canonical id_token path organizations[0].id", () => {
+				mockedDecodeJWT.mockImplementation((token) => {
+					if (token === "id_token") {
+						return {
+							[JWT_CLAIM_PATH]: {
+								chatgpt_account_id: "token_acc",
+								organizations: [{ id: "canonical-org-id", name: "Canonical Org" }],
+							},
+							// Other org-like fields in payload root
+							organizations: [{ id: "root-org-id", name: "Root Org" }],
+							organization_id: "fallback-org-id",
+						};
+					}
+					return null;
+				});
+				const candidates = getAccountIdCandidates(undefined, "id_token");
+				const idTokenCandidate = candidates.find((c) => c.source === "id_token");
+				expect(idTokenCandidate?.organizationId).toBe("canonical-org-id");
+			});
+
+			it("prefers canonical organizations[0].id over other org-like fields in id_token", () => {
+				mockedDecodeJWT.mockImplementation((token) => {
+					if (token === "id_token") {
+						return {
+							[JWT_CLAIM_PATH]: {
+								chatgpt_account_id: "token_acc",
+								organizations: [{ id: "canonical-org-123", name: "Canonical Org" }],
+								organization_id: "nested-fallback-org",
+							},
+							// Top-level org-like fields
+							organization_id: "top-level-fallback-org",
+							organizationId: "camelCaseFallbackOrg",
+						};
+					}
+					return null;
+				});
+				const candidates = getAccountIdCandidates(undefined, "id_token");
+				const idTokenCandidate = candidates.find((c) => c.source === "id_token");
+				expect(idTokenCandidate?.organizationId).toBe("canonical-org-123");
+			});
+
+			it("falls back to undefined when canonical organizations[0].id is missing", () => {
+				mockedDecodeJWT.mockImplementation((token) => {
+					if (token === "id_token") {
+						return {
+							[JWT_CLAIM_PATH]: {
+								chatgpt_account_id: "token_acc",
+								// organizations array exists but id field is missing
+								organizations: [{ name: "Org Without ID" }],
+							},
+							// Other org-like fields available
+							organization_id: "fallback-org-id",
+						};
+					}
+					return null;
+				});
+				const candidates = getAccountIdCandidates(undefined, "id_token");
+				const idTokenCandidate = candidates.find((c) => c.source === "id_token");
+				expect(idTokenCandidate?.organizationId).toBeUndefined();
+			});
+
+			it("falls back to undefined when canonical organizations array is missing", () => {
+				mockedDecodeJWT.mockImplementation((token) => {
+					if (token === "id_token") {
+						return {
+							[JWT_CLAIM_PATH]: {
+								chatgpt_account_id: "token_acc",
+								// No organizations array at all
+							},
+							organization_id: "fallback-org-id",
+						};
+					}
+					return null;
+				});
+				const candidates = getAccountIdCandidates(undefined, "id_token");
+				const idTokenCandidate = candidates.find((c) => c.source === "id_token");
+				expect(idTokenCandidate?.organizationId).toBeUndefined();
+			});
+
+			it("falls back to undefined when organizations array is empty", () => {
+				mockedDecodeJWT.mockImplementation((token) => {
+					if (token === "id_token") {
+						return {
+							[JWT_CLAIM_PATH]: {
+								chatgpt_account_id: "token_acc",
+								organizations: [],
+							},
+							organization_id: "fallback-org-id",
+						};
+					}
+					return null;
+				});
+				const candidates = getAccountIdCandidates(undefined, "id_token");
+				const idTokenCandidate = candidates.find((c) => c.source === "id_token");
+				expect(idTokenCandidate?.organizationId).toBeUndefined();
+			});
+
+			it("rejects organizations[0].organization_id when organizations[0].id is missing (strict orgId source)", () => {
+				mockedDecodeJWT.mockImplementation((token) => {
+					if (token === "id_token") {
+						return {
+							[JWT_CLAIM_PATH]: {
+								chatgpt_account_id: "token_acc",
+								organizations: [
+									{ organization_id: "nested-org-id", name: "Org Without ID" },
+								],
+							},
+						};
+					}
+					return null;
+				});
+				const candidates = getAccountIdCandidates(undefined, "id_token");
+				const idTokenCandidate = candidates.find((c) => c.source === "id_token");
+				expect(idTokenCandidate?.organizationId).toBeUndefined();
+			});
+		});
 	});
 
 	describe("selectBestAccountCandidate", () => {

@@ -202,7 +202,7 @@ describe("storage", () => {
       expect(basename(path)).toMatch(/^unsafe-name-\d{8}-\d{9}-[a-f0-9]{6}\.json$/);
     });
 
-    it("collapses same-refresh no-organization imports when accountId differs (legacy fallback)", async () => {
+    it("preserves accounts with different accountId values even when refreshToken and email are shared (no organizationId)", async () => {
       await saveAccounts({
         version: 3,
         activeIndex: 0,
@@ -238,8 +238,10 @@ describe("storage", () => {
       await importAccounts(exportPath);
 
       const loaded = await loadAccounts();
-      expect(loaded?.accounts).toHaveLength(1);
-      expect(loaded?.accounts[0]?.accountId).toBe("workspace-b");
+      expect(loaded?.accounts).toHaveLength(2);
+      const accountIds = loaded?.accounts.map((account) => account.accountId);
+      expect(accountIds).toContain("workspace-a");
+      expect(accountIds).toContain("workspace-b");
       expect(loaded?.activeIndex).toBe(0);
       expect(loaded?.activeIndexByFamily?.codex).toBe(0);
     });
@@ -979,7 +981,7 @@ describe("storage", () => {
       expect(result?.accounts).toHaveLength(1);
     });
 
-    it("collapses same refresh token to the newest account when accountId differs", () => {
+    it("preserves accounts with different accountId values even when refreshToken and email are shared (no organizationId)", () => {
       const data = {
         version: 3,
         activeIndex: 0,
@@ -1002,8 +1004,10 @@ describe("storage", () => {
       };
 
       const result = normalizeAccountStorage(data);
-      expect(result?.accounts).toHaveLength(1);
-      expect(result?.accounts[0]?.accountId).toBe("workspace-b");
+      expect(result?.accounts).toHaveLength(2);
+      const accountIds = result?.accounts.map((account) => account.accountId);
+      expect(accountIds).toContain("workspace-a");
+      expect(accountIds).toContain("workspace-b");
     });
 
     it("preserves organization-scoped variants that share the same refresh token", () => {
@@ -1042,6 +1046,35 @@ describe("storage", () => {
         .filter((organizationId): organizationId is string => typeof organizationId === "string");
       expect(new Set(organizationIds)).toEqual(new Set(["org-1", "org-2"]));
       expect(result?.accounts.every((account) => account.accountId === "workspace-b")).toBe(true);
+    });
+
+    it("preserves workspace variants when organizationId differs despite same accountId and refreshToken", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            organizationId: "org-1",
+            accountId: "same-workspace",
+            refreshToken: "shared-refresh",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+          {
+            organizationId: "org-2",
+            accountId: "same-workspace",
+            refreshToken: "shared-refresh",
+            addedAt: 2,
+            lastUsed: 20,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts).toHaveLength(2);
+      expect(result?.accounts.every((account) => account.accountId === "same-workspace")).toBe(true);
+      expect(result?.accounts.every((account) => account.refreshToken === "shared-refresh")).toBe(true);
+      expect(result?.accounts.map((account) => account.organizationId).sort()).toEqual(["org-1", "org-2"]);
     });
 
     it("retains legacy no-organization dedupe semantics", () => {
@@ -1627,7 +1660,7 @@ describe("storage", () => {
       await fs.rm(testWorkDir, { recursive: true, force: true });
     });
 
-    it("normalizes duplicate org/token variants sharing a refresh token before writing", async () => {
+    it("preserves org/token workspace variants sharing a refresh token when accountId differs", async () => {
       const now = Date.now();
       const storage = {
         version: 3 as const,
@@ -1656,10 +1689,12 @@ describe("storage", () => {
       await saveAccounts(storage);
 
       const loaded = await loadAccounts();
-      expect(loaded?.accounts).toHaveLength(1);
-      expect(loaded?.accounts[0]?.refreshToken).toBe("shared-refresh-kira");
-      expect(loaded?.accounts[0]?.organizationId).toBe("org-i1iYFgVqyAkR8CLrUKvNczIa");
-      expect(loaded?.accounts[0]?.email).toBe("user@example.com");
+      expect(loaded?.accounts).toHaveLength(2);
+      expect(loaded?.accounts.every((account) => account.refreshToken === "shared-refresh-kira")).toBe(true);
+      expect(loaded?.accounts.map((account) => account.accountId).sort()).toEqual([
+        "7ff374aa-1b2e-4e69-89f3-0cec62582efb",
+        "org-i1iYFgVqyAkR8CLrUKvNczIa",
+      ]);
     });
 
     it("retries on EPERM and succeeds on second attempt", async () => {
