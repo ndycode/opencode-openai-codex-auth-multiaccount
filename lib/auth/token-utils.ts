@@ -226,13 +226,37 @@ function extractOrganizationIdsByIndex(value: unknown): Array<string | undefined
 	});
 }
 
+function extractPrimaryAuthClaimOrganizationId(
+	payload: JWTPayload | Record<string, unknown> | null,
+): string | undefined {
+	if (!payload || !isRecord(payload)) return undefined;
+	const auth = payload[JWT_CLAIM_PATH];
+	if (!isRecord(auth)) return undefined;
+	const organizations = normalizeCandidateArray(auth.organizations);
+	if (organizations.length === 0) return undefined;
+	const firstOrganization = organizations[0];
+	if (!isRecord(firstOrganization)) return undefined;
+	return toStringValue(firstOrganization.id);
+}
+
 function extractCanonicalOrganizationIds(
 	payload: JWTPayload | Record<string, unknown> | null,
 ): Array<string | undefined> {
 	if (!payload || !isRecord(payload)) return [];
 	const auth = payload[JWT_CLAIM_PATH];
 	if (!isRecord(auth)) return [];
-	return extractOrganizationIdsByIndex(auth.organizations);
+
+	const organizationIds = extractOrganizationIdsByIndex(auth.organizations);
+	if (organizationIds.length === 0) return organizationIds;
+
+	// Authoritative source: idToken['https://api.openai.com/auth'].organizations[0].id
+	// Only fall back to broader field extraction when this exact path is missing.
+	const primaryOrganizationId = extractPrimaryAuthClaimOrganizationId(payload);
+	if (primaryOrganizationId) {
+		organizationIds[0] = primaryOrganizationId;
+	}
+
+	return organizationIds;
 }
 
 function resolveOrganizationOverridesForKey(
@@ -443,12 +467,12 @@ export function getAccountIdCandidates(
 
 	if (idToken) {
 		const decoded = decodeJWT(idToken);
-		const canonicalOrganizationIds = extractCanonicalOrganizationIds(decoded);
+		const primaryOrganizationId = extractPrimaryAuthClaimOrganizationId(decoded);
 		const idAccountId = extractAccountIdFromPayload(decoded);
 		if (idAccountId && idAccountId !== accessId) {
 			candidates.push({
 				accountId: idAccountId,
-				organizationId: canonicalOrganizationIds[0],
+				organizationId: primaryOrganizationId,
 				label: formatTokenCandidateLabel("ID token account", idAccountId),
 				source: "id_token",
 			});
