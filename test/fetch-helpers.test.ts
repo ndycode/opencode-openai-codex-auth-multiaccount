@@ -664,13 +664,13 @@ describe('Fetch Helpers Module', () => {
 			expect(rateLimit?.retryAfterMs).toBeGreaterThan(0);
 		});
 
-	it('normalizes small retryAfterMs values as seconds', async () => {
+	it('keeps retry_after_ms values in milliseconds even when small', async () => {
 		const body = { error: { message: 'rate limited', retry_after_ms: 5 } };
 		const response = new Response(JSON.stringify(body), { status: 429 });
 		
 		const { rateLimit } = await handleErrorResponse(response);
 		
-		expect(rateLimit?.retryAfterMs).toBe(5000);
+		expect(rateLimit?.retryAfterMs).toBe(5);
 	});
 
 	it('caps retryAfterMs at 5 minutes', async () => {
@@ -689,6 +689,15 @@ describe('Fetch Helpers Module', () => {
 		const { rateLimit } = await handleErrorResponse(response);
 		
 		expect(rateLimit?.retryAfterMs).toBe(60000);
+	});
+
+	it('treats retry_after as seconds from body payload', async () => {
+		const body = { error: { message: 'rate limited', retry_after: 5 } };
+		const response = new Response(JSON.stringify(body), { status: 429 });
+
+		const { rateLimit } = await handleErrorResponse(response);
+
+		expect(rateLimit?.retryAfterMs).toBe(5000);
 	});
 
 		it('handles millisecond unix timestamp in reset header', async () => {
