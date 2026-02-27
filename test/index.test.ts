@@ -394,8 +394,8 @@ type PluginType = {
 		"codex-status": ToolExecute;
 		"codex-metrics": ToolExecute;
 		"codex-help": ToolExecute<{ topic?: string }>;
-		"codex-setup": OptionalToolExecute<{ wizard?: boolean }>;
-		"codex-doctor": OptionalToolExecute<{ deep?: boolean; fix?: boolean }>;
+		"codex-setup": OptionalToolExecute<{ mode?: string; wizard?: boolean }>;
+		"codex-doctor": OptionalToolExecute<{ mode?: string; deep?: boolean; fix?: boolean }>;
 		"codex-next": ToolExecute;
 		"codex-label": ToolExecute<{ index?: number; label: string }>;
 		"codex-tag": ToolExecute<{ index?: number; tags: string }>;
@@ -702,7 +702,7 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Codex Help");
 			expect(result).toContain("Quickstart");
 			expect(result).toContain("codex-doctor");
-			expect(result).toContain("codex-setup --wizard");
+			expect(result).toContain("codex-setup mode=\"wizard\"");
 		});
 
 		it("filters by topic", async () => {
@@ -724,7 +724,7 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-setup"].execute();
 			expect(result).toContain("Setup Checklist");
 			expect(result).toContain("opencode auth login");
-			expect(result).toContain("codex-setup --wizard");
+			expect(result).toContain("codex-setup mode=\"wizard\"");
 		});
 
 		it("shows healthy account progress when account exists", async () => {
@@ -741,6 +741,28 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Showing checklist view instead");
 			expect(result).toContain("Setup Checklist");
 		});
+
+		it("supports explicit setup mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-setup"].execute({ mode: "wizard" });
+			expect(result).toContain("Interactive wizard mode is unavailable");
+			expect(result).toContain("Setup Checklist");
+		});
+
+		it("rejects invalid setup mode values", async () => {
+			const result = await plugin.tool["codex-setup"].execute({ mode: "invalid-mode" });
+			expect(result).toContain("Invalid mode");
+			expect(result).toContain("checklist");
+			expect(result).toContain("wizard");
+		});
+
+		it("rejects conflicting setup options", async () => {
+			const result = await plugin.tool["codex-setup"].execute({
+				mode: "checklist",
+				wizard: true,
+			});
+			expect(result).toContain("Conflicting setup options");
+		});
 	});
 
 	describe("codex-doctor tool", () => {
@@ -756,6 +778,12 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-doctor"].execute({ deep: true });
 			expect(result).toContain("Technical snapshot");
 			expect(result).toContain("Storage:");
+		});
+
+		it("supports explicit doctor mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "deep" });
+			expect(result).toContain("Technical snapshot");
 		});
 
 		it("applies safe auto-fixes when fix mode is enabled", async () => {
@@ -786,6 +814,22 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-doctor"].execute({ fix: true });
 			expect(result).toContain("Auto-fix");
 			expect(result).toContain("No eligible account available for auto-switch");
+		});
+
+		it("rejects invalid doctor mode values", async () => {
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "all" });
+			expect(result).toContain("Invalid mode");
+			expect(result).toContain("standard");
+			expect(result).toContain("deep");
+			expect(result).toContain("fix");
+		});
+
+		it("rejects conflicting doctor mode and flags", async () => {
+			const result = await plugin.tool["codex-doctor"].execute({
+				mode: "standard",
+				fix: true,
+			});
+			expect(result).toContain("Conflicting doctor options");
 		});
 	});
 
