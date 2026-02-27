@@ -1965,7 +1965,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mockStorage.accounts.some((account) => account.accountId === "token-personal")).toBe(true);
 	});
 
-	it("preserves org/no-org shared-refresh entries with different accountId values in pre-populated storage", async () => {
+	it("preserves org/no-org shared-refresh entries with different accountId values from a single login", async () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const authModule = await import("../lib/auth/auth.js");
 

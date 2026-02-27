@@ -645,7 +645,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						let newestNoAccountId: number | undefined;
 						let newestExactAccountId: number | undefined;
 						let newestAnyNonEmptyAccountId: number | undefined;
-						let nonEmptyAccountIdCount = 0;
+						const distinctNonEmptyAccountIds = new Set<string>();
 
 						for (const index of matches) {
 							const existing = accounts[index];
@@ -658,7 +658,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										: index;
 								continue;
 							}
-							nonEmptyAccountIdCount += 1;
+							distinctNonEmptyAccountIds.add(existingAccountId);
 							newestAnyNonEmptyAccountId =
 								typeof newestAnyNonEmptyAccountId === "number"
 									? pickNewestAccountIndex(newestAnyNonEmptyAccountId, index)
@@ -677,7 +677,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						if (typeof newestNoAccountId === "number") {
 							return newestNoAccountId;
 						}
-						if (nonEmptyAccountIdCount === 1) {
+						if (distinctNonEmptyAccountIds.size === 1) {
 							return newestAnyNonEmptyAccountId;
 						}
 						return undefined;
