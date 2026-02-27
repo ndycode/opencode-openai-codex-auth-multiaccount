@@ -633,19 +633,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						byRefreshTokenGlobal: Map<string, number[]>;
 					};
 
-					const pickNewestFromIndices = (indices: number[]): number | undefined => {
-						if (indices.length === 0) return undefined;
-						const first = indices[0];
-						if (typeof first !== "number") return undefined;
-						let newestIndex = first;
-						for (let i = 1; i < indices.length; i += 1) {
-							const candidate = indices[i];
-							if (typeof candidate !== "number") continue;
-							newestIndex = pickNewestAccountIndex(newestIndex, candidate);
-						}
-						return newestIndex;
-					};
-
 					const resolveNoOrgRefreshMatch = (
 						indexes: IdentityIndexes,
 						refreshToken: string,
@@ -654,25 +641,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const candidateId = candidateAccountId?.trim() || undefined;
 						const matches = indexes.byRefreshTokenNoOrg.get(refreshToken);
 						if (!matches || matches.length === 0) return undefined;
+						let newestNoAccountId: number | undefined;
+						let newestExactAccountId: number | undefined;
 
-						const withNoAccountId = matches.filter((index) => {
+						for (const index of matches) {
 							const existing = accounts[index];
-							return !normalizeStoredAccountId(existing);
-						});
-
-						if (!candidateId) {
-							return pickNewestFromIndices(withNoAccountId);
+							const existingAccountId = normalizeStoredAccountId(existing);
+							if (!existingAccountId) {
+								newestNoAccountId =
+									typeof newestNoAccountId === "number"
+										? pickNewestAccountIndex(newestNoAccountId, index)
+										: index;
+								continue;
+							}
+							if (candidateId && existingAccountId === candidateId) {
+								newestExactAccountId =
+									typeof newestExactAccountId === "number"
+										? pickNewestAccountIndex(newestExactAccountId, index)
+										: index;
+							}
 						}
 
-						const exactMatches = matches.filter((index) => {
-							const existing = accounts[index];
-							return normalizeStoredAccountId(existing) === candidateId;
-						});
-						if (exactMatches.length > 0) {
-							return pickNewestFromIndices(exactMatches);
-						}
-
-						return pickNewestFromIndices(withNoAccountId);
+						return newestExactAccountId ?? newestNoAccountId;
 					};
 
 					const resolveUniqueOrgScopedMatch = (
@@ -900,6 +890,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						const target = accounts[preferredOrgIndex];
 						const source = accounts[fallbackIndex];
 						if (!target || !source) return true;
+						const targetAccountId = normalizeStoredAccountId(target);
+						const sourceAccountId = normalizeStoredAccountId(source);
+						if (!targetAccountId && sourceAccountId) {
+							return false;
+						}
 						if (hasDistinctNonEmptyAccountIds(target, source)) {
 							return false;
 						}

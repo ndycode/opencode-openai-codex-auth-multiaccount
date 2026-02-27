@@ -205,6 +205,12 @@ type AccountLike = {
   lastUsed?: number;
 };
 
+type RefreshDedupeEntry = {
+  byOrg: Map<string, number>;
+  preferredOrgIndex?: number;
+  fallbackIndices: number[];
+};
+
 async function ensureGitignore(storagePath: string): Promise<void> {
   if (!currentStoragePath) return;
 
@@ -426,11 +432,7 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
     return true;
   };
 
-  const refreshMap = new Map<string, {
-    byOrg: Map<string, number>;
-    preferredOrgIndex?: number;
-    fallbackIndices: number[];
-  }>();
+  const refreshMap = new Map<string, RefreshDedupeEntry>();
 
   const pickPreferredOrgIndex = (
     existingIndex: number | undefined,
@@ -441,37 +443,31 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
   };
 
   const collapseFallbackIntoPreferredOrg = (
-    entry: {
-      byOrg: Map<string, number>;
-      preferredOrgIndex?: number;
-      fallbackIndices: number[];
-    },
+    entry: RefreshDedupeEntry,
   ): void => {
     if (entry.preferredOrgIndex === undefined || entry.fallbackIndices.length === 0) {
       return;
     }
 
     const preferredOrgIndex = entry.preferredOrgIndex;
-    const target = working[preferredOrgIndex];
-    if (!target) return;
-
     const remainingFallbacks: number[] = [];
     for (const fallbackIndex of entry.fallbackIndices) {
       if (fallbackIndex === preferredOrgIndex) continue;
       const source = working[fallbackIndex];
       if (!source) continue;
 
-      if (!canMergeByRefreshToken(target, source)) {
+      const currentPreferred = working[preferredOrgIndex];
+      if (!currentPreferred) {
         remainingFallbacks.push(fallbackIndex);
         continue;
       }
 
-      const mergeTarget = working[preferredOrgIndex];
-      if (!mergeTarget) {
+      if (!canMergeByRefreshToken(currentPreferred, source)) {
         remainingFallbacks.push(fallbackIndex);
         continue;
       }
-      working[preferredOrgIndex] = mergeAccountRecords(mergeTarget, source);
+
+      working[preferredOrgIndex] = mergeAccountRecords(currentPreferred, source);
       indicesToRemove.add(fallbackIndex);
     }
     entry.fallbackIndices = remainingFallbacks;

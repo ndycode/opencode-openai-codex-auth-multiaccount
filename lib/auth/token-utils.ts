@@ -246,17 +246,19 @@ function extractCanonicalOrganizationIds(
 	const auth = payload[JWT_CLAIM_PATH];
 	if (!isRecord(auth)) return [];
 
-	const organizationIds = extractOrganizationIdsByIndex(auth.organizations);
-	if (organizationIds.length === 0) return organizationIds;
-
 	// Authoritative source: idToken['https://api.openai.com/auth'].organizations[0].id
 	// Only fall back to broader field extraction when this exact path is missing.
 	const primaryOrganizationId = extractPrimaryAuthClaimOrganizationId(payload);
+
 	if (primaryOrganizationId) {
+		const organizationIds = extractOrganizationIdsByIndex(auth.organizations);
+		if (organizationIds.length === 0) return [primaryOrganizationId];
 		organizationIds[0] = primaryOrganizationId;
+		return organizationIds;
 	}
 
-	return organizationIds;
+	// Fallback: broader field extraction
+	return extractOrganizationIdsByIndex(auth.organizations);
 }
 
 function resolveOrganizationOverridesForKey(
