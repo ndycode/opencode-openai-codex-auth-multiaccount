@@ -271,7 +271,7 @@ let include: Vec<String> = if reasoning.is_some() {
    - Filter unsupported AI SDK constructs (item_reference)
    - Strip IDs for stateless compatibility (store: false)
    - Apply bridge or tool-remap prompt logic (codexMode)
-   - Normalize orphaned tool outputs and inject missing outputs
+   - Normalize orphaned tool outputs, serialize non-JSON-safe outputs safely, and inject missing outputs
 
 4. Common post-processing
    - Resolve reasoning + verbosity settings
@@ -307,7 +307,7 @@ let include: Vec<String> = if reasoning.is_some() {
 |---------|-----------|-------------|------|
 | **Codex-OpenCode Bridge** | N/A (native) | ✅ Legacy-mode prompt injection | OpenCode -> Codex behavioral translation when legacy mode is enabled |
 | **OpenCode Prompt Filtering** | N/A | ✅ Legacy-mode prompt filtering | Removes OpenCode prompts and keeps env/AGENTS context in legacy mode |
-| **Orphan Tool Output Handling** | ✅ Drop orphans | ✅ Convert to messages | Preserve context + avoid 400s |
+| **Orphan Tool Output Handling** | ✅ Drop orphans | ✅ Convert to messages with safe output serialization | Preserve context + avoid 400s without serialization crashes |
 | **Usage-limit messaging** | CLI prints status | ✅ Friendly error summary | Surface 5h/weekly windows in OpenCode |
 | **Per-Model Options** | CLI flags | ✅ Config file | Better UX in OpenCode |
 | **Custom Model Names** | No | ✅ Display names | UI convenience |
