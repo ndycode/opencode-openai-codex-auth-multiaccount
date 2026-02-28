@@ -79,7 +79,7 @@ Sandbox policies, approvals, final formatting, git protocols, and file reference
 
 const MAX_MANIFEST_TOOLS = 32;
 
-const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
+function normalizeRuntimeToolNames(toolNames: readonly string[]): string[] {
 	const unique = new Set<string>();
 	for (const rawName of toolNames) {
 		const name = rawName.trim();
@@ -88,9 +88,9 @@ const normalizeRuntimeToolNames = (toolNames: readonly string[]): string[] => {
 		unique.add(name);
 	}
 	return Array.from(unique);
-};
+}
 
-export const renderCodexOpenCodeBridge = (toolNames: readonly string[]): string => {
+export function renderCodexOpenCodeBridge(toolNames: readonly string[]): string {
 	const runtimeToolNames = normalizeRuntimeToolNames(toolNames);
 	if (runtimeToolNames.length === 0) {
 		return CODEX_OPENCODE_BRIDGE;
@@ -105,7 +105,7 @@ export const renderCodexOpenCodeBridge = (toolNames: readonly string[]): string 
 	].join("\n");
 
 	return `${manifest}\n\n${CODEX_OPENCODE_BRIDGE}`;
-};
+}
 
 export interface CodexOpenCodeBridgeMeta {
 	estimatedTokens: number;

@@ -32,9 +32,17 @@ export interface UiTheme {
 	colors: UiThemeColors;
 }
 
-const ansi16 = (code: number): string => `\x1b[${code}m`;
-const ansi256 = (code: number): string => `\x1b[38;5;${code}m`;
-const truecolor = (r: number, g: number, b: number): string => `\x1b[38;2;${r};${g};${b}m`;
+function ansi16(code: number): string {
+	return `\x1b[${code}m`;
+}
+
+function ansi256(code: number): string {
+	return `\x1b[38;5;${code}m`;
+}
+
+function truecolor(r: number, g: number, b: number): string {
+	return `\x1b[38;2;${r};${g};${b}m`;
+}
 
 function resolveGlyphMode(mode: UiGlyphMode): Exclude<UiGlyphMode, "auto"> {
 	if (mode !== "auto") return mode;
