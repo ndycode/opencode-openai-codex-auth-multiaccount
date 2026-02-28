@@ -1,0 +1,18 @@
+=== fixed-7-npm-run-audit-ci ===
+COMMAND: npm run audit:ci
+
+> oc-chatgpt-multi-auth@5.4.0 audit:ci
+> npm run audit:prod && npm run audit:dev:allowlist
+
+
+> oc-chatgpt-multi-auth@5.4.0 audit:prod
+> npm audit --omit=dev --audit-level=high
+
+found 0 vulnerabilities
+
+> oc-chatgpt-multi-auth@5.4.0 audit:dev:allowlist
+> node scripts/audit-dev-allowlist.js
+
+Unexpected high/critical vulnerabilities detected in dev dependency audit:
+- rollup (high) via rollup:>=4.0.0 <4.59.0 fixAvailable=true
+EXIT_CODE: 1

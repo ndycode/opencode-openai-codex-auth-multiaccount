@@ -1,0 +1,7 @@
+=== final-3-npm-run-typecheck ===
+COMMAND: npm run typecheck
+
+> oc-chatgpt-multi-auth@5.4.0 typecheck
+> tsc --noEmit
+
+EXIT_CODE: 0
