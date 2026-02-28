@@ -15,6 +15,7 @@ import type {
   MessagePart,
   RecoveryErrorType,
   ResumeConfig,
+  StoredPart,
   ToolResultPart,
 } from "./recovery/types.js";
 
@@ -88,17 +89,53 @@ export function isRecoverableError(error: unknown): boolean {
   return detectErrorType(error) !== null;
 }
 
-interface ToolUsePart {
-  type: "tool_use";
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
+function normalizeToolUseId(rawId: unknown): string | null {
+  if (typeof rawId !== "string") return null;
+  const trimmed = rawId.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function getStoredPartCallId(part: StoredPart): string | undefined {
+  if ("callID" in part) {
+    return normalizeToolUseId(part.callID) ?? undefined;
+  }
+
+  return normalizeToolUseId(part.id) ?? undefined;
+}
+
+function getStoredPartInput(part: StoredPart): Record<string, unknown> | undefined {
+  if (!("state" in part)) {
+    return undefined;
+  }
+
+  const state = (part as { state?: { input?: Record<string, unknown> } }).state;
+  return state?.input;
+}
+
+function toRecoveryMessagePart(part: StoredPart): MessagePart {
+  const type = part.type === "tool" ? "tool_use" : part.type;
+  const name = "tool" in part && typeof part.tool === "string" ? part.tool : undefined;
+
+  return {
+    type,
+    id: getStoredPartCallId(part),
+    name,
+    input: getStoredPartInput(part),
+  };
 }
 
 function extractToolUseIds(parts: MessagePart[]): string[] {
-  return parts
-    .filter((p): p is ToolUsePart & MessagePart => p.type === "tool_use" && !!p.id)
-    .map((p) => p.id as string);
+  const ids = new Set<string>();
+
+  for (const part of parts) {
+    if (part.type !== "tool_use") continue;
+
+    const id = normalizeToolUseId(part.id);
+    if (!id) continue;
+    ids.add(id);
+  }
+
+  return Array.from(ids);
 }
 
 async function sendToolResultsForRecovery(
@@ -124,12 +161,7 @@ async function recoverToolResultMissing(
   let parts = failedMsg.parts || [];
   if (parts.length === 0 && failedMsg.info?.id) {
     const storedParts = readParts(failedMsg.info.id);
-    parts = storedParts.map((p) => ({
-      type: p.type === "tool" ? "tool_use" : p.type,
-      id: "callID" in p ? (p as { callID?: string }).callID : p.id,
-      name: "tool" in p ? (p as { tool?: string }).tool : undefined,
-      input: "state" in p ? (p as { state?: { input?: Record<string, unknown> } }).state?.input : undefined,
-    }));
+    parts = storedParts.map(toRecoveryMessagePart);
   }
 
   const toolUseIds = extractToolUseIds(parts);
