@@ -1,0 +1,184 @@
+=== baseline-6-npm-run-coverage ===
+COMMAND: npm run coverage
+
+> oc-chatgpt-multi-auth@5.4.0 coverage
+> vitest run --coverage
+
+
+ RUN  v4.0.18 C:/Users/neil/DevTools/oc-chatgpt-multi-auth-audit-main-20260301
+      Coverage enabled with v8
+
+ ✓ test/shutdown.test.ts (11 tests) 65ms
+ ✓ test/response-handler.test.ts (30 tests) 85ms
+ ✓ test/auto-update-checker.test.ts (18 tests) 139ms
+ ✓ test/context-overflow.test.ts (21 tests) 28ms
+ ✓ test/audit.test.ts (17 tests) 107ms
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > omits raw request and response payloads by default
+[openai-codex-plugin] Request logging ENABLED (metadata only; set CODEX_PLUGIN_LOG_BODIES=1 for raw payloads) - logs will be saved to: C:\Users\neil\.opencode\logs\codex-plugin
+
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > omits raw request and response payloads by default
+[openai-codex-plugin] Logged payload-stage to C:\Users\neil\.opencode\logs\codex-plugin\request-1-payload-stage.json
+
+ ✓ test/opencode-codex.test.ts (13 tests) 140ms
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > captures raw payloads only when CODEX_PLUGIN_LOG_BODIES=1
+[openai-codex-plugin] Request logging ENABLED (raw payload capture ON) - logs will be saved to: C:\Users\neil\.opencode\logs\codex-plugin
+
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > captures raw payloads only when CODEX_PLUGIN_LOG_BODIES=1
+[openai-codex-plugin] Logged payload-stage to C:\Users\neil\.opencode\logs\codex-plugin\request-1-payload-stage.json
+
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > handles write failures gracefully
+[openai-codex-plugin] Request logging ENABLED (metadata only; set CODEX_PLUGIN_LOG_BODIES=1 for raw payloads) - logs will be saved to: C:\Users\neil\.opencode\logs\codex-plugin
+
+ ✓ test/recovery-storage.test.ts (45 tests) 187ms
+ ✓ test/recovery.test.ts (73 tests) 49ms
+ ✓ test/server.unit.test.ts (13 tests) 81ms
+ ✓ test/oauth-server.integration.test.ts (5 tests) 79ms
+ ✓ test/audit.race.test.ts (1 test) 169ms
+ ✓ test/logger.test.ts (85 tests) 87ms
+ ✓ test/property/rotation.property.test.ts (16 tests) 142ms
+ ✓ test/storage-async.test.ts (23 tests) 64ms
+ ✓ test/cli.test.ts (38 tests) 492ms
+       ✓ returns true for 'y' input  430ms
+ ✓ test/codex-prompts.test.ts (28 tests) 24ms
+ ✓ test/copy-oauth-success.test.ts (2 tests) 68ms
+ ✓ test/property/transformer.property.test.ts (17 tests) 93ms
+ ✓ test/parallel-probe.test.ts (15 tests) 238ms
+ ✓ test/rotation.test.ts (43 tests) 25ms
+ ✓ test/chaos/fault-injection.test.ts (43 tests) 66ms
+ ✓ test/utils.test.ts (24 tests) 21ms
+ ✓ test/input-utils.test.ts (32 tests) 23ms
+ ✓ test/fetch-helpers.test.ts (73 tests) 243ms
+ ✓ test/circuit-breaker.test.ts (23 tests) 13ms
+ ✓ test/token-utils.test.ts (90 tests) 18ms
+ ✓ test/proactive-refresh.test.ts (27 tests) 16ms
+ ✓ test/index-retry.test.ts (1 test) 771ms
+     ✓ waits and retries when all accounts are rate-limited  770ms
+ ✓ test/plugin-config.test.ts (61 tests) 29ms
+ ✓ test/schemas.test.ts (60 tests) 23ms
+ ✓ test/auth-rate-limit.test.ts (22 tests) 16ms
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+
+Verifying flagged accounts...
+
+
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+[1/2] cache@example.com: RESTORED (Codex CLI cache)
+
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+[2/2] refresh@example.com: RESTORED
+
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+
+Results: 2 restored, 0 still flagged
+
+
+ ✓ test/rate-limit-backoff.test.ts (21 tests) 11ms
+ ✓ test/index.test.ts (106 tests) 857ms
+       ✓ exports event handler  748ms
+ ✓ test/browser.test.ts (21 tests) 12ms
+ ✓ test/accounts.test.ts (99 tests) 32ms
+ ✓ test/errors.test.ts (33 tests) 11ms
+ ✓ test/auth.test.ts (41 tests) 49ms
+ ✓ test/refresh-queue.test.ts (24 tests) 15ms
+ ✓ test/paths.test.ts (28 tests) 11ms
+ ✓ test/health.test.ts (13 tests) 10ms
+ ✓ test/rotation-integration.test.ts (21 tests) 47ms
+ ✓ test/recovery-constants.test.ts (7 tests) 11ms
+ ✓ test/model-map.test.ts (22 tests) 9ms
+ ✓ test/config.test.ts (20 tests) 7ms
+ ✓ test/beginner-ui.test.ts (12 tests) 6ms
+ ✓ test/codex.test.ts (32 tests) 4ms
+ ✓ test/tool-utils.test.ts (30 tests) 7ms
+ ✓ test/table-formatter.test.ts (8 tests) 5ms
+ ✓ test/retry-budget.test.ts (4 tests) 3ms
+ ✓ test/ui-runtime.test.ts (3 tests) 3ms
+ ✓ test/auth-menu.test.ts (2 tests) 5ms
+ ✓ test/ui-format.test.ts (4 tests) 3ms
+ ✓ test/ui-theme.test.ts (5 tests) 4ms
+ ✓ test/property/setup.test.ts (3 tests) 10ms
+ ✓ test/storage.test.ts (94 tests) 1343ms
+       ✓ returns migrated data even when save fails (line 422-423 coverage)  375ms
+       ✓ throws after 5 failed EPERM retries  496ms
+ ✓ test/request-transformer.test.ts (153 tests) 8377ms
+       ✓ should treat local_shell_call as a match for function_call_output  328ms
+       ✓ should keep matching custom_tool_call_output items  334ms
+         ✓ should preserve patch-style tool names exactly as provided by runtime manifest  1841ms
+
+ Test Files  56 passed (56)
+      Tests  1776 passed (1776)
+   Start at  01:49:41
+   Duration  9.84s (transform 7.18s, setup 0ms, import 11.03s, tests 14.45s, environment 7ms)
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   77.05 |    68.25 |    88.9 |    78.4 |                   
+ ...-main-20260301 |   58.84 |     47.1 |   69.73 |   59.88 |                   
+  index.ts         |   58.84 |     47.1 |   69.73 |   59.88 | ...5589-5605,5611 
+ ...n-20260301/lib |   88.44 |    79.28 |   94.96 |   90.12 |                   
+  accounts.ts      |    68.8 |    60.54 |    87.3 |   72.53 | ...38-851,901,922 
+  audit.ts         |   96.62 |    97.67 |     100 |   97.53 | 19-20             
+  ...rate-limit.ts |     100 |      100 |     100 |     100 |                   
+  ...te-checker.ts |   92.75 |       90 |    90.9 |   93.54 | 31,41,52,152      
+  ...it-breaker.ts |     100 |    96.42 |     100 |     100 | 137               
+  cli.ts           |   69.16 |    66.66 |    87.5 |   72.11 | 95-100,143-183    
+  config.ts        |   94.52 |    89.71 |   95.34 |   96.89 | 85,165,445-453    
+  constants.ts     |     100 |      100 |     100 |     100 |                   
+  ...t-overflow.ts |     100 |      100 |     100 |     100 |                   
+  errors.ts        |     100 |    94.44 |     100 |     100 | 44                
+  health.ts        |     100 |      100 |     100 |     100 |                   
+  logger.ts        |    99.5 |    97.32 |     100 |     100 | 70,241,368        
+  ...llel-probe.ts |   98.27 |       92 |     100 |     100 | 43,64             
+  ...ve-refresh.ts |     100 |       96 |     100 |     100 | 158               
+  recovery.ts      |     100 |    89.43 |   96.15 |     100 | ...67,399-403,406 
+  refresh-queue.ts |     100 |    96.77 |     100 |     100 | 270               
+  rotation.ts      |     100 |    95.65 |     100 |     100 | 245,326,357       
+  schemas.ts       |     100 |      100 |     100 |     100 |                   
+  shutdown.ts      |     100 |      100 |     100 |     100 |                   
+  storage.ts       |   84.21 |    73.14 |   89.47 |      86 | ...1199-1201,1288 
+  ...-formatter.ts |     100 |      100 |     100 |     100 |                   
+  utils.ts         |     100 |      100 |     100 |     100 |                   
+ ...1/lib/accounts |   97.29 |    94.28 |     100 |   96.87 |                   
+  rate-limits.ts   |   97.29 |    94.28 |     100 |   96.87 | 51                
+ ...60301/lib/auth |   97.65 |    95.63 |   98.07 |     100 |                   
+  auth.ts          |   98.82 |    94.82 |    87.5 |     100 | 38,58,118         
+  browser.ts       |   96.66 |    93.75 |     100 |     100 | 23                
+  server.ts        |   98.27 |       75 |     100 |     100 | 21,46-70,92       
+  token-utils.ts   |   97.15 |     97.4 |     100 |     100 | ...47,255,374,385 
+ ...01/lib/prompts |   90.69 |    82.14 |   87.09 |    92.8 |                   
+  ...ode-bridge.ts |      90 |    66.66 |     100 |     100 | 86-87             
+  codex.ts         |   91.17 |    82.14 |   84.61 |   92.53 | ...54-262,399-402 
+  ...code-codex.ts |   90.19 |       84 |   86.66 |   91.83 | ...96,235,261-262 
+ ...1/lib/recovery |   96.88 |    91.81 |     100 |     100 |                   
+  constants.ts     |     100 |      100 |     100 |     100 |                   
+  storage.ts       |   96.74 |    91.34 |     100 |     100 | ...23-230,322,345 
+ ...01/lib/request |   90.38 |    84.59 |   95.91 |    94.3 |                   
+  fetch-helpers.ts |   91.95 |    81.84 |   93.54 |   94.91 | ...76,789,800,810 
+  ...it-backoff.ts |     100 |      100 |     100 |     100 |                   
+  ...ransformer.ts |   86.96 |    85.18 |   97.36 |   92.95 | ...90,723,943,946 
+  ...se-handler.ts |    95.2 |    86.88 |   92.85 |   95.61 | 61,78,128-132,180 
+  retry-budget.ts  |   91.17 |    83.33 |     100 |    93.1 | 99-100            
+ ...equest/helpers |   99.01 |    96.34 |     100 |   98.93 |                   
+  input-utils.ts   |   99.24 |    94.89 |     100 |   99.19 | 42                
+  model-map.ts     |      90 |      100 |     100 |      90 | 137               
+  tool-utils.ts    |     100 |    98.38 |     100 |     100 | 137               
+ ...01/lib/storage |     100 |     87.5 |     100 |     100 |                   
+  migrations.ts    |     100 |      100 |     100 |     100 |                   
+  paths.ts         |     100 |    84.61 |     100 |     100 | 26-34,75-80       
+ ...0260301/lib/ui |   35.21 |    35.17 |   58.49 |   34.89 |                   
+  ansi.ts          |    12.5 |     5.26 |      25 |   18.18 | 9-35              
+  auth-menu.ts     |   56.32 |    35.86 |     100 |   61.64 | ...82-183,227-228 
+  beginner.ts      |   87.65 |     84.7 |     100 |   87.67 | ...53,293,299,302 
+  confirm.ts       |       0 |        0 |       0 |       0 | 5-21              
+  format.ts        |      80 |    81.25 |     100 |   84.21 | 60-62             
+  runtime.ts       |     100 |    83.33 |     100 |     100 | 30                
+  select.ts        |    1.18 |        0 |       0 |    1.25 | 28-412            
+  theme.ts         |   95.23 |     62.5 |     100 |   94.11 | 42                
+ ...260301/scripts |   89.47 |    54.54 |     100 |   94.44 |                   
+  ...th-success.js |   89.47 |    54.54 |     100 |   94.44 | 36                
+-------------------|---------|----------|---------|---------|-------------------
+ERROR: Coverage for lines (78.4%) does not meet global threshold (80%)
+ERROR: Coverage for statements (77.05%) does not meet global threshold (80%)
+ERROR: Coverage for branches (68.25%) does not meet global threshold (80%)
+EXIT_CODE: 1

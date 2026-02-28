@@ -1,0 +1,19 @@
+=== final-7-npm-run-audit-ci ===
+COMMAND: npm run audit:ci
+
+> oc-chatgpt-multi-auth@5.4.0 audit:ci
+> npm run audit:prod && npm run audit:dev:allowlist
+
+
+> oc-chatgpt-multi-auth@5.4.0 audit:prod
+> npm audit --omit=dev --audit-level=high
+
+found 0 vulnerabilities
+
+> oc-chatgpt-multi-auth@5.4.0 audit:dev:allowlist
+> node scripts/audit-dev-allowlist.js
+
+Allowlisted high/critical dev vulnerabilities detected:
+- minimatch (high) via minimatch:>=9.0.0 <9.0.6, minimatch:>=9.0.0 <9.0.7, minimatch:>=10.0.0 <10.2.3, minimatch:>=9.0.0 <9.0.7, minimatch:>=10.0.0 <10.2.3 fixAvailable=true
+No unexpected high/critical vulnerabilities found.
+EXIT_CODE: 0

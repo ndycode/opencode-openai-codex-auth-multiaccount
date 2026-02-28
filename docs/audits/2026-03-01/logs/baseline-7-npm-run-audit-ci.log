@@ -1,0 +1,23 @@
+=== baseline-7-npm-run-audit-ci ===
+COMMAND: npm run audit:ci
+
+> oc-chatgpt-multi-auth@5.4.0 audit:ci
+> npm run audit:prod && npm run audit:dev:allowlist
+
+
+> oc-chatgpt-multi-auth@5.4.0 audit:prod
+> npm audit --omit=dev --audit-level=high
+
+# npm audit report
+
+hono  4.12.0 - 4.12.1
+Severity: high
+Hono is Vulnerable to Authentication Bypass by IP Spoofing in AWS Lambda ALB conninfo - https://github.com/advisories/GHSA-xh87-mx6m-69f3
+fix available via `npm audit fix`
+node_modules/hono
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+EXIT_CODE: 1

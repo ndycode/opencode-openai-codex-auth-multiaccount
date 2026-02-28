@@ -1,0 +1,7 @@
+=== baseline-4-npm-run-build ===
+COMMAND: npm run build
+
+> oc-chatgpt-multi-auth@5.4.0 build
+> tsc && node scripts/copy-oauth-success.js
+
+EXIT_CODE: 0
