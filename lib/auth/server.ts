@@ -88,7 +88,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 						pollAborted = true;
 						server.close();
 					},
-				waitForCode: async (_expectedState: string) => {
+				waitForCode: async (expectedState: string) => {
 					const POLL_INTERVAL_MS = 100;
 					const TIMEOUT_MS = 5 * 60 * 1000;
 					const maxIterations = Math.floor(TIMEOUT_MS / POLL_INTERVAL_MS);
@@ -98,7 +98,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 						const codeStore = server as http.Server & { _lastCode?: string; _lastState?: string };
 						const lastCode = codeStore._lastCode;
 						const lastState = codeStore._lastState;
-						if (lastCode && lastState === _expectedState) return { code: lastCode };
+						if (lastCode && lastState === expectedState) return { code: lastCode };
 						await poll();
 					}
 					logWarn("OAuth poll timeout after 5 minutes");
