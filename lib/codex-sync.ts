@@ -720,6 +720,12 @@ export async function writeCodexMultiAuthPool(
 		merged[existingIndex] = {
 			...existingAccount,
 			...candidate,
+			accountId: candidate.accountId ?? existingAccount?.accountId,
+			organizationId: candidate.organizationId ?? existingAccount?.organizationId,
+			accountIdSource: candidate.accountIdSource ?? existingAccount?.accountIdSource,
+			accountLabel: candidate.accountLabel ?? existingAccount?.accountLabel,
+			email: candidate.email ?? existingAccount?.email,
+			enabled: candidate.enabled ?? existingAccount?.enabled,
 			addedAt: existingAccount?.addedAt ?? candidate.addedAt,
 		};
 	} else {

@@ -605,6 +605,72 @@ describe("codex-sync", () => {
 		expect(saved.activeIndex).toBe(0);
 	});
 
+	it("preserves existing optional metadata when update payload omits those fields", async () => {
+		const codexDir = await createCodexDir("codex-sync-pool-preserve-metadata");
+		const poolDir = join(codexDir, "multi-auth");
+		await mkdir(poolDir, { recursive: true });
+		const poolPath = join(poolDir, "openai-codex-accounts.json");
+
+		await writeFile(
+			poolPath,
+			JSON.stringify(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: { codex: 0, "gpt-5-codex": 0, "codex-max": 0 },
+					accounts: [
+						{
+							accountId: "pool-acc-meta",
+							organizationId: "org-meta",
+							accountIdSource: "token",
+							accountLabel: "Primary Account",
+							email: "pool-meta@example.com",
+							refreshToken: "pool-refresh-meta",
+							accessToken: "old-access-meta",
+							enabled: false,
+							addedAt: Date.now() - 1000,
+							lastUsed: Date.now() - 1000,
+						},
+					],
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const newAccess = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 7200,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "pool-acc-meta",
+			},
+		});
+		await writeCodexMultiAuthPool(
+			{
+				accessToken: newAccess,
+				refreshToken: "pool-refresh-meta",
+				accountId: "pool-acc-meta",
+			},
+			{ codexDir },
+		);
+
+		const saved = JSON.parse(await readFile(poolPath, "utf-8")) as {
+			accounts: Array<{
+				organizationId?: string;
+				accountLabel?: string;
+				email?: string;
+				enabled?: boolean;
+				accessToken?: string;
+			}>;
+		};
+		const account = saved.accounts[0];
+		expect(account?.organizationId).toBe("org-meta");
+		expect(account?.accountLabel).toBe("Primary Account");
+		expect(account?.email).toBe("pool-meta@example.com");
+		expect(account?.enabled).toBe(false);
+		expect(account?.accessToken).toBe(newAccess);
+	});
+
 	it("creates a new pool account when only organization matches but account identities differ", async () => {
 		const codexDir = await createCodexDir("codex-sync-pool-org-collision");
 		const poolDir = join(codexDir, "multi-auth");

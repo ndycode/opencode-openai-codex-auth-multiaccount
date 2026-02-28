@@ -28,6 +28,7 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { homedir } from "node:os";
 import {
         createAuthorizationFlow,
         exchangeAuthorizationCode,
@@ -1449,6 +1450,24 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			hashedAccountId: hashSyncAuditValue(accountId, "account"),
 		});
 
+		const homePathPrefix = homedir().replace(/\\/g, "/").toLowerCase();
+		const sanitizeAuditPath = (rawPath: string | undefined): string | undefined => {
+			const normalized = rawPath?.trim().replace(/\\/g, "/");
+			if (!normalized) return undefined;
+
+			const normalizedLower = normalized.toLowerCase();
+			if (homePathPrefix && normalizedLower.startsWith(homePathPrefix)) {
+				const suffix = normalized.slice(homePathPrefix.length);
+				return `~${suffix || "/"}`;
+			}
+
+			const basename = normalized.split("/").filter(Boolean).pop();
+			return basename ?? normalized;
+		};
+
+		const sanitizeAuditPaths = (paths: string[]): string[] =>
+			paths.map((value) => sanitizeAuditPath(value) ?? "<unknown>");
+
 		const syncFromCodexToPlugin = async (): Promise<SyncSummary> => {
 			try {
 				const codexAccount = await readCodexCurrentAccount();
@@ -1554,6 +1573,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					notes: [],
 				};
 				const syncIdentity = buildSyncAuditIdentity(inferredEmail, inferredAccountId);
+				const sanitizedSourcePath = sanitizeAuditPath(summary.sourcePath);
+				const sanitizedTargetPath = sanitizeAuditPath(summary.targetPaths[0]);
 				auditLog(
 					AuditAction.ACCOUNT_SYNC_PULL,
 					"sync",
@@ -1561,8 +1582,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					AuditOutcome.SUCCESS,
 					{
 						direction: summary.direction,
-						sourcePath: summary.sourcePath,
-						targetPath: summary.targetPaths[0],
+						sourcePath: sanitizedSourcePath,
+						targetPath: sanitizedTargetPath,
 						created: summary.created,
 						updated: summary.updated,
 						totalAccounts: summary.totalAccounts,
@@ -1711,6 +1732,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					notes,
 				};
 				const syncIdentity = buildSyncAuditIdentity(payload.email, payload.accountId);
+				const sanitizedSourcePath = sanitizeAuditPath(summary.sourcePath);
+				const sanitizedTargetPaths = sanitizeAuditPaths(summary.targetPaths);
 				auditLog(
 					AuditAction.ACCOUNT_SYNC_PUSH,
 					"sync",
@@ -1718,8 +1741,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					AuditOutcome.SUCCESS,
 					{
 						direction: summary.direction,
-						sourcePath: summary.sourcePath,
-						targetPaths: summary.targetPaths,
+						sourcePath: sanitizedSourcePath,
+						targetPaths: sanitizedTargetPaths,
 						created: summary.created,
 						updated: summary.updated,
 						totalAccounts: summary.totalAccounts,
