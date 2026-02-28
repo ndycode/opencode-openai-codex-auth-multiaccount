@@ -37,6 +37,7 @@ vi.mock("../lib/auth/auth.js", () => ({
 			state: stateMatch?.[1],
 		};
 	}),
+	AUTHORIZE_URL: "https://auth.openai.com/oauth/authorize",
 	REDIRECT_URI: "http://127.0.0.1:1455/auth/callback",
 }));
 
@@ -394,8 +395,8 @@ type PluginType = {
 		"codex-status": ToolExecute;
 		"codex-metrics": ToolExecute;
 		"codex-help": ToolExecute<{ topic?: string }>;
-		"codex-setup": OptionalToolExecute<{ wizard?: boolean }>;
-		"codex-doctor": OptionalToolExecute<{ deep?: boolean; fix?: boolean }>;
+		"codex-setup": OptionalToolExecute<{ mode?: string; wizard?: boolean }>;
+		"codex-doctor": OptionalToolExecute<{ mode?: string; deep?: boolean; fix?: boolean }>;
 		"codex-next": ToolExecute;
 		"codex-label": ToolExecute<{ index?: number; label: string }>;
 		"codex-tag": ToolExecute<{ index?: number; tags: string }>;
@@ -489,6 +490,46 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await flow.callback(invalidInput);
 			expect(result.type).toBe("failed");
 			expect(result.reason).toBe("invalid_response");
+			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
+		});
+
+		it("rejects manual OAuth callback URLs with non-localhost host", async () => {
+			const authModule = await import("../lib/auth/auth.js");
+			const manualMethod = plugin.auth.methods[1] as unknown as {
+				authorize: () => Promise<{
+					validate: (input: string) => string | undefined;
+					callback: (input: string) => Promise<{ type: string; reason?: string; message?: string }>;
+				}>;
+			};
+
+			const flow = await manualMethod.authorize();
+			const invalidInput = "http://evil.example/auth/callback?code=abc123&state=test-state";
+			expect(flow.validate(invalidInput)).toContain("Invalid callback URL host");
+
+			const result = await flow.callback(invalidInput);
+			expect(result.type).toBe("failed");
+			expect(result.reason).toBe("invalid_response");
+			expect(result.message).toContain("Invalid callback URL host");
+			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
+		});
+
+		it("rejects manual OAuth callback URLs with unexpected protocol", async () => {
+			const authModule = await import("../lib/auth/auth.js");
+			const manualMethod = plugin.auth.methods[1] as unknown as {
+				authorize: () => Promise<{
+					validate: (input: string) => string | undefined;
+					callback: (input: string) => Promise<{ type: string; reason?: string; message?: string }>;
+				}>;
+			};
+
+			const flow = await manualMethod.authorize();
+			const invalidInput = "https://localhost:1455/auth/callback?code=abc123&state=test-state";
+			expect(flow.validate(invalidInput)).toContain("Invalid callback URL protocol");
+
+			const result = await flow.callback(invalidInput);
+			expect(result.type).toBe("failed");
+			expect(result.reason).toBe("invalid_response");
+			expect(result.message).toContain("Invalid callback URL protocol");
 			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
 		});
 	});
@@ -702,7 +743,7 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Codex Help");
 			expect(result).toContain("Quickstart");
 			expect(result).toContain("codex-doctor");
-			expect(result).toContain("codex-setup --wizard");
+			expect(result).toContain("codex-setup mode=\"wizard\"");
 		});
 
 		it("filters by topic", async () => {
@@ -724,7 +765,7 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-setup"].execute();
 			expect(result).toContain("Setup Checklist");
 			expect(result).toContain("opencode auth login");
-			expect(result).toContain("codex-setup --wizard");
+			expect(result).toContain("codex-setup mode=\"wizard\"");
 		});
 
 		it("shows healthy account progress when account exists", async () => {
@@ -740,6 +781,42 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Interactive wizard mode is unavailable");
 			expect(result).toContain("Showing checklist view instead");
 			expect(result).toContain("Setup Checklist");
+		});
+
+		it("supports explicit setup mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-setup"].execute({ mode: "wizard" });
+			expect(result).toContain("Interactive wizard mode is unavailable");
+			expect(result).toContain("Setup Checklist");
+		});
+
+		it("supports explicit checklist mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-setup"].execute({ mode: "checklist" });
+			expect(result).toContain("Setup Checklist");
+			expect(result).toContain("Recommended next step");
+		});
+
+		it("rejects invalid setup mode values", async () => {
+			const result = await plugin.tool["codex-setup"].execute({ mode: "invalid-mode" });
+			expect(result).toContain("Invalid mode");
+			expect(result).toContain("checklist");
+			expect(result).toContain("wizard");
+		});
+
+		it("rejects empty or whitespace setup mode values", async () => {
+			const emptyResult = await plugin.tool["codex-setup"].execute({ mode: "" });
+			expect(emptyResult).toContain("Invalid mode");
+			const whitespaceResult = await plugin.tool["codex-setup"].execute({ mode: "   " });
+			expect(whitespaceResult).toContain("Invalid mode");
+		});
+
+		it("rejects conflicting setup options", async () => {
+			const result = await plugin.tool["codex-setup"].execute({
+				mode: "checklist",
+				wizard: true,
+			});
+			expect(result).toContain("Conflicting setup options");
 		});
 	});
 
@@ -758,9 +835,29 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Storage:");
 		});
 
+		it("supports explicit doctor mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "deep" });
+			expect(result).toContain("Technical snapshot");
+		});
+
+		it("supports standard doctor mode without deep snapshot", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "standard" });
+			expect(result).toContain("Codex Doctor");
+			expect(result).not.toContain("Technical snapshot");
+		});
+
 		it("applies safe auto-fixes when fix mode is enabled", async () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-doctor"].execute({ fix: true });
+			expect(result).toContain("Auto-fix");
+			expect(result).toContain("Refreshed");
+		});
+
+		it("applies safe auto-fixes with explicit fix mode", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "fix" });
 			expect(result).toContain("Auto-fix");
 			expect(result).toContain("Refreshed");
 		});
@@ -786,6 +883,29 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-doctor"].execute({ fix: true });
 			expect(result).toContain("Auto-fix");
 			expect(result).toContain("No eligible account available for auto-switch");
+		});
+
+		it("rejects invalid doctor mode values", async () => {
+			const result = await plugin.tool["codex-doctor"].execute({ mode: "all" });
+			expect(result).toContain("Invalid mode");
+			expect(result).toContain("standard");
+			expect(result).toContain("deep");
+			expect(result).toContain("fix");
+		});
+
+		it("rejects empty or whitespace doctor mode values", async () => {
+			const emptyResult = await plugin.tool["codex-doctor"].execute({ mode: "" });
+			expect(emptyResult).toContain("Invalid mode");
+			const whitespaceResult = await plugin.tool["codex-doctor"].execute({ mode: "   " });
+			expect(whitespaceResult).toContain("Invalid mode");
+		});
+
+		it("rejects conflicting doctor mode and flags", async () => {
+			const result = await plugin.tool["codex-doctor"].execute({
+				mode: "standard",
+				fix: true,
+			});
+			expect(result).toContain("Conflicting doctor options");
 		});
 	});
 

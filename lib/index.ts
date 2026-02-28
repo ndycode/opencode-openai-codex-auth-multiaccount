@@ -15,3 +15,4 @@ export * from "./circuit-breaker.js";
 export * from "./health.js";
 export * from "./table-formatter.js";
 export * from "./parallel-probe.js";
+export * from "./codex-sync.js";

@@ -15,7 +15,7 @@ const OPENCODE_CONTEXT_MARKERS = [
 	"<instructions>",
 ].map((marker) => marker.toLowerCase());
 
-export const getContentText = (item: InputItem): string => {
+export function getContentText(item: InputItem): string {
 	if (typeof item.content === "string") {
 		return item.content;
 	}
@@ -26,9 +26,9 @@ export const getContentText = (item: InputItem): string => {
 			.join("\n");
 	}
 	return "";
-};
+}
 
-const replaceContentText = (item: InputItem, contentText: string): InputItem => {
+function replaceContentText(item: InputItem, contentText: string): InputItem {
 	if (typeof item.content === "string") {
 		return { ...item, content: contentText };
 	}
@@ -40,9 +40,9 @@ const replaceContentText = (item: InputItem, contentText: string): InputItem => 
 	}
 	// istanbul ignore next -- only called after getContentText returns non-empty (string/array content)
 	return { ...item, content: contentText };
-};
+}
 
-const extractOpenCodeContext = (contentText: string): string | null => {
+function extractOpenCodeContext(contentText: string): string | null {
 	const lower = contentText.toLowerCase();
 	let earliestIndex = -1;
 
@@ -55,7 +55,7 @@ const extractOpenCodeContext = (contentText: string): string | null => {
 
 	if (earliestIndex === -1) return null;
 	return contentText.slice(earliestIndex).trimStart();
-};
+}
 
 export function isOpenCodeSystemPrompt(
 	item: InputItem,
@@ -114,29 +114,45 @@ export function filterOpenCodeSystemPromptsWithCachedPrompt(
 	});
 }
 
-const getCallId = (item: InputItem): string | null => {
+function getCallId(item: InputItem): string | null {
 	const rawCallId = (item as { call_id?: unknown }).call_id;
 	if (typeof rawCallId !== "string") return null;
 	const trimmed = rawCallId.trim();
 	return trimmed.length > 0 ? trimmed : null;
-};
+}
 
-const convertOrphanedOutputToMessage = (
+function getToolName(item: InputItem): string {
+	const rawName = (item as { name?: unknown }).name;
+	if (typeof rawName !== "string") return "tool";
+	const trimmed = rawName.trim();
+	return trimmed.length > 0 ? trimmed : "tool";
+}
+
+function stringifyToolOutput(output: unknown): string {
+	if (typeof output === "string") {
+		return output;
+	}
+
+	try {
+		const serialized = JSON.stringify(output);
+		if (typeof serialized === "string") {
+			return serialized;
+		}
+	} catch {
+		// Fall through to String() fallback.
+	}
+
+	return String(output ?? "");
+}
+
+function convertOrphanedOutputToMessage(
 	item: InputItem,
 	callId: string | null,
-): InputItem => {
-	const toolName =
-		typeof (item as { name?: unknown }).name === "string"
-			? ((item as { name?: string }).name as string)
-			: "tool";
+): InputItem {
+	const toolName = getToolName(item);
 	const labelCallId = callId ?? "unknown";
-	let text: string;
-	try {
-		const out = (item as { output?: unknown }).output;
-		text = typeof out === "string" ? out : JSON.stringify(out);
-	} catch {
-		text = String((item as { output?: unknown }).output ?? "");
-	}
+	let text = stringifyToolOutput((item as { output?: unknown }).output);
+
 	if (text.length > 16000) {
 		text = text.slice(0, 16000) + "\n...[truncated]";
 	}
@@ -145,9 +161,13 @@ const convertOrphanedOutputToMessage = (
 		role: "assistant",
 		content: `[Previous ${toolName} result; call_id=${labelCallId}]: ${text}`,
 	} as InputItem;
-};
+}
 
-const collectCallIds = (input: InputItem[]) => {
+function collectCallIds(input: InputItem[]): {
+	functionCallIds: Set<string>;
+	localShellCallIds: Set<string>;
+	customToolCallIds: Set<string>;
+} {
 	const functionCallIds = new Set<string>();
 	const localShellCallIds = new Set<string>();
 	const customToolCallIds = new Set<string>();
@@ -171,11 +191,9 @@ const collectCallIds = (input: InputItem[]) => {
 	}
 
 	return { functionCallIds, localShellCallIds, customToolCallIds };
-};
+}
 
-export const normalizeOrphanedToolOutputs = (
-	input: InputItem[],
-): InputItem[] => {
+export function normalizeOrphanedToolOutputs(input: InputItem[]): InputItem[] {
 	const { functionCallIds, localShellCallIds, customToolCallIds } =
 		collectCallIds(input);
 
@@ -208,11 +226,28 @@ export const normalizeOrphanedToolOutputs = (
 
 		return item;
 	});
-};
+}
 
 const CANCELLED_TOOL_OUTPUT = "Operation cancelled by user";
+type ToolOutputType =
+	| "function_call_output"
+	| "local_shell_call_output"
+	| "custom_tool_call_output";
 
-const collectOutputCallIds = (input: InputItem[]): Set<string> => {
+function toToolOutputType(type: InputItem["type"]): ToolOutputType | null {
+	switch (type) {
+		case "function_call":
+			return "function_call_output";
+		case "local_shell_call":
+			return "local_shell_call_output";
+		case "custom_tool_call":
+			return "custom_tool_call_output";
+		default:
+			return null;
+	}
+}
+
+function collectOutputCallIds(input: InputItem[]): Set<string> {
 	const outputCallIds = new Set<string>();
 	for (const item of input) {
 		if (
@@ -225,37 +260,30 @@ const collectOutputCallIds = (input: InputItem[]): Set<string> => {
 		}
 	}
 	return outputCallIds;
-};
+}
 
-export const injectMissingToolOutputs = (input: InputItem[]): InputItem[] => {
+export function injectMissingToolOutputs(input: InputItem[]): InputItem[] {
 	const outputCallIds = collectOutputCallIds(input);
 	const result: InputItem[] = [];
 
 	for (const item of input) {
 		result.push(item);
 
-		if (
-			item.type === "function_call" ||
-			item.type === "local_shell_call" ||
-			item.type === "custom_tool_call"
-		) {
-			const callId = getCallId(item);
-			if (callId && !outputCallIds.has(callId)) {
-				const outputType =
-					item.type === "function_call"
-						? "function_call_output"
-						: item.type === "local_shell_call"
-							? "local_shell_call_output"
-							: "custom_tool_call_output";
+		const outputType = toToolOutputType(item.type);
+		if (!outputType) {
+			continue;
+		}
 
-				result.push({
-					type: outputType,
-					call_id: callId,
-					output: CANCELLED_TOOL_OUTPUT,
-				} as unknown as InputItem);
-			}
+		const callId = getCallId(item);
+		if (callId && !outputCallIds.has(callId)) {
+			result.push({
+				type: outputType,
+				call_id: callId,
+				output: CANCELLED_TOOL_OUTPUT,
+			} as unknown as InputItem);
+			outputCallIds.add(callId);
 		}
 	}
 
 	return result;
-};
+}

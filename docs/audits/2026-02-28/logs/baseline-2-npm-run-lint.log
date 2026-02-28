@@ -1,0 +1,12 @@
+
+> oc-chatgpt-multi-auth@5.4.0 lint
+> npm run lint:ts && npm run lint:scripts
+
+
+> oc-chatgpt-multi-auth@5.4.0 lint:ts
+> eslint . --ext .ts
+
+
+> oc-chatgpt-multi-auth@5.4.0 lint:scripts
+> eslint scripts --ext .js
+

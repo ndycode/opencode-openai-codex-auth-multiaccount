@@ -1,6 +1,3 @@
-import { existsSync, promises as fs } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { Auth } from "@opencode-ai/sdk";
 import { createLogger } from "./logger.js";
 import {
@@ -19,8 +16,7 @@ import {
 	type AccountWithMetrics,
 	type HybridSelectionOptions,
 } from "./rotation.js";
-import { isRecord, nowMs } from "./utils.js";
-import { decodeJWT } from "./auth/auth.js";
+import { nowMs } from "./utils.js";
 
 export {
 	extractAccountId,
@@ -62,6 +58,7 @@ import {
 	formatWaitTime,
 	type RateLimitReason,
 } from "./accounts/rate-limits.js";
+import { loadCodexCliTokenCacheEntriesByEmail } from "./codex-sync.js";
 
 const log = createLogger("accounts");
 
@@ -72,20 +69,9 @@ export type CodexCliTokenCacheEntry = {
 	accountId?: string;
 };
 
-const CODEX_CLI_ACCOUNTS_PATH = join(homedir(), ".codex", "accounts.json");
 const CODEX_CLI_CACHE_TTL_MS = 5_000;
 let codexCliTokenCache: Map<string, CodexCliTokenCacheEntry> | null = null;
 let codexCliTokenCacheLoadedAt = 0;
-
-function extractExpiresAtFromAccessToken(accessToken: string): number | undefined {
-	const decoded = decodeJWT(accessToken);
-	const exp = decoded?.exp;
-	if (typeof exp === "number" && Number.isFinite(exp)) {
-		// JWT exp is in seconds since epoch.
-		return exp * 1000;
-	}
-	return undefined;
-}
 
 async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEntry> | null> {
 	const syncEnabled = process.env.CODEX_AUTH_SYNC_CODEX_CLI !== "0";
@@ -101,47 +87,22 @@ async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEn
 	}
 	codexCliTokenCacheLoadedAt = now;
 
-	if (!existsSync(CODEX_CLI_ACCOUNTS_PATH)) {
-		codexCliTokenCache = null;
-		return null;
-	}
-
 	try {
-		const raw = await fs.readFile(CODEX_CLI_ACCOUNTS_PATH, "utf-8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (!isRecord(parsed) || !Array.isArray(parsed.accounts)) {
+		const entries = await loadCodexCliTokenCacheEntriesByEmail();
+		if (entries.length === 0) {
 			codexCliTokenCache = null;
 			return null;
 		}
 
 		const next = new Map<string, CodexCliTokenCacheEntry>();
-		for (const entry of parsed.accounts) {
-			if (!isRecord(entry)) continue;
-
-			const email = sanitizeEmail(typeof entry.email === "string" ? entry.email : undefined);
-			if (!email) continue;
-
-			const accountId =
-				typeof entry.accountId === "string" && entry.accountId.trim() ? entry.accountId.trim() : undefined;
-
-			const auth = entry.auth;
-			const tokens = isRecord(auth) ? auth.tokens : undefined;
-			const accessToken =
-				isRecord(tokens) && typeof tokens.access_token === "string" && tokens.access_token.trim()
-					? tokens.access_token.trim()
-					: undefined;
-			const refreshToken =
-				isRecord(tokens) && typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()
-					? tokens.refresh_token.trim()
-					: undefined;
-
-			if (!accessToken) continue;
-
-			next.set(email, {
-				accessToken,
-				expiresAt: extractExpiresAtFromAccessToken(accessToken),
-				refreshToken,
-				accountId,
+		for (const entry of entries) {
+			const emailKey = sanitizeEmail(entry.email);
+			if (!emailKey) continue;
+			next.set(emailKey, {
+				accessToken: entry.accessToken,
+				expiresAt: entry.expiresAt,
+				refreshToken: entry.refreshToken,
+				accountId: entry.accountId,
 			});
 		}
 
@@ -571,6 +532,9 @@ export class AccountManager {
 	getCurrentOrNextForFamilyHybrid(family: ModelFamily, model?: string | null, options?: HybridSelectionOptions): ManagedAccount | null {
 		const count = this.accounts.length;
 		if (count === 0) return null;
+		const quotaKey = model ? `${family}:${model}` : family;
+		const healthTracker = getHealthTracker();
+		const tokenTracker = getTokenTracker();
 
 		const currentIndex = this.currentAccountIndexByFamily[family];
 		if (currentIndex >= 0 && currentIndex < count) {
@@ -582,7 +546,8 @@ export class AccountManager {
 				clearExpiredRateLimits(currentAccount);
 				if (
 					!isRateLimitedForFamily(currentAccount, family, model) &&
-					!this.isAccountCoolingDown(currentAccount)
+					!this.isAccountCoolingDown(currentAccount) &&
+					tokenTracker.getTokens(currentAccount.index, quotaKey) >= 1
 				) {
 					currentAccount.lastUsed = nowMs();
 					return currentAccount;
@@ -591,17 +556,16 @@ export class AccountManager {
 			}
 		}
 
-		const quotaKey = model ? `${family}:${model}` : family;
-		const healthTracker = getHealthTracker();
-		const tokenTracker = getTokenTracker();
-
 		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
 			.map((account): AccountWithMetrics | null => {
 				if (!account) return null;
 				if (account.enabled === false) return null;
 				clearExpiredRateLimits(account);
+				const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
 				const isAvailable =
-					!isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
+					!isRateLimitedForFamily(account, family, model) &&
+					!this.isAccountCoolingDown(account) &&
+					tokensAvailable >= 1;
 				return {
 					index: account.index,
 					isAvailable,

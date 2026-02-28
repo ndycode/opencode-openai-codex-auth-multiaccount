@@ -664,13 +664,13 @@ describe('Fetch Helpers Module', () => {
 			expect(rateLimit?.retryAfterMs).toBeGreaterThan(0);
 		});
 
-	it('normalizes small retryAfterMs values as seconds', async () => {
+	it('keeps retry_after_ms values in milliseconds even when small', async () => {
 		const body = { error: { message: 'rate limited', retry_after_ms: 5 } };
 		const response = new Response(JSON.stringify(body), { status: 429 });
 		
 		const { rateLimit } = await handleErrorResponse(response);
 		
-		expect(rateLimit?.retryAfterMs).toBe(5000);
+		expect(rateLimit?.retryAfterMs).toBe(5);
 	});
 
 	it('caps retryAfterMs at 5 minutes', async () => {
@@ -689,6 +689,58 @@ describe('Fetch Helpers Module', () => {
 		const { rateLimit } = await handleErrorResponse(response);
 		
 		expect(rateLimit?.retryAfterMs).toBe(60000);
+	});
+
+	it('treats retry_after as seconds from body payload', async () => {
+		const body = { error: { message: 'rate limited', retry_after: 5 } };
+		const response = new Response(JSON.stringify(body), { status: 429 });
+
+		const { rateLimit } = await handleErrorResponse(response);
+
+		expect(rateLimit?.retryAfterMs).toBe(5000);
+	});
+
+	it('prefers retry_after_ms over retry_after when both are present', async () => {
+		const body = { error: { message: 'rate limited', retry_after_ms: 250, retry_after: 5 } };
+		const response = new Response(JSON.stringify(body), { status: 429 });
+
+		const { rateLimit } = await handleErrorResponse(response);
+
+		expect(rateLimit?.retryAfterMs).toBe(250);
+	});
+
+	it('clamps retry_after_ms zero and negative values to minimum delay', async () => {
+		const zeroResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after_ms: 0 } }),
+			{ status: 429 },
+		);
+		const negativeResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after_ms: -5 } }),
+			{ status: 429 },
+		);
+
+		const zeroRateLimit = await handleErrorResponse(zeroResponse);
+		const negativeRateLimit = await handleErrorResponse(negativeResponse);
+
+		expect(zeroRateLimit.rateLimit?.retryAfterMs).toBe(1);
+		expect(negativeRateLimit.rateLimit?.retryAfterMs).toBe(1);
+	});
+
+	it('clamps retry_after zero and negative values to minimum delay', async () => {
+		const zeroResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after: 0 } }),
+			{ status: 429 },
+		);
+		const negativeResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after: -5 } }),
+			{ status: 429 },
+		);
+
+		const zeroRateLimit = await handleErrorResponse(zeroResponse);
+		const negativeRateLimit = await handleErrorResponse(negativeResponse);
+
+		expect(zeroRateLimit.rateLimit?.retryAfterMs).toBe(1);
+		expect(negativeRateLimit.rateLimit?.retryAfterMs).toBe(1);
 	});
 
 		it('handles millisecond unix timestamp in reset header', async () => {

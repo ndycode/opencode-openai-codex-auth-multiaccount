@@ -27,11 +27,11 @@ export async function copyOAuthSuccessHtml(options = {}) {
 	return { src, dest };
 }
 
-const isDirectRun = (() => {
+function isDirectRun() {
 	if (!process.argv[1]) return false;
 	return normalizePathForCompare(process.argv[1]) === normalizePathForCompare(__filename);
-})();
+}
 
-if (isDirectRun) {
+if (isDirectRun()) {
 	await copyOAuthSuccessHtml();
 }

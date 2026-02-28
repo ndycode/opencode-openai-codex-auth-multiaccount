@@ -39,6 +39,7 @@
 | Guide | Description |
 |-------|-------------|
 | [Architecture](development/ARCHITECTURE.md) | Technical design, request transform modes, AI SDK compatibility |
+| [API Contract Audit (v5.4.0)](development/API_CONTRACT_AUDIT_v5.4.0.md) | Public API compatibility assessment, error contracts, and semver recommendation |
 | [Config System](development/CONFIG_FLOW.md) | Configuration loading and merging |
 | [Config Fields](development/CONFIG_FIELDS.md) | Understanding config keys and fields |
 | [Testing Guide](development/TESTING.md) | Test scenarios and verification |

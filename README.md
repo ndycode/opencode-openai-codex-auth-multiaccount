@@ -390,8 +390,10 @@ codex-setup
 Open guided wizard (menu-driven when terminal supports it, checklist fallback otherwise):
 
 ```text
-codex-setup wizard=true
+codex-setup mode="wizard"
 ```
+
+Legacy compatibility: `codex-setup wizard=true` is still supported.
 
 ---
 
@@ -401,7 +403,7 @@ Run diagnostics with actionable findings.
 
 ```text
 codex-doctor
-codex-doctor deep=true
+codex-doctor mode="deep"
 ```
 
 Apply safe auto-fixes (`--fix` equivalent):
@@ -410,8 +412,10 @@ Apply safe auto-fixes (`--fix` equivalent):
 - Switches active account to the healthiest eligible account
 
 ```text
-codex-doctor fix=true
+codex-doctor mode="fix"
 ```
+
+Legacy compatibility: `deep=true` / `fix=true` flags remain supported.
 
 ---
 
@@ -538,9 +542,9 @@ codex-dashboard
 | Tool | What It Does | Example |
 |------|--------------|---------|
 | `codex-help` | Command guide by topic | `codex-help topic="setup"` |
-| `codex-setup` | Readiness checklist/wizard | `codex-setup wizard=true` |
+| `codex-setup` | Readiness checklist/wizard | `codex-setup mode="wizard"` |
 | `codex-next` | Best next action | `codex-next` |
-| `codex-doctor` | Diagnostics and optional safe fixes | `codex-doctor fix=true` |
+| `codex-doctor` | Diagnostics and optional safe fixes | `codex-doctor mode="fix"` |
 | `codex-list` | List/filter accounts | `codex-list tag="work"` |
 | `codex-switch` | Switch active account | `codex-switch index=2` |
 | `codex-label` | Set/clear display label | `codex-label index=2 label="Work"` |
@@ -554,6 +558,7 @@ codex-dashboard
 | `codex-remove` | Remove account entry | `codex-remove index=3` |
 | `codex-export` | Export account backups | `codex-export` |
 | `codex-import` | Dry-run or apply imports | `codex-import path="~/backup/accounts.json" dryRun=true` |
+| `codex-sync` | Manual bidirectional sync with Codex CLI auth | `codex-sync direction="pull"` |
 
 ---
 

@@ -1,0 +1,16 @@
+
+> oc-chatgpt-multi-auth@5.4.0 prepare
+> husky
+
+
+added 214 packages, and audited 215 packages in 3s
+
+73 packages are looking for funding
+  run `npm fund` for details
+
+4 vulnerabilities (1 moderate, 3 high)
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.

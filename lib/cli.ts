@@ -41,6 +41,8 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
 
 export type LoginMode =
 	| "add"
+	| "sync-from-codex"
+	| "sync-to-codex"
 	| "fresh"
 	| "manage"
 	| "check"
@@ -113,15 +115,28 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
 		}
 
 		while (true) {
-			const answer = await rl.question("(a)dd, (f)resh, (c)heck, (d)eep, (v)erify flagged, or (q)uit? [a/f/c/d/v/q]: ");
+			const answer = await rl.question(
+				"(a)dd, (s)ync-from-codex, (p)ush-to-codex, (f)resh, (c)heck, (d)eep, (v)erify flagged, or (q)uit? [a/s/p/f/c/d/v/q]: ",
+			);
 			const normalized = answer.trim().toLowerCase();
 			if (normalized === "a" || normalized === "add") return { mode: "add" };
+			if (normalized === "s" || normalized === "sync" || normalized === "sync-from-codex") {
+				return { mode: "sync-from-codex" };
+			}
+			if (
+				normalized === "p" ||
+				normalized === "push" ||
+				normalized === "push-to-codex" ||
+				normalized === "sync-to-codex"
+			) {
+				return { mode: "sync-to-codex" };
+			}
 			if (normalized === "f" || normalized === "fresh") return { mode: "fresh", deleteAll: true };
 			if (normalized === "c" || normalized === "check") return { mode: "check" };
 			if (normalized === "d" || normalized === "deep") return { mode: "deep-check" };
 			if (normalized === "v" || normalized === "verify") return { mode: "verify-flagged" };
 			if (normalized === "q" || normalized === "quit") return { mode: "cancel" };
-			console.log("Please enter one of: a, f, c, d, v, q.");
+			console.log("Please enter one of: a, s, p, f, c, d, v, q.");
 		}
 	} finally {
 		rl.close();
@@ -148,6 +163,10 @@ export async function promptLoginMode(
 		switch (action.type) {
 			case "add":
 				return { mode: "add" };
+			case "sync-from-codex":
+				return { mode: "sync-from-codex" };
+			case "sync-to-codex":
+				return { mode: "sync-to-codex" };
 			case "fresh":
 				if (!(await promptDeleteAllTypedConfirm())) {
 					console.log("\nDelete-all cancelled.\n");
