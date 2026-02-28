@@ -45,11 +45,11 @@ describe("RecoveryStorage", () => {
   describe("generatePartId", () => {
     it("should include prefix, timestamp, and random hex suffix", () => {
       const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+      const tsHex = (1700000000000).toString(16);
 
       const id = storage.generatePartId();
 
-      expect(id).toMatch(/^prt_[0-9a-f]+[a-f0-9]{8}$/);
-      expect(id).toContain((1700000000000).toString(16));
+      expect(id).toMatch(new RegExp(`^prt_${tsHex}[a-f0-9]{8}$`));
 
       nowSpy.mockRestore();
     });
@@ -221,6 +221,8 @@ describe("RecoveryStorage", () => {
 
   describe("injectTextPart", () => {
     it("should create directory and write synthetic text part", () => {
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+      const tsHex = (1700000000000).toString(16);
       const sessionID = "sess";
       const messageID = "msg";
       const partDir = join(PART_STORAGE, messageID);
@@ -234,7 +236,7 @@ describe("RecoveryStorage", () => {
       expect(fsMock.writeFileSync).toHaveBeenCalledTimes(1);
 
       const [filePath, payload] = fsMock.writeFileSync.mock.calls[0] ?? [];
-      expect(filePath).toMatch(/prt_[0-9a-f]+[a-f0-9]+\.json$/);
+      expect(filePath).toMatch(new RegExp(`prt_${tsHex}[a-f0-9]{8}\\.json$`));
       const parsed = JSON.parse(payload);
       expect(parsed).toMatchObject({
         sessionID,
@@ -244,6 +246,7 @@ describe("RecoveryStorage", () => {
         synthetic: true,
       });
       expect(parsed.id).toMatch(/^prt_/);
+      nowSpy.mockRestore();
     });
 
     it("should return false on write error", () => {
