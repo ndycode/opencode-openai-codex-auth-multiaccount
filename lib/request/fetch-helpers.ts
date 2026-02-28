@@ -898,15 +898,17 @@ function parseRetryAfterMs(
 function normalizeRetryAfterMilliseconds(value: number): number {
         if (!Number.isFinite(value)) return 60000;
         const ms = Math.floor(value);
+        const MIN_RETRY_DELAY_MS = 1;
         const MAX_RETRY_DELAY_MS = 5 * 60 * 1000;
-        return Math.min(ms, MAX_RETRY_DELAY_MS);
+        return Math.min(Math.max(ms, MIN_RETRY_DELAY_MS), MAX_RETRY_DELAY_MS);
 }
 
 function normalizeRetryAfterSeconds(value: number): number {
 	if (!Number.isFinite(value)) return 60000;
 	const ms = Math.floor(value * 1000);
+	const MIN_RETRY_DELAY_MS = 1;
 	const MAX_RETRY_DELAY_MS = 5 * 60 * 1000;
-	return Math.min(ms, MAX_RETRY_DELAY_MS);
+	return Math.min(Math.max(ms, MIN_RETRY_DELAY_MS), MAX_RETRY_DELAY_MS);
 }
 
 function toNumber(value: unknown): number | undefined {

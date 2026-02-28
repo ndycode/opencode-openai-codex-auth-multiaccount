@@ -700,6 +700,15 @@ describe('Fetch Helpers Module', () => {
 		expect(rateLimit?.retryAfterMs).toBe(5000);
 	});
 
+	it('prefers retry_after_ms over retry_after when both are present', async () => {
+		const body = { error: { message: 'rate limited', retry_after_ms: 250, retry_after: 5 } };
+		const response = new Response(JSON.stringify(body), { status: 429 });
+
+		const { rateLimit } = await handleErrorResponse(response);
+
+		expect(rateLimit?.retryAfterMs).toBe(250);
+	});
+
 		it('handles millisecond unix timestamp in reset header', async () => {
 			const futureTimestampMs = Date.now() + 45000;
 			const headers = new Headers({ 'x-ratelimit-reset': String(futureTimestampMs) });
