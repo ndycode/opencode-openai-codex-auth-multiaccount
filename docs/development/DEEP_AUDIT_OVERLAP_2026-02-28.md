@@ -19,7 +19,7 @@ Track overlap against currently open audit PRs so this branch remains incrementa
   - `hono` floor raised to `^4.12.3`
   - `rollup` floor raised to `^4.59.0`
   - `minimatch` floors raised to `^10.2.4` and `^9.0.9` for `@typescript-eslint/typescript-estree`
-- Result: high vulnerabilities cleared in this branch; only one moderate `ajv` advisory remains in dev tooling (`eslint` transitive path).
+- Result: high vulnerabilities cleared in this branch; follow-up dev-tooling update also cleared the remaining moderate `ajv` advisory.
 
 ### Auth/server overlap
 - PR #44/#46 touch auth-related files including `index.ts` and `lib/auth/server.ts`.
@@ -39,4 +39,4 @@ Track overlap against currently open audit PRs so this branch remains incrementa
 
 ## Verification Snapshot
 - Baseline before fixes: `npm audit --audit-level=high` reported 3 high + 1 moderate.
-- After phase 1 dependency remediation: `npm audit --audit-level=high` reports 0 high/critical, 1 moderate.
+- Final state after dependency and tooling updates: `npm audit` reports 0 vulnerabilities.

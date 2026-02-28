@@ -29,8 +29,9 @@ Full repository deep audit focused on high-impact risk classes:
   - `@typescript-eslint/typescript-estree` nested `minimatch`: `^9.0.9`
 
 **Outcome:**
-- `npm audit --audit-level=high` now passes (0 high/critical).
-- Remaining issue is one moderate advisory on `ajv` in `eslint` transitive dependency.
+- Initial pass cleared all high/critical findings.
+- Follow-up tooling update (`npm update eslint`) removed the remaining moderate `ajv` advisory.
+- Final audit status: `npm audit` reports 0 vulnerabilities.
 
 ### Phase 2: Manual OAuth callback trust hardening
 **Risk class:** Callback URL trust boundary and OAuth state handling hardening.
@@ -65,8 +66,8 @@ Full repository deep audit focused on high-impact risk classes:
   - Assert captured authorization code is consumed once.
 
 ## Deferred/Residual Items
-- Moderate `ajv` advisory remains in `eslint` transitive dependencies (`npm audit` moderate only).
-- Policy for this audit run required High/Critical remediation; medium/low and moderate-only findings are documented but not in-scope for mandatory fix.
+- No remaining vulnerabilities from `npm audit` at time of verification.
+- Medium/low style and refactor-only opportunities remain out of scope for this security-focused pass.
 
 ## Verification Evidence
 Commands executed after remediation:
@@ -74,10 +75,12 @@ Commands executed after remediation:
 - `npm run typecheck` -> pass
 - `npm test` -> pass
 - `npx vitest run test/server.unit.test.ts test/index.test.ts` -> pass
-- `npm run audit:all` -> pass for high threshold (moderate advisory only)
+- `npm run audit:all` -> pass
+- `npm audit` -> pass (0 vulnerabilities)
 
 ## Atomic Commit Map
 1. `fix(audit phase 1): remediate high dependency vulnerabilities`
 2. `fix(audit phase 2): harden manual OAuth callback validation`
 3. `fix(audit phase 3): tighten local OAuth callback server behavior`
 4. `docs(audit): publish overlap ledger and deep audit report`
+5. `chore(audit): refresh eslint toolchain to clear residual moderate advisory`
