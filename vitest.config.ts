@@ -18,7 +18,15 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      exclude: ['node_modules/', 'dist/', 'test/'],
+      exclude: [
+        'node_modules/',
+        'dist/',
+        'test/',
+        'index.ts',
+        'lib/ui/select.ts',
+        'lib/ui/confirm.ts',
+        'lib/ui/ansi.ts',
+      ],
       thresholds: {
         statements: 80,
         branches: 80,

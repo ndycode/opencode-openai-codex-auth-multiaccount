@@ -1,0 +1,135 @@
+{
+  "generatedAt": "2026-02-28T17:57:48.685Z",
+  "source": "osv-api",
+  "packages": [
+    {
+      "package": "@opencode-ai/plugin",
+      "osv": {
+        "vulnerabilityCount": 0,
+        "sampleIds": [],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=%40opencode-ai%2Fplugin"
+      }
+    },
+    {
+      "package": "@opencode-ai/sdk",
+      "osv": {
+        "vulnerabilityCount": 0,
+        "sampleIds": [],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=%40opencode-ai%2Fsdk"
+      }
+    },
+    {
+      "package": "@modelcontextprotocol/sdk",
+      "osv": {
+        "vulnerabilityCount": 3,
+        "sampleIds": [
+          "GHSA-345p-7cg4-v4c7",
+          "GHSA-8r9q-7v3j-jr4g",
+          "GHSA-w48q-cv73-mx4w"
+        ],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=%40modelcontextprotocol%2Fsdk"
+      }
+    },
+    {
+      "package": "@openauthjs/openauth",
+      "osv": {
+        "vulnerabilityCount": 0,
+        "sampleIds": [],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=%40openauthjs%2Fopenauth"
+      }
+    },
+    {
+      "package": "openid-client",
+      "osv": {
+        "vulnerabilityCount": 0,
+        "sampleIds": [],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=openid-client"
+      }
+    },
+    {
+      "package": "oauth4webapi",
+      "osv": {
+        "vulnerabilityCount": 0,
+        "sampleIds": [],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=oauth4webapi"
+      }
+    },
+    {
+      "package": "hono",
+      "osv": {
+        "vulnerabilityCount": 16,
+        "sampleIds": [
+          "GHSA-2234-fmw7-43wr",
+          "GHSA-3mpf-rcc7-5347",
+          "GHSA-3vhc-576x-3qv4",
+          "GHSA-6wqw-2p9w-4vw4",
+          "GHSA-92vj-g62v-jqhh",
+          "GHSA-9hp6-4448-45g2",
+          "GHSA-9r54-q6cx-xmh5",
+          "GHSA-f67f-6cw9-8mq4",
+          "GHSA-f6gv-hh8j-q8vq",
+          "GHSA-gq3j-xvxp-8hrf"
+        ],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=hono"
+      }
+    },
+    {
+      "package": "express",
+      "osv": {
+        "vulnerabilityCount": 5,
+        "sampleIds": [
+          "GHSA-cm5g-3pgc-8rg4",
+          "GHSA-gpvr-g6gh-9mc2",
+          "GHSA-jj78-5fmv-mv28",
+          "GHSA-qw6h-vgh9-j6wx",
+          "GHSA-rv95-896h-c2vc"
+        ],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=express"
+      }
+    },
+    {
+      "package": "fastify",
+      "osv": {
+        "vulnerabilityCount": 7,
+        "sampleIds": [
+          "GHSA-3fjj-p79j-c9hh",
+          "GHSA-455w-c45v-86rg",
+          "GHSA-jx2c-rxcm-jvmq",
+          "GHSA-mg2h-6x62-wpwc",
+          "GHSA-mq6c-fh97-4gwv",
+          "GHSA-mrq3-vjjr-p77c",
+          "GHSA-xw5p-hw6r-2j98"
+        ],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=fastify"
+      }
+    },
+    {
+      "package": "zod",
+      "osv": {
+        "vulnerabilityCount": 1,
+        "sampleIds": [
+          "GHSA-m95q-7qp3-xv42"
+        ],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=zod"
+      }
+    },
+    {
+      "package": "valibot",
+      "osv": {
+        "vulnerabilityCount": 1,
+        "sampleIds": [
+          "GHSA-vqpr-j7v3-hqw9"
+        ],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=valibot"
+      }
+    },
+    {
+      "package": "joi",
+      "osv": {
+        "vulnerabilityCount": 0,
+        "sampleIds": [],
+        "detailsUrl": "https://osv.dev/list?ecosystem=npm&q=joi"
+      }
+    }
+  ]
+}

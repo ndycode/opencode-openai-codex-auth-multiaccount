@@ -1,0 +1,110 @@
+
+=== COMMAND: npm test ===
+
+
+> oc-chatgpt-multi-auth@5.4.0 test
+> vitest run
+
+
+ RUN  v4.0.18 C:/Users/neil/DevTools/oc-chatgpt-multi-auth-audit-main-deep-20260301
+
+ ✓ test/tool-utils.test.ts (30 tests) 4ms
+ ✓ test/input-utils.test.ts (32 tests) 18ms
+ ✓ test/refresh-queue.test.ts (24 tests) 10ms
+ ✓ test/proactive-refresh.test.ts (27 tests) 13ms
+ ✓ test/codex-prompts.test.ts (28 tests) 21ms
+ ✓ test/rotation.test.ts (43 tests) 25ms
+ ✓ test/recovery.test.ts (73 tests) 35ms
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > omits raw request and response payloads by default
+[openai-codex-plugin] Request logging ENABLED (metadata only; set CODEX_PLUGIN_LOG_BODIES=1 for raw payloads) - logs will be saved to: C:\Users\neil\.opencode\logs\codex-plugin
+
+ ✓ test/server.unit.test.ts (13 tests) 74ms
+ ✓ test/token-utils.test.ts (90 tests) 17ms
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > omits raw request and response payloads by default
+[openai-codex-plugin] Logged payload-stage to C:\Users\neil\.opencode\logs\codex-plugin\request-1-payload-stage.json
+
+ ✓ test/recovery-storage.test.ts (45 tests) 151ms
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > captures raw payloads only when CODEX_PLUGIN_LOG_BODIES=1
+[openai-codex-plugin] Request logging ENABLED (raw payload capture ON) - logs will be saved to: C:\Users\neil\.opencode\logs\codex-plugin
+
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > captures raw payloads only when CODEX_PLUGIN_LOG_BODIES=1
+[openai-codex-plugin] Logged payload-stage to C:\Users\neil\.opencode\logs\codex-plugin\request-1-payload-stage.json
+
+stdout | test/logger.test.ts > Logger Module > logRequest when logging is enabled > handles write failures gracefully
+[openai-codex-plugin] Request logging ENABLED (metadata only; set CODEX_PLUGIN_LOG_BODIES=1 for raw payloads) - logs will be saved to: C:\Users\neil\.opencode\logs\codex-plugin
+
+ ✓ test/logger.test.ts (85 tests) 63ms
+ ✓ test/opencode-codex.test.ts (13 tests) 29ms
+ ✓ test/errors.test.ts (33 tests) 9ms
+ ✓ test/browser.test.ts (21 tests) 10ms
+ ✓ test/circuit-breaker.test.ts (23 tests) 12ms
+ ✓ test/auto-update-checker.test.ts (18 tests) 67ms
+ ✓ test/response-handler.test.ts (30 tests) 66ms
+ ✓ test/model-map.test.ts (22 tests) 6ms
+ ✓ test/cli.test.ts (38 tests) 484ms
+       ✓ returns true for 'y' input  434ms
+ ✓ test/paths.test.ts (28 tests) 6ms
+ ✓ test/audit.test.ts (17 tests) 91ms
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+
+Verifying flagged accounts...
+
+
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+[1/2] cache@example.com: RESTORED (Codex CLI cache)
+
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+[2/2] refresh@example.com: RESTORED
+
+stdout | test/index.test.ts > OpenAIOAuthPlugin persistAccountPool > preserves flagged organization identity during verify-flagged restore for cached and refreshed paths
+
+Results: 2 restored, 0 still flagged
+
+
+ ✓ test/auth-rate-limit.test.ts (22 tests) 11ms
+ ✓ test/config.test.ts (20 tests) 4ms
+ ✓ test/index.test.ts (106 tests) 589ms
+       ✓ exports event handler  512ms
+ ✓ test/codex.test.ts (32 tests) 6ms
+ ✓ test/health.test.ts (13 tests) 9ms
+ ✓ test/context-overflow.test.ts (21 tests) 25ms
+ ✓ test/parallel-probe.test.ts (15 tests) 246ms
+ ✓ test/shutdown.test.ts (11 tests) 76ms
+ ✓ test/rate-limit-backoff.test.ts (21 tests) 11ms
+ ✓ test/beginner-ui.test.ts (12 tests) 5ms
+ ✓ test/auth.test.ts (41 tests) 23ms
+ ✓ test/utils.test.ts (24 tests) 22ms
+ ✓ test/schemas.test.ts (60 tests) 21ms
+ ✓ test/plugin-config.test.ts (61 tests) 24ms
+ ✓ test/recovery-constants.test.ts (7 tests) 8ms
+ ✓ test/index-retry.test.ts (1 test) 242ms
+ ✓ test/storage-async.test.ts (23 tests) 58ms
+ ✓ test/table-formatter.test.ts (8 tests) 4ms
+ ✓ test/ui-format.test.ts (4 tests) 4ms
+ ✓ test/auth-menu.test.ts (2 tests) 6ms
+ ✓ test/rotation-integration.test.ts (21 tests) 38ms
+ ✓ test/oauth-server.integration.test.ts (5 tests) 75ms
+ ✓ test/accounts.test.ts (99 tests) 27ms
+ ✓ test/retry-budget.test.ts (4 tests) 3ms
+ ✓ test/ui-theme.test.ts (5 tests) 2ms
+ ✓ test/ui-runtime.test.ts (3 tests) 2ms
+ ✓ test/copy-oauth-success.test.ts (2 tests) 23ms
+ ✓ test/fetch-helpers.test.ts (73 tests) 236ms
+ ✓ test/audit.race.test.ts (1 test) 167ms
+ ✓ test/property/setup.test.ts (3 tests) 8ms
+ ✓ test/property/transformer.property.test.ts (17 tests) 37ms
+ ✓ test/property/rotation.property.test.ts (16 tests) 65ms
+ ✓ test/storage.test.ts (94 tests) 1390ms
+       ✓ returns migrated data even when save fails (line 422-423 coverage)  369ms
+       ✓ throws after 5 failed EPERM retries  499ms
+ ✓ test/chaos/fault-injection.test.ts (43 tests) 71ms
+ ✓ test/request-transformer.test.ts (153 tests) 5959ms
+
+ Test Files  56 passed (56)
+      Tests  1776 passed (1776)
+   Start at  01:50:23
+   Duration  7.28s (transform 9.82s, setup 0ms, import 24.48s, tests 10.71s, environment 7ms)
+
+
+=== EXIT CODE: 0 ===
+

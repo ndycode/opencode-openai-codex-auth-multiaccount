@@ -1,0 +1,243 @@
+{
+  "generatedAt": "2026-02-28T17:57:22.697Z",
+  "source": "npm-registry-and-github-api",
+  "packages": [
+    {
+      "package": "@opencode-ai/plugin",
+      "npm": {
+        "url": "https://www.npmjs.com/package/@opencode-ai/plugin",
+        "latest": "1.2.15",
+        "downloadsLastWeek": 1826527,
+        "latestPublishedAt": "2026-02-26T08:23:51.089Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/@opencode-ai%2Fplugin",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/@opencode-ai%2Fplugin"
+      },
+      "github": null
+    },
+    {
+      "package": "@opencode-ai/sdk",
+      "npm": {
+        "url": "https://www.npmjs.com/package/@opencode-ai/sdk",
+        "latest": "1.2.15",
+        "downloadsLastWeek": 1949786,
+        "latestPublishedAt": "2026-02-26T08:23:47.389Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/@opencode-ai%2Fsdk",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/@opencode-ai%2Fsdk"
+      },
+      "github": null
+    },
+    {
+      "package": "@modelcontextprotocol/sdk",
+      "npm": {
+        "url": "https://www.npmjs.com/package/@modelcontextprotocol/sdk",
+        "latest": "1.27.1",
+        "downloadsLastWeek": 23214738,
+        "latestPublishedAt": "2026-02-24T21:56:51.019Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/@modelcontextprotocol%2Fsdk",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/@modelcontextprotocol%2Fsdk"
+      },
+      "github": {
+        "repo": "modelcontextprotocol/typescript-sdk",
+        "url": "https://github.com/modelcontextprotocol/typescript-sdk",
+        "apiUrl": "https://api.github.com/repos/modelcontextprotocol/typescript-sdk",
+        "stars": 11709,
+        "openIssues": 336,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-28T04:26:02Z",
+        "license": "NOASSERTION"
+      }
+    },
+    {
+      "package": "@openauthjs/openauth",
+      "npm": {
+        "url": "https://www.npmjs.com/package/@openauthjs/openauth",
+        "latest": "0.4.3",
+        "downloadsLastWeek": 1089383,
+        "latestPublishedAt": "2025-03-04T01:26:14.647Z",
+        "license": null,
+        "registryUrl": "https://registry.npmjs.org/@openauthjs%2Fopenauth",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/@openauthjs%2Fopenauth"
+      },
+      "github": null
+    },
+    {
+      "package": "openid-client",
+      "npm": {
+        "url": "https://www.npmjs.com/package/openid-client",
+        "latest": "6.8.2",
+        "downloadsLastWeek": 6773345,
+        "latestPublishedAt": "2026-02-07T19:46:22.979Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/openid-client",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/openid-client"
+      },
+      "github": {
+        "repo": "panva/openid-client",
+        "url": "https://github.com/panva/openid-client",
+        "apiUrl": "https://api.github.com/repos/panva/openid-client",
+        "stars": 2304,
+        "openIssues": 0,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-28T08:25:12Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "oauth4webapi",
+      "npm": {
+        "url": "https://www.npmjs.com/package/oauth4webapi",
+        "latest": "3.8.5",
+        "downloadsLastWeek": 5206071,
+        "latestPublishedAt": "2026-02-16T08:29:36.573Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/oauth4webapi",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/oauth4webapi"
+      },
+      "github": {
+        "repo": "panva/oauth4webapi",
+        "url": "https://github.com/panva/oauth4webapi",
+        "apiUrl": "https://api.github.com/repos/panva/oauth4webapi",
+        "stars": 724,
+        "openIssues": 0,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-28T08:25:29Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "hono",
+      "npm": {
+        "url": "https://www.npmjs.com/package/hono",
+        "latest": "4.12.3",
+        "downloadsLastWeek": 23472737,
+        "latestPublishedAt": "2026-02-26T13:00:00.391Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/hono",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/hono"
+      },
+      "github": {
+        "repo": "honojs/hono",
+        "url": "https://github.com/honojs/hono",
+        "apiUrl": "https://api.github.com/repos/honojs/hono",
+        "stars": 29085,
+        "openIssues": 368,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-26T13:00:04Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "express",
+      "npm": {
+        "url": "https://www.npmjs.com/package/express",
+        "latest": "5.2.1",
+        "downloadsLastWeek": 78993523,
+        "latestPublishedAt": "2025-12-01T20:49:43.268Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/express",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/express"
+      },
+      "github": {
+        "repo": "expressjs/express",
+        "url": "https://github.com/expressjs/express",
+        "apiUrl": "https://api.github.com/repos/expressjs/express",
+        "stars": 68833,
+        "openIssues": 190,
+        "defaultBranch": "master",
+        "pushedAt": "2026-02-23T09:58:26Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "fastify",
+      "npm": {
+        "url": "https://www.npmjs.com/package/fastify",
+        "latest": "5.7.4",
+        "downloadsLastWeek": 5513136,
+        "latestPublishedAt": "2026-02-02T18:23:18.342Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/fastify",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/fastify"
+      },
+      "github": {
+        "repo": "fastify/fastify",
+        "url": "https://github.com/fastify/fastify",
+        "apiUrl": "https://api.github.com/repos/fastify/fastify",
+        "stars": 35701,
+        "openIssues": 117,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-28T09:32:19Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "zod",
+      "npm": {
+        "url": "https://www.npmjs.com/package/zod",
+        "latest": "4.3.6",
+        "downloadsLastWeek": 101522159,
+        "latestPublishedAt": "2026-01-22T19:14:35.382Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/zod",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/zod"
+      },
+      "github": {
+        "repo": "colinhacks/zod",
+        "url": "https://github.com/colinhacks/zod",
+        "apiUrl": "https://api.github.com/repos/colinhacks/zod",
+        "stars": 41992,
+        "openIssues": 253,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-15T14:20:41Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "valibot",
+      "npm": {
+        "url": "https://www.npmjs.com/package/valibot",
+        "latest": "1.2.0",
+        "downloadsLastWeek": 6244923,
+        "latestPublishedAt": "2025-11-24T23:35:28.769Z",
+        "license": "MIT",
+        "registryUrl": "https://registry.npmjs.org/valibot",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/valibot"
+      },
+      "github": {
+        "repo": "open-circle/valibot",
+        "url": "https://github.com/open-circle/valibot",
+        "apiUrl": "https://api.github.com/repos/open-circle/valibot",
+        "stars": 8461,
+        "openIssues": 141,
+        "defaultBranch": "main",
+        "pushedAt": "2026-02-27T22:52:03Z",
+        "license": "MIT"
+      }
+    },
+    {
+      "package": "joi",
+      "npm": {
+        "url": "https://www.npmjs.com/package/joi",
+        "latest": "18.0.2",
+        "downloadsLastWeek": 17311481,
+        "latestPublishedAt": "2025-11-19T15:49:39.317Z",
+        "license": "BSD-3-Clause",
+        "registryUrl": "https://registry.npmjs.org/joi",
+        "downloadsUrl": "https://api.npmjs.org/downloads/point/last-week/joi"
+      },
+      "github": {
+        "repo": "hapijs/joi",
+        "url": "https://github.com/hapijs/joi",
+        "apiUrl": "https://api.github.com/repos/hapijs/joi",
+        "stars": 21200,
+        "openIssues": 190,
+        "defaultBranch": "master",
+        "pushedAt": "2025-11-19T15:48:42Z",
+        "license": "NOASSERTION"
+      }
+    }
+  ]
+}
