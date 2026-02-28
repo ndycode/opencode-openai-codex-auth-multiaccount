@@ -470,7 +470,7 @@ async function writeJsonAtomicWithBackup(
 	let backupPath: string | undefined;
 
 	try {
-		await fs.mkdir(dirname(path), { recursive: true });
+		await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
 
 		if (await fileExists(path)) {
 			backupPath = createBackupPath(path);
