@@ -400,6 +400,7 @@ export async function loadCodexCliTokenCacheEntriesByEmail(
 	}
 	if (sourceCandidates.length === 0) return [];
 
+	const aggregated: CodexCliTokenCacheEntryByEmail[] = [];
 	for (const source of sourceCandidates) {
 		try {
 			const record = await readJsonRecord(source.path);
@@ -407,9 +408,7 @@ export async function loadCodexCliTokenCacheEntriesByEmail(
 				source.type === "auth.json"
 					? parseAuthJsonCacheEntries(source.path, record)
 					: parseLegacyCacheEntries(source.path, record);
-			if (entries.length > 0) {
-				return entries;
-			}
+			if (entries.length > 0) aggregated.push(...entries);
 		} catch (error) {
 			log.debug("Failed to load Codex CLI token cache entries from source", {
 				error: String(error),
@@ -419,7 +418,15 @@ export async function loadCodexCliTokenCacheEntriesByEmail(
 		}
 	}
 
-	return [];
+	if (aggregated.length === 0) return [];
+
+	const byEmail = new Map<string, CodexCliTokenCacheEntryByEmail>();
+	for (const entry of aggregated) {
+		const key = entry.email.toLowerCase();
+		if (!byEmail.has(key)) byEmail.set(key, entry);
+	}
+
+	return Array.from(byEmail.values());
 }
 
 function formatBackupTimestamp(value: Date): string {

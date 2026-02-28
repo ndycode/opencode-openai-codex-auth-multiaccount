@@ -247,6 +247,92 @@ describe("codex-sync", () => {
 		expect(entries[0]?.accountId).toBe("legacy-fallback-acc");
 	});
 
+	it("aggregates cache entries across auth.json and legacy accounts.json with auth precedence", async () => {
+		const codexDir = await createCodexDir("codex-sync-cache-aggregate");
+		const authAccessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "auth-acc",
+				chatgpt_user_email: "auth@example.com",
+			},
+		});
+		await writeFile(
+			join(codexDir, "auth.json"),
+			JSON.stringify(
+				{
+					auth_mode: "chatgpt",
+					tokens: {
+						access_token: authAccessToken,
+						refresh_token: "auth-refresh",
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const legacyUniqueAccessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			email: "legacy-only@example.com",
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "legacy-only-acc",
+			},
+		});
+		const legacyDuplicateAccessToken = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			email: "auth@example.com",
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "legacy-duplicate-acc",
+			},
+		});
+		await writeFile(
+			join(codexDir, "accounts.json"),
+			JSON.stringify(
+				{
+					accounts: [
+						{
+							email: "legacy-only@example.com",
+							accountId: "legacy-only-acc",
+							auth: {
+								tokens: {
+									access_token: legacyUniqueAccessToken,
+									refresh_token: "legacy-only-refresh",
+								},
+							},
+						},
+						{
+							email: "AUTH@example.com",
+							accountId: "legacy-duplicate-acc",
+							auth: {
+								tokens: {
+									access_token: legacyDuplicateAccessToken,
+									refresh_token: "legacy-duplicate-refresh",
+								},
+							},
+						},
+					],
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const entries = await loadCodexCliTokenCacheEntriesByEmail({ codexDir });
+		expect(entries).toHaveLength(2);
+
+		const byEmail = new Map(entries.map((entry) => [entry.email.toLowerCase(), entry]));
+		expect(byEmail.get("auth@example.com")).toMatchObject({
+			sourceType: "auth.json",
+			accountId: "auth-acc",
+		});
+		expect(byEmail.get("legacy-only@example.com")).toMatchObject({
+			sourceType: "accounts.json",
+			accountId: "legacy-only-acc",
+		});
+	});
+
 	it("writes auth.json with backup and preserves unrelated keys", async () => {
 		const codexDir = await createCodexDir("codex-sync-auth-write");
 		const authPath = join(codexDir, "auth.json");

@@ -1456,7 +1456,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			if (!normalized) return undefined;
 
 			const normalizedLower = normalized.toLowerCase();
-			if (homePathPrefix && normalizedLower.startsWith(homePathPrefix)) {
+			if (
+				homePathPrefix &&
+				(normalizedLower === homePathPrefix || normalizedLower.startsWith(`${homePathPrefix}/`))
+			) {
 				const suffix = normalized.slice(homePathPrefix.length);
 				return `~${suffix || "/"}`;
 			}
