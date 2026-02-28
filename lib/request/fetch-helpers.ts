@@ -848,7 +848,7 @@ function parseRetryAfterMs(
         if (retryAfterMsHeader) {
                 const parsed = Number.parseInt(retryAfterMsHeader, 10);
                 if (!Number.isNaN(parsed) && parsed > 0) {
-                        return parsed;
+                        return normalizeRetryAfterMilliseconds(parsed);
                 }
         }
 
@@ -856,7 +856,7 @@ function parseRetryAfterMs(
         if (retryAfterHeader) {
                 const parsed = Number.parseInt(retryAfterHeader, 10);
                 if (!Number.isNaN(parsed) && parsed > 0) {
-                        return parsed * 1000;
+                        return normalizeRetryAfterSeconds(parsed);
                 }
         }
 

@@ -709,6 +709,40 @@ describe('Fetch Helpers Module', () => {
 		expect(rateLimit?.retryAfterMs).toBe(250);
 	});
 
+	it('clamps retry_after_ms zero and negative values to minimum delay', async () => {
+		const zeroResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after_ms: 0 } }),
+			{ status: 429 },
+		);
+		const negativeResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after_ms: -5 } }),
+			{ status: 429 },
+		);
+
+		const zeroRateLimit = await handleErrorResponse(zeroResponse);
+		const negativeRateLimit = await handleErrorResponse(negativeResponse);
+
+		expect(zeroRateLimit.rateLimit?.retryAfterMs).toBe(1);
+		expect(negativeRateLimit.rateLimit?.retryAfterMs).toBe(1);
+	});
+
+	it('clamps retry_after zero and negative values to minimum delay', async () => {
+		const zeroResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after: 0 } }),
+			{ status: 429 },
+		);
+		const negativeResponse = new Response(
+			JSON.stringify({ error: { message: 'rate limited', retry_after: -5 } }),
+			{ status: 429 },
+		);
+
+		const zeroRateLimit = await handleErrorResponse(zeroResponse);
+		const negativeRateLimit = await handleErrorResponse(negativeResponse);
+
+		expect(zeroRateLimit.rateLimit?.retryAfterMs).toBe(1);
+		expect(negativeRateLimit.rateLimit?.retryAfterMs).toBe(1);
+	});
+
 		it('handles millisecond unix timestamp in reset header', async () => {
 			const futureTimestampMs = Date.now() + 45000;
 			const headers = new Headers({ 'x-ratelimit-reset': String(futureTimestampMs) });
