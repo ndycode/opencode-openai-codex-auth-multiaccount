@@ -30,6 +30,7 @@ import {
         createAuthorizationFlow,
         exchangeAuthorizationCode,
         parseAuthorizationInput,
+        AUTHORIZE_URL,
         REDIRECT_URI,
 } from "./lib/auth/auth.js";
 import { queuedRefresh, getRefreshQueueMetrics } from "./lib/refresh-queue.js";
@@ -377,6 +378,36 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				};
 		};
 
+		const MANUAL_OAUTH_ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost"]);
+
+		const getManualOAuthUrlValidationError = (
+			input: string,
+		): string | undefined => {
+			const raw = input.trim();
+			if (!raw) return undefined;
+
+			let parsedUrl: URL;
+			try {
+				parsedUrl = new URL(raw);
+			} catch {
+				return undefined;
+			}
+
+			if (parsedUrl.protocol !== "http:") {
+				return `Invalid callback URL protocol. Use ${REDIRECT_URI}`;
+			}
+			if (!MANUAL_OAUTH_ALLOWED_HOSTS.has(parsedUrl.hostname.toLowerCase())) {
+				return `Invalid callback URL host. Use ${REDIRECT_URI}`;
+			}
+			if (parsedUrl.port !== "1455") {
+				return `Invalid callback URL port. Use ${REDIRECT_URI}`;
+			}
+			if (parsedUrl.pathname !== "/auth/callback") {
+				return `Invalid callback URL path. Use ${REDIRECT_URI}`;
+			}
+			return undefined;
+		};
+
 		const buildManualOAuthFlow = (
 				pkce: { verifier: string },
 				url: string,
@@ -387,6 +418,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 method: "code" as const,
                 instructions: AUTH_LABELS.INSTRUCTIONS_MANUAL,
                 validate: (input: string): string | undefined => {
+                        const callbackValidationError = getManualOAuthUrlValidationError(input);
+                        if (callbackValidationError) {
+                                return callbackValidationError;
+                        }
                         const parsed = parseAuthorizationInput(input);
                         if (!parsed.code) {
                                 return "No authorization code found. Paste the full callback URL (e.g., http://localhost:1455/auth/callback?code=...)";
@@ -400,6 +435,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         return undefined;
                 },
                 callback: async (input: string) => {
+                        const callbackValidationError = getManualOAuthUrlValidationError(input);
+                        if (callbackValidationError) {
+                                return {
+                                        type: "failed" as const,
+                                        reason: "invalid_response" as const,
+                                        message: callbackValidationError,
+                                };
+                        }
                         const parsed = parseAuthorizationInput(input);
                         if (!parsed.code || !parsed.state) {
                                 return {
@@ -437,7 +480,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		forceNewLogin: boolean = false,
 	): Promise<TokenResult> => {
 		const { pkce, state, url } = await createAuthorizationFlow({ forceNewLogin });
-		logInfo(`OAuth URL: ${url}`);
+		logInfo(`OAuth authorization flow initialized at ${AUTHORIZE_URL}`);
 
                 let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null = null;
                 try {

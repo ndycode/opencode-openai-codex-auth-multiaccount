@@ -37,6 +37,7 @@ vi.mock("../lib/auth/auth.js", () => ({
 			state: stateMatch?.[1],
 		};
 	}),
+	AUTHORIZE_URL: "https://auth.openai.com/oauth/authorize",
 	REDIRECT_URI: "http://127.0.0.1:1455/auth/callback",
 }));
 
@@ -489,6 +490,46 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await flow.callback(invalidInput);
 			expect(result.type).toBe("failed");
 			expect(result.reason).toBe("invalid_response");
+			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
+		});
+
+		it("rejects manual OAuth callback URLs with non-localhost host", async () => {
+			const authModule = await import("../lib/auth/auth.js");
+			const manualMethod = plugin.auth.methods[1] as unknown as {
+				authorize: () => Promise<{
+					validate: (input: string) => string | undefined;
+					callback: (input: string) => Promise<{ type: string; reason?: string; message?: string }>;
+				}>;
+			};
+
+			const flow = await manualMethod.authorize();
+			const invalidInput = "http://evil.example/auth/callback?code=abc123&state=test-state";
+			expect(flow.validate(invalidInput)).toContain("Invalid callback URL host");
+
+			const result = await flow.callback(invalidInput);
+			expect(result.type).toBe("failed");
+			expect(result.reason).toBe("invalid_response");
+			expect(result.message).toContain("Invalid callback URL host");
+			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
+		});
+
+		it("rejects manual OAuth callback URLs with unexpected protocol", async () => {
+			const authModule = await import("../lib/auth/auth.js");
+			const manualMethod = plugin.auth.methods[1] as unknown as {
+				authorize: () => Promise<{
+					validate: (input: string) => string | undefined;
+					callback: (input: string) => Promise<{ type: string; reason?: string; message?: string }>;
+				}>;
+			};
+
+			const flow = await manualMethod.authorize();
+			const invalidInput = "https://localhost:1455/auth/callback?code=abc123&state=test-state";
+			expect(flow.validate(invalidInput)).toContain("Invalid callback URL protocol");
+
+			const result = await flow.callback(invalidInput);
+			expect(result.type).toBe("failed");
+			expect(result.reason).toBe("invalid_response");
+			expect(result.message).toContain("Invalid callback URL protocol");
 			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
 		});
 	});
