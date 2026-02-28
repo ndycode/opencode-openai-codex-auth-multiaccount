@@ -13,7 +13,6 @@ vi.mock('node:http', () => {
 		close: vi.fn(),
 		unref: vi.fn(),
 		on: vi.fn(),
-		_lastCode: undefined as string | undefined,
 	};
 
 	return {
@@ -45,13 +44,11 @@ import { logError, logWarn } from '../lib/logger.js';
 describe('OAuth Server Unit Tests', () => {
 	let mockServer: ReturnType<typeof http.createServer> & {
 		_handler?: (req: IncomingMessage, res: ServerResponse) => void;
-		_lastCode?: string;
 	};
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockServer = http.createServer(() => {}) as typeof mockServer;
-		mockServer._lastCode = undefined;
 	});
 
 	afterEach(() => {
@@ -115,9 +112,10 @@ describe('OAuth Server Unit Tests', () => {
 			requestHandler = mockServer._handler!;
 		});
 
-		function createMockRequest(url: string): IncomingMessage {
+		function createMockRequest(url: string, method: string = "GET"): IncomingMessage {
 			const req = new EventEmitter() as IncomingMessage;
 			req.url = url;
+			req.method = method;
 			return req;
 		}
 
@@ -144,6 +142,17 @@ describe('OAuth Server Unit Tests', () => {
 
 			expect(res.statusCode).toBe(404);
 			expect(res.end).toHaveBeenCalledWith('Not found');
+		});
+
+		it('should return 405 for non-GET methods', () => {
+			const req = createMockRequest('/auth/callback?code=abc&state=test-state', 'POST');
+			const res = createMockResponse();
+
+			requestHandler(req, res);
+
+			expect(res.statusCode).toBe(405);
+			expect(res.setHeader).toHaveBeenCalledWith('Allow', 'GET');
+			expect(res.end).toHaveBeenCalledWith('Method not allowed');
 		});
 
 		it('should return 400 for state mismatch', () => {
@@ -180,16 +189,9 @@ describe('OAuth Server Unit Tests', () => {
 				'Content-Security-Policy',
 				"default-src 'self'; script-src 'none'"
 			);
+			expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+			expect(res.setHeader).toHaveBeenCalledWith('Pragma', 'no-cache');
 			expect(res.end).toHaveBeenCalledWith('<html>Success</html>');
-		});
-
-		it('should store the code in server._lastCode', () => {
-			const req = createMockRequest('/auth/callback?code=captured-code&state=test-state');
-			const res = createMockResponse();
-
-			requestHandler(req, res);
-
-			expect(mockServer._lastCode).toBe('captured-code');
 		});
 
 		it('should handle request handler errors gracefully', () => {
@@ -249,6 +251,21 @@ describe('OAuth Server Unit Tests', () => {
 	});
 
 	describe('waitForCode function', () => {
+		function createMockRequest(url: string): IncomingMessage {
+			const req = new EventEmitter() as IncomingMessage;
+			req.url = url;
+			req.method = 'GET';
+			return req;
+		}
+
+		function createMockResponse(): ServerResponse {
+			return {
+				statusCode: 200,
+				setHeader: vi.fn(),
+				end: vi.fn(),
+			} as unknown as ServerResponse;
+		}
+
 		it('should return null immediately when ready=false', async () => {
 			(mockServer.listen as ReturnType<typeof vi.fn>).mockReturnValue(mockServer);
 			(mockServer.on as ReturnType<typeof vi.fn>).mockImplementation(
@@ -278,11 +295,39 @@ describe('OAuth Server Unit Tests', () => {
 			(mockServer.on as ReturnType<typeof vi.fn>).mockReturnValue(mockServer);
 
 			const result = await startLocalOAuthServer({ state: 'test-state' });
-			
-			mockServer._lastCode = 'the-code';
+			mockServer._handler?.(
+				createMockRequest('/auth/callback?code=the-code&state=test-state'),
+				createMockResponse(),
+			);
 			
 			const code = await result.waitForCode('test-state');
 			expect(code).toEqual({ code: 'the-code' });
+		});
+
+		it('should consume captured code only once', async () => {
+			vi.useFakeTimers();
+			(mockServer.listen as ReturnType<typeof vi.fn>).mockImplementation(
+				(_port: number, _host: string, callback: () => void) => {
+					callback();
+					return mockServer;
+				}
+			);
+			(mockServer.on as ReturnType<typeof vi.fn>).mockReturnValue(mockServer);
+
+			const result = await startLocalOAuthServer({ state: 'test-state' });
+			mockServer._handler?.(
+				createMockRequest('/auth/callback?code=one-time-code&state=test-state'),
+				createMockResponse(),
+			);
+
+			const first = await result.waitForCode('test-state');
+			expect(first).toEqual({ code: 'one-time-code' });
+
+			const secondPromise = result.waitForCode('test-state');
+			await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 100);
+			const second = await secondPromise;
+			expect(second).toBeNull();
+			vi.useRealTimers();
 		});
 
 		it('should return null after 5 minute timeout', async () => {

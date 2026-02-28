@@ -16,8 +16,15 @@ const successHtml = fs.readFileSync(path.join(__dirname, "..", "oauth-success.ht
  */
 export function startLocalOAuthServer({ state }: { state: string }): Promise<OAuthServerInfo> {
 	let pollAborted = false;
+	let capturedCode: string | undefined;
 	const server = http.createServer((req, res) => {
 		try {
+			if ((req.method ?? "GET").toUpperCase() !== "GET") {
+				res.statusCode = 405;
+				res.setHeader("Allow", "GET");
+				res.end("Method not allowed");
+				return;
+			}
 			const url = new URL(req.url || "", "http://localhost");
 			if (url.pathname !== "/auth/callback") {
 				res.statusCode = 404;
@@ -40,13 +47,17 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			res.setHeader("X-Frame-Options", "DENY");
 			res.setHeader("X-Content-Type-Options", "nosniff");
 			res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'none'");
+			res.setHeader("Cache-Control", "no-store");
+			res.setHeader("Pragma", "no-cache");
 			res.end(successHtml);
-			(server as http.Server & { _lastCode?: string })._lastCode = code;
-	} catch (err) {
-		logError(`Request handler error: ${(err as Error)?.message ?? String(err)}`);
-		res.statusCode = 500;
-		res.end("Internal error");
-	}
+			if (!capturedCode) {
+				capturedCode = code;
+			}
+		} catch (err) {
+			logError(`Request handler error: ${(err as Error)?.message ?? String(err)}`);
+			res.statusCode = 500;
+			res.end("Internal error");
+		}
 	});
 
 	server.unref();
@@ -61,20 +72,23 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 						pollAborted = true;
 						server.close();
 					},
-				waitForCode: async () => {
-					const POLL_INTERVAL_MS = 100;
-					const TIMEOUT_MS = 5 * 60 * 1000;
-					const maxIterations = Math.floor(TIMEOUT_MS / POLL_INTERVAL_MS);
-					const poll = () => new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
-					for (let i = 0; i < maxIterations; i++) {
-						if (pollAborted) return null;
-						const lastCode = (server as http.Server & { _lastCode?: string })._lastCode;
-						if (lastCode) return { code: lastCode };
-						await poll();
-					}
-					logWarn("OAuth poll timeout after 5 minutes");
-					return null;
-				},
+					waitForCode: async () => {
+						const POLL_INTERVAL_MS = 100;
+						const TIMEOUT_MS = 5 * 60 * 1000;
+						const maxIterations = Math.floor(TIMEOUT_MS / POLL_INTERVAL_MS);
+						const poll = () => new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
+						for (let i = 0; i < maxIterations; i++) {
+							if (pollAborted) return null;
+							if (capturedCode) {
+								const code = capturedCode;
+								capturedCode = undefined;
+								return { code };
+							}
+							await poll();
+						}
+						logWarn("OAuth poll timeout after 5 minutes");
+						return null;
+					},
 				});
 			})
 			.on("error", (err: NodeJS.ErrnoException) => {
@@ -84,14 +98,14 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 				resolve({
 					port: 1455,
 					ready: false,
-				close: () => {
-					pollAborted = true;
-					try {
-						server.close();
-					} catch (err) {
-					logError(`Failed to close OAuth server: ${(err as Error)?.message ?? String(err)}`);
-					}
-				},
+					close: () => {
+						pollAborted = true;
+						try {
+							server.close();
+						} catch (err) {
+							logError(`Failed to close OAuth server: ${(err as Error)?.message ?? String(err)}`);
+						}
+					},
 					waitForCode: () => Promise.resolve(null),
 				});
 			});
