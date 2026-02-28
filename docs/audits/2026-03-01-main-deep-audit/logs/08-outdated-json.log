@@ -1,0 +1,64 @@
+
+=== COMMAND: npm outdated --json ===
+
+{
+  "@opencode-ai/plugin": {
+    "current": "1.2.9",
+    "wanted": "1.2.15",
+    "latest": "1.2.15",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\@opencode-ai\\plugin"
+  },
+  "@opencode-ai/sdk": {
+    "current": "1.2.10",
+    "wanted": "1.2.15",
+    "latest": "1.2.15",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\@opencode-ai\\sdk"
+  },
+  "@types/node": {
+    "current": "25.3.0",
+    "wanted": "25.3.2",
+    "latest": "25.3.2",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\@types\\node"
+  },
+  "@typescript-eslint/eslint-plugin": {
+    "current": "8.56.0",
+    "wanted": "8.56.1",
+    "latest": "8.56.1",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\@typescript-eslint\\eslint-plugin"
+  },
+  "@typescript-eslint/parser": {
+    "current": "8.56.0",
+    "wanted": "8.56.1",
+    "latest": "8.56.1",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\@typescript-eslint\\parser"
+  },
+  "eslint": {
+    "current": "10.0.0",
+    "wanted": "10.0.2",
+    "latest": "10.0.2",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\eslint"
+  },
+  "hono": {
+    "current": "4.12.0",
+    "wanted": "4.12.3",
+    "latest": "4.12.3",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\hono"
+  },
+  "lint-staged": {
+    "current": "16.2.7",
+    "wanted": "16.3.0",
+    "latest": "16.3.0",
+    "dependent": "oc-chatgpt-multi-auth-audit-main-deep-20260301",
+    "location": "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-audit-main-deep-20260301\\node_modules\\lint-staged"
+  }
+}
+
+=== EXIT CODE: 1 ===
+

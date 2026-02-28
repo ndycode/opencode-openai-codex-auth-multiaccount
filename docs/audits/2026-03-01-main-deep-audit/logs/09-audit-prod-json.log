@@ -1,0 +1,59 @@
+
+=== COMMAND: npm audit --omit=dev --json ===
+
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "hono": {
+      "name": "hono",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1113595,
+          "name": "hono",
+          "dependency": "hono",
+          "title": "Hono is Vulnerable to Authentication Bypass by IP Spoofing in AWS Lambda ALB conninfo",
+          "url": "https://github.com/advisories/GHSA-xh87-mx6m-69f3",
+          "severity": "high",
+          "cwe": [
+            "CWE-290",
+            "CWE-345"
+          ],
+          "cvss": {
+            "score": 8.2,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N"
+          },
+          "range": ">=4.12.0 <4.12.2"
+        }
+      ],
+      "effects": [],
+      "range": "4.12.0 - 4.12.1",
+      "nodes": [
+        "node_modules/hono"
+      ],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 1,
+      "critical": 0,
+      "total": 1
+    },
+    "dependencies": {
+      "prod": 10,
+      "dev": 247,
+      "optional": 52,
+      "peer": 7,
+      "peerOptional": 0,
+      "total": 263
+    }
+  }
+}
+
+=== EXIT CODE: 1 ===
+

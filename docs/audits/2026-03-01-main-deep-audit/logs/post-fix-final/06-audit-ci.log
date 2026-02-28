@@ -1,0 +1,19 @@
+
+=== COMMAND: npm run audit:ci ===
+
+
+> oc-chatgpt-multi-auth@5.4.0 audit:ci
+> npm run audit:prod && npm run audit:dev:allowlist
+
+
+> oc-chatgpt-multi-auth@5.4.0 audit:prod
+> npm audit --omit=dev --audit-level=high
+
+found 0 vulnerabilities
+
+> oc-chatgpt-multi-auth@5.4.0 audit:dev:allowlist
+> node scripts/audit-dev-allowlist.js
+
+
+=== EXIT CODE: 0 ===
+
