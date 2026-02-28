@@ -1971,7 +1971,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				lines.push("");
 				lines.push(...formatUiSection(ui, "Recommended next step"));
 				lines.push(formatUiItem(ui, state.nextAction, "accent"));
-				lines.push(formatUiItem(ui, "Guided wizard: codex-setup --wizard", "muted"));
+				lines.push(formatUiItem(ui, "Guided wizard: codex-setup mode=\"wizard\"", "muted"));
 				return lines.join("\n");
 			}
 
@@ -1989,7 +1989,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 			lines.push("");
 			lines.push(`Recommended next step: ${state.nextAction}`);
-			lines.push("Guided wizard: codex-setup --wizard");
+			lines.push("Guided wizard: codex-setup mode=\"wizard\"");
 			return lines.join("\n");
 		};
 
@@ -2104,7 +2104,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						"",
 						formatUiItem(ui, `Selected: ${selectedLabel}`, "accent"),
 						formatUiItem(ui, `Run: ${command}`, "success"),
-						formatUiItem(ui, "Run codex-setup --wizard again to choose another step.", "muted"),
+						formatUiItem(ui, "Run codex-setup mode=\"wizard\" again to choose another step.", "muted"),
 					].join("\n");
 				}
 				return [
@@ -2112,7 +2112,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					`Selected: ${selectedLabel}`,
 					`Run: ${command}`,
 					"",
-					"Run codex-setup --wizard again to choose another step.",
+					"Run codex-setup mode=\"wizard\" again to choose another step.",
 				].join("\n");
 			} catch (error) {
 				const reason = error instanceof Error ? error.message : String(error);
@@ -4298,7 +4298,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push(formatUiItem(ui, "Set account note: codex-note index=2 note=\"weekday primary\""));
 						lines.push(formatUiItem(ui, "Doctor checks: codex-doctor"));
 						lines.push(formatUiItem(ui, "Onboarding checklist: codex-setup"));
-						lines.push(formatUiItem(ui, "Guided setup wizard: codex-setup --wizard"));
+						lines.push(formatUiItem(ui, "Guided setup wizard: codex-setup mode=\"wizard\""));
 						lines.push(formatUiItem(ui, "Best next action: codex-next"));
 						lines.push(formatUiItem(ui, "Rename account label: codex-label index=2 label=\"Work\""));
 						lines.push(formatUiItem(ui, "Command guide: codex-help"));
@@ -4357,7 +4357,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					lines.push("  - Set account note: codex-note");
                                         lines.push("  - Doctor checks: codex-doctor");
                                         lines.push("  - Setup checklist: codex-setup");
-                                        lines.push("  - Guided setup wizard: codex-setup --wizard");
+                                        lines.push("  - Guided setup wizard: codex-setup mode=\"wizard\"");
                                         lines.push("  - Best next action: codex-next");
                                         lines.push("  - Rename account label: codex-label");
                                         lines.push("  - Command guide: codex-help");
@@ -4839,7 +4839,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								"2) Verify account health: codex-health",
 								"3) View account list: codex-list",
 								"4) Run checklist: codex-setup",
-								"5) Use guided wizard: codex-setup --wizard",
+								"5) Use guided wizard: codex-setup mode=\"wizard\"",
 								"6) Start requests and monitor: codex-dashboard",
 							],
 						},
@@ -4866,9 +4866,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 								"Verify token health: codex-health",
 								"Refresh all tokens: codex-refresh",
 								"Run diagnostics: codex-doctor",
-								"Run diagnostics with fixes: codex-doctor --fix",
+								"Run diagnostics with fixes: codex-doctor mode=\"fix\"",
 								"Show best next action: codex-next",
-								"Run guided wizard: codex-setup --wizard",
+								"Run guided wizard: codex-setup mode=\"wizard\"",
 							],
 						},
 						{
@@ -4923,7 +4923,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						}
 						lines.push(...formatUiSection(ui, "Tips"));
 						lines.push(formatUiItem(ui, "Run codex-setup after adding accounts."));
-						lines.push(formatUiItem(ui, "Use codex-setup --wizard for menu-driven onboarding."));
+						lines.push(formatUiItem(ui, "Use codex-setup mode=\"wizard\" for menu-driven onboarding."));
 						lines.push(formatUiItem(ui, "Use codex-doctor when request failures increase."));
 						return lines.join("\n").trimEnd();
 					}
@@ -4938,7 +4938,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 					lines.push("Tips:");
 					lines.push("  - Run codex-setup after adding accounts.");
-					lines.push("  - Use codex-setup --wizard for menu-driven onboarding.");
+					lines.push("  - Use codex-setup mode=\"wizard\" for menu-driven onboarding.");
 					lines.push("  - Use codex-doctor when request failures increase.");
 					return lines.join("\n");
 				},
@@ -4946,15 +4946,36 @@ while (attempted.size < Math.max(1, accountCount)) {
 			"codex-setup": tool({
 				description: "Beginner checklist for first-time setup and account readiness.",
 				args: {
+					mode: tool.schema
+						.string()
+						.optional()
+						.describe("Optional mode: checklist | wizard. Preferred over boolean wizard for clearer intent."),
 					wizard: tool.schema
 						.boolean()
 						.optional()
-						.describe("Launch menu-driven setup wizard when terminal supports it."),
+						.describe("Legacy alias for mode=\"wizard\" (backward compatible)."),
 				},
-				async execute({ wizard }: { wizard?: boolean } = {}) {
+				async execute({ mode, wizard }: { mode?: string; wizard?: boolean } = {}) {
+					const normalizedMode = mode?.trim().toLowerCase();
+					if (
+						mode !== undefined &&
+						(!normalizedMode || (normalizedMode !== "checklist" && normalizedMode !== "wizard"))
+					) {
+						return `Invalid mode: ${mode}\n\nValid modes: checklist, wizard`;
+					}
+					if (normalizedMode) {
+						const wizardFromMode = normalizedMode === "wizard";
+						if (wizard !== undefined && wizard !== wizardFromMode) {
+							return `Conflicting setup options: mode="${normalizedMode}" implies wizard=${wizardFromMode}, but wizard=${wizard} was provided.`;
+						}
+					}
+
+					const useWizard = normalizedMode
+						? normalizedMode === "wizard"
+						: !!wizard;
 					const ui = resolveUiRuntime();
 					const state = await buildSetupChecklistState();
-					if (wizard) {
+					if (useWizard) {
 						return runSetupWizard(ui, state);
 					}
 					return renderSetupChecklistOutput(ui, state);
@@ -4963,16 +4984,44 @@ while (attempted.size < Math.max(1, accountCount)) {
 			"codex-doctor": tool({
 				description: "Run beginner-friendly diagnostics with clear fixes.",
 				args: {
+					mode: tool.schema
+						.string()
+						.optional()
+						.describe("Optional mode: standard | deep | fix. Preferred over individual booleans for clearer intent."),
 					deep: tool.schema
 						.boolean()
 						.optional()
-						.describe("Include technical snapshot details (default: false)."),
+						.describe("Legacy flag. Equivalent to mode=\"deep\" (backward compatible)."),
 					fix: tool.schema
 						.boolean()
 						.optional()
-						.describe("Apply safe automated fixes (refresh tokens and switch to healthiest eligible account)."),
+						.describe("Legacy flag. Equivalent to mode=\"fix\" (backward compatible)."),
 				},
-				async execute({ deep, fix }: { deep?: boolean; fix?: boolean } = {}) {
+				async execute({ mode, deep, fix }: { mode?: string; deep?: boolean; fix?: boolean } = {}) {
+					const normalizedMode = mode?.trim().toLowerCase();
+					if (
+						mode !== undefined &&
+						(!normalizedMode ||
+							(normalizedMode !== "standard" && normalizedMode !== "deep" && normalizedMode !== "fix"))
+					) {
+						return `Invalid mode: ${mode}\n\nValid modes: standard, deep, fix`;
+					}
+
+					let deepMode = !!deep;
+					let fixMode = !!fix;
+					if (normalizedMode) {
+						const expectedDeep = normalizedMode === "deep";
+						const expectedFix = normalizedMode === "fix";
+						if (deep !== undefined && deep !== expectedDeep) {
+							return `Conflicting doctor options: mode="${normalizedMode}" implies deep=${expectedDeep}, but deep=${deep} was provided.`;
+						}
+						if (fix !== undefined && fix !== expectedFix) {
+							return `Conflicting doctor options: mode="${normalizedMode}" implies fix=${expectedFix}, but fix=${fix} was provided.`;
+						}
+						deepMode = expectedDeep;
+						fixMode = expectedFix;
+					}
+
 					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
 					const now = Date.now();
@@ -4994,7 +5043,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const appliedFixes: string[] = [];
 					const fixErrors: string[] = [];
 
-					if (fix && storage && storage.accounts.length > 0) {
+					if (fixMode && storage && storage.accounts.length > 0) {
 						let changedByRefresh = false;
 						let refreshedCount = 0;
 						for (const account of storage.accounts) {
@@ -5096,7 +5145,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push("");
 						lines.push(...formatUiSection(ui, "Recommended next step"));
 						lines.push(formatUiItem(ui, nextAction, "accent"));
-						if (fix) {
+						if (fixMode) {
 							lines.push("");
 							lines.push(...formatUiSection(ui, "Auto-fix"));
 							if (appliedFixes.length === 0) {
@@ -5111,7 +5160,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							}
 						}
 
-						if (deep) {
+						if (deepMode) {
 							lines.push("");
 							lines.push(...formatUiSection(ui, "Technical snapshot"));
 							lines.push(formatUiKeyValue(ui, "Storage", getStoragePath(), "muted"));
@@ -5141,7 +5190,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 					lines.push("");
 					lines.push(`Recommended next step: ${nextAction}`);
-					if (fix) {
+					if (fixMode) {
 						lines.push("");
 						lines.push("Auto-fix:");
 						if (appliedFixes.length === 0) {
@@ -5155,7 +5204,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							lines.push(`  - warning: ${error}`);
 						}
 					}
-					if (deep) {
+					if (deepMode) {
 						lines.push("");
 						lines.push("Technical snapshot:");
 						lines.push(`  Storage: ${getStoragePath()}`);

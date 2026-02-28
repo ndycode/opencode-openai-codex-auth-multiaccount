@@ -14,6 +14,7 @@ Welcome to the OpenCode OpenAI Codex Auth Plugin documentation.
 Explore the engineering depth behind this plugin:
 
 - **[Architecture](development/ARCHITECTURE.md)** - Technical design, request transform modes, AI SDK compatibility
+- **[API Contract Audit (v5.4.0)](development/API_CONTRACT_AUDIT_v5.4.0.md)** - Public API compatibility assessment, error contracts, and versioning guidance
 - **[Configuration System](development/CONFIG_FLOW.md)** - How config loading and merging works
 - **[Config Fields Guide](development/CONFIG_FIELDS.md)** - Understanding config keys, `id`, and `name`
 - **[Testing Guide](development/TESTING.md)** - Test scenarios, verification procedures, integration testing

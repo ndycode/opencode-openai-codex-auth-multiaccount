@@ -472,12 +472,12 @@ The plugin now includes a beginner-focused operational layer in `index.ts` and `
 
 2. **Checklist and wizard flow**
    - `codex-setup` renders a checklist (`add account`, `set active`, `verify health`, `label accounts`, `learn commands`).
-   - `codex-setup wizard=true` launches an interactive menu when terminal supports TTY interaction.
+   - `codex-setup mode="wizard"` launches an interactive menu when terminal supports TTY interaction (legacy `wizard=true` remains supported).
    - Wizard gracefully falls back to checklist output when menus are unavailable.
 
 3. **Doctor + next-action diagnostics**
    - `codex-doctor` maps runtime/account states into severity findings (`ok`, `warning`, `error`) with specific action text.
-   - `codex-doctor fix=true` performs safe remediation:
+   - `codex-doctor mode="fix"` performs safe remediation (legacy `fix=true` remains supported):
      - refreshes tokens using queued refresh,
      - persists refreshed credentials,
      - switches active account to healthiest eligible account when beneficial.

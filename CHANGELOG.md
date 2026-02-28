@@ -7,6 +7,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 ### added
 
 - **beginner operations toolkit**: added `codex-help`, `codex-setup` (with `wizard` mode + fallback), `codex-doctor` (`fix` mode), and `codex-next` for guided onboarding and recovery.
+- **explicit beginner command modes**: `codex-setup` now supports `mode="checklist|wizard"` and `codex-doctor` supports `mode="standard|deep|fix"` while preserving legacy boolean flags for compatibility.
 - **account metadata commands**: added `codex-tag` and `codex-note`, plus `codex-list` tag filtering.
 - **interactive account pickers**: `codex-switch`, `codex-label`, and `codex-remove` now support optional index with interactive selection in compatible terminals.
 - **backup/import safety controls**: `codex-export` now supports auto timestamped backup paths; `codex-import` adds `dryRun` preview and automatic pre-import backup on apply.
@@ -18,6 +19,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **account storage schema**: V3 account metadata now includes optional `accountTags` and `accountNote`.
 - **docs refresh for operational flows**: README + docs portal/development guides updated to reflect beginner commands, safe mode, interactive picker behavior, and backup/import safeguards.
 - **test matrix expansion**: coverage now includes beginner UI helpers, safe-fix diagnostics edge cases, tag/note command behavior, and timestamped backup/import preview utilities.
+- **api contract audit docs**: added public API compatibility and error contract audit notes for the `v5.3.4..HEAD` range.
 
 ### fixed
 
