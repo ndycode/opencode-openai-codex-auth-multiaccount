@@ -33,6 +33,8 @@ export enum AuditAction {
 	ACCOUNT_REFRESH = "account.refresh",
 	ACCOUNT_EXPORT = "account.export",
 	ACCOUNT_IMPORT = "account.import",
+	ACCOUNT_SYNC_PULL = "account.sync.pull",
+	ACCOUNT_SYNC_PUSH = "account.sync.push",
 	AUTH_LOGIN = "auth.login",
 	AUTH_LOGOUT = "auth.logout",
 	AUTH_REFRESH = "auth.refresh",

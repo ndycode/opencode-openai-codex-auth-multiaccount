@@ -17,6 +17,8 @@ Use this checklist to keep `oc-chatgpt-multi-auth` aligned with the Antigravity-
   - `Danger zone`
 - Core actions visible:
   - `Add account`
+  - `Sync from Codex`
+  - `Sync to Codex`
   - `Check quotas`
   - `Deep probe accounts`
   - `Verify flagged accounts`
@@ -83,6 +85,7 @@ Use this checklist to keep `oc-chatgpt-multi-auth` aligned with the Antigravity-
 
 - `codex-list` reflects account states and active selection.
 - `codex-status` shows per-family active index and account-level state details.
+- `codex-sync` supports `direction="pull"` and `direction="push"` without exposing tokens in output.
 - `codex-import` and `codex-export` remain compatible with multi-account storage.
 
 ## Verification Checklist (Before Release)

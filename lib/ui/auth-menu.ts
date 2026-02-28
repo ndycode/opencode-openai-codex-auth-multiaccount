@@ -32,6 +32,8 @@ export interface AuthMenuOptions {
 
 export type AuthMenuAction =
 	| { type: "add" }
+	| { type: "sync-from-codex" }
+	| { type: "sync-to-codex" }
 	| { type: "fresh" }
 	| { type: "check" }
 	| { type: "deep-check" }
@@ -140,6 +142,8 @@ export async function showAuthMenu(
 	const items: MenuItem<AuthMenuAction>[] = [
 		{ label: "Actions", value: { type: "cancel" }, kind: "heading" },
 		{ label: "Add account", value: { type: "add" }, color: "cyan" },
+		{ label: "Sync from Codex", value: { type: "sync-from-codex" }, color: "cyan" },
+		{ label: "Sync to Codex", value: { type: "sync-to-codex" }, color: "cyan" },
 		{ label: "Check quotas", value: { type: "check" }, color: "cyan" },
 		{ label: "Deep check accounts", value: { type: "deep-check" }, color: "cyan" },
 		{ label: verifyLabel, value: { type: "verify-flagged" }, color: "cyan" },

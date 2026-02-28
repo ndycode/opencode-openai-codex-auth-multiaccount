@@ -72,4 +72,16 @@ describe("auth-menu", () => {
 			expect.stringContaining("shared@example.com | workspace:Workspace A | id:org-aaaa...bb2222"),
 		);
 	});
+
+	it("supports sync-from-codex action", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "sync-from-codex" });
+		const action = await showAuthMenu([]);
+		expect(action).toEqual({ type: "sync-from-codex" });
+	});
+
+	it("supports sync-to-codex action", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "sync-to-codex" });
+		const action = await showAuthMenu([]);
+		expect(action).toEqual({ type: "sync-to-codex" });
+	});
 });
