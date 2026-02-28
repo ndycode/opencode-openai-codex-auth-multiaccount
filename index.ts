@@ -1348,22 +1348,49 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 		};
 
+		const WINDOWS_SYNC_RETRY_ATTEMPTS = 6;
+		const WINDOWS_SYNC_RETRY_BASE_DELAY_MS = 25;
+
+		const isWindowsSyncLockError = (error: unknown): boolean => {
+			const code = (error as NodeJS.ErrnoException)?.code;
+			return code === "EPERM" || code === "EBUSY";
+		};
+
+		const runWithWindowsSyncRetry = async <T>(operation: () => Promise<T>): Promise<T> => {
+			let lastError: unknown;
+			for (let attempt = 0; attempt < WINDOWS_SYNC_RETRY_ATTEMPTS; attempt += 1) {
+				try {
+					return await operation();
+				} catch (error) {
+					if (!isWindowsSyncLockError(error) || attempt === WINDOWS_SYNC_RETRY_ATTEMPTS - 1) {
+						throw error;
+					}
+					lastError = error;
+					await new Promise<void>((resolve) =>
+						setTimeout(resolve, WINDOWS_SYNC_RETRY_BASE_DELAY_MS * 2 ** attempt),
+					);
+				}
+			}
+			throw lastError;
+		};
+
 		const rollbackPartialCodexAuthWrite = async (
 			authWrite: CodexWriteResult | undefined,
 		): Promise<string | null> => {
 			if (!authWrite) return null;
 
 			try {
-				if (authWrite.backupPath) {
-					await fs.copyFile(authWrite.backupPath, authWrite.path);
+				const backupPath = authWrite.backupPath;
+				if (backupPath) {
+					await runWithWindowsSyncRetry(() => fs.copyFile(backupPath, authWrite.path));
 					try {
-						await fs.unlink(authWrite.backupPath);
+						await runWithWindowsSyncRetry(() => fs.unlink(backupPath));
 					} catch {
 						// Best-effort cleanup of backup created by failed sync push.
 					}
 				} else {
 					try {
-						await fs.unlink(authWrite.path);
+						await runWithWindowsSyncRetry(() => fs.unlink(authWrite.path));
 					} catch (error) {
 						const code = (error as NodeJS.ErrnoException).code;
 						if (code !== "ENOENT") {
