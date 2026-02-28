@@ -763,6 +763,13 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("wizard");
 		});
 
+		it("rejects empty or whitespace setup mode values", async () => {
+			const emptyResult = await plugin.tool["codex-setup"].execute({ mode: "" });
+			expect(emptyResult).toContain("Invalid mode");
+			const whitespaceResult = await plugin.tool["codex-setup"].execute({ mode: "   " });
+			expect(whitespaceResult).toContain("Invalid mode");
+		});
+
 		it("rejects conflicting setup options", async () => {
 			const result = await plugin.tool["codex-setup"].execute({
 				mode: "checklist",
@@ -843,6 +850,13 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("standard");
 			expect(result).toContain("deep");
 			expect(result).toContain("fix");
+		});
+
+		it("rejects empty or whitespace doctor mode values", async () => {
+			const emptyResult = await plugin.tool["codex-doctor"].execute({ mode: "" });
+			expect(emptyResult).toContain("Invalid mode");
+			const whitespaceResult = await plugin.tool["codex-doctor"].execute({ mode: "   " });
+			expect(whitespaceResult).toContain("Invalid mode");
 		});
 
 		it("rejects conflicting doctor mode and flags", async () => {

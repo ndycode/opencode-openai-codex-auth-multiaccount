@@ -4514,7 +4514,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 				},
 				async execute({ mode, wizard }: { mode?: string; wizard?: boolean } = {}) {
 					const normalizedMode = mode?.trim().toLowerCase();
-					if (normalizedMode && normalizedMode !== "checklist" && normalizedMode !== "wizard") {
+					if (
+						mode !== undefined &&
+						(!normalizedMode || (normalizedMode !== "checklist" && normalizedMode !== "wizard"))
+					) {
 						return `Invalid mode: ${mode}\n\nValid modes: checklist, wizard`;
 					}
 					if (normalizedMode) {
@@ -4553,7 +4556,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 				},
 				async execute({ mode, deep, fix }: { mode?: string; deep?: boolean; fix?: boolean } = {}) {
 					const normalizedMode = mode?.trim().toLowerCase();
-					if (normalizedMode && normalizedMode !== "standard" && normalizedMode !== "deep" && normalizedMode !== "fix") {
+					if (
+						mode !== undefined &&
+						(!normalizedMode ||
+							(normalizedMode !== "standard" && normalizedMode !== "deep" && normalizedMode !== "fix"))
+					) {
 						return `Invalid mode: ${mode}\n\nValid modes: standard, deep, fix`;
 					}
 
