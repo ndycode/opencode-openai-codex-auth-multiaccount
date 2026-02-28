@@ -525,12 +525,65 @@ export function findSyncIndexByIdentity(
 	identityKeys: string[],
 ): number {
 	if (identityKeys.length === 0) return -1;
+
+	const target = {
+		organizationId: "",
+		accountId: "",
+		refreshToken: "",
+	};
 	for (const key of identityKeys) {
-		const index = accounts.findIndex((candidate) =>
-			collectSyncIdentityKeys(candidate).includes(key),
-		);
-		if (index >= 0) return index;
+		if (key.startsWith("organizationId:")) {
+			target.organizationId = key.slice("organizationId:".length);
+		}
+		if (key.startsWith("accountId:")) {
+			target.accountId = key.slice("accountId:".length);
+		}
+		if (key.startsWith("refreshToken:")) {
+			target.refreshToken = key.slice("refreshToken:".length);
+		}
 	}
+
+	for (let index = 0; index < accounts.length; index += 1) {
+		const candidate = accounts[index];
+		if (!candidate) continue;
+
+		const candidateOrg = getNonEmptyString(candidate.organizationId) ?? "";
+		const candidateAccountId = getNonEmptyString(candidate.accountId) ?? "";
+		const candidateRefreshToken = getNonEmptyString(candidate.refreshToken) ?? "";
+
+		const refreshMatch =
+			target.refreshToken.length > 0 && target.refreshToken === candidateRefreshToken;
+		const accountMatch =
+			target.accountId.length > 0 && target.accountId === candidateAccountId;
+
+		if (refreshMatch || accountMatch) {
+			if (
+				refreshMatch &&
+				target.accountId.length > 0 &&
+				candidateAccountId.length > 0 &&
+				target.accountId !== candidateAccountId
+			) {
+				continue;
+			}
+			if (
+				target.organizationId.length > 0 &&
+				candidateOrg.length > 0 &&
+				target.organizationId !== candidateOrg
+			) {
+				continue;
+			}
+			return index;
+		}
+	}
+
+	const hasStrongIdentity = target.accountId.length > 0 || target.refreshToken.length > 0;
+	if (!hasStrongIdentity && target.organizationId.length > 0) {
+		return accounts.findIndex((candidate) => {
+			const candidateOrg = getNonEmptyString(candidate.organizationId);
+			return candidateOrg === target.organizationId;
+		});
+	}
+
 	return -1;
 }
 

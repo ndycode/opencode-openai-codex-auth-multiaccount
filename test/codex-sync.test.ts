@@ -58,7 +58,7 @@ describe("codex-sync", () => {
 		]);
 	});
 
-	it("finds sync index by any identity key", () => {
+	it("finds sync index by strong identity keys", () => {
 		const accounts = [
 			{ organizationId: "org-1", accountId: "acc-1", refreshToken: "refresh-1" },
 			{ organizationId: "org-2", accountId: "acc-2", refreshToken: "refresh-2" },
@@ -70,6 +70,20 @@ describe("codex-sync", () => {
 		expect(byAccountId).toBe(1);
 		expect(byRefresh).toBe(0);
 		expect(missing).toBe(-1);
+	});
+
+	it("does not merge on refresh-token match when account identity conflicts", () => {
+		const accounts = [
+			{ organizationId: "org-1", accountId: "acc-1", refreshToken: "refresh-1" },
+		];
+
+		const conflicting = findSyncIndexByIdentity(accounts, [
+			"organizationId:org-1",
+			"accountId:acc-2",
+			"refreshToken:refresh-1",
+		]);
+
+		expect(conflicting).toBe(-1);
 	});
 
 	it("prefers auth.json over legacy accounts.json during discovery", async () => {
@@ -589,6 +603,67 @@ describe("codex-sync", () => {
 		expect(saved.accounts).toHaveLength(1);
 		expect(saved.accounts[0]?.accessToken).toBe(newAccess);
 		expect(saved.activeIndex).toBe(0);
+	});
+
+	it("creates a new pool account when only organization matches but account identities differ", async () => {
+		const codexDir = await createCodexDir("codex-sync-pool-org-collision");
+		const poolDir = join(codexDir, "multi-auth");
+		await mkdir(poolDir, { recursive: true });
+		const poolPath = join(poolDir, "openai-codex-accounts.json");
+
+		await writeFile(
+			poolPath,
+			JSON.stringify(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: { codex: 0, "gpt-5-codex": 0, "codex-max": 0 },
+					accounts: [
+						{
+							organizationId: "org-shared",
+							accountId: "pool-acc-1",
+							email: "pool1@example.com",
+							refreshToken: "pool-refresh-1",
+							accessToken: "old-access-1",
+							addedAt: Date.now() - 1000,
+							lastUsed: Date.now() - 1000,
+						},
+					],
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		const newAccess = createJwt({
+			exp: Math.floor(Date.now() / 1000) + 7200,
+			"https://api.openai.com/auth": {
+				chatgpt_account_id: "pool-acc-2",
+			},
+		});
+		const result = await writeCodexMultiAuthPool(
+			{
+				accessToken: newAccess,
+				refreshToken: "pool-refresh-2",
+				accountId: "pool-acc-2",
+				email: "pool2@example.com",
+				organizationId: "org-shared",
+			},
+			{ codexDir },
+		);
+
+		expect(result.created).toBe(true);
+		expect(result.updated).toBe(false);
+		expect(result.totalAccounts).toBe(2);
+		expect(result.activeIndex).toBe(1);
+
+		const saved = JSON.parse(await readFile(poolPath, "utf-8")) as {
+			accounts: Array<{ accessToken?: string }>;
+		};
+		expect(saved.accounts).toHaveLength(2);
+		expect(saved.accounts[0]?.accessToken).toBe("old-access-1");
+		expect(saved.accounts[1]?.accessToken).toBe(newAccess);
 	});
 
 	it("fails closed when existing pool file is malformed", async () => {

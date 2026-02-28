@@ -26,6 +26,7 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
         createAuthorizationFlow,
@@ -1384,12 +1385,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		const rollbackPartialCodexAuthWrite = async (
 			authWrite: CodexWriteResult | undefined,
 		): Promise<string | null> => {
-			if (!authWrite) return null;
+			return rollbackPartialCodexWrite(authWrite, "Codex auth.json");
+		};
+
+		const rollbackPartialCodexMultiAuthPoolWrite = async (
+			poolWrite: CodexWriteResult | undefined,
+		): Promise<string | null> => {
+			return rollbackPartialCodexWrite(poolWrite, "Codex multi-auth pool");
+		};
+
+		const rollbackPartialCodexWrite = async (
+			writeResult: CodexWriteResult | undefined,
+			label: string,
+		): Promise<string | null> => {
+			if (!writeResult) return null;
 
 			try {
-				const backupPath = authWrite.backupPath;
+				const backupPath = writeResult.backupPath;
 				if (backupPath) {
-					await runWithWindowsSyncRetry(() => fs.copyFile(backupPath, authWrite.path));
+					await runWithWindowsSyncRetry(() => fs.copyFile(backupPath, writeResult.path));
 					try {
 						await runWithWindowsSyncRetry(() => fs.unlink(backupPath));
 					} catch {
@@ -1397,7 +1411,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 				} else {
 					try {
-						await runWithWindowsSyncRetry(() => fs.unlink(authWrite.path));
+						await runWithWindowsSyncRetry(() => fs.unlink(writeResult.path));
 					} catch (error) {
 						const code = (error as NodeJS.ErrnoException).code;
 						if (code !== "ENOENT") {
@@ -1408,14 +1422,32 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return null;
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				logWarn("Failed to rollback partial Codex auth.json write", {
+				logWarn(`Failed to rollback partial ${label} write`, {
 					error: message,
-					path: authWrite.path,
-					backupPath: authWrite.backupPath,
+					path: writeResult.path,
+					backupPath: writeResult.backupPath,
 				});
 				return message;
 			}
 		};
+
+		const hashSyncAuditValue = (
+			raw: string | undefined,
+			prefix: "email" | "account",
+		): string | undefined => {
+			const normalized = raw?.trim();
+			if (!normalized) return undefined;
+			const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+			return `${prefix}:${digest}`;
+		};
+
+		const buildSyncAuditIdentity = (
+			email: string | undefined,
+			accountId: string | undefined,
+		): { hashedEmail?: string; hashedAccountId?: string } => ({
+			hashedEmail: hashSyncAuditValue(sanitizeEmail(email), "email"),
+			hashedAccountId: hashSyncAuditValue(accountId, "account"),
+		});
 
 		const syncFromCodexToPlugin = async (): Promise<SyncSummary> => {
 			try {
@@ -1521,6 +1553,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					updated,
 					notes: [],
 				};
+				const syncIdentity = buildSyncAuditIdentity(inferredEmail, inferredAccountId);
 				auditLog(
 					AuditAction.ACCOUNT_SYNC_PULL,
 					"sync",
@@ -1534,8 +1567,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						updated: summary.updated,
 						totalAccounts: summary.totalAccounts,
 						activeIndex: summary.activeIndex,
-						email: inferredEmail,
-						accountId: inferredAccountId,
+						hashedEmail: syncIdentity.hashedEmail,
+						hashedAccountId: syncIdentity.hashedAccountId,
 					},
 				);
 				return summary;
@@ -1632,12 +1665,23 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					authWrite = await writeCodexAuthJsonSession(payload);
 					poolWrite = await writeCodexMultiAuthPool(payload);
 				} catch (writeError) {
-					const rollbackError = await rollbackPartialCodexAuthWrite(authWrite);
-					if (rollbackError) {
+					const rollbackErrors: string[] = [];
+					const poolRollbackError =
+						await rollbackPartialCodexMultiAuthPoolWrite(poolWrite);
+					if (poolRollbackError) {
+						rollbackErrors.push(
+							`multi-auth pool rollback failed: ${poolRollbackError}`,
+						);
+					}
+					const authRollbackError = await rollbackPartialCodexAuthWrite(authWrite);
+					if (authRollbackError) {
+						rollbackErrors.push(`auth.json rollback failed: ${authRollbackError}`);
+					}
+					if (rollbackErrors.length > 0) {
 						const writeMessage =
 							writeError instanceof Error ? writeError.message : String(writeError);
 						throw new Error(
-							`Failed to sync plugin account to Codex (${writeMessage}). Rollback of auth.json also failed: ${rollbackError}`,
+							`Failed to sync plugin account to Codex (${writeMessage}). ${rollbackErrors.join("; ")}`,
 							{
 								cause: writeError instanceof Error ? writeError : undefined,
 							},
@@ -1666,6 +1710,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					updated: poolWrite.updated ? 1 : 0,
 					notes,
 				};
+				const syncIdentity = buildSyncAuditIdentity(payload.email, payload.accountId);
 				auditLog(
 					AuditAction.ACCOUNT_SYNC_PUSH,
 					"sync",
@@ -1679,8 +1724,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						updated: summary.updated,
 						totalAccounts: summary.totalAccounts,
 						activeIndex: summary.activeIndex,
-						email: payload.email,
-						accountId: payload.accountId,
+						hashedEmail: syncIdentity.hashedEmail,
+						hashedAccountId: syncIdentity.hashedAccountId,
 					},
 				);
 				return summary;

@@ -58,6 +58,6 @@
 - `npm run lint`: pass
 - `npm run typecheck`: pass
 - `npm run build`: pass
-- `npm test`: pass (`1836/1836`)
-- `npm run coverage`: pass (`89.2 statements / 81.05 branches / 95.7 functions / 91.48 lines`)
+- `npm test`: pass (`1838/1838`)
+- `npm run coverage`: pass (`89.19 statements / 81.02 branches / 95.57 functions / 91.48 lines`)
 - `npm run audit:ci`: pass (`0` prod vulnerabilities; no unexpected high/critical dev advisories)
