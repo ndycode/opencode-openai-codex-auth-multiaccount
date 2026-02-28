@@ -1,0 +1,25 @@
+
+> oc-chatgpt-multi-auth@5.4.0 lint
+> npm run lint:ts && npm run lint:scripts
+
+
+> oc-chatgpt-multi-auth@5.4.0 lint:ts
+> eslint . --ext .ts
+
+
+C:\Users\neil\DevTools\oc-chatgpt-multi-auth-audit-20260228-111254\coverage\block-navigation.js
+  1:1  warning  Unused eslint-disable directive (no problems were reported)
+
+C:\Users\neil\DevTools\oc-chatgpt-multi-auth-audit-20260228-111254\coverage\prettify.js
+  1:1  warning  Unused eslint-disable directive (no problems were reported)
+
+C:\Users\neil\DevTools\oc-chatgpt-multi-auth-audit-20260228-111254\coverage\sorter.js
+  1:1  warning  Unused eslint-disable directive (no problems were reported)
+
+✖ 3 problems (0 errors, 3 warnings)
+  0 errors and 3 warnings potentially fixable with the `--fix` option.
+
+
+> oc-chatgpt-multi-auth@5.4.0 lint:scripts
+> eslint scripts --ext .js
+

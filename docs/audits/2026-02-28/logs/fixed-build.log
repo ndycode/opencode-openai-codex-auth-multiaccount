@@ -1,0 +1,4 @@
+
+> oc-chatgpt-multi-auth@5.4.0 build
+> tsc && node scripts/copy-oauth-success.js
+
