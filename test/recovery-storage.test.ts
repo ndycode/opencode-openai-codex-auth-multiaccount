@@ -43,17 +43,15 @@ beforeEach(async () => {
 
 describe("RecoveryStorage", () => {
   describe("generatePartId", () => {
-    it("should include prefix, timestamp, and random", () => {
+    it("should include prefix, timestamp, and random hex suffix", () => {
       const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1700000000000);
-      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.123456789);
 
       const id = storage.generatePartId();
 
-      expect(id).toMatch(/^prt_[0-9a-f]+[a-z0-9]{8}$/);
+      expect(id).toMatch(/^prt_[0-9a-f]+[a-f0-9]{8}$/);
       expect(id).toContain((1700000000000).toString(16));
 
       nowSpy.mockRestore();
-      randomSpy.mockRestore();
     });
   });
 
@@ -236,7 +234,7 @@ describe("RecoveryStorage", () => {
       expect(fsMock.writeFileSync).toHaveBeenCalledTimes(1);
 
       const [filePath, payload] = fsMock.writeFileSync.mock.calls[0] ?? [];
-      expect(filePath).toMatch(/prt_[0-9a-f]+[a-z0-9]+\.json$/);
+      expect(filePath).toMatch(/prt_[0-9a-f]+[a-f0-9]+\.json$/);
       const parsed = JSON.parse(payload);
       expect(parsed).toMatchObject({
         sessionID,

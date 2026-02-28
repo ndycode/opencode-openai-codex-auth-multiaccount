@@ -5,6 +5,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { MESSAGE_STORAGE, PART_STORAGE, THINKING_TYPES, META_TYPES } from "./constants.js";
 import type { StoredMessageMeta, StoredPart, StoredTextPart } from "./types.js";
@@ -23,7 +24,7 @@ function validatePathId(id: string, name: string): void {
 
 export function generatePartId(): string {
   const timestamp = Date.now().toString(16);
-  const random = Math.random().toString(36).substring(2, 10);
+  const random = randomBytes(4).toString("hex");
   return `prt_${timestamp}${random}`;
 }
 

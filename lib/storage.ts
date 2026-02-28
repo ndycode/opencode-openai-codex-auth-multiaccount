@@ -174,7 +174,7 @@ async function writeFileWithTimeout(filePath: string, content: string, timeoutMs
 }
 
 async function writePreImportBackupFile(backupPath: string, snapshot: AccountStorageV3): Promise<void> {
-  const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const uniqueSuffix = `${Date.now()}.${randomBytes(6).toString("hex")}`;
   const tempPath = `${backupPath}.${uniqueSuffix}.tmp`;
 
   try {
@@ -862,7 +862,7 @@ async function loadAccountsInternal(
 
 async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
   const path = getStoragePath();
-  const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const uniqueSuffix = `${Date.now()}.${randomBytes(6).toString("hex")}`;
   const tempPath = `${path}.${uniqueSuffix}.tmp`;
 
   try {
@@ -1098,7 +1098,7 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
 	return withStorageLock(async () => {
 		const path = getFlaggedAccountsPath();
-		const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+		const uniqueSuffix = `${Date.now()}.${randomBytes(6).toString("hex")}`;
 		const tempPath = `${path}.${uniqueSuffix}.tmp`;
 
 		try {
