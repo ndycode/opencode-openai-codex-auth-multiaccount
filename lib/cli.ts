@@ -123,7 +123,12 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
 			if (normalized === "s" || normalized === "sync" || normalized === "sync-from-codex") {
 				return { mode: "sync-from-codex" };
 			}
-			if (normalized === "p" || normalized === "push" || normalized === "sync-to-codex") {
+			if (
+				normalized === "p" ||
+				normalized === "push" ||
+				normalized === "push-to-codex" ||
+				normalized === "sync-to-codex"
+			) {
 				return { mode: "sync-to-codex" };
 			}
 			if (normalized === "f" || normalized === "fresh") return { mode: "fresh", deleteAll: true };

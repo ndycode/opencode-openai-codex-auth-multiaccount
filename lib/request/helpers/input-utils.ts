@@ -281,6 +281,7 @@ export function injectMissingToolOutputs(input: InputItem[]): InputItem[] {
 				call_id: callId,
 				output: CANCELLED_TOOL_OUTPUT,
 			} as unknown as InputItem);
+			outputCallIds.add(callId);
 		}
 	}
 

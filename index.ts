@@ -391,7 +391,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				};
 		};
 
-		const MANUAL_OAUTH_ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost"]);
+		const MANUAL_OAUTH_REDIRECT_URL = new URL(REDIRECT_URI);
+		const MANUAL_OAUTH_ALLOWED_HOSTS = new Set([
+			MANUAL_OAUTH_REDIRECT_URL.hostname.toLowerCase(),
+		]);
 
 		const getManualOAuthUrlValidationError = (
 			input: string,
@@ -403,19 +406,23 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			try {
 				parsedUrl = new URL(raw);
 			} catch {
-				return undefined;
+				return `Invalid callback URL. Use ${REDIRECT_URI}`;
 			}
 
-			if (parsedUrl.protocol !== "http:") {
+			if (parsedUrl.protocol !== MANUAL_OAUTH_REDIRECT_URL.protocol) {
 				return `Invalid callback URL protocol. Use ${REDIRECT_URI}`;
 			}
-			if (!MANUAL_OAUTH_ALLOWED_HOSTS.has(parsedUrl.hostname.toLowerCase())) {
+			const parsedHost = parsedUrl.hostname.toLowerCase();
+			if (
+				!MANUAL_OAUTH_ALLOWED_HOSTS.has(parsedHost) ||
+				parsedHost !== MANUAL_OAUTH_REDIRECT_URL.hostname.toLowerCase()
+			) {
 				return `Invalid callback URL host. Use ${REDIRECT_URI}`;
 			}
-			if (parsedUrl.port !== "1455") {
+			if (parsedUrl.port !== MANUAL_OAUTH_REDIRECT_URL.port) {
 				return `Invalid callback URL port. Use ${REDIRECT_URI}`;
 			}
-			if (parsedUrl.pathname !== "/auth/callback") {
+			if (parsedUrl.pathname !== MANUAL_OAUTH_REDIRECT_URL.pathname) {
 				return `Invalid callback URL path. Use ${REDIRECT_URI}`;
 			}
 			return undefined;

@@ -134,7 +134,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 							logError(`Failed to close OAuth server: ${(err as Error)?.message ?? String(err)}`);
 						}
 					},
-					waitForCode: () => Promise.resolve(null),
+					waitForCode: async (_expectedState: string) => Promise.resolve(null),
 				});
 			});
 	});

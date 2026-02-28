@@ -30,7 +30,7 @@ Track overlap against currently open audit PRs so this branch remains incrementa
 
 ### Rate-limit overlap
 - PR #47 focuses retry-after unit parsing in `lib/request/fetch-helpers.ts`.
-- This branch does not modify retry-after parsing logic and therefore does not duplicate that unit-conversion patchline.
+- This consolidation branch includes the retry-after parsing normalization (`retry_after_ms` vs `retry_after`) with precedence and clamp coverage in `lib/request/fetch-helpers.ts`.
 
 ## Exclusions in This Branch
 - No medium/low-only cleanup work.

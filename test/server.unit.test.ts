@@ -41,6 +41,31 @@ import http from 'node:http';
 import { startLocalOAuthServer } from '../lib/auth/server.js';
 import { logError, logWarn } from '../lib/logger.js';
 
+type MockResponse = ServerResponse & { _body: string; _headers: Record<string, string> };
+
+function createMockRequest(url: string, method: string = 'GET'): IncomingMessage {
+	const req = new EventEmitter() as IncomingMessage;
+	req.url = url;
+	req.method = method;
+	return req;
+}
+
+function createMockResponse(): MockResponse {
+	const res = {
+		statusCode: 200,
+		_body: '',
+		_headers: {} as Record<string, string>,
+		setHeader: vi.fn((name: string, value: string) => {
+			res._headers[name.toLowerCase()] = value;
+		}),
+		end: vi.fn((body?: string) => {
+			if (body) res._body = body;
+		}),
+	};
+
+	return res as unknown as MockResponse;
+}
+
 describe('OAuth Server Unit Tests', () => {
 	let mockServer: ReturnType<typeof http.createServer> & {
 		_handler?: (req: IncomingMessage, res: ServerResponse) => void;
@@ -111,28 +136,6 @@ describe('OAuth Server Unit Tests', () => {
 			startLocalOAuthServer({ state: 'test-state' });
 			requestHandler = mockServer._handler!;
 		});
-
-		function createMockRequest(url: string, method: string = "GET"): IncomingMessage {
-			const req = new EventEmitter() as IncomingMessage;
-			req.url = url;
-			req.method = method;
-			return req;
-		}
-
-		function createMockResponse(): ServerResponse & { _body: string; _headers: Record<string, string> } {
-			const res = {
-				statusCode: 200,
-				_body: '',
-				_headers: {} as Record<string, string>,
-				setHeader: vi.fn((name: string, value: string) => {
-					res._headers[name.toLowerCase()] = value;
-				}),
-				end: vi.fn((body?: string) => {
-					if (body) res._body = body;
-				}),
-			};
-			return res as unknown as ServerResponse & { _body: string; _headers: Record<string, string> };
-		}
 
 		it('should return 404 for non-callback paths', () => {
 			const req = createMockRequest('/other-path');
@@ -251,21 +254,6 @@ describe('OAuth Server Unit Tests', () => {
 	});
 
 	describe('waitForCode function', () => {
-		function createMockRequest(url: string): IncomingMessage {
-			const req = new EventEmitter() as IncomingMessage;
-			req.url = url;
-			req.method = 'GET';
-			return req;
-		}
-
-		function createMockResponse(): ServerResponse {
-			return {
-				statusCode: 200,
-				setHeader: vi.fn(),
-				end: vi.fn(),
-			} as unknown as ServerResponse;
-		}
-
 		it('should return null immediately when ready=false', async () => {
 			(mockServer.listen as ReturnType<typeof vi.fn>).mockReturnValue(mockServer);
 			(mockServer.on as ReturnType<typeof vi.fn>).mockImplementation(

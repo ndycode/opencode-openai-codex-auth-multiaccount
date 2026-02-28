@@ -96,7 +96,9 @@ async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEn
 
 		const next = new Map<string, CodexCliTokenCacheEntry>();
 		for (const entry of entries) {
-			next.set(entry.email, {
+			const emailKey = sanitizeEmail(entry.email);
+			if (!emailKey) continue;
+			next.set(emailKey, {
 				accessToken: entry.accessToken,
 				expiresAt: entry.expiresAt,
 				refreshToken: entry.refreshToken,

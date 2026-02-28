@@ -187,6 +187,15 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "sync-to-codex" });
     });
 
+    it("returns 'sync-to-codex' for 'push-to-codex' input", async () => {
+      mockRl.question.mockResolvedValueOnce("push-to-codex");
+
+      const { promptLoginMode } = await import("../lib/cli.js");
+      const result = await promptLoginMode([{ index: 0 }]);
+
+      expect(result).toEqual({ mode: "sync-to-codex" });
+    });
+
     it("returns 'sync-to-codex' for 'sync-to-codex' input", async () => {
       mockRl.question.mockResolvedValueOnce("sync-to-codex");
 

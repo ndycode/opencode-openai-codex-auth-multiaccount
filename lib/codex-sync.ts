@@ -279,6 +279,10 @@ function pickLegacyCurrentAccount(
 	accounts: unknown[],
 	path: string,
 ): CodexCurrentAccount | null {
+	// Legacy account files can expose multiple activation flags. We prefer entries
+	// that are explicitly active (3), then default (2), then selected/current (1),
+	// and finally unflagged entries (0). Highest score wins; ties keep the first
+	// entry after descending sort.
 	const scored: Array<{ score: number; account: CodexCurrentAccount }> = [];
 
 	for (const entry of accounts) {

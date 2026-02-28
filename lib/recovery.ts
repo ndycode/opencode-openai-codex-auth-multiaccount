@@ -97,7 +97,8 @@ function normalizeToolUseId(rawId: unknown): string | null {
 
 function getStoredPartCallId(part: StoredPart): string | undefined {
   if ("callID" in part) {
-    return normalizeToolUseId(part.callID) ?? undefined;
+    const callId = normalizeToolUseId(part.callID);
+    if (callId) return callId;
   }
 
   return normalizeToolUseId(part.id) ?? undefined;
@@ -130,9 +131,11 @@ function extractToolUseIds(parts: MessagePart[]): string[] {
   for (const part of parts) {
     if (part.type !== "tool_use") continue;
 
-    const id = normalizeToolUseId(part.id);
-    if (!id) continue;
-    ids.add(id);
+    const partId = normalizeToolUseId(part.id);
+    if (partId) ids.add(partId);
+
+    const callId = normalizeToolUseId(part.callID);
+    if (callId) ids.add(callId);
   }
 
   return Array.from(ids);

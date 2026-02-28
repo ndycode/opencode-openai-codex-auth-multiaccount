@@ -59,6 +59,7 @@ describe("OAuth server success-page fallback", () => {
 
 		const req = new EventEmitter() as IncomingMessage;
 		req.url = "/auth/callback?code=test-code&state=state-1";
+		req.method = "GET";
 		const body = { value: "" };
 		const res = {
 			statusCode: 0,
