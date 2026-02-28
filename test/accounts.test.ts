@@ -1785,6 +1785,29 @@ describe("AccountManager", () => {
       expect(selected?.index).toBe(1);
     });
 
+    it("skips token-depleted current account and selects account with available tokens", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now - 10000 },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      manager.setActiveIndex(0);
+      getTokenTracker().drain(0, "codex", 100);
+
+      const selected = manager.getCurrentOrNextForFamilyHybrid("codex");
+
+      expect(selected).not.toBeNull();
+      expect(selected?.refreshToken).toBe("token-2");
+      expect(selected?.index).toBe(1);
+    });
+
     it("updates cursor and family index after hybrid selection", () => {
       const now = Date.now();
       const stored = {

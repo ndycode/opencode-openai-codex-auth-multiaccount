@@ -436,9 +436,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 return callbackValidationError;
                         }
                         const parsed = parseAuthorizationInput(input);
-                        if (!parsed.code) {
-                                return "No authorization code found. Paste the full callback URL (e.g., http://localhost:1455/auth/callback?code=...)";
-                        }
+						if (!parsed.code) {
+								return "No authorization code found. Paste the full callback URL (e.g., http://127.0.0.1:1455/auth/callback?code=...)";
+						}
                         if (!parsed.state) {
                                 return "Missing OAuth state. Paste the full callback URL including both code and state parameters.";
                         }
@@ -2832,7 +2832,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									logWarn(
 										`Skipping account ${account.index + 1}: local token bucket depleted for ${modelFamily}${model ? `:${model}` : ""}`,
 									);
-									break;
+									continue;
 								}
 
 							while (true) {

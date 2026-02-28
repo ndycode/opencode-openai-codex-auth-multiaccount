@@ -21,12 +21,8 @@ import {
   previewImportAccounts,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  type AccountStorageV3,
 } from "../lib/storage.js";
-
-// Mocking the behavior we're about to implement for TDD
-// Since the functions aren't in lib/storage.ts yet, we'll need to mock them or 
-// accept that this test won't even compile/run until we add them.
-// But Task 0 says: "Tests should fail initially (RED phase)"
 
 describe("storage", () => {
   describe("deduplication", () => {
@@ -108,56 +104,43 @@ describe("storage", () => {
     });
 
     it("should export accounts to a file", async () => {
-      // @ts-ignore - exportAccounts doesn't exist yet
-      const { exportAccounts } = await import("../lib/storage.js");
-      
-      const storage = {
+      const storage: AccountStorageV3 = {
         version: 3,
         activeIndex: 0,
-        accounts: [{ accountId: "test", refreshToken: "ref", addedAt: 1, lastUsed: 2 }]
+        accounts: [{ accountId: "test", refreshToken: "ref", addedAt: 1, lastUsed: 2 }],
       };
-      // @ts-ignore
       await saveAccounts(storage);
-      
-      // @ts-ignore
+
       await exportAccounts(exportPath);
-      
+
       expect(existsSync(exportPath)).toBe(true);
       const exported = JSON.parse(await fs.readFile(exportPath, "utf-8"));
       expect(exported.accounts[0].accountId).toBe("test");
     });
 
     it("should fail export if file exists and force is false", async () => {
-      // @ts-ignore
-      const { exportAccounts } = await import("../lib/storage.js");
       await fs.writeFile(exportPath, "exists");
-      
-      // @ts-ignore
+
       await expect(exportAccounts(exportPath, false)).rejects.toThrow(/already exists/);
     });
 
     it("should import accounts from a file and merge", async () => {
-      // @ts-ignore
-      const { importAccounts } = await import("../lib/storage.js");
-      
-      const existing = {
+      const existing: AccountStorageV3 = {
         version: 3,
         activeIndex: 0,
-        accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }]
+        accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }],
       };
-      // @ts-ignore
       await saveAccounts(existing);
-      
-      const toImport = {
+
+      const toImport: AccountStorageV3 = {
         version: 3,
         activeIndex: 0,
-        accounts: [{ accountId: "new", refreshToken: "ref2", addedAt: 3, lastUsed: 4 }]
+        accounts: [{ accountId: "new", refreshToken: "ref2", addedAt: 3, lastUsed: 4 }],
       };
       await fs.writeFile(exportPath, JSON.stringify(toImport));
-      
-      // @ts-ignore
+
       await importAccounts(exportPath);
-      
+
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(2);
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
@@ -486,24 +469,20 @@ describe("storage", () => {
     });
 
     it("should enforce MAX_ACCOUNTS during import", async () => {
-       // @ts-ignore
-      const { importAccounts } = await import("../lib/storage.js");
-      
       const manyAccounts = Array.from({ length: 21 }, (_, i) => ({
         accountId: `acct${i}`,
         refreshToken: `ref${i}`,
         addedAt: Date.now(),
-        lastUsed: Date.now()
+        lastUsed: Date.now(),
       }));
-      
-      const toImport = {
+
+      const toImport: AccountStorageV3 = {
         version: 3,
         activeIndex: 0,
-        accounts: manyAccounts
+        accounts: manyAccounts,
       };
       await fs.writeFile(exportPath, JSON.stringify(toImport));
-      
-      // @ts-ignore
+
       await expect(importAccounts(exportPath)).rejects.toThrow(/exceed maximum/);
     });
 

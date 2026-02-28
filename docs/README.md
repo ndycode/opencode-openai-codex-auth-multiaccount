@@ -19,6 +19,7 @@ Explore the engineering depth behind this plugin:
 - **[Config Fields Guide](development/CONFIG_FIELDS.md)** - Understanding config keys, `id`, and `name`
 - **[Testing Guide](development/TESTING.md)** - Test scenarios, verification procedures, integration testing
 - **[TUI Parity Checklist](development/TUI_PARITY_CHECKLIST.md)** - Auth dashboard/UI parity requirements for future changes
+- **[Architecture Audit (2026-02-28)](development/ARCHITECTURE_AUDIT_2026-02-28.md)** - Full security/reliability audit findings and remediation summary
 
 ## Key Architectural Decisions
 
