@@ -527,6 +527,26 @@ Before apply, the plugin creates an automatic timestamped pre-import backup when
 
 ---
 
+### codex-sync
+
+Sync accounts between this plugin and Codex CLI auth storage.
+
+Pull from Codex CLI into plugin storage:
+
+```text
+codex-sync direction="pull"
+```
+
+Push current plugin account into Codex CLI auth:
+
+```text
+codex-sync direction="push"
+```
+
+Use this to keep OpenCode plugin accounts and Codex CLI auth aligned across workflows.
+
+---
+
 ### codex-dashboard
 
 Show live account eligibility, retry budget usage, refresh queue metrics, and the recommended next step.

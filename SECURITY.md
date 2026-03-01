@@ -72,7 +72,11 @@ The following are **not** security vulnerabilities:
 ### Third-Party Dependencies
 
 This plugin minimizes dependencies for security:
-- **Only dependency:** `@openauthjs/openauth` (for OAuth handling)
+- Runtime dependencies are intentionally small and security-reviewed:
+  - `@openauthjs/openauth` (OAuth flow)
+  - `@opencode-ai/plugin` (OpenCode plugin integration)
+  - `hono` (OAuth callback HTTP server)
+  - `zod` (schema validation)
 - Regular dependency updates for security patches
 - No telemetry or analytics dependencies
 
