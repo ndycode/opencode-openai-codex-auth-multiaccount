@@ -205,12 +205,6 @@ type AccountLike = {
   lastUsed?: number;
 };
 
-type RefreshDedupeEntry = {
-  byOrg: Map<string, number>;
-  preferredOrgIndex?: number;
-  fallbackIndices: number[];
-};
-
 async function ensureGitignore(storagePath: string): Promise<void> {
   if (!currentStoragePath) return;
 
@@ -354,11 +348,12 @@ function selectNewestAccount<T extends AccountLike>(
 }
 
 function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
+  const working = [...accounts];
   const keyToIndex = new Map<string, number>();
-  const indicesToKeep = new Set<number>();
+  const indicesToRemove = new Set<number>();
 
-  for (let i = 0; i < accounts.length; i += 1) {
-    const account = accounts[i];
+  for (let i = 0; i < working.length; i += 1) {
+    const account = working[i];
     if (!account) continue;
     const key = toAccountIdentityKey(account);
     if (!key) continue;
@@ -369,21 +364,22 @@ function deduplicateAccountsByKey<T extends AccountLike>(accounts: T[]): T[] {
       continue;
     }
 
-    const existing = accounts[existingIndex];
-    const newest = selectNewestAccount(existing, account);
-    keyToIndex.set(key, newest === account ? i : existingIndex);
-  }
-
-  for (const idx of keyToIndex.values()) {
-    indicesToKeep.add(idx);
+    const newestIndex = pickNewestAccountIndex(working, existingIndex, i);
+    const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
+    const target = working[newestIndex];
+    const source = working[obsoleteIndex];
+    if (target && source) {
+      working[newestIndex] = mergeAccountRecords(target, source);
+    }
+    indicesToRemove.add(obsoleteIndex);
+    keyToIndex.set(key, newestIndex);
   }
 
   const result: T[] = [];
-  for (let i = 0; i < accounts.length; i += 1) {
-    if (indicesToKeep.has(i)) {
-      const account = accounts[i];
-      if (account) result.push(account);
-    }
+  for (let i = 0; i < working.length; i += 1) {
+    if (indicesToRemove.has(i)) continue;
+    const account = working[i];
+    if (account) result.push(account);
   }
   return result;
 }
@@ -415,160 +411,6 @@ function mergeAccountRecords<T extends AccountLike>(target: T, source: T): T {
   };
 }
 
-function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[]): T[] {
-  const working = [...accounts];
-  const indicesToRemove = new Set<number>();
-  const getAccountIdKey = (account: T | undefined): string => account?.accountId?.trim() ?? "";
-  const canMergeByRefreshToken = (
-    left: T | undefined,
-    right: T | undefined,
-  ): boolean => {
-    if (!left || !right) return false;
-    const leftAccountId = getAccountIdKey(left);
-    const rightAccountId = getAccountIdKey(right);
-    if (leftAccountId && rightAccountId && leftAccountId !== rightAccountId) {
-      return false;
-    }
-    return true;
-  };
-
-  const refreshMap = new Map<string, RefreshDedupeEntry>();
-
-  const pickPreferredOrgIndex = (
-    existingIndex: number | undefined,
-    candidateIndex: number,
-  ): number => {
-    if (existingIndex === undefined) return candidateIndex;
-    return pickNewestAccountIndex(working, existingIndex, candidateIndex);
-  };
-
-  const collapseFallbackIntoPreferredOrg = (
-    entry: RefreshDedupeEntry,
-  ): void => {
-    if (entry.preferredOrgIndex === undefined || entry.fallbackIndices.length === 0) {
-      return;
-    }
-
-    const preferredOrgIndex = entry.preferredOrgIndex;
-    const remainingFallbacks: number[] = [];
-    for (const fallbackIndex of entry.fallbackIndices) {
-      if (fallbackIndex === preferredOrgIndex) continue;
-      const source = working[fallbackIndex];
-      if (!source) continue;
-
-      const currentPreferred = working[preferredOrgIndex];
-      if (!currentPreferred) {
-        remainingFallbacks.push(fallbackIndex);
-        continue;
-      }
-      const preferredAccountId = getAccountIdKey(currentPreferred);
-      const sourceAccountId = getAccountIdKey(source);
-      if (!preferredAccountId && sourceAccountId) {
-        remainingFallbacks.push(fallbackIndex);
-        continue;
-      }
-
-      // Do NOT merge if the source account has a different organizationId than the preferred org
-      // Each unique organizationId should remain as a separate entry
-      // Also treat undefined vs defined organizationId as distinct (do not merge)
-      const sourceOrgId = source.organizationId?.trim();
-      const preferredOrgId = currentPreferred.organizationId?.trim();
-      if ((sourceOrgId || preferredOrgId) && sourceOrgId !== preferredOrgId) {
-        remainingFallbacks.push(fallbackIndex);
-        continue;
-      }
-
-      if (!canMergeByRefreshToken(currentPreferred, source)) {
-        remainingFallbacks.push(fallbackIndex);
-        continue;
-      }
-
-      working[preferredOrgIndex] = mergeAccountRecords(currentPreferred, source);
-      indicesToRemove.add(fallbackIndex);
-    }
-    entry.fallbackIndices = remainingFallbacks;
-  };
-
-  for (let i = 0; i < working.length; i += 1) {
-    const account = working[i];
-    if (!account) continue;
-
-    const refreshToken = account.refreshToken?.trim();
-    if (!refreshToken) continue;
-    const orgKey = account.organizationId?.trim() ?? "";
-
-    let entry = refreshMap.get(refreshToken);
-    if (!entry) {
-      entry = {
-        byOrg: new Map<string, number>(),
-        preferredOrgIndex: undefined,
-        fallbackIndices: [],
-      };
-      refreshMap.set(refreshToken, entry);
-    }
-
-    if (orgKey) {
-      const existingIndex = entry.byOrg.get(orgKey);
-      if (existingIndex !== undefined) {
-        const newestIndex = pickNewestAccountIndex(working, existingIndex, i);
-        const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
-        const target = working[newestIndex];
-        const source = working[obsoleteIndex];
-        if (target && source) {
-          working[newestIndex] = mergeAccountRecords(target, source);
-        }
-        indicesToRemove.add(obsoleteIndex);
-        entry.byOrg.set(orgKey, newestIndex);
-        entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, newestIndex);
-        collapseFallbackIntoPreferredOrg(entry);
-        continue;
-      }
-      entry.byOrg.set(orgKey, i);
-      entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, i);
-      collapseFallbackIntoPreferredOrg(entry);
-      continue;
-    }
-
-    let merged = false;
-    for (let j = 0; j < entry.fallbackIndices.length; j += 1) {
-      const existingFallback = entry.fallbackIndices[j];
-      if (existingFallback === undefined) {
-        continue;
-      }
-      const existingAccount = working[existingFallback];
-      if (!existingAccount || !canMergeByRefreshToken(existingAccount, account)) {
-        continue;
-      }
-
-      const newestIndex = pickNewestAccountIndex(working, existingFallback, i);
-      const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
-      const target = working[newestIndex];
-      const source = working[obsoleteIndex];
-      if (target && source) {
-        working[newestIndex] = mergeAccountRecords(target, source);
-      }
-      indicesToRemove.add(obsoleteIndex);
-      entry.fallbackIndices[j] = newestIndex;
-      merged = true;
-      break;
-    }
-
-    if (!merged) {
-      entry.fallbackIndices.push(i);
-    }
-
-    collapseFallbackIntoPreferredOrg(entry);
-  }
-
-  const result: T[] = [];
-  for (let i = 0; i < working.length; i += 1) {
-    if (indicesToRemove.has(i)) continue;
-    const account = working[i];
-    if (account) result.push(account);
-  }
-  return result;
-}
-
 /**
  * Removes duplicate accounts, keeping the most recently used entry for each unique key.
  * Deduplication identity hierarchy: organizationId -> accountId -> refreshToken.
@@ -583,13 +425,12 @@ export function deduplicateAccounts<T extends { organizationId?: string; account
 
 /**
  * Applies storage deduplication semantics used by normalize/import paths.
- * 1) Always dedupe by identity key first (organizationId -> accountId -> refreshToken).
+ * 1) Dedupe only exact identity duplicates (organizationId -> accountId -> refreshToken),
+ *    preserving distinct workspace variants that share a refresh token.
  * 2) Then apply legacy email dedupe only for entries that still do not have organizationId/accountId.
  */
 function deduplicateAccountsForStorage<T extends AccountLike & { email?: string }>(accounts: T[]): T[] {
-  return deduplicateAccountsByRefreshToken(
-    deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts)),
-  );
+  return deduplicateAccountsByEmail(deduplicateAccountsByKey(accounts));
 }
 
 /**
@@ -880,7 +721,7 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
     await ensureGitignore(path);
 
     // Normalize before persisting so every write path enforces dedup semantics
-    // (organizationId/accountId identity plus refresh-token collision collapse).
+    // (exact identity dedupe plus legacy email dedupe for identity-less records).
     const normalizedStorage = normalizeAccountStorage(storage) ?? storage;
     const content = JSON.stringify(normalizedStorage, null, 2);
     await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
