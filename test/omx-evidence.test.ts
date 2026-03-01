@@ -52,7 +52,7 @@ describe("omx-capture-evidence script", () => {
 
     try {
       const outputPath = join(root, ".omx", "evidence", "redacted.md");
-      mod.runEvidence(
+      await mod.runEvidence(
         {
           mode: "ralph",
           team: "",
@@ -105,29 +105,24 @@ describe("omx-capture-evidence script", () => {
     try {
       const concurrencyCount = 100;
       const writes = Array.from({ length: concurrencyCount }, (_value, index) => {
-        return new Promise<void>((resolve, reject) => {
-          setTimeout(() => {
-            try {
-              mod.writeFileWithRetry(sharedPath, `write-${index}`, {
-                writeFileSyncFn: (path: string, content: string, encoding: BufferEncoding) => {
-                  const attempts = seenPayloadAttempts.get(content) ?? 0;
-                  if (attempts === 0) {
-                    seenPayloadAttempts.set(content, 1);
-                    throw makeBusyError();
-                  }
-                  seenPayloadAttempts.set(content, attempts + 1);
-                  writeFileSync(path, content, encoding);
-                },
-                sleepSyncFn: () => undefined,
-                maxAttempts: 5,
-                baseDelayMs: 0,
-              });
-              resolve();
-            } catch (error) {
-              reject(error);
-            }
-          }, 0);
-        });
+        return new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        }).then(() =>
+          mod.writeFileWithRetry(sharedPath, `write-${index}`, {
+            writeFileSyncFn: (path: string, content: string, encoding: BufferEncoding) => {
+              const attempts = seenPayloadAttempts.get(content) ?? 0;
+              if (attempts === 0) {
+                seenPayloadAttempts.set(content, 1);
+                throw makeBusyError();
+              }
+              seenPayloadAttempts.set(content, attempts + 1);
+              writeFileSync(path, content, encoding);
+            },
+            sleepFn: async () => Promise.resolve(),
+            maxAttempts: 5,
+            baseDelayMs: 0,
+          }),
+        );
       });
 
       await expect(Promise.all(writes)).resolves.toHaveLength(concurrencyCount);
@@ -151,7 +146,7 @@ describe("omx-capture-evidence script", () => {
     };
 
     try {
-      expect(() => {
+      await expect(
         mod.writeFileWithRetry(outputPath, "content", {
           writeFileSyncFn: (path: string, content: string, encoding: BufferEncoding) => {
             calls += 1;
@@ -160,8 +155,8 @@ describe("omx-capture-evidence script", () => {
           },
           maxAttempts: 3,
           baseDelayMs: 1,
-        });
-      }).not.toThrow();
+        }),
+      ).resolves.toBeUndefined();
 
       expect(calls).toBe(2);
       const fileContent = await readFile(outputPath, "utf8");
@@ -178,7 +173,7 @@ describe("omx-capture-evidence script", () => {
 
     try {
       const outputPath = join(root, ".omx", "evidence", "result.md");
-      const result = mod.runEvidence(
+      const result = await mod.runEvidence(
         {
           mode: "ralph",
           team: "",
@@ -223,7 +218,7 @@ describe("omx-capture-evidence script", () => {
 
     try {
       const outputPath = join(root, ".omx", "evidence", "result-active.md");
-      const result = mod.runEvidence(
+      const result = await mod.runEvidence(
         {
           mode: "ralph",
           team: "",

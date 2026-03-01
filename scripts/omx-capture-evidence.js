@@ -229,18 +229,17 @@ function isRetryableWriteError(error) {
   return code === "EBUSY" || code === "EPERM";
 }
 
-function sleepSync(milliseconds) {
+function sleep(milliseconds) {
   const waitMs = Number.isFinite(milliseconds) && milliseconds > 0 ? milliseconds : 0;
-  if (waitMs === 0) return;
-  const deadline = Date.now() + waitMs;
-  while (Date.now() < deadline) {
-    // Busy-wait fallback keeps retry logic synchronous and avoids Atomics.wait main-thread restrictions.
-  }
+  if (waitMs === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, waitMs);
+  });
 }
 
-export function writeFileWithRetry(outputPath, content, deps = {}) {
+export async function writeFileWithRetry(outputPath, content, deps = {}) {
   const writeFn = deps.writeFileSyncFn ?? writeFileSync;
-  const sleepFn = deps.sleepSyncFn ?? sleepSync;
+  const sleepFn = deps.sleepFn ?? sleep;
   const maxAttempts = Number.isInteger(deps.maxAttempts) ? deps.maxAttempts : WRITE_RETRY_ATTEMPTS;
   const baseDelayMs = Number.isFinite(deps.baseDelayMs) ? deps.baseDelayMs : WRITE_RETRY_BASE_DELAY_MS;
 
@@ -251,7 +250,7 @@ export function writeFileWithRetry(outputPath, content, deps = {}) {
     } catch (error) {
       const isRetryable = isRetryableWriteError(error);
       if (!isRetryable || attempt === maxAttempts) throw error;
-      sleepFn(baseDelayMs * attempt);
+      await sleepFn(baseDelayMs * attempt);
     }
   }
 }
@@ -288,7 +287,7 @@ function buildOutputPath(options, cwd, runId) {
   return join(cwd, ".omx", "evidence", filename);
 }
 
-export function runEvidence(options, deps = {}) {
+export async function runEvidence(options, deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
   ensureRepoRoot(cwd);
 
@@ -418,13 +417,13 @@ export function runEvidence(options, deps = {}) {
   lines.push("```");
   lines.push("");
 
-  writeFileWithRetry(outputPath, lines.join("\n"));
+  await writeFileWithRetry(outputPath, lines.join("\n"));
   return { overallPassed, outputPath };
 }
 
-export function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
-  const result = runEvidence(options);
+  const result = await runEvidence(options);
   if (result.overallPassed) {
     console.log(`Evidence captured at ${result.outputPath}`);
     console.log("All gates passed.");
@@ -436,11 +435,9 @@ export function main(argv = process.argv.slice(2)) {
 }
 
 if (isDirectRun) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error("Failed to capture evidence.");
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
-  }
+  });
 }
