@@ -601,15 +601,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return accountId && accountId.length > 0 ? accountId : undefined;
 			};
 
-			const hasDistinctNonEmptyAccountIds = (
-				left: { accountId?: string } | undefined,
-				right: { accountId?: string } | undefined,
-			): boolean => {
-				const leftId = normalizeStoredAccountId(left);
-				const rightId = normalizeStoredAccountId(right);
-				return !!leftId && !!rightId && leftId !== rightId;
-			};
-
 			const canCollapseWithCandidateAccountId = (
 				existing: { accountId?: string } | undefined,
 				candidateAccountId: string | undefined,
@@ -910,157 +901,45 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 			const pruneRefreshTokenCollisions = (): void => {
 				const indicesToRemove = new Set<number>();
-				const refreshMap = new Map<
-					string,
-					{
-						byOrg: Map<string, number[]>;
-						preferredOrgIndex?: number;
-						fallbackNoAccountIdIndex?: number;
-						fallbackByAccountId: Map<string, number>;
-					}
-				>();
+				const exactIdentityToIndex = new Map<string, number>();
 
-				const pickPreferredOrgIndex = (
-					existingIndex: number | undefined,
-					candidateIndex: number,
-				): number => {
-					if (existingIndex === undefined) return candidateIndex;
-					return pickNewestAccountIndex(existingIndex, candidateIndex);
-				};
-
-				const collapseFallbackIntoPreferredOrg = (entry: {
-					byOrg: Map<string, number[]>;
-					preferredOrgIndex?: number;
-					fallbackNoAccountIdIndex?: number;
-					fallbackByAccountId: Map<string, number>;
-				}): void => {
-					if (entry.preferredOrgIndex === undefined) {
-						return;
-					}
-
-					const preferredOrgIndex = entry.preferredOrgIndex;
-					const collapseFallbackIndex = (fallbackIndex: number): boolean => {
-						if (preferredOrgIndex === fallbackIndex) return true;
-						const target = accounts[preferredOrgIndex];
-						const source = accounts[fallbackIndex];
-						if (!target || !source) return true;
-						const targetAccountId = normalizeStoredAccountId(target);
-						const sourceAccountId = normalizeStoredAccountId(source);
-						if (!targetAccountId && sourceAccountId) {
-							return false;
-						}
-						if (hasDistinctNonEmptyAccountIds(target, source)) {
-							return false;
-						}
-						mergeAccountRecords(preferredOrgIndex, fallbackIndex);
-						indicesToRemove.add(fallbackIndex);
-						return true;
-					};
-
-					if (typeof entry.fallbackNoAccountIdIndex === "number") {
-						if (collapseFallbackIndex(entry.fallbackNoAccountIdIndex)) {
-							entry.fallbackNoAccountIdIndex = undefined;
-						}
-					}
-
-					const fallbackAccountIdsToDelete: string[] = [];
-					for (const [accountId, fallbackIndex] of entry.fallbackByAccountId) {
-						if (collapseFallbackIndex(fallbackIndex)) {
-							fallbackAccountIdsToDelete.push(accountId);
-						}
-					}
-					for (const accountId of fallbackAccountIdsToDelete) {
-						entry.fallbackByAccountId.delete(accountId);
-					}
+				const getExactIdentityKey = (
+					account: {
+						organizationId?: string;
+						accountId?: string;
+						email?: string;
+						refreshToken?: string;
+					} | undefined,
+				): string => {
+					const organizationId = account?.organizationId?.trim() ?? "";
+					const accountId = normalizeStoredAccountId(account) ?? "";
+					const email = account?.email?.trim().toLowerCase() ?? "";
+					const refreshToken = account?.refreshToken?.trim() ?? "";
+					return `org:${organizationId}|account:${accountId}|email:${email}|refresh:${refreshToken}`;
 				};
 
 				for (let i = 0; i < accounts.length; i += 1) {
 					const account = accounts[i];
 					if (!account) continue;
-					const refreshToken = account.refreshToken?.trim();
-					if (!refreshToken) continue;
-					const orgKey = account.organizationId?.trim() ?? "";
-					let entry = refreshMap.get(refreshToken);
-					if (!entry) {
-						entry = {
-							byOrg: new Map<string, number[]>(),
-							preferredOrgIndex: undefined,
-							fallbackNoAccountIdIndex: undefined,
-							fallbackByAccountId: new Map<string, number>(),
-						};
-						refreshMap.set(refreshToken, entry);
-					}
 
-					if (orgKey) {
-						const orgMatches = entry.byOrg.get(orgKey) ?? [];
-						const existingIndex = resolveOrganizationMatch(
-							{
-								byOrganizationId: new Map([[orgKey, orgMatches]]),
-								byAccountIdNoOrg: new Map(),
-								byRefreshTokenNoOrg: new Map(),
-								byEmailNoOrg: new Map(),
-								byAccountIdOrgScoped: new Map(),
-								byRefreshTokenOrgScoped: new Map(),
-								byRefreshTokenGlobal: new Map(),
-							},
-							orgKey,
-							normalizeStoredAccountId(account),
-						);
-						if (existingIndex !== undefined) {
-							const newestIndex = pickNewestAccountIndex(existingIndex, i);
-							const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
-							mergeAccountRecords(newestIndex, obsoleteIndex);
-							indicesToRemove.add(obsoleteIndex);
-							const nextOrgMatches = orgMatches.filter(
-								(index) => index !== obsoleteIndex && index !== newestIndex,
-							);
-							nextOrgMatches.push(newestIndex);
-							entry.byOrg.set(orgKey, nextOrgMatches);
-							entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, newestIndex);
-							collapseFallbackIntoPreferredOrg(entry);
-							continue;
-						}
-						entry.byOrg.set(orgKey, [...orgMatches, i]);
-						entry.preferredOrgIndex = pickPreferredOrgIndex(entry.preferredOrgIndex, i);
-						collapseFallbackIntoPreferredOrg(entry);
+					const identityKey = getExactIdentityKey(account);
+					const existingIndex = exactIdentityToIndex.get(identityKey);
+					if (existingIndex === undefined) {
+						exactIdentityToIndex.set(identityKey, i);
 						continue;
 					}
 
-					const fallbackAccountId = normalizeStoredAccountId(account);
-					if (fallbackAccountId) {
-						const existingFallback = entry.fallbackByAccountId.get(fallbackAccountId);
-						if (typeof existingFallback === "number") {
-							const newestIndex = pickNewestAccountIndex(existingFallback, i);
-							const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
-							mergeAccountRecords(newestIndex, obsoleteIndex);
-							indicesToRemove.add(obsoleteIndex);
-							entry.fallbackByAccountId.set(fallbackAccountId, newestIndex);
-							collapseFallbackIntoPreferredOrg(entry);
-							continue;
-						}
-						entry.fallbackByAccountId.set(fallbackAccountId, i);
-						collapseFallbackIntoPreferredOrg(entry);
-						continue;
-					}
-
-					const existingFallback = entry.fallbackNoAccountIdIndex;
-					if (typeof existingFallback === "number") {
-						const newestIndex = pickNewestAccountIndex(existingFallback, i);
-						const obsoleteIndex = newestIndex === existingFallback ? i : existingFallback;
-						mergeAccountRecords(newestIndex, obsoleteIndex);
-						indicesToRemove.add(obsoleteIndex);
-						entry.fallbackNoAccountIdIndex = newestIndex;
-						collapseFallbackIntoPreferredOrg(entry);
-						continue;
-					}
-					entry.fallbackNoAccountIdIndex = i;
-					collapseFallbackIntoPreferredOrg(entry);
+					const newestIndex = pickNewestAccountIndex(existingIndex, i);
+					const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
+					mergeAccountRecords(newestIndex, obsoleteIndex);
+					indicesToRemove.add(obsoleteIndex);
+					exactIdentityToIndex.set(identityKey, newestIndex);
 				}
 
-			if (indicesToRemove.size > 0) {
-				accounts = accounts.filter((_, index) => !indicesToRemove.has(index));
-			}
-		};
+				if (indicesToRemove.size > 0) {
+					accounts = accounts.filter((_, index) => !indicesToRemove.has(index));
+				}
+			};
 
 			const collectIdentityKeys = (
 				account: { organizationId?: string; accountId?: string; refreshToken?: string } | undefined,
