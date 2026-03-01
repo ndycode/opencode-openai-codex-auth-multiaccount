@@ -387,6 +387,90 @@ describe("AccountManager", () => {
     expect(third?.refreshToken).toBe("token-1");
   });
 
+  it("selects usable variant when refresh-token siblings are blocked", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3 as const,
+      activeIndex: 0,
+      accounts: [
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-disabled",
+          addedAt: now,
+          lastUsed: now,
+          enabled: false,
+        },
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-rate-limited",
+          addedAt: now,
+          lastUsed: now,
+          rateLimitResetTimes: { codex: now + 60_000 },
+        },
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-cooling-down",
+          addedAt: now,
+          lastUsed: now,
+          coolingDownUntil: now + 60_000,
+          cooldownReason: "network-error" as const,
+        },
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-usable",
+          addedAt: now,
+          lastUsed: now,
+        },
+      ],
+    };
+
+    const manager = new AccountManager(undefined, stored);
+    const selected = manager.getCurrentOrNextForFamily("codex");
+
+    expect(selected?.accountId).toBe("workspace-usable");
+    expect(selected?.refreshToken).toBe("shared-refresh");
+  });
+
+  it("returns null and preserves min-wait behavior when all shared-token variants are blocked", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3 as const,
+      activeIndex: 0,
+      accounts: [
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-disabled",
+          addedAt: now,
+          lastUsed: now,
+          enabled: false,
+        },
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-rate-limited",
+          addedAt: now,
+          lastUsed: now,
+          rateLimitResetTimes: { codex: now + 120_000 },
+        },
+        {
+          refreshToken: "shared-refresh",
+          accountId: "workspace-cooling-down",
+          addedAt: now,
+          lastUsed: now,
+          coolingDownUntil: now + 30_000,
+          cooldownReason: "auth-failure" as const,
+        },
+      ],
+    };
+
+    const manager = new AccountManager(undefined, stored);
+
+    expect(manager.getCurrentOrNextForFamily("codex")).toBeNull();
+
+    const minWait = manager.getMinWaitTimeForFamily("codex");
+    expect(minWait).toBeGreaterThan(0);
+    expect(minWait).toBeLessThanOrEqual(30_000);
+  });
+
   it("uses independent cursors per model family", () => {
     const now = Date.now();
     const stored = {
