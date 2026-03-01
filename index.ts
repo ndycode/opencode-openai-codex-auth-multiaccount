@@ -525,7 +525,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return (
 				entry.action === AuditAction.OPERATION_START &&
 				metadata?.operation_class === "request" &&
-				metadata.operation_name === "request.fetch"
+				metadata.operation_name === "request.fetch" &&
+				metadata.attempt_no === 1
 			);
 		});
 

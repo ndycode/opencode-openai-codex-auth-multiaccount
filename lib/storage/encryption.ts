@@ -1,13 +1,14 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
 
 const ENCRYPTION_MARKER = "oc-chatgpt-multi-auth";
 
 export interface EncryptedStoragePayload {
 	__encrypted: string;
-	version: 1;
+	version: 1 | 2;
 	iv: string;
 	tag: string;
 	ciphertext: string;
+	salt?: string;
 }
 
 export interface DecryptionResult {
@@ -20,16 +21,21 @@ function deriveKey(secret: string): Buffer {
 	return createHash("sha256").update(secret).digest();
 }
 
+function deriveKeyWithSalt(secret: string, salt: Buffer): Buffer {
+	return scryptSync(secret, salt, 32);
+}
+
 function parseEncryptedPayload(serialized: string): EncryptedStoragePayload | null {
 	try {
 		const parsed = JSON.parse(serialized) as Partial<EncryptedStoragePayload>;
 		if (
 			parsed &&
 			parsed.__encrypted === ENCRYPTION_MARKER &&
-			parsed.version === 1 &&
+			(parsed.version === 1 || parsed.version === 2) &&
 			typeof parsed.iv === "string" &&
 			typeof parsed.tag === "string" &&
-			typeof parsed.ciphertext === "string"
+			typeof parsed.ciphertext === "string" &&
+			(parsed.version === 1 || typeof parsed.salt === "string")
 		) {
 			return parsed as EncryptedStoragePayload;
 		}
@@ -40,14 +46,16 @@ function parseEncryptedPayload(serialized: string): EncryptedStoragePayload | nu
 }
 
 export function encryptStoragePayload(plaintext: string, secret: string): string {
-	const key = deriveKey(secret);
+	const salt = randomBytes(16);
+	const key = deriveKeyWithSalt(secret, salt);
 	const iv = randomBytes(12);
 	const cipher = createCipheriv("aes-256-gcm", key, iv);
 	const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 	const tag = cipher.getAuthTag();
 	const payload: EncryptedStoragePayload = {
 		__encrypted: ENCRYPTION_MARKER,
-		version: 1,
+		version: 2,
+		salt: salt.toString("base64"),
 		iv: iv.toString("base64"),
 		tag: tag.toString("base64"),
 		ciphertext: ciphertext.toString("base64"),
@@ -63,7 +71,9 @@ export function decryptStoragePayload(serialized: string, secret: string | null)
 	if (!secret) {
 		return { plaintext: "", encrypted: true, requiresSecret: true };
 	}
-	const key = deriveKey(secret);
+	const key = payload.version === 2
+		? deriveKeyWithSalt(secret, Buffer.from(payload.salt ?? "", "base64"))
+		: deriveKey(secret);
 	const iv = Buffer.from(payload.iv, "base64");
 	const ciphertext = Buffer.from(payload.ciphertext, "base64");
 	const decipher = createDecipheriv("aes-256-gcm", key, iv);

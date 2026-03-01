@@ -23,6 +23,7 @@ import {
   withAccountStorageTransaction,
   type AccountStorageV3,
 } from "../lib/storage.js";
+import { encryptStoragePayload } from "../lib/storage/encryption.js";
 
 describe("storage", () => {
   describe("deduplication", () => {
@@ -184,6 +185,18 @@ describe("storage", () => {
       const path = createTimestampedBackupPath("../unsafe/../name");
       expect(basename(path)).toMatch(/^unsafe-name-\d{8}-\d{9}-[a-f0-9]{6}\.json$/);
     });
+
+		it("throws ENOKEY when encrypted storage exists without storage key", async () => {
+			const encryptedPayload = encryptStoragePayload(
+				JSON.stringify({ version: 3, activeIndex: 0, accounts: [] }),
+				"different-secret",
+			);
+			await fs.writeFile(testStoragePath, encryptedPayload, "utf-8");
+			await expect(loadAccounts()).rejects.toMatchObject({
+				name: "StorageError",
+				code: "ENOKEY",
+			});
+		});
 
     it("preserves accounts with different accountId values even when refreshToken and email are shared (no organizationId)", async () => {
       await saveAccounts({

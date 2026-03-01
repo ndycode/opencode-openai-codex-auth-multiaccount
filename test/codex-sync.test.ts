@@ -617,6 +617,40 @@ describe("codex-sync", () => {
 		expect(leftoverTempFiles).toEqual([]);
 	});
 
+	it.each(["EPERM", "EBUSY"] as const)("retries auth.json rename when %s is encountered", async (code) => {
+		const codexDir = await createCodexDir("codex-sync-rename-retry");
+		const authPath = join(codexDir, "auth.json");
+		const originalRename = nodeFs.rename.bind(nodeFs);
+		let shouldFailOnce = true;
+		const renameSpy = vi.spyOn(nodeFs, "rename").mockImplementation(async (sourcePath, destinationPath) => {
+			if (shouldFailOnce) {
+				shouldFailOnce = false;
+				const error = new Error("locked") as NodeJS.ErrnoException;
+				error.code = code;
+				throw error;
+			}
+			await originalRename(sourcePath, destinationPath);
+		});
+
+		const accessToken = createJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+		try {
+			await writeCodexAuthJsonSession(
+				{
+					accessToken,
+					refreshToken: "retry-refresh",
+				},
+				{ codexDir },
+			);
+			const saved = JSON.parse(await readFile(authPath, "utf-8")) as {
+				tokens?: { access_token?: string };
+			};
+			expect(saved.tokens?.access_token).toBe(accessToken);
+			expect(renameSpy).toHaveBeenCalledTimes(2);
+		} finally {
+			renameSpy.mockRestore();
+		}
+	});
+
 	it("clears stale account and id token keys when payload omits them", async () => {
 		const codexDir = await createCodexDir("codex-sync-clear-stale-token-keys");
 		const authPath = join(codexDir, "auth.json");

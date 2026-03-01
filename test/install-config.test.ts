@@ -27,4 +27,24 @@ describe("install config merging", () => {
 		expect(merged.plugin.filter((name) => name === "oc-chatgpt-multi-auth").length).toBe(1);
 		expect(merged.plugin).toContain("custom");
 	});
+
+	it("filters invalid plugin entries while keeping valid strings", async () => {
+		const module = await import("../scripts/install-config-helpers.js");
+		const normalized = module.normalizePluginList([
+			" custom-plugin ",
+			"",
+			null,
+			42,
+			"oc-chatgpt-multi-auth@1.0.0",
+			"oc-chatgpt-multi-auth",
+		]);
+		expect(normalized).toEqual(["custom-plugin", "oc-chatgpt-multi-auth"]);
+	});
+
+	it("guards createMergedConfig when existing config is not an object", async () => {
+		const module = await import("../scripts/install-config-helpers.js");
+		const template = { plugin: ["oc-chatgpt-multi-auth"], provider: { openai: { options: { store: false } } } };
+		const merged = module.createMergedConfig(template, "not-an-object");
+		expect(merged).toEqual(template);
+	});
 });

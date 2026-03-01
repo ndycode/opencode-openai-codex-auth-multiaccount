@@ -64,6 +64,10 @@ describe("omx-capture-evidence script", () => {
         {
           cwd: root,
           runCommand: (command: string, args: string[]) => {
+            const fakeBearer = ["bearer", "value"].join("-");
+            const fakeSk = ["sk", "1234567890123456789012"].join("-");
+            const fakeAwsAccessKeyId = ["AKIA", "1234567890ABCDEF"].join("");
+            const fakeAwsSecret = Array.from({ length: 40 }, () => "a").join("");
             if (command === "git" && args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
               return { command: "git rev-parse --abbrev-ref HEAD", code: 0, stdout: "feature/test", stderr: "" };
             }
@@ -73,8 +77,7 @@ describe("omx-capture-evidence script", () => {
             return {
               command: `${command} ${args.join(" ")}`,
               code: 0,
-              stdout:
-                "token=secret-value Authorization: Bearer bearer-value sk-1234567890123456789012 AKIA1234567890ABCDEF AWS_SECRET_ACCESS_KEY=abcdABCD0123abcdABCD0123abcdABCD0123abcd",
+              stdout: `token=secret-value Authorization: Bearer ${fakeBearer} ${fakeSk} ${fakeAwsAccessKeyId} AWS_SECRET_ACCESS_KEY=${fakeAwsSecret}`,
               stderr: "",
             };
           },
@@ -86,7 +89,7 @@ describe("omx-capture-evidence script", () => {
       expect(markdown).not.toContain("secret-value");
       expect(markdown).not.toContain("bearer-value");
       expect(markdown).not.toContain("AKIA1234567890ABCDEF");
-      expect(markdown).not.toContain("abcdABCD0123abcdABCD0123abcdABCD0123abcd");
+      expect(markdown).not.toContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
       expect(markdown).toContain("## Redaction Strategy");
     } finally {
       await rm(root, { recursive: true, force: true });

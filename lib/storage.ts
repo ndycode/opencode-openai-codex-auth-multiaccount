@@ -826,7 +826,18 @@ async function loadAccountsInternal(
   try {
 	const path = getStoragePath();
 	const content = await fs.readFile(path, "utf-8");
-	const decrypted = decryptStoragePayload(content, STORAGE_ENCRYPTION_SECRET);
+	let decrypted;
+	try {
+		decrypted = decryptStoragePayload(content, STORAGE_ENCRYPTION_SECRET);
+	} catch (error) {
+		throw new StorageError(
+			"Failed to decrypt encrypted account storage.",
+			"EDECRYPT",
+			path,
+			"Ensure CODEX_AUTH_STORAGE_KEY matches the key used to encrypt this file.",
+			error instanceof Error ? error : undefined,
+		);
+	}
 	if (decrypted.requiresSecret) {
 		throw new StorageError(
 			"Encrypted account storage detected but CODEX_AUTH_STORAGE_KEY is not set.",
@@ -858,10 +869,13 @@ async function loadAccountsInternal(
 
     return normalized;
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      const migrated = persistMigration
-        ? await migrateLegacyProjectStorageIfNeeded(persistMigration)
+	const code = (error as NodeJS.ErrnoException).code;
+	if (error instanceof StorageError && (error.code === "ENOKEY" || error.code === "EDECRYPT")) {
+		throw error;
+	}
+	if (code === "ENOENT") {
+	  const migrated = persistMigration
+		? await migrateLegacyProjectStorageIfNeeded(persistMigration)
         : null;
       if (migrated) return migrated;
       return null;

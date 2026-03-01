@@ -1,5 +1,9 @@
 export const INSTALL_PLUGIN_NAME = "oc-chatgpt-multi-auth";
 
+function isPlainObject(value) {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function clone(value) {
 	if (value === null || value === undefined) return value;
 	if (typeof structuredClone === "function") {
@@ -31,17 +35,21 @@ function deepMerge(base, override) {
 }
 
 export function normalizePluginList(list, pluginName = INSTALL_PLUGIN_NAME) {
-	const entries = Array.isArray(list) ? list.filter(Boolean) : [];
+	const entries = Array.isArray(list)
+		? list
+			.filter((entry) => typeof entry === "string")
+			.map((entry) => entry.trim())
+			.filter(Boolean)
+		: [];
 	const filtered = entries.filter((entry) => {
-		if (typeof entry !== "string") return true;
 		return entry !== pluginName && !entry.startsWith(`${pluginName}@`);
 	});
 	return [...filtered, pluginName];
 }
 
 export function createMergedConfig(template, existing, pluginName = INSTALL_PLUGIN_NAME) {
-	const templateClone = clone(template) ?? {};
-	if (!existing) {
+	const templateClone = isPlainObject(template) ? clone(template) : {};
+	if (!isPlainObject(existing)) {
 		return templateClone;
 	}
 	const merged = deepMerge(templateClone, existing);
