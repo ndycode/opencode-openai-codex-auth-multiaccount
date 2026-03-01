@@ -706,19 +706,41 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						return newestExactAccountId ?? newestNoAccountId;
 					};
 
-					const resolveUniqueOrgScopedMatch = (
-						indexes: IdentityIndexes,
-						accountId: string | undefined,
-						refreshToken: string,
-					): number | undefined => {
-						const byAccountId = accountId
-							? asUniqueIndex(indexes.byAccountIdOrgScoped.get(accountId))
-							: undefined;
-						if (byAccountId !== undefined) return byAccountId;
+			const resolveUniqueOrgScopedMatch = (
+				indexes: IdentityIndexes,
+				accountId: string | undefined,
+				refreshToken: string,
+			): number | undefined => {
+				const byAccountId = accountId
+					? asUniqueIndex(indexes.byAccountIdOrgScoped.get(accountId))
+					: undefined;
+				if (byAccountId !== undefined) return byAccountId;
 
-						// Refresh-token-only fallback is allowed only when accountId is absent.
-						// This avoids collapsing distinct workspace variants that share refresh token.
-						if (accountId) return undefined;
+				if (accountId) {
+					const accountMatches = indexes.byAccountIdOrgScoped.get(accountId);
+					if (accountMatches && accountMatches.length > 1) {
+						let newestRefreshMatch: number | undefined;
+						for (const index of accountMatches) {
+							const existing = accounts[index];
+							if (!existing) continue;
+							const existingRefresh = existing.refreshToken?.trim();
+							if (!existingRefresh || existingRefresh !== refreshToken) {
+								continue;
+							}
+							newestRefreshMatch =
+								typeof newestRefreshMatch === "number"
+									? pickNewestAccountIndex(newestRefreshMatch, index)
+									: index;
+						}
+						if (typeof newestRefreshMatch === "number") {
+							return newestRefreshMatch;
+						}
+					}
+				}
+
+				// Refresh-token-only fallback is allowed only when accountId is absent.
+				// This avoids collapsing distinct workspace variants that share refresh token.
+				if (accountId) return undefined;
 
 						return asUniqueIndex(indexes.byRefreshTokenOrgScoped.get(refreshToken));
 					};
@@ -915,7 +937,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const accountId = normalizeStoredAccountId(account) ?? "";
 					const email = account?.email?.trim().toLowerCase() ?? "";
 					const refreshToken = account?.refreshToken?.trim() ?? "";
-					return `org:${organizationId}|account:${accountId}|email:${email}|refresh:${refreshToken}`;
+					if (organizationId || accountId) {
+						return `org:${organizationId}|account:${accountId}|refresh:${refreshToken}`;
+					}
+					return `email:${email}|refresh:${refreshToken}`;
 				};
 
 				for (let i = 0; i < accounts.length; i += 1) {
