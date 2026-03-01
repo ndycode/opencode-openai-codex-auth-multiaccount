@@ -730,6 +730,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
       const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(4);
       const account1 = accounts[0];
       const account2 = accounts[1];
       const account3 = accounts[2];
@@ -761,6 +762,7 @@ describe("AccountManager", () => {
       expect(manager.getAccountCount()).toBe(4);
 
       const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(4);
       const account1 = accounts[0];
       const removedCount = manager.removeAccountsWithSameRefreshToken(account1);
 
@@ -783,6 +785,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
       const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(2);
       const account1 = accounts[0];
 
       // Increment auth failures for token-1
@@ -797,11 +800,12 @@ describe("AccountManager", () => {
       const removedCount = manager.removeAccountsWithSameRefreshToken(account1);
       expect(removedCount).toBe(2);
       expect(manager.getAccountCount()).toBe(0);
-
-      // After removal, a new account with the same refresh token should start from 0 failures
-      // (not continuing from the old counter)
-      // Note: We can't directly test this since all accounts are removed,
-      // but the stale counter is cleared from authFailuresByRefreshToken
+      const failuresByRefreshToken = Reflect.get(
+        manager,
+        "authFailuresByRefreshToken",
+      ) as Map<string, number>;
+      expect(failuresByRefreshToken.has("token-1")).toBe(false);
+      expect(manager.incrementAuthFailures(account1)).toBe(1);
     });
   });
 
