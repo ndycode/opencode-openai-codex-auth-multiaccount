@@ -338,6 +338,51 @@ describe("storage", () => {
       expect(new Set(organizationIds)).toEqual(new Set(["org-a", "org-b"]));
     });
 
+    it("does not merge accounts when one has organizationId and the other does not, despite same refreshToken", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            organizationId: "org-scoped",
+            accountId: "workspace-with-org",
+            refreshToken: "shared-refresh-token",
+            addedAt: 1,
+            lastUsed: 10,
+          },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            {
+              organizationId: undefined,
+              accountId: "workspace-no-org",
+              refreshToken: "shared-refresh-token",
+              addedAt: 2,
+              lastUsed: 20,
+            },
+          ],
+        }),
+      );
+
+      await importAccounts(exportPath);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts).toHaveLength(2);
+
+      const orgScoped = loaded?.accounts.find((account) => account.organizationId === "org-scoped");
+      expect(orgScoped).toBeDefined();
+      expect(orgScoped?.accountId).toBe("workspace-with-org");
+
+      const noOrg = loaded?.accounts.find((account) => !account.organizationId && account.accountId === "workspace-no-org");
+      expect(noOrg).toBeDefined();
+    });
+
     it("keeps legacy no-organization dedupe semantics during import", async () => {
       await saveAccounts({
         version: 3,

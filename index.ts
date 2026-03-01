@@ -2179,7 +2179,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							}
 
 							while (true) {
-										const accountCount = accountManager.getAccountCount();
+										let accountCount = accountManager.getAccountCount();
 										const attempted = new Set<number>();
 										let restartAccountTraversalWithFallback = false;
 
@@ -2268,6 +2268,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						"error",
 						{ duration: toastDurationMs * 2 },
 					);
+					// Restart traversal: clear attempted and refresh accountCount to avoid skipping healthy accounts
+					attempted.clear();
+					accountCount = accountManager.getAccountCount();
 					continue;
 				}
 				

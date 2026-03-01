@@ -860,6 +860,9 @@ export class AccountManager {
 			}
 		}
 
+		// Clear stale auth failure state for this refresh token
+		this.authFailuresByRefreshToken.delete(refreshToken);
+
 		return removedCount;
 	}
 

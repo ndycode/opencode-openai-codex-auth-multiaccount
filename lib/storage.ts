@@ -470,9 +470,10 @@ function deduplicateAccountsByRefreshToken<T extends AccountLike>(accounts: T[])
 
       // Do NOT merge if the source account has a different organizationId than the preferred org
       // Each unique organizationId should remain as a separate entry
+      // Also treat undefined vs defined organizationId as distinct (do not merge)
       const sourceOrgId = source.organizationId?.trim();
       const preferredOrgId = currentPreferred.organizationId?.trim();
-      if (sourceOrgId && preferredOrgId && sourceOrgId !== preferredOrgId) {
+      if ((sourceOrgId || preferredOrgId) && sourceOrgId !== preferredOrgId) {
         remainingFallbacks.push(fallbackIndex);
         continue;
       }
