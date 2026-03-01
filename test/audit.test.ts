@@ -10,6 +10,7 @@ import {
 	getAuditConfig,
 	getAuditLogPath,
 	listAuditLogFiles,
+	readAuditEntries,
 } from "../lib/audit.js";
 
 describe("Audit logging", () => {
@@ -247,6 +248,60 @@ describe("Audit logging", () => {
 		});
 	});
 
+	describe("readAuditEntries", () => {
+		it("returns parsed entries filtered by sinceMs", () => {
+			const now = Date.now();
+			auditLog(
+				AuditAction.OPERATION_START,
+				"actor",
+				"request.fetch",
+				AuditOutcome.PARTIAL,
+				{
+					event_version: "1.0",
+					operation_id: "old",
+					process_session_id: "p1",
+					operation_class: "request",
+					operation_name: "request.fetch",
+					attempt_no: 1,
+					retry_count: 0,
+					manual_recovery_required: false,
+					beginner_safe_mode: false,
+				},
+			);
+
+			const sinceMs = now - 1000;
+			auditLog(
+				AuditAction.OPERATION_SUCCESS,
+				"actor",
+				"request.fetch",
+				AuditOutcome.SUCCESS,
+				{
+					event_version: "1.0",
+					operation_id: "new",
+					process_session_id: "p1",
+					operation_class: "request",
+					operation_name: "request.fetch",
+					attempt_no: 2,
+					retry_count: 1,
+					manual_recovery_required: false,
+					beginner_safe_mode: false,
+				},
+			);
+
+			const entries = readAuditEntries({ sinceMs });
+			expect(entries.length).toBeGreaterThanOrEqual(1);
+			expect(entries.some((entry) => entry.action === AuditAction.OPERATION_SUCCESS)).toBe(true);
+		});
+
+		it("respects the limit option", () => {
+			auditLog(AuditAction.ACCOUNT_ADD, "actor", "r1", AuditOutcome.SUCCESS);
+			auditLog(AuditAction.ACCOUNT_REMOVE, "actor", "r2", AuditOutcome.SUCCESS);
+
+			const entries = readAuditEntries({ limit: 1 });
+			expect(entries).toHaveLength(1);
+		});
+	});
+
 	describe("AuditAction enum", () => {
 		it("should have all expected actions", () => {
 			expect(AuditAction.ACCOUNT_ADD).toBe("account.add");
@@ -254,6 +309,11 @@ describe("Audit logging", () => {
 			expect(AuditAction.CONFIG_LOAD).toBe("config.load");
 			expect(AuditAction.REQUEST_START).toBe("request.start");
 			expect(AuditAction.CIRCUIT_OPEN).toBe("circuit.open");
+			expect(AuditAction.OPERATION_START).toBe("operation.start");
+			expect(AuditAction.OPERATION_SUCCESS).toBe("operation.success");
+			expect(AuditAction.OPERATION_FAILURE).toBe("operation.failure");
+			expect(AuditAction.OPERATION_RETRY).toBe("operation.retry");
+			expect(AuditAction.OPERATION_RECOVERY).toBe("operation.recovery");
 		});
 	});
 

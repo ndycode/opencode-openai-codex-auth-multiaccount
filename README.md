@@ -437,7 +437,7 @@ codex-status
 
 ### codex-metrics
 
-Show live runtime metrics (request counts, latency, errors, retries, and safe mode).
+Show live runtime metrics (request counts, latency, errors, retries, and safe mode), plus local-only reliability KPIs computed from local audit events in a best-effort 24h, retention-bounded window.
 
 ```text
 codex-metrics
@@ -554,6 +554,7 @@ codex-dashboard
 | `codex-remove` | Remove account entry | `codex-remove index=3` |
 | `codex-export` | Export account backups | `codex-export` |
 | `codex-import` | Dry-run or apply imports | `codex-import path="~/backup/accounts.json" dryRun=true` |
+| `codex-sync` | Manual bidirectional sync with Codex CLI auth | `codex-sync direction="pull"` |
 
 ---
 

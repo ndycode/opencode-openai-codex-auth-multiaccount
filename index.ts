@@ -26,6 +26,7 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
+import { randomUUID } from "node:crypto";
 import {
         createAuthorizationFlow,
         exchangeAuthorizationCode,
@@ -169,6 +170,15 @@ import {
 	type ModelFamily,
 } from "./lib/prompts/codex.js";
 import { prewarmOpenCodeCodexPrompt } from "./lib/prompts/opencode-codex.js";
+import {
+	auditLog,
+	AuditAction,
+	AuditOutcome,
+	readAuditEntries,
+	OPERATION_EVENT_VERSION,
+	type OperationClass,
+	type ReliabilityAuditMetadata,
+} from "./lib/audit.js";
 import type {
 	AccountIdSource,
 	OAuthAuthDetails,
@@ -278,6 +288,404 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastSelectedAccountIndex: null,
 		lastQuotaKey: null,
 		lastSelectionSnapshot: null,
+	};
+
+	const processSessionId = randomUUID();
+	let operationSequence = 0;
+
+	type OperationTracker = {
+		operationId: string;
+		operationClass: OperationClass;
+		operationName: string;
+		startedAt: number;
+		attemptNo: number;
+		retryCount: number;
+		manualRecoveryRequired: boolean;
+		modelFamily?: string;
+		retryProfile?: string;
+		extraMetadata?: Record<string, unknown>;
+	};
+
+	type OperationStartOptions = {
+		operationClass: OperationClass;
+		operationName: string;
+		attemptNo?: number;
+		retryCount?: number;
+		manualRecoveryRequired?: boolean;
+		modelFamily?: string;
+		retryProfile?: string;
+		extraMetadata?: Record<string, unknown>;
+	};
+
+	type OperationStatusOptions = {
+		errorCategory?: string;
+		httpStatus?: number;
+		manualRecoveryRequired?: boolean;
+		extraMetadata?: Record<string, unknown>;
+	};
+
+	type ReliabilityKpiSnapshot = {
+		requestStarts24h: number;
+		uninterruptedCompletionRate24h: number | null;
+		firstAttemptSuccessRate24h: number | null;
+		autoRecoverySuccessRate24h: number | null;
+		tokenRefreshSuccessRate24h: number | null;
+		operationSuccessRateByClass24h: Record<string, number | null>;
+	};
+
+	const formatPercent = (value: number | null): string =>
+		value === null ? "n/a" : `${value.toFixed(1)}%`;
+
+	const toPercent = (numerator: number, denominator: number): number | null =>
+		denominator > 0 ? (numerator / denominator) * 100 : null;
+
+	const createOperationId = (operationClass: OperationClass): string => {
+		operationSequence += 1;
+		return `${operationClass}-${Date.now()}-${operationSequence}-${randomUUID().slice(0, 8)}`;
+	};
+
+	const buildOperationMetadata = (
+		state: OperationTracker,
+		overrides: Partial<ReliabilityAuditMetadata> = {},
+	): ReliabilityAuditMetadata => ({
+		event_version: OPERATION_EVENT_VERSION,
+		operation_id: state.operationId,
+		process_session_id: processSessionId,
+		operation_class: state.operationClass,
+		operation_name: state.operationName,
+		attempt_no: state.attemptNo,
+		retry_count: state.retryCount,
+		manual_recovery_required: state.manualRecoveryRequired,
+		beginner_safe_mode: beginnerSafeModeEnabled,
+		...(state.modelFamily ? { model_family: state.modelFamily } : {}),
+		...(state.retryProfile ? { retry_profile: state.retryProfile } : {}),
+		...(state.extraMetadata ?? {}),
+		...overrides,
+	});
+
+	const startOperation = ({
+		operationClass,
+		operationName,
+		attemptNo = 1,
+		retryCount = 0,
+		manualRecoveryRequired = false,
+		modelFamily,
+		retryProfile: operationRetryProfile,
+		extraMetadata,
+	}: OperationStartOptions): OperationTracker => {
+		const state: OperationTracker = {
+			operationId: createOperationId(operationClass),
+			operationClass,
+			operationName,
+			startedAt: Date.now(),
+			attemptNo,
+			retryCount,
+			manualRecoveryRequired,
+			modelFamily,
+			retryProfile: operationRetryProfile,
+			extraMetadata,
+		};
+		auditLog(
+			AuditAction.OPERATION_START,
+			"plugin",
+			operationName,
+			AuditOutcome.PARTIAL,
+			buildOperationMetadata(state),
+		);
+		return state;
+	};
+
+	const markOperationRetry = (state: OperationTracker, options: OperationStatusOptions = {}): void => {
+		state.retryCount += 1;
+		auditLog(
+			AuditAction.OPERATION_RETRY,
+			"plugin",
+			state.operationName,
+			AuditOutcome.PARTIAL,
+			buildOperationMetadata(state, {
+				...(options.errorCategory ? { error_category: options.errorCategory } : {}),
+				...(typeof options.httpStatus === "number" ? { http_status: options.httpStatus } : {}),
+				...(options.extraMetadata ?? {}),
+			}),
+		);
+	};
+
+	const markOperationRecovery = (
+		state: OperationTracker,
+		options: OperationStatusOptions & { recoveryStep: string },
+	): void => {
+		auditLog(
+			AuditAction.OPERATION_RECOVERY,
+			"plugin",
+			state.operationName,
+			AuditOutcome.PARTIAL,
+			buildOperationMetadata(state, {
+				...(options.errorCategory ? { error_category: options.errorCategory } : {}),
+				...(typeof options.httpStatus === "number" ? { http_status: options.httpStatus } : {}),
+				recovery_step: options.recoveryStep,
+				...(options.extraMetadata ?? {}),
+			}),
+		);
+	};
+
+	const completeOperationSuccess = (
+		state: OperationTracker,
+		options: OperationStatusOptions = {},
+	): void => {
+		if (options.manualRecoveryRequired === true) {
+			state.manualRecoveryRequired = true;
+		}
+		auditLog(
+			AuditAction.OPERATION_SUCCESS,
+			"plugin",
+			state.operationName,
+			AuditOutcome.SUCCESS,
+			buildOperationMetadata(state, {
+				duration_ms: Math.max(0, Date.now() - state.startedAt),
+				...(options.errorCategory ? { error_category: options.errorCategory } : {}),
+				...(typeof options.httpStatus === "number" ? { http_status: options.httpStatus } : {}),
+				...(options.extraMetadata ?? {}),
+			}),
+		);
+	};
+
+	const completeOperationFailure = (
+		state: OperationTracker,
+		options: OperationStatusOptions = {},
+	): void => {
+		if (options.manualRecoveryRequired === true) {
+			state.manualRecoveryRequired = true;
+		}
+		auditLog(
+			AuditAction.OPERATION_FAILURE,
+			"plugin",
+			state.operationName,
+			AuditOutcome.FAILURE,
+			buildOperationMetadata(state, {
+				duration_ms: Math.max(0, Date.now() - state.startedAt),
+				error_category: options.errorCategory ?? "unknown",
+				...(typeof options.httpStatus === "number" ? { http_status: options.httpStatus } : {}),
+				...(options.extraMetadata ?? {}),
+			}),
+		);
+	};
+
+	const computeReliabilityKpis = (nowMs: number): ReliabilityKpiSnapshot => {
+		const sinceMs = nowMs - 24 * 60 * 60 * 1000;
+		const entries = readAuditEntries({ sinceMs });
+		const operationEntries = entries.filter((entry) =>
+			entry.action === AuditAction.OPERATION_START ||
+			entry.action === AuditAction.OPERATION_SUCCESS ||
+			entry.action === AuditAction.OPERATION_FAILURE ||
+			entry.action === AuditAction.OPERATION_RETRY ||
+			entry.action === AuditAction.OPERATION_RECOVERY,
+		);
+
+		const requestStarts = operationEntries.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return (
+				entry.action === AuditAction.OPERATION_START &&
+				metadata?.operation_class === "request" &&
+				metadata.operation_name === "request.fetch"
+			);
+		});
+
+		const requestSuccesses = operationEntries.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return (
+				entry.action === AuditAction.OPERATION_SUCCESS &&
+				metadata?.operation_class === "request" &&
+				metadata.operation_name === "request.fetch"
+			);
+		});
+
+		const uninterruptedSuccesses = requestSuccesses.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return metadata?.manual_recovery_required === false;
+		});
+
+		const firstAttemptStarts = requestStarts.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return metadata?.attempt_no === 1;
+		});
+		const firstAttemptSuccesses = requestSuccesses.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return metadata?.attempt_no === 1 && metadata.retry_count === 0;
+		});
+
+		type RequestFlowState = {
+			firstAttemptFailed: boolean;
+			eventualSuccess: boolean;
+			manualRecoveryRequired: boolean;
+		};
+		const requestFlowStates = new Map<string, RequestFlowState>();
+		for (const entry of operationEntries) {
+			const metadata = entry.metadata as (ReliabilityAuditMetadata & { request_flow_id?: string }) | undefined;
+			if (
+				metadata?.operation_class !== "request" ||
+				metadata.operation_name !== "request.fetch" ||
+				!metadata.request_flow_id
+			) {
+				continue;
+			}
+
+			const flow = requestFlowStates.get(metadata.request_flow_id) ?? {
+				firstAttemptFailed: false,
+				eventualSuccess: false,
+				manualRecoveryRequired: false,
+			};
+			if (entry.action === AuditAction.OPERATION_FAILURE && metadata.attempt_no === 1) {
+				flow.firstAttemptFailed = true;
+			}
+			if (entry.action === AuditAction.OPERATION_SUCCESS) {
+				flow.eventualSuccess = true;
+			}
+			if (metadata.manual_recovery_required) {
+				flow.manualRecoveryRequired = true;
+			}
+			requestFlowStates.set(metadata.request_flow_id, flow);
+		}
+		const flowsWithFirstFailure = [...requestFlowStates.values()].filter((flow) => flow.firstAttemptFailed);
+		const autoRecoveredFlows = flowsWithFirstFailure.filter(
+			(flow) => flow.eventualSuccess && !flow.manualRecoveryRequired,
+		);
+
+		const authRefreshStarts = operationEntries.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return (
+				entry.action === AuditAction.OPERATION_START &&
+				metadata?.operation_class === "auth" &&
+				metadata.operation_name === "auth.refresh-token"
+			);
+		});
+		const authRefreshSuccesses = operationEntries.filter((entry) => {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			return (
+				entry.action === AuditAction.OPERATION_SUCCESS &&
+				metadata?.operation_class === "auth" &&
+				metadata.operation_name === "auth.refresh-token"
+			);
+		});
+
+		const startsByClass = new Map<string, number>();
+		const successesByClass = new Map<string, number>();
+		for (const entry of operationEntries) {
+			const metadata = entry.metadata as ReliabilityAuditMetadata | undefined;
+			if (!metadata) continue;
+			if (
+				metadata.operation_class === "request" &&
+				metadata.operation_name === "request.exhausted"
+			) {
+				continue;
+			}
+			if (entry.action === AuditAction.OPERATION_START) {
+				startsByClass.set(
+					metadata.operation_class,
+					(startsByClass.get(metadata.operation_class) ?? 0) + 1,
+				);
+			}
+			if (entry.action === AuditAction.OPERATION_SUCCESS) {
+				successesByClass.set(
+					metadata.operation_class,
+					(successesByClass.get(metadata.operation_class) ?? 0) + 1,
+				);
+			}
+		}
+		const operationSuccessRateByClass24h: Record<string, number | null> = {};
+		for (const [operationClass, startCount] of startsByClass.entries()) {
+			const successCount = successesByClass.get(operationClass) ?? 0;
+			operationSuccessRateByClass24h[operationClass] = toPercent(successCount, startCount);
+		}
+
+		return {
+			requestStarts24h: requestStarts.length,
+			uninterruptedCompletionRate24h: toPercent(
+				uninterruptedSuccesses.length,
+				requestStarts.length,
+			),
+			firstAttemptSuccessRate24h: toPercent(
+				firstAttemptSuccesses.length,
+				firstAttemptStarts.length,
+			),
+			autoRecoverySuccessRate24h: toPercent(
+				autoRecoveredFlows.length,
+				flowsWithFirstFailure.length,
+			),
+			tokenRefreshSuccessRate24h: toPercent(
+				authRefreshSuccesses.length,
+				authRefreshStarts.length,
+			),
+			operationSuccessRateByClass24h,
+		};
+	};
+
+	const instrumentToolRegistry = <TTools extends Record<string, unknown>>(tools: TTools): TTools => {
+		for (const [toolName, toolDefinition] of Object.entries(tools)) {
+			const candidate = toolDefinition as {
+				execute?: (input: unknown) => Promise<unknown> | unknown;
+			};
+			if (typeof candidate.execute !== "function") continue;
+			const originalExecute = candidate.execute.bind(candidate);
+			candidate.execute = async (input: unknown) => {
+				const dryRunValue =
+					typeof input === "object" &&
+					input !== null &&
+					"dryRun" in input &&
+					typeof (input as { dryRun?: unknown }).dryRun === "boolean"
+						? (input as { dryRun: boolean }).dryRun
+						: undefined;
+				const op = startOperation({
+					operationClass: "tool",
+					operationName: `tool.${toolName}`,
+					retryProfile: runtimeMetrics.retryProfile,
+					extraMetadata:
+						typeof dryRunValue === "boolean"
+							? { operation_mode: dryRunValue ? "dry_run" : "apply" }
+							: undefined,
+				});
+				try {
+					const result = await originalExecute(input);
+					completeOperationSuccess(op);
+					return result;
+				} catch (error) {
+					completeOperationFailure(op, {
+						errorCategory: "tool-execution",
+					});
+					throw error;
+				}
+			};
+		}
+		return tools;
+	};
+
+	const instrumentAuthMethods = <TMethods extends unknown[]>(methods: TMethods): TMethods => {
+		for (const methodDefinition of methods) {
+			const candidate = methodDefinition as {
+				label?: unknown;
+				authorize?: (input?: Record<string, string>) => Promise<unknown>;
+			};
+			if (typeof candidate.authorize !== "function") continue;
+			const originalAuthorize = candidate.authorize.bind(candidate);
+			candidate.authorize = async (input?: Record<string, string>) => {
+				const label = typeof candidate.label === "string" ? candidate.label : "oauth";
+				const authOperation = startOperation({
+					operationClass: "auth",
+					operationName: `auth.method.${label.toLowerCase().replace(/\s+/g, "-")}`,
+					retryProfile: runtimeMetrics.retryProfile,
+				});
+				try {
+					const result = await originalAuthorize(input);
+					completeOperationSuccess(authOperation);
+					return result;
+				} catch (error) {
+					completeOperationFailure(authOperation, {
+						errorCategory: "auth-method",
+					});
+					throw error;
+				}
+			};
+		}
+		return methods;
 	};
 
 		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
@@ -1706,6 +2114,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		const runStartupPreflight = async (): Promise<void> => {
 			if (startupPreflightShown) return;
 			startupPreflightShown = true;
+			const startupOperation = startOperation({
+				operationClass: "startup",
+				operationName: "startup.preflight",
+				retryProfile: runtimeMetrics.retryProfile,
+			});
 			try {
 				const state = await buildSetupChecklistState();
 				const message =
@@ -1714,7 +2127,18 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					`Next: ${state.nextAction}`;
 				await showToast(message, state.summary.healthy > 0 ? "info" : "warning");
 				logInfo(message);
+				completeOperationSuccess(startupOperation, {
+					extraMetadata: {
+						healthy_accounts: state.summary.healthy,
+						total_accounts: state.summary.total,
+						blocked_accounts: state.summary.blocked,
+						rate_limited_accounts: state.summary.rateLimited,
+					},
+				});
 			} catch (error) {
+				completeOperationFailure(startupOperation, {
+					errorCategory: "startup-preflight",
+				});
 				logDebug(
 					`[${PLUGIN_NAME}] Startup preflight skipped: ${
 						error instanceof Error ? error.message : String(error)
@@ -1730,6 +2154,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
         // Event handler for session recovery and account selection
         const eventHandler = async (input: { event: { type: string; properties?: unknown } }) => {
+          const eventType = input.event.type ?? "unknown";
+          const eventOperation = startOperation({
+                operationClass: "ui_event",
+                operationName: `ui-event.${eventType}`,
+                retryProfile: runtimeMetrics.retryProfile,
+                extraMetadata: { event_type: eventType },
+          });
           try {
                 const { event } = input;
                 // Handle TUI account selection events
@@ -1741,6 +2172,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         const props = event.properties as { index?: number; accountIndex?: number; provider?: string };
                         // Filter by provider if specified
                         if (props.provider && props.provider !== "openai" && props.provider !== PROVIDER_ID) {
+                                completeOperationSuccess(eventOperation, {
+                                        extraMetadata: { ignored_reason: "provider-mismatch" },
+                                });
                                 return;
                         }
 
@@ -1748,6 +2182,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                         if (typeof index === "number") {
                                 const storage = await loadAccounts();
                                 if (!storage || index < 0 || index >= storage.accounts.length) {
+                                        completeOperationSuccess(eventOperation, {
+                                                extraMetadata: { ignored_reason: "invalid-account-index" },
+                                        });
                                         return;
                                 }
 
@@ -1776,7 +2213,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 await showToast(`Switched to account ${index + 1}`, "info");
                         }
                 }
+                completeOperationSuccess(eventOperation);
           } catch (error) {
+                completeOperationFailure(eventOperation, {
+                        errorCategory: "ui-event",
+                });
                 logDebug(`[${PLUGIN_NAME}] Event handler error: ${error instanceof Error ? error.message : String(error)}`);
           }
         };
@@ -2173,6 +2614,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 							let allRateLimitedRetries = 0;
 							let emptyResponseRetries = 0;
+							const requestFlowId = randomUUID();
+							let requestAttemptNumber = 0;
 							const attemptedUnsupportedFallbackModels = new Set<string>();
 							if (model) {
 								attemptedUnsupportedFallbackModels.add(model);
@@ -2216,8 +2659,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 							);
 
 											let accountAuth = accountManager.toAuthDetails(account) as OAuthAuthDetails;
+											let refreshOperation: OperationTracker | null = null;
 								try {
 						if (shouldRefreshToken(accountAuth, tokenRefreshSkewMs)) {
+							refreshOperation = startOperation({
+								operationClass: "auth",
+								operationName: "auth.refresh-token",
+								attemptNo: 1,
+								retryCount: 0,
+								modelFamily,
+								retryProfile,
+								extraMetadata: {
+									request_flow_id: requestFlowId,
+								},
+							});
 							accountAuth = (await refreshAndUpdateToken(
 								accountAuth,
 								client,
@@ -2225,8 +2680,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 							accountManager.updateFromAuth(account, accountAuth);
 							accountManager.clearAuthFailures(account);
 							accountManager.saveToDiskDebounced();
+							completeOperationSuccess(refreshOperation);
 						}
 			} catch (err) {
+				if (refreshOperation) {
+					completeOperationFailure(refreshOperation, {
+						errorCategory: "auth-refresh",
+					});
+				}
 				logDebug(`[${PLUGIN_NAME}] Auth refresh failed for account: ${(err as Error)?.message ?? String(err)}`);
 				if (
 					!consumeRetryBudget(
@@ -2340,6 +2801,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 							while (true) {
+								requestAttemptNumber++;
+								const requestOperation = startOperation({
+									operationClass: "request",
+									operationName: "request.fetch",
+									attemptNo: requestAttemptNumber,
+									retryCount: Math.max(0, requestAttemptNumber - 1),
+									modelFamily,
+									retryProfile,
+									extraMetadata: {
+										request_flow_id: requestFlowId,
+										quota_key: quotaKey,
+									},
+								});
 								let response: Response;
 								const fetchStart = performance.now();
 
@@ -2378,6 +2852,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 										`Network error on account ${account.index + 1}: ${errorMsg}`,
 									)
 								) {
+									completeOperationFailure(requestOperation, {
+										errorCategory: "network",
+										manualRecoveryRequired: true,
+										extraMetadata: { request_flow_id: requestFlowId },
+									});
 									accountManager.refundToken(account, modelFamily, model);
 									return new Response(
 										JSON.stringify({
@@ -2401,6 +2880,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 								runtimeMetrics.lastErrorCategory = "network";
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
+								completeOperationFailure(requestOperation, {
+									errorCategory: "network",
+									extraMetadata: { request_flow_id: requestFlowId },
+								});
+								markOperationRecovery(requestOperation, {
+									errorCategory: "network",
+									recoveryStep: "account-rotation",
+									extraMetadata: { request_flow_id: requestFlowId },
+								});
 								break;
 								} finally {
 									clearTimeout(fetchTimeoutId);
@@ -2421,6 +2909,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 								if (!response.ok) {
 									const contextOverflowResult = await handleContextOverflow(response, model);
 									if (contextOverflowResult.handled) {
+										completeOperationSuccess(requestOperation, {
+											extraMetadata: {
+												request_flow_id: requestFlowId,
+												context_overflow_recovered: true,
+											},
+										});
 										return contextOverflowResult.response;
 									}
 
@@ -2443,6 +2937,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 				account.lastSwitchReason = "rotation";
 				runtimeMetrics.lastError = `Unsupported model on account ${account.index + 1}: ${blockedModel}`;
 				runtimeMetrics.lastErrorCategory = "unsupported-model";
+				completeOperationFailure(requestOperation, {
+					errorCategory: "unsupported-model",
+					httpStatus: response.status,
+					extraMetadata: {
+						request_flow_id: requestFlowId,
+						blocked_model: blockedModel,
+					},
+				});
+				markOperationRecovery(requestOperation, {
+					errorCategory: "unsupported-model",
+					httpStatus: response.status,
+					recoveryStep: "account-rotation",
+					extraMetadata: {
+						request_flow_id: requestFlowId,
+					},
+				});
 				logWarn(
 					`Model ${blockedModel} is unsupported for account ${account.index + 1}. Trying next account/workspace before fallback.`,
 					{
@@ -2497,6 +3007,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 				};
 				runtimeMetrics.lastError = `Model fallback: ${previousModel} -> ${model}`;
 				runtimeMetrics.lastErrorCategory = "model-fallback";
+				completeOperationFailure(requestOperation, {
+					errorCategory: "unsupported-model",
+					httpStatus: response.status,
+					extraMetadata: {
+						request_flow_id: requestFlowId,
+						blocked_model: previousModel,
+					},
+				});
+				markOperationRecovery(requestOperation, {
+					errorCategory: "model-fallback",
+					httpStatus: response.status,
+					recoveryStep: "model-fallback",
+					extraMetadata: {
+						request_flow_id: requestFlowId,
+						fallback_model: model,
+					},
+				});
 				logWarn(
 					`Model ${previousModel} is unsupported for this ChatGPT account. Falling back to ${model}.`,
 					{
@@ -2565,8 +3092,25 @@ while (attempted.size < Math.max(1, accountCount)) {
 								`Server error ${response.status} on account ${account.index + 1}`,
 							)
 						) {
+							completeOperationFailure(requestOperation, {
+								errorCategory: "server",
+								httpStatus: response.status,
+								manualRecoveryRequired: true,
+								extraMetadata: { request_flow_id: requestFlowId },
+							});
 							return errorResponse;
 						}
+						completeOperationFailure(requestOperation, {
+							errorCategory: "server",
+							httpStatus: response.status,
+							extraMetadata: { request_flow_id: requestFlowId },
+						});
+						markOperationRecovery(requestOperation, {
+							errorCategory: "server",
+							httpStatus: response.status,
+							recoveryStep: "account-rotation",
+							extraMetadata: { request_flow_id: requestFlowId },
+						});
 						break;
 					}
 
@@ -2601,6 +3145,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 															await sleep(addJitter(Math.max(MIN_BACKOFF_MS, delayMs), 0.2));
+															markOperationRetry(requestOperation, {
+																errorCategory: "rate-limit-short",
+																httpStatus: response.status,
+																extraMetadata: {
+																	request_flow_id: requestFlowId,
+																	backoff_ms: delayMs,
+																},
+															});
+															completeOperationFailure(requestOperation, {
+																errorCategory: "rate-limit-short",
+																httpStatus: response.status,
+																extraMetadata: { request_flow_id: requestFlowId },
+															});
 															continue;
 																																}
 
@@ -2616,6 +3173,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 				runtimeMetrics.accountRotations++;
 				runtimeMetrics.lastErrorCategory = "rate-limit";
 				accountManager.saveToDiskDebounced();
+				completeOperationFailure(requestOperation, {
+					errorCategory: "rate-limit",
+					httpStatus: response.status,
+					extraMetadata: { request_flow_id: requestFlowId, backoff_ms: delayMs },
+				});
+				markOperationRecovery(requestOperation, {
+					errorCategory: "rate-limit",
+					httpStatus: response.status,
+					recoveryStep: "account-rotation",
+					extraMetadata: { request_flow_id: requestFlowId, backoff_ms: delayMs },
+				});
 						logWarn(
 							`Rate limited. Rotating account ${account.index + 1} (${account.email ?? "unknown"}).`,
 						);
@@ -2639,6 +3207,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 																													runtimeMetrics.failedRequests++;
 																													runtimeMetrics.lastError = `HTTP ${response.status}`;
 																													runtimeMetrics.lastErrorCategory = "http";
+																													completeOperationFailure(requestOperation, {
+																														errorCategory: "http",
+																														httpStatus: response.status,
+																														manualRecoveryRequired: true,
+																														extraMetadata: { request_flow_id: requestFlowId },
+																													});
 																													return errorResponse;
 																											}
 
@@ -2652,6 +3226,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.lastError = `HTTP ${successResponse.status}`;
 						runtimeMetrics.lastErrorCategory = "http";
+						completeOperationFailure(requestOperation, {
+							errorCategory: "http",
+							httpStatus: successResponse.status,
+							manualRecoveryRequired: true,
+							extraMetadata: { request_flow_id: requestFlowId },
+						});
 						return successResponse;
 					}
 
@@ -2678,6 +3258,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 									);
 									accountManager.refundToken(account, modelFamily, model);
 									accountManager.recordFailure(account, modelFamily, model);
+									markOperationRetry(requestOperation, {
+										errorCategory: "empty-response",
+										extraMetadata: {
+											request_flow_id: requestFlowId,
+											retry_attempt: emptyResponseRetries,
+										},
+									});
+									completeOperationFailure(requestOperation, {
+										errorCategory: "empty-response",
+										extraMetadata: {
+											request_flow_id: requestFlowId,
+										},
+									});
 									await sleep(addJitter(emptyResponseRetryDelayMs, 0.2));
 									break;
 								}
@@ -2692,6 +3285,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 					runtimeMetrics.successfulRequests++;
 					runtimeMetrics.lastError = null;
 					runtimeMetrics.lastErrorCategory = null;
+					completeOperationSuccess(requestOperation, {
+						httpStatus: successResponse.status,
+						extraMetadata: { request_flow_id: requestFlowId },
+					});
 						return successResponse;
 																								}
 										if (restartAccountTraversalWithFallback) {
@@ -2734,6 +3331,24 @@ while (attempted.size < Math.max(1, accountCount)) {
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.lastError = message;
 								runtimeMetrics.lastErrorCategory = waitMs > 0 ? "rate-limit" : "account-failure";
+								const exhaustedOperation = startOperation({
+									operationClass: "request",
+									operationName: "request.exhausted",
+									attemptNo: requestAttemptNumber + 1,
+									retryCount: requestAttemptNumber,
+									modelFamily,
+									retryProfile,
+									extraMetadata: {
+										request_flow_id: requestFlowId,
+									},
+								});
+								completeOperationFailure(exhaustedOperation, {
+									errorCategory: waitMs > 0 ? "rate-limit" : "account-failure",
+									manualRecoveryRequired: true,
+									extraMetadata: {
+										request_flow_id: requestFlowId,
+									},
+								});
 								return new Response(JSON.stringify({ error: { message } }), {
 									status: waitMs > 0 ? 429 : 503,
 											headers: {
@@ -2751,7 +3366,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					loaderMutex = null;
 				}
                         },
-				methods: [
+				methods: instrumentAuthMethods([
 					{
 						label: AUTH_LABELS.OAUTH,
 						type: "oauth" as const,
@@ -3751,9 +4366,9 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         });
                                                 },
                                         },
-                        ],
+                        ]),
                 },
-                tool: {
+                tool: instrumentToolRegistry({
                         "codex-list": tool({
                                 description:
                                         "List all Codex OAuth accounts and the current active index.",
@@ -4238,6 +4853,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const total = runtimeMetrics.totalRequests;
 					const successful = runtimeMetrics.successfulRequests;
 					const refreshMetrics = getRefreshQueueMetrics();
+					const reliabilityKpis = computeReliabilityKpis(now);
+					const operationClassRates = Object.entries(
+						reliabilityKpis.operationSuccessRateByClass24h,
+					)
+						.sort(([classA], [classB]) => classA.localeCompare(classB))
+						.map(([operationClass, value]) => `${operationClass}=${formatPercent(value)}`)
+						.join(", ");
 					const successRate = total > 0 ? ((successful / total) * 100).toFixed(1) : "0.0";
 					const avgLatencyMs =
 						successful > 0
@@ -4279,6 +4901,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 							`${refreshMetrics.failed}/` +
 							`${refreshMetrics.pending}`,
 						`Last upstream request: ${lastRequest}`,
+						"",
+						"Local reliability KPIs (best-effort 24h, retention-bounded):",
+						`Request starts: ${reliabilityKpis.requestStarts24h}`,
+						`Uninterrupted completion rate: ${formatPercent(reliabilityKpis.uninterruptedCompletionRate24h)}`,
+						`First-attempt success rate: ${formatPercent(reliabilityKpis.firstAttemptSuccessRate24h)}`,
+						`Auto-recovery success rate: ${formatPercent(reliabilityKpis.autoRecoverySuccessRate24h)}`,
+						`Token refresh success rate: ${formatPercent(reliabilityKpis.tokenRefreshSuccessRate24h)}`,
+						`Operation success by class: ${operationClassRates || "n/a"}`,
 					];
 
 					if (runtimeMetrics.lastError) {
@@ -4339,6 +4969,39 @@ while (attempted.size < Math.max(1, accountCount)) {
 								"muted",
 							),
 							formatUiKeyValue(ui, "Last upstream request", lastRequest, "muted"),
+							"",
+							...formatUiSection(ui, "Local reliability KPIs (best-effort 24h, retention-bounded)"),
+							formatUiKeyValue(ui, "Request starts", String(reliabilityKpis.requestStarts24h)),
+							formatUiKeyValue(
+								ui,
+								"Uninterrupted completion",
+								formatPercent(reliabilityKpis.uninterruptedCompletionRate24h),
+								"accent",
+							),
+							formatUiKeyValue(
+								ui,
+								"First-attempt success",
+								formatPercent(reliabilityKpis.firstAttemptSuccessRate24h),
+								"accent",
+							),
+							formatUiKeyValue(
+								ui,
+								"Auto-recovery success",
+								formatPercent(reliabilityKpis.autoRecoverySuccessRate24h),
+								"accent",
+							),
+							formatUiKeyValue(
+								ui,
+								"Token refresh success",
+								formatPercent(reliabilityKpis.tokenRefreshSuccessRate24h),
+								"accent",
+							),
+							formatUiKeyValue(
+								ui,
+								"Operation success by class",
+								operationClassRates || "n/a",
+								"muted",
+							),
 						];
 						if (runtimeMetrics.lastError) {
 							styled.push(formatUiKeyValue(ui, "Last error", runtimeMetrics.lastError, "danger"));
@@ -5620,7 +6283,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 			},
 		}),
 
-	},
+	}),
 	};
 };
 

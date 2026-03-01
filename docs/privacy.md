@@ -37,6 +37,16 @@ All data is stored **locally on your machine**:
 - **Purpose:** Reduce GitHub API calls and improve performance
 - **TTL:** 15 minutes (automatically refreshes when stale)
 
+### Audit Logs (Local Reliability Metrics)
+- **Location:** `~/.opencode/logs/audit.log` (rotated as `audit.1.log`, `audit.2.log`, etc.)
+- **Contents:** Local operation lifecycle events used by `codex-metrics` for best-effort 24h reliability KPIs (bounded by local log retention)
+- **Includes:**
+  - Operation class/name (`request`, `auth`, `tool`, `sync`, `startup`, `ui_event`)
+  - Timing and outcome (`start`, `success`, `failure`, `retry`, `recovery`)
+  - Error category and HTTP status (when available)
+- **Does not include:** prompt text, model responses, OAuth tokens, or secrets
+- **Scope:** Local-only; never transmitted to third parties
+
 ### Debug Logs
 - **Location:** `~/.opencode/logs/codex-plugin/`
 - **Contents:** Request/response metadata logs (only when `ENABLE_PLUGIN_REQUEST_LOGGING=1` is set)
@@ -114,6 +124,7 @@ rm -rf ~/.opencode/cache/
 ### Delete Logs
 ```bash
 rm -rf ~/.opencode/logs/codex-plugin/
+rm -f ~/.opencode/logs/audit*.log
 ```
 
 ### Revoke OAuth Access

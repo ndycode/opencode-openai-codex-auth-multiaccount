@@ -1,4 +1,13 @@
-import { mkdirSync, existsSync, statSync, renameSync, readdirSync, unlinkSync, appendFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+} from "node:fs";
 
 // Simple in-memory queue to prevent EBUSY locks during highly concurrent writes
 const logQueue: string[] = [];
@@ -33,6 +42,8 @@ export enum AuditAction {
 	ACCOUNT_REFRESH = "account.refresh",
 	ACCOUNT_EXPORT = "account.export",
 	ACCOUNT_IMPORT = "account.import",
+	ACCOUNT_SYNC_PULL = "account.sync.pull",
+	ACCOUNT_SYNC_PUSH = "account.sync.push",
 	AUTH_LOGIN = "auth.login",
 	AUTH_LOGOUT = "auth.logout",
 	AUTH_REFRESH = "auth.refresh",
@@ -44,6 +55,11 @@ export enum AuditAction {
 	REQUEST_FAILURE = "request.failure",
 	CIRCUIT_OPEN = "circuit.open",
 	CIRCUIT_CLOSE = "circuit.close",
+	OPERATION_START = "operation.start",
+	OPERATION_SUCCESS = "operation.success",
+	OPERATION_FAILURE = "operation.failure",
+	OPERATION_RETRY = "operation.retry",
+	OPERATION_RECOVERY = "operation.recovery",
 }
 
 export enum AuditOutcome {
@@ -67,6 +83,44 @@ export interface AuditConfig {
 	logDir: string;
 	maxFileSizeBytes: number;
 	maxFiles: number;
+}
+
+export type OperationClass =
+	| "request"
+	| "auth"
+	| "account"
+	| "tool"
+	| "sync"
+	| "startup"
+	| "ui_event"
+	| "storage";
+
+export type OperationOutcome = "success" | "failure" | "partial";
+
+export interface ReliabilityAuditMetadata {
+	event_version: "1.0";
+	operation_id: string;
+	process_session_id: string;
+	operation_class: OperationClass;
+	operation_name: string;
+	attempt_no: number;
+	retry_count: number;
+	manual_recovery_required: boolean;
+	beginner_safe_mode: boolean;
+	operation_mode?: "dry_run" | "apply";
+	duration_ms?: number;
+	error_category?: string;
+	model_family?: string;
+	retry_profile?: string;
+	http_status?: number;
+	[key: string]: unknown;
+}
+
+export const OPERATION_EVENT_VERSION = "1.0" as const;
+
+interface ReadAuditEntriesOptions {
+	sinceMs?: number;
+	limit?: number;
 }
 
 const DEFAULT_CONFIG: AuditConfig = {
@@ -186,4 +240,41 @@ export function listAuditLogFiles(): string[] {
 		.filter((f) => f.startsWith("audit") && f.endsWith(".log"))
 		.map((f) => join(auditConfig.logDir, f))
 		.sort();
+}
+
+export function readAuditEntries(options: ReadAuditEntriesOptions = {}): AuditEntry[] {
+	const { sinceMs, limit } = options;
+	const minTimestamp = typeof sinceMs === "number" ? sinceMs : null;
+	const files = listAuditLogFiles();
+	const parsedEntries: AuditEntry[] = [];
+
+	for (const filePath of files) {
+		let content = "";
+		try {
+			content = readFileSync(filePath, "utf8");
+		} catch {
+			continue;
+		}
+
+		const lines = content.split("\n");
+		for (const rawLine of lines) {
+			const line = rawLine.trim();
+			if (!line) continue;
+			try {
+				const entry = JSON.parse(line) as AuditEntry;
+				const parsedTime = Date.parse(entry.timestamp);
+				if (!Number.isFinite(parsedTime)) continue;
+				if (minTimestamp !== null && parsedTime < minTimestamp) continue;
+				parsedEntries.push(entry);
+			} catch {
+				// Ignore malformed lines; audit reads should be best-effort.
+			}
+		}
+	}
+
+	parsedEntries.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+	if (typeof limit === "number" && limit > 0 && parsedEntries.length > limit) {
+		return parsedEntries.slice(parsedEntries.length - limit);
+	}
+	return parsedEntries;
 }

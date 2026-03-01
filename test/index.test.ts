@@ -265,6 +265,24 @@ vi.mock("../lib/storage.js", () => ({
 	formatStorageErrorHint: () => "Check file permissions",
 }));
 
+vi.mock("../lib/audit.js", () => ({
+	AuditAction: {
+		OPERATION_START: "operation.start",
+		OPERATION_SUCCESS: "operation.success",
+		OPERATION_FAILURE: "operation.failure",
+		OPERATION_RETRY: "operation.retry",
+		OPERATION_RECOVERY: "operation.recovery",
+	},
+	AuditOutcome: {
+		SUCCESS: "success",
+		FAILURE: "failure",
+		PARTIAL: "partial",
+	},
+	OPERATION_EVENT_VERSION: "1.0",
+	auditLog: vi.fn(),
+	readAuditEntries: vi.fn(() => []),
+}));
+
 vi.mock("../lib/accounts.js", () => {
 	class MockAccountManager {
 		private accounts = [
@@ -693,6 +711,190 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-metrics"].execute();
 			expect(result).toContain("Codex Plugin Metrics");
 			expect(result).toContain("Total upstream requests");
+			expect(result).toContain("Local reliability KPIs");
+			expect(result).toContain("retention-bounded");
+		});
+
+		it("renders best-effort 24h reliability percentages from local audit events", async () => {
+			const auditModule = await import("../lib/audit.js");
+			const readAuditEntriesMock = vi.mocked(auditModule.readAuditEntries);
+			const timestamp = new Date().toISOString();
+			readAuditEntriesMock.mockReturnValue([
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.start",
+					actor: "plugin",
+					resource: "request.fetch",
+					outcome: "partial",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "req-1",
+						process_session_id: "proc-1",
+						operation_class: "request",
+						operation_name: "request.fetch",
+						attempt_no: 1,
+						retry_count: 0,
+						manual_recovery_required: false,
+						beginner_safe_mode: false,
+						request_flow_id: "flow-1",
+					},
+				},
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.success",
+					actor: "plugin",
+					resource: "request.fetch",
+					outcome: "success",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "req-1",
+						process_session_id: "proc-1",
+						operation_class: "request",
+						operation_name: "request.fetch",
+						attempt_no: 1,
+						retry_count: 0,
+						manual_recovery_required: false,
+						beginner_safe_mode: false,
+						request_flow_id: "flow-1",
+					},
+				},
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.start",
+					actor: "plugin",
+					resource: "auth.refresh-token",
+					outcome: "partial",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "auth-1",
+						process_session_id: "proc-1",
+						operation_class: "auth",
+						operation_name: "auth.refresh-token",
+						attempt_no: 1,
+						retry_count: 0,
+						manual_recovery_required: false,
+						beginner_safe_mode: false,
+					},
+				},
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.success",
+					actor: "plugin",
+					resource: "auth.refresh-token",
+					outcome: "success",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "auth-1",
+						process_session_id: "proc-1",
+						operation_class: "auth",
+						operation_name: "auth.refresh-token",
+						attempt_no: 1,
+						retry_count: 0,
+						manual_recovery_required: false,
+						beginner_safe_mode: false,
+					},
+				},
+			]);
+
+			const result = await plugin.tool["codex-metrics"].execute();
+			expect(result).toContain("Uninterrupted completion rate: 100.0%");
+			expect(result).toContain("First-attempt success rate: 100.0%");
+			expect(result).toContain("Token refresh success rate: 100.0%");
+		});
+
+		it("excludes request.exhausted from class-level request success denominator", async () => {
+			const auditModule = await import("../lib/audit.js");
+			const readAuditEntriesMock = vi.mocked(auditModule.readAuditEntries);
+			const timestamp = new Date().toISOString();
+			readAuditEntriesMock.mockReturnValue([
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.start",
+					actor: "plugin",
+					resource: "request.fetch",
+					outcome: "partial",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "req-1",
+						process_session_id: "proc-1",
+						operation_class: "request",
+						operation_name: "request.fetch",
+						attempt_no: 1,
+						retry_count: 0,
+						manual_recovery_required: false,
+						beginner_safe_mode: false,
+						request_flow_id: "flow-1",
+					},
+				},
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.success",
+					actor: "plugin",
+					resource: "request.fetch",
+					outcome: "success",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "req-1",
+						process_session_id: "proc-1",
+						operation_class: "request",
+						operation_name: "request.fetch",
+						attempt_no: 1,
+						retry_count: 0,
+						manual_recovery_required: false,
+						beginner_safe_mode: false,
+						request_flow_id: "flow-1",
+					},
+				},
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.start",
+					actor: "plugin",
+					resource: "request.exhausted",
+					outcome: "partial",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "req-x",
+						process_session_id: "proc-1",
+						operation_class: "request",
+						operation_name: "request.exhausted",
+						attempt_no: 2,
+						retry_count: 1,
+						manual_recovery_required: true,
+						beginner_safe_mode: false,
+						request_flow_id: "flow-1",
+					},
+				},
+				{
+					timestamp,
+					correlationId: null,
+					action: "operation.failure",
+					actor: "plugin",
+					resource: "request.exhausted",
+					outcome: "failure",
+					metadata: {
+						event_version: "1.0",
+						operation_id: "req-x",
+						process_session_id: "proc-1",
+						operation_class: "request",
+						operation_name: "request.exhausted",
+						attempt_no: 2,
+						retry_count: 1,
+						manual_recovery_required: true,
+						beginner_safe_mode: false,
+						request_flow_id: "flow-1",
+					},
+				},
+			]);
+
+			const result = await plugin.tool["codex-metrics"].execute();
+			expect(result).toContain("Operation success by class: request=100.0%");
 		});
 	});
 
