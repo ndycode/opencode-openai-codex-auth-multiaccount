@@ -5,8 +5,10 @@ import { readFile, writeFile, mkdir, copyFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { INSTALL_PLUGIN_NAME, normalizePluginList, createMergedConfig } from "./install-config-helpers.js";
 
-const PLUGIN_NAME = "oc-chatgpt-multi-auth";
+const PLUGIN_NAME = INSTALL_PLUGIN_NAME;
+const TEST_MODE = process.env.OC_INSTALLER_TEST_MODE === "1";
 
 const args = new Set(process.argv.slice(2));
 
@@ -50,14 +52,6 @@ function log(message) {
 	console.log(message);
 }
 
-function normalizePluginList(list) {
-	const entries = Array.isArray(list) ? list.filter(Boolean) : [];
-	const filtered = entries.filter((entry) => {
-		if (typeof entry !== "string") return true;
-		return entry !== PLUGIN_NAME && !entry.startsWith(`${PLUGIN_NAME}@`);
-	});
-	return [...filtered, PLUGIN_NAME];
-}
 
 function formatJson(obj) {
 	return `${JSON.stringify(obj, null, 2)}\n`;
@@ -145,7 +139,7 @@ async function main() {
 	}
 
 	const template = await readJson(templatePath);
-	template.plugin = [PLUGIN_NAME];
+	template.plugin = normalizePluginList(template.plugin);
 
 	let nextConfig = template;
 	if (existsSync(configPath)) {
@@ -154,14 +148,7 @@ async function main() {
 
 		try {
 			const existing = await readJson(configPath);
-			const merged = { ...existing };
-			merged.plugin = normalizePluginList(existing.plugin);
-			const provider = (existing.provider && typeof existing.provider === "object")
-				? { ...existing.provider }
-				: {};
-			provider.openai = template.provider.openai;
-			merged.provider = provider;
-			nextConfig = merged;
+			nextConfig = createMergedConfig(template, existing);
 		} catch (error) {
 			log(`Warning: Could not parse existing config (${error}). Replacing with template.`);
 			nextConfig = template;
@@ -170,13 +157,13 @@ async function main() {
 		log("No existing config found. Creating new global config.");
 	}
 
-	if (dryRun) {
-		log(`[dry-run] Would write ${configPath} using ${useLegacy ? "legacy" : "modern"} config`);
-	} else {
-		await mkdir(configDir, { recursive: true });
-		await writeFile(configPath, formatJson(nextConfig), "utf-8");
-		log(`Wrote ${configPath} (${useLegacy ? "legacy" : "modern"} config)`);
-	}
+if (dryRun) {
+	log(`[dry-run] Would write ${configPath} using ${useLegacy ? "legacy" : "modern"} config`);
+} else {
+	await mkdir(configDir, { recursive: true });
+	await writeFile(configPath, formatJson(nextConfig), "utf-8");
+	log(`Wrote ${configPath} (${useLegacy ? "legacy" : "modern"} config)`);
+}
 
 	await clearCache();
 
@@ -187,7 +174,9 @@ async function main() {
 	}
 }
 
-main().catch((error) => {
-	console.error(`Installer failed: ${error instanceof Error ? error.message : error}`);
-	process.exit(1);
-});
+if (!TEST_MODE) {
+	main().catch((error) => {
+		console.error(`Installer failed: ${error instanceof Error ? error.message : error}`);
+		process.exit(1);
+	});
+}

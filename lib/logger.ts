@@ -206,6 +206,12 @@ if (LOGGING_ENABLED) {
 			? `[${PLUGIN_NAME}] Request logging ENABLED (raw payload capture ON) - logs will be saved to: ${LOG_DIR}`
 			: `[${PLUGIN_NAME}] Request logging ENABLED (metadata only; set CODEX_PLUGIN_LOG_BODIES=1 for raw payloads) - logs will be saved to: ${LOG_DIR}`,
 	);
+	if (REQUEST_BODY_LOGGING_ENABLED) {
+		logToConsole(
+			"warn",
+			`[${PLUGIN_NAME}] WARNING: Raw request logging may include sensitive payload data. Do not enable CODEX_PLUGIN_LOG_BODIES outside of debugging sessions.`,
+		);
+	}
 }
 if (DEBUG_ENABLED && !LOGGING_ENABLED) {
 	logToConsole(

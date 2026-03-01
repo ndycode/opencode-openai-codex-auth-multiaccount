@@ -3021,11 +3021,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						)
 					: null;
 
-			checkAndNotify(async (message, variant) => {
-				await showToast(message, variant);
-			}).catch((err) => {
-				logDebug(`Update check failed: ${err instanceof Error ? err.message : String(err)}`);
-			});
+			const autoUpdateEnabled = process.env.CODEX_AUTH_AUTO_UPDATE !== "0";
+			if (autoUpdateEnabled) {
+				checkAndNotify(async (message, variant) => {
+					await showToast(message, variant);
+				}).catch((err) => {
+					logDebug(`Update check failed: ${err instanceof Error ? err.message : String(err)}`);
+				});
+			}
 			await runStartupPreflight();
 
 

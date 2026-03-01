@@ -891,6 +891,7 @@ CODEX_TUI_V2=0 opencode                          # Disable Codex-style UI (legac
 CODEX_TUI_COLOR_PROFILE=ansi16 opencode          # Force UI color profile
 CODEX_TUI_GLYPHS=unicode opencode                # Override glyph mode (ascii|unicode|auto)
 CODEX_AUTH_PREWARM=0 opencode                    # Disable startup prewarm (prompt/instruction cache warmup)
+CODEX_AUTH_AUTO_UPDATE=0 opencode                # Skip npm registry calls at startup (no update check)
 CODEX_AUTH_FAST_SESSION=1 opencode               # Enable faster response defaults
 CODEX_AUTH_FAST_SESSION_STRATEGY=always opencode # Force fast mode for all prompts
 CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS=24 opencode # Tune fast-mode history window
@@ -904,6 +905,7 @@ CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 opencode # Legacy fallback toggle (prefe
 CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode    # Disable only the legacy gpt-5.3 -> gpt-5.2 edge
 CODEX_AUTH_FETCH_TIMEOUT_MS=120000 opencode      # Override request timeout
 CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000 opencode # Override SSE stall timeout
+CODEX_AUTH_STORAGE_KEY="your strong passphrase" opencode # Encrypt multi-account storage on disk (AES-256-GCM)
 ```
 
 For all options, see [docs/configuration.md](docs/configuration.md).
