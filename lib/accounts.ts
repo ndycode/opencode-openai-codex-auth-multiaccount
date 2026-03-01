@@ -716,6 +716,14 @@ export class AccountManager {
 		return newFailures;
 	}
 
+	/**
+	 * Clear the authentication failure counter for the given account's refresh token.
+	 *
+	 * Notes:
+	 * - Failure counts are tracked per refresh token (not per account), so this clears
+	 *   shared failure state for all org variants that reuse the same token.
+	 * - Failure counts are in-memory only for the current AccountManager instance.
+	 */
 	clearAuthFailures(account: ManagedAccount): void {
 		this.authFailuresByRefreshToken.delete(account.refreshToken);
 	}
@@ -851,6 +859,7 @@ export class AccountManager {
 	 */
 	removeAccountsWithSameRefreshToken(account: ManagedAccount): number {
 		const refreshToken = account.refreshToken;
+		// Snapshot first because removeAccount mutates this.accounts.
 		const accountsToRemove = this.accounts.filter((acc) => acc.refreshToken === refreshToken);
 		let removedCount = 0;
 

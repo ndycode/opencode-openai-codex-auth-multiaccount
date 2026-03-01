@@ -379,7 +379,11 @@ describe("storage", () => {
       expect(orgScoped).toBeDefined();
       expect(orgScoped?.accountId).toBe("workspace-with-org");
 
-      const noOrg = loaded?.accounts.find((account) => !account.organizationId && account.accountId === "workspace-no-org");
+      const noOrg = loaded?.accounts.find(
+        (account) =>
+          typeof account.organizationId === "undefined" &&
+          account.accountId === "workspace-no-org",
+      );
       expect(noOrg).toBeDefined();
     });
 
