@@ -190,7 +190,6 @@ export interface ManagedAccount {
 	rateLimitResetTimes: RateLimitStateV3;
 	coolingDownUntil?: number;
 	cooldownReason?: CooldownReason;
-	consecutiveAuthFailures?: number;
 }
 
 export interface AccountSelectionExplainability {
@@ -215,6 +214,7 @@ export class AccountManager {
 	private lastToastTime = 0;
 	private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingSave: Promise<void> | null = null;
+	private authFailuresByRefreshToken: Map<string, number> = new Map();
 
 	static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
 		const stored = await loadAccounts();
@@ -710,12 +710,14 @@ export class AccountManager {
 	}
 
 	incrementAuthFailures(account: ManagedAccount): number {
-		account.consecutiveAuthFailures = (account.consecutiveAuthFailures ?? 0) + 1;
-		return account.consecutiveAuthFailures;
+		const currentFailures = this.authFailuresByRefreshToken.get(account.refreshToken) ?? 0;
+		const newFailures = currentFailures + 1;
+		this.authFailuresByRefreshToken.set(account.refreshToken, newFailures);
+		return newFailures;
 	}
 
 	clearAuthFailures(account: ManagedAccount): void {
-		account.consecutiveAuthFailures = 0;
+		this.authFailuresByRefreshToken.delete(account.refreshToken);
 	}
 
 	shouldShowAccountToast(accountIndex: number, debounceMs = 30000): boolean {
@@ -840,6 +842,25 @@ export class AccountManager {
 		const account = this.accounts[index];
 		if (!account) return false;
 		return this.removeAccount(account);
+	}
+
+	/**
+	 * Remove all accounts that share the same refreshToken as the given account.
+	 * This is used when auth refresh fails to remove all org variants together.
+	 * @returns Number of accounts removed
+	 */
+	removeAccountsWithSameRefreshToken(account: ManagedAccount): number {
+		const refreshToken = account.refreshToken;
+		const accountsToRemove = this.accounts.filter((acc) => acc.refreshToken === refreshToken);
+		let removedCount = 0;
+
+		for (const accountToRemove of accountsToRemove) {
+			if (this.removeAccount(accountToRemove)) {
+				removedCount++;
+			}
+		}
+
+		return removedCount;
 	}
 
 	setAccountEnabled(index: number, enabled: boolean): ManagedAccount | null {

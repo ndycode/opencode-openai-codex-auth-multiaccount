@@ -2258,10 +2258,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 				const accountLabel = formatAccountLabel(account, account.index);
 				
 				if (failures >= ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_REMOVAL) {
-					accountManager.removeAccount(account);
+					const removedCount = accountManager.removeAccountsWithSameRefreshToken(account);
 					accountManager.saveToDiskDebounced();
+					const removalMessage = removedCount > 1
+						? `Removed ${removedCount} accounts (same refresh token) after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`
+						: `Removed ${accountLabel} after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`;
 					await showToast(
-						`Removed ${accountLabel} after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`,
+						removalMessage,
 						"error",
 						{ duration: toastDurationMs * 2 },
 					);

@@ -703,12 +703,71 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
       const account = manager.getCurrentAccount()!;
-      
-      manager.incrementAuthFailures(account);
-      manager.incrementAuthFailures(account);
+
+      // Increment failures twice
+      expect(manager.incrementAuthFailures(account)).toBe(1);
+      expect(manager.incrementAuthFailures(account)).toBe(2);
+
+      // Clear failures
       manager.clearAuthFailures(account);
-      
-      expect(account.consecutiveAuthFailures).toBe(0);
+
+      // After clearing, increment should start from 0 (returning 1)
+      expect(manager.incrementAuthFailures(account)).toBe(1);
+    });
+
+    it("tracks failures per refreshToken across multiple accounts", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now }, // base account
+          { refreshToken: "token-1", organizationId: "org-1", addedAt: now, lastUsed: now }, // org variant 1
+          { refreshToken: "token-1", organizationId: "org-2", addedAt: now, lastUsed: now }, // org variant 2
+          { refreshToken: "token-2", addedAt: now, lastUsed: now }, // different token
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccountsSnapshot();
+      const account1 = accounts[0];
+      const account2 = accounts[1];
+      const account3 = accounts[2];
+      const account4 = accounts[3];
+
+      // Increment failures on first account (token-1)
+      expect(manager.incrementAuthFailures(account1)).toBe(1);
+      expect(manager.incrementAuthFailures(account2)).toBe(2);
+      expect(manager.incrementAuthFailures(account3)).toBe(3);
+
+      // Different token should start from 0
+      expect(manager.incrementAuthFailures(account4)).toBe(1);
+    });
+
+    it("removes all accounts with the same refreshToken", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now }, // base account
+          { refreshToken: "token-1", organizationId: "org-1", addedAt: now, lastUsed: now }, // org variant 1
+          { refreshToken: "token-1", organizationId: "org-2", addedAt: now, lastUsed: now }, // org variant 2
+          { refreshToken: "token-2", addedAt: now, lastUsed: now }, // different token
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      expect(manager.getAccountCount()).toBe(4);
+
+      const accounts = manager.getAccountsSnapshot();
+      const account1 = accounts[0];
+      const removedCount = manager.removeAccountsWithSameRefreshToken(account1);
+
+      // Should remove 3 accounts with token-1
+      expect(removedCount).toBe(3);
+      expect(manager.getAccountCount()).toBe(1);
+      expect(manager.getAccountsSnapshot()[0].refreshToken).toBe("token-2");
     });
   });
 
