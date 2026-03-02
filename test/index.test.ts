@@ -328,6 +328,7 @@ vi.mock("../lib/accounts.js", () => {
 		incrementAuthFailures() { return 1; }
 		async saveToDisk() {}
 		markAccountCoolingDown() {}
+		markAccountsWithRefreshTokenCoolingDown() { return 1; }
 		markRateLimited() {}
 		markRateLimitedWithReason() {}
 		consumeToken() { return true; }
@@ -1348,9 +1349,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const removeGroupedAccountsSpy = vi
 			.spyOn(AccountManager.prototype, "removeAccountsWithSameRefreshToken")
 			.mockReturnValue(0);
-		const markAccountCoolingDownSpy = vi.spyOn(
+		const markAccountsWithRefreshTokenCoolingDownSpy = vi.spyOn(
 			AccountManager.prototype,
-			"markAccountCoolingDown",
+			"markAccountsWithRefreshTokenCoolingDown",
 		);
 
 		globalThis.fetch = vi.fn().mockResolvedValue(
@@ -1367,8 +1368,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(incrementAuthFailuresSpy).toHaveBeenCalledTimes(1);
 		expect(removeGroupedAccountsSpy).toHaveBeenCalledTimes(1);
-		expect(markAccountCoolingDownSpy).toHaveBeenCalledWith(
-			expect.objectContaining({ index: 0 }),
+		expect(markAccountsWithRefreshTokenCoolingDownSpy).toHaveBeenCalledWith(
+			"refresh-1",
 			ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
 			"auth-failure",
 		);

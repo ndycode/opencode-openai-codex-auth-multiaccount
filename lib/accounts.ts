@@ -695,6 +695,22 @@ export class AccountManager {
 		account.cooldownReason = reason;
 	}
 
+	/**
+	 * Mark every in-memory account sharing a refresh token as cooling down.
+	 * @returns Number of live accounts updated.
+	 */
+	markAccountsWithRefreshTokenCoolingDown(
+		refreshToken: string,
+		cooldownMs: number,
+		reason: CooldownReason,
+	): number {
+		const matches = this.accounts.filter((account) => account.refreshToken === refreshToken);
+		for (const account of matches) {
+			this.markAccountCoolingDown(account, cooldownMs, reason);
+		}
+		return matches.length;
+	}
+
 	isAccountCoolingDown(account: ManagedAccount): boolean {
 		if (account.coolingDownUntil === undefined) return false;
 		if (nowMs() >= account.coolingDownUntil) {

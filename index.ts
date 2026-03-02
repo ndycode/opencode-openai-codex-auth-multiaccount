@@ -2167,11 +2167,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 						logWarn(
 							`[${PLUGIN_NAME}] Expected grouped account removal after auth failures, but removed ${removedCount}.`,
 						);
-						accountManager.markAccountCoolingDown(
-							account,
+						const cooledCount = accountManager.markAccountsWithRefreshTokenCoolingDown(
+							account.refreshToken,
 							ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
 							"auth-failure",
 						);
+						if (cooledCount <= 0) {
+							logWarn(
+								`[${PLUGIN_NAME}] Unable to apply auth-failure cooldown; no live account found for refresh token.`,
+							);
+						}
 						accountManager.saveToDiskDebounced();
 						continue;
 					}
