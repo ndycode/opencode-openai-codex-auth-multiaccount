@@ -2163,6 +2163,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 				
 				if (failures >= ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_REMOVAL) {
 					const removedCount = accountManager.removeAccountsWithSameRefreshToken(account);
+					if (removedCount <= 0) {
+						logWarn(
+							`[${PLUGIN_NAME}] Expected grouped account removal after auth failures, but removed ${removedCount}.`,
+						);
+						accountManager.markAccountCoolingDown(
+							account,
+							ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+							"auth-failure",
+						);
+						accountManager.saveToDiskDebounced();
+						continue;
+					}
 					accountManager.saveToDiskDebounced();
 					const removalMessage = removedCount > 1
 						? `Removed ${removedCount} accounts (same refresh token) after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`
