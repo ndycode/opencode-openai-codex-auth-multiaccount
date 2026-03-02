@@ -758,9 +758,13 @@ export class AccountManager {
 	}
 
 	updateFromAuth(account: ManagedAccount, auth: OAuthAuthDetails): void {
+		const previousRefreshToken = account.refreshToken;
 		account.refreshToken = auth.refresh;
 		account.access = auth.access;
 		account.expires = auth.expires;
+		if (previousRefreshToken !== account.refreshToken) {
+			this.authFailuresByRefreshToken.delete(previousRefreshToken);
+		}
 		const tokenAccountId = extractAccountId(auth.access);
 		if (
 			tokenAccountId &&

@@ -1064,6 +1064,37 @@ describe("AccountManager", () => {
       expect(account.accountId).toBe("org-selected-id");
       expect(account.accountIdSource).toBe("org");
     });
+
+    it("clears stale auth failure state when refresh token rotates", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "old-token", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const account = manager.getCurrentAccount()!;
+      expect(manager.incrementAuthFailures(account)).toBe(1);
+
+      const newAuth: OAuthAuthDetails = {
+        type: "oauth",
+        access: "new-access",
+        refresh: "new-refresh",
+        expires: now + 3600000,
+      };
+
+      manager.updateFromAuth(account, newAuth);
+
+      const failuresByRefreshToken = Reflect.get(
+        manager,
+        "authFailuresByRefreshToken",
+      ) as Map<string, number>;
+      expect(failuresByRefreshToken.has("old-token")).toBe(false);
+      expect(manager.incrementAuthFailures(account)).toBe(1);
+    });
   });
 
   describe("toAuthDetails", () => {
