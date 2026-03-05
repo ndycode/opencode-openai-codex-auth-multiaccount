@@ -38,6 +38,7 @@ describe("Model Map Module", () => {
 
 	    it("contains GPT-5.4 Pro models", () => {
 	      expect(MODEL_MAP["gpt-5.4-pro"]).toBe("gpt-5.4-pro");
+	      expect(MODEL_MAP["gpt-5.4-pro-none"]).toBe("gpt-5.4-pro");
 	      expect(MODEL_MAP["gpt-5.4-pro-low"]).toBe("gpt-5.4-pro");
 	      expect(MODEL_MAP["gpt-5.4-pro-medium"]).toBe("gpt-5.4-pro");
 	      expect(MODEL_MAP["gpt-5.4-pro-high"]).toBe("gpt-5.4-pro");
@@ -109,6 +110,7 @@ describe("Model Map Module", () => {
 	      expect(getNormalizedModel("gpt-5.3-codex-high")).toBe("gpt-5-codex");
 	      expect(getNormalizedModel("gpt-5.3-codex-spark-high")).toBe("gpt-5-codex");
 	      expect(getNormalizedModel("gpt-5.4-high")).toBe("gpt-5.4");
+	      expect(getNormalizedModel("gpt-5.4-pro-none")).toBe("gpt-5.4-pro");
 	      expect(getNormalizedModel("gpt-5.4-pro-high")).toBe("gpt-5.4-pro");
 	    });
 
@@ -146,6 +148,7 @@ describe("Model Map Module", () => {
 	      expect(isKnownModel("gpt-5.3-codex")).toBe(true);
 	      expect(isKnownModel("gpt-5.3-codex-spark")).toBe(true);
 	      expect(isKnownModel("gpt-5.4")).toBe(true);
+	      expect(isKnownModel("gpt-5.4-pro-none")).toBe(true);
 	      expect(isKnownModel("gpt-5.4-pro")).toBe(true);
 	      expect(isKnownModel("gpt-5.1-codex-max")).toBe(true);
 	      expect(isKnownModel("gpt-5-codex")).toBe(true);

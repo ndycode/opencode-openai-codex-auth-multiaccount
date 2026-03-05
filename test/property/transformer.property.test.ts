@@ -228,7 +228,7 @@ describe("getReasoningConfig property tests", () => {
 	        ),
 	        (model) => {
 	          const result = getReasoningConfig(model, { reasoningEffort: "none" });
-	          expect(result.effort).not.toBe("none");
+	          expect(result.effort).toBe("low");
           return true;
         }
       )

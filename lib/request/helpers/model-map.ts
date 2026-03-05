@@ -72,6 +72,7 @@ export const MODEL_MAP: Record<string, string> = {
 	// GPT-5.4 Pro Models (optional/manual config)
 	// ============================================================================
 	"gpt-5.4-pro": "gpt-5.4-pro",
+	"gpt-5.4-pro-none": "gpt-5.4-pro",
 	"gpt-5.4-pro-low": "gpt-5.4-pro",
 	"gpt-5.4-pro-medium": "gpt-5.4-pro",
 	"gpt-5.4-pro-high": "gpt-5.4-pro",
