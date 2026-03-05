@@ -25,7 +25,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
 
-## [5.4.2] - 2026-03-06
+## [5.4.2] - 2026-03-05
 
 ### added
 

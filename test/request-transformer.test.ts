@@ -83,24 +83,33 @@ describe('Request Transformer Module', () => {
 				expect(normalizeModel('openai/gpt-5.1-codex-max-medium')).toBe('gpt-5.1-codex-max');
 			});
 
-				
-				it('should normalize gpt-5.4 general presets', async () => {
+			it('should normalize gpt-5.2 codex presets', async () => {
+				expect(normalizeModel('gpt-5.2-codex')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.2-codex-low')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.2-codex-medium')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.2-codex-high')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.2-codex-xhigh')).toBe('gpt-5-codex');
+				expect(normalizeModel('openai/gpt-5.2-codex-xhigh')).toBe('gpt-5-codex');
+			});
+
+			it('should normalize gpt-5.4 general presets', async () => {
 					expect(normalizeModel('gpt-5.4')).toBe('gpt-5.4');
 					expect(normalizeModel('gpt-5.4-low')).toBe('gpt-5.4');
 					expect(normalizeModel('gpt-5.4-medium')).toBe('gpt-5.4');
 					expect(normalizeModel('gpt-5.4-high')).toBe('gpt-5.4');
 					expect(normalizeModel('gpt-5.4-xhigh')).toBe('gpt-5.4');
 					expect(normalizeModel('openai/gpt-5.4-xhigh')).toBe('gpt-5.4');
-				});
+			});
 
-				it('should normalize gpt-5.4-pro presets', async () => {
+			it('should normalize gpt-5.4-pro presets', async () => {
 					expect(normalizeModel('gpt-5.4-pro')).toBe('gpt-5.4-pro');
+					expect(normalizeModel('gpt-5.4-pro-none')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('gpt-5.4-pro-low')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('gpt-5.4-pro-medium')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('gpt-5.4-pro-high')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('openai/gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
-				});
+			});
 
 				it('should normalize gpt-5.3 codex presets', async () => {
 					expect(normalizeModel('gpt-5.3-codex')).toBe('gpt-5-codex');
