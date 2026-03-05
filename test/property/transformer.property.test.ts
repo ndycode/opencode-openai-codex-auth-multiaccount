@@ -216,10 +216,11 @@ describe("getReasoningConfig property tests", () => {
     );
   });
 
-	  it("codex models upgrade none to low", () => {
+	  it("codex/pro models upgrade none to low", () => {
 	    fc.assert(
 	      fc.property(
 	        fc.constantFrom(
+	          "gpt-5.4-pro",
 	          "gpt-5.1-codex",
 	          "gpt-5.2-codex",
 	          "gpt-5.3-codex",
@@ -234,10 +235,10 @@ describe("getReasoningConfig property tests", () => {
     );
   });
 
-  it("gpt-5.1 and gpt-5.2 general support none effort", () => {
+  it("gpt-5.1, gpt-5.2, and gpt-5.4 general support none effort", () => {
     fc.assert(
       fc.property(
-        fc.constantFrom("gpt-5.1", "gpt-5.2"),
+        fc.constantFrom("gpt-5.1", "gpt-5.2", "gpt-5.4"),
         (model) => {
           const result = getReasoningConfig(model, { reasoningEffort: "none" });
           expect(result.effort).toBe("none");

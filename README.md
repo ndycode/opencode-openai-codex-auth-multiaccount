@@ -3,14 +3,14 @@
 [![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 
-OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.2`, `gpt-5-codex`, and `gpt-5.1-codex-max` (plus optional entitlement-gated Spark IDs and legacy Codex aliases).
+OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.4`, `gpt-5-codex`, and `gpt-5.1-codex-max` (plus optional/manual `gpt-5.4-pro`, entitlement-gated Spark IDs, and legacy Codex aliases).
 
 > [!NOTE]
 > **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
 
 ## What You Get
 
-- **GPT-5.2, GPT-5 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
+- **GPT-5.4, GPT-5 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
 - **Multi-account support** — Add up to 20 ChatGPT accounts, health-aware rotation with automatic failover
 - **Per-project accounts** — Each project gets its own account storage (new in v4.10.0)
 - **Workspace-aware identity persistence** — Keeps workspace/org identity stable across token refresh and verify-flagged restore flows
@@ -91,7 +91,7 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 4. **Use it:**
 
    ```bash
-   opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
+   opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
    ```
 
 </details>
@@ -119,7 +119,7 @@ This writes the config to `~/.config/opencode/opencode.json`, backs up existing 
 ### Verification
 
 ```bash
-opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
+opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 ```
 
 </details>
@@ -132,7 +132,8 @@ opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
 
 | Model | Variants | Notes |
 |-------|----------|-------|
-| `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 with reasoning levels |
+| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 with reasoning levels |
+| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` |
 | `gpt-5-codex` | low, medium, high | Canonical Codex model for code generation (default: high) |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Spark IDs are supported by the plugin, but access is entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
@@ -145,10 +146,10 @@ Config templates intentionally omit Spark model IDs by default to reduce entitle
 **Using variants:**
 ```bash
 # Modern OpenCode (v1.0.210+)
-opencode run "Hello" --model=openai/gpt-5.2 --variant=high
+opencode run "Hello" --model=openai/gpt-5.4 --variant=high
 
 # Legacy OpenCode (v1.0.209 and below)
-opencode run "Hello" --model=openai/gpt-5.2-high
+opencode run "Hello" --model=openai/gpt-5.4-high
 ```
 
 <details>
@@ -170,8 +171,8 @@ Add this to your `~/.config/opencode/opencode.json`:
         "store": false
       },
       "models": {
-        "gpt-5.2": {
-          "name": "GPT 5.2 (OAuth)",
+        "gpt-5.4": {
+          "name": "GPT 5.4 (OAuth)",
           "limit": { "context": 272000, "output": 128000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
@@ -258,7 +259,7 @@ Optional Spark model block (manual add only when entitled):
 }
 ```
 
-For legacy OpenCode (v1.0.209 and below), use `config/opencode-legacy.json` which has individual model entries like `gpt-5.2-low`, `gpt-5.2-medium`, etc.
+For legacy OpenCode (v1.0.209 and below), use `config/opencode-legacy.json` which has individual model entries like `gpt-5.4-low`, `gpt-5.4-medium`, etc.
 
 </details>
 
@@ -661,15 +662,15 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
 1. Use `openai/` prefix:
    ```bash
    # Correct
-   --model=openai/gpt-5.2
+   --model=openai/gpt-5.4
    
    # Wrong
-   --model=gpt-5.2
+   --model=gpt-5.4
    ```
 
 2. Verify model is in your config:
    ```json
-   { "models": { "gpt-5.2": { ... } } }
+   { "models": { "gpt-5.4": { ... } } }
    ```
 
 </details>
@@ -697,6 +698,7 @@ OpenCode uses `~/.config/opencode/` on **all platforms** including Windows.
      "unsupportedCodexPolicy": "fallback",
      "fallbackOnUnsupportedCodexModel": true,
      "unsupportedCodexFallbackChain": {
+       "gpt-5.4-pro": ["gpt-5.4"],
        "gpt-5-codex": ["gpt-5.2-codex"],
        "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
        "gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"]
@@ -843,6 +845,7 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `streamStallTimeoutMs` | `45000` | Abort non-stream parsing if SSE stalls (ms) |
 
 Default unsupported-model fallback chain (used when `unsupportedCodexPolicy` is `fallback`):
+- `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
 - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
 - `gpt-5.2-codex -> gpt-5-codex`

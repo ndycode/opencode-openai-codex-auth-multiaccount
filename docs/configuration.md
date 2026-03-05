@@ -34,7 +34,8 @@ controls how much thinking the model does.
 
 | model | supported values |
 |-------|------------------|
-| `gpt-5.2` | none, low, medium, high, xhigh |
+| `gpt-5.4` | none, low, medium, high, xhigh |
+| `gpt-5.4-pro` | low, medium, high, xhigh (optional/manual model) |
 | `gpt-5-codex` | low, medium, high (default: high) |
 | `gpt-5.3-codex` | low, medium, high, xhigh (legacy alias to `gpt-5-codex`) |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh (entitlement-gated legacy alias; add manually) |
@@ -44,14 +45,14 @@ controls how much thinking the model does.
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-the shipped config templates include 21 presets and do not add Spark by default. add `gpt-5.3-codex-spark` manually only for entitled workspaces.
+the shipped config templates include 21 presets and do not add optional IDs by default. add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only for entitled workspaces.
 
 what they mean:
 - `none` - no reasoning phase (base models only, auto-converts to `low` for codex)
 - `low` - light reasoning, fastest
 - `medium` - balanced (default)
 - `high` - deep reasoning
-- `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`)
+- `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`; available for `gpt-5.4` and optional `gpt-5.4-pro`)
 
 ### reasoningSummary
 
@@ -117,6 +118,7 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "fallbackOnUnsupportedCodexModel": false,
   "fallbackToGpt52OnUnsupportedGpt53": true,
   "unsupportedCodexFallbackChain": {
+    "gpt-5.4-pro": ["gpt-5.4"],
     "gpt-5-codex": ["gpt-5.2-codex"]
   }
 }
@@ -147,7 +149,7 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `unsupportedCodexPolicy` | `strict` | unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry with configured fallback chain) |
 | `fallbackOnUnsupportedCodexModel` | `false` | legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
-| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`) |
+| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`; default includes `gpt-5.4-pro -> gpt-5.4`) |
 | `sessionRecovery` | `true` | auto-recover from common api errors |
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
@@ -171,6 +173,7 @@ by default the plugin is strict (`unsupportedCodexPolicy: "strict"`). it returns
 set `unsupportedCodexPolicy: "fallback"` to enable model fallback after account/workspace attempts are exhausted.
 
 defaults when fallback policy is enabled and `unsupportedCodexFallbackChain` is empty:
+- `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
 - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
 - `gpt-5.2-codex -> gpt-5-codex`
@@ -184,6 +187,7 @@ custom chain example:
   "unsupportedCodexPolicy": "fallback",
   "fallbackOnUnsupportedCodexModel": true,
   "unsupportedCodexFallbackChain": {
+    "gpt-5.4-pro": ["gpt-5.4"],
     "gpt-5-codex": ["gpt-5.2-codex"],
     "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
     "gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"]
@@ -264,12 +268,12 @@ different settings for different models:
         "store": false
       },
       "models": {
-        "gpt-5.2-fast": {
-          "name": "fast gpt-5.2",
+        "gpt-5.4-fast": {
+          "name": "fast gpt-5.4",
           "options": { "reasoningEffort": "low" }
         },
-        "gpt-5.2-smart": {
-          "name": "smart gpt-5.2",
+        "gpt-5.4-smart": {
+          "name": "smart gpt-5.4",
           "options": { "reasoningEffort": "high" }
         }
       }
@@ -338,12 +342,12 @@ opencode
 ### verify model resolution
 
 ```bash
-DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5.2
+DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5.4
 ```
 
 look for:
 ```
-[openai-codex-plugin] Model config lookup: "gpt-5.2" → normalized to "gpt-5.2" for API {
+[openai-codex-plugin] Model config lookup: "gpt-5.4" → normalized to "gpt-5.4" for API {
   hasModelSpecificConfig: true,
   resolvedConfig: { ... }
 }
@@ -353,12 +357,12 @@ look for:
 
 ```bash
 # modern opencode (variants)
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2 --variant=low
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2 --variant=high
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4 --variant=low
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4 --variant=high
 
 # legacy presets (model names include the effort)
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-low
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2-high
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4-low
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4-high
 
 # compare reasoning.effort in logs
 cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasoning.effort'

@@ -15,8 +15,8 @@
         "store": false
       },
       "models": {
-        "gpt-5.2-none": {
-          "name": "GPT 5.2 None (OAuth)",
+        "gpt-5.4-none": {
+          "name": "GPT 5.4 None (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -40,8 +40,8 @@
             "store": false
           }
         },
-        "gpt-5.2-low": {
-          "name": "GPT 5.2 Low (OAuth)",
+        "gpt-5.4-low": {
+          "name": "GPT 5.4 Low (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -65,8 +65,8 @@
             "store": false
           }
         },
-        "gpt-5.2-medium": {
-          "name": "GPT 5.2 Medium (OAuth)",
+        "gpt-5.4-medium": {
+          "name": "GPT 5.4 Medium (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -90,8 +90,8 @@
             "store": false
           }
         },
-        "gpt-5.2-high": {
-          "name": "GPT 5.2 High (OAuth)",
+        "gpt-5.4-high": {
+          "name": "GPT 5.4 High (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
@@ -115,8 +115,8 @@
             "store": false
           }
         },
-        "gpt-5.2-xhigh": {
-          "name": "GPT 5.2 Extra High (OAuth)",
+        "gpt-5.4-xhigh": {
+          "name": "GPT 5.4 Extra High (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000

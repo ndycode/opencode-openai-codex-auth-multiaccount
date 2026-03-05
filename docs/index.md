@@ -56,7 +56,7 @@ npx -y oc-chatgpt-multi-auth@latest
 opencode auth login
 
 # 3. Use it
-opencode run "Hello" --model=openai/gpt-5.2 --variant=medium
+opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 ```
 
 For detailed setup, see [Getting Started](getting-started.md).
@@ -68,7 +68,7 @@ For detailed setup, see [Getting Started](getting-started.md).
 | Feature | Description |
 |---------|-------------|
 | **OAuth Authentication** | Secure ChatGPT Plus/Pro login |
-| **21 Template Presets** | GPT-5.2, GPT-5 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex, GPT-5.1 Codex Mini, GPT-5.1 (plus optional manual Spark IDs) |
+| **21 Template Presets** | GPT-5.4, GPT-5 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex, GPT-5.1 Codex Mini, GPT-5.1 (plus optional manual GPT-5.4 Pro and Spark IDs) |
 | **Variant System** | Works with OpenCode v1.0.210+ variants and legacy presets |
 | **Multi-Account** | Auto-rotation when rate-limited with workspace-aware identity persistence |
 | **Beginner Toolkit** | `codex-help`, `codex-setup`, `codex-doctor`, and `codex-next` for onboarding + recovery |

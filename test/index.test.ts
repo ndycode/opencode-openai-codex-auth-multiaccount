@@ -1394,6 +1394,60 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		consumeSpy.mockRestore();
 	});
 
+	it("falls back from gpt-5.4-pro to gpt-5.4 when unsupported fallback is enabled", async () => {
+		const configModule = await import("../lib/config.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+
+		vi.mocked(configModule.getFallbackOnUnsupportedCodexModel).mockReturnValueOnce(true);
+		vi.mocked(configModule.getFallbackToGpt52OnUnsupportedGpt53).mockReturnValueOnce(true);
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+			updatedInit: {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.4-pro" }),
+			},
+			body: { model: "gpt-5.4-pro" },
+		});
+		vi.mocked(fetchHelpers.handleErrorResponse).mockResolvedValueOnce({
+			response: new Response(
+				JSON.stringify({
+					error: {
+						code: "model_not_supported_with_chatgpt_account",
+						message:
+							"The 'gpt-5.4-pro' model is not supported when using Codex with a ChatGPT account.",
+					},
+				}),
+				{ status: 400 },
+			),
+			rateLimit: undefined,
+			errorBody: {
+				error: {
+					code: "model_not_supported_with_chatgpt_account",
+					message:
+						"The 'gpt-5.4-pro' model is not supported when using Codex with a ChatGPT account.",
+				},
+			},
+		});
+		vi.mocked(fetchHelpers.resolveUnsupportedCodexFallbackModel).mockReturnValueOnce("gpt-5.4");
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("bad", { status: 400 }))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.4-pro" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		const firstInit = vi.mocked(globalThis.fetch).mock.calls[0]?.[1] as RequestInit;
+		const secondInit = vi.mocked(globalThis.fetch).mock.calls[1]?.[1] as RequestInit;
+		expect(JSON.parse(firstInit.body as string).model).toBe("gpt-5.4-pro");
+		expect(JSON.parse(secondInit.body as string).model).toBe("gpt-5.4");
+	});
+
 	it("falls back from gpt-5.3-codex to gpt-5.2-codex when unsupported fallback is enabled", async () => {
 		const configModule = await import("../lib/config.js");
 		const fetchHelpers = await import("../lib/request/fetch-helpers.js");

@@ -25,6 +25,23 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
 
+## [5.4.2] - 2026-03-06
+
+### added
+
+- **gpt-5.4 + gpt-5.4-pro runtime support**: added model-map normalization and request-transform coverage for `gpt-5.4` (general) and optional `gpt-5.4-pro`.
+- **gpt-5.4-pro fallback edge**: default unsupported-model fallback chain now includes `gpt-5.4-pro -> gpt-5.4` when fallback policy is enabled.
+
+### changed
+
+- **template defaults updated to gpt-5.4**: modern + legacy config templates now use `gpt-5.4` variants as the default general-purpose family.
+- **docs refresh for 5.4 rollout**: README, getting-started, configuration, troubleshooting, docs index, and config docs now reflect `gpt-5.4` defaults and optional `gpt-5.4-pro` usage.
+- **test matrix expanded for 5.4**: unit, integration, and property tests now explicitly cover `gpt-5.4` and `gpt-5.4-pro` normalization/reasoning/fallback paths.
+
+### fixed
+
+- **quota probe model order**: quota snapshot probing now includes `gpt-5.4` first before legacy Codex probe models.
+
 ## [5.4.0] - 2026-02-28
 
 ### changed

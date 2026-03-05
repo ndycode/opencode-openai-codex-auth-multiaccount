@@ -2889,7 +2889,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								accessToken: string;
 								organizationId: string | undefined;
 							}): Promise<CodexQuotaSnapshot> => {
-								const QUOTA_PROBE_MODELS = ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"];
+								const QUOTA_PROBE_MODELS = ["gpt-5.4", "gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"];
 								let lastError: Error | null = null;
 
 								for (const model of QUOTA_PROBE_MODELS) {

@@ -126,7 +126,7 @@ Use one of the provided config files:
 
 Copy the relevant config to your `~/.config/opencode/opencode.json`.
 
-The shipped templates include 21 presets and intentionally omit Spark IDs. Add `gpt-5.3-codex-spark` manually only when your workspace is entitled.
+The shipped templates include 21 presets and intentionally omit optional IDs. Add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only when your workspace is entitled.
 
 <details>
 <summary><b>Why use the full config?</b></summary>
@@ -141,11 +141,11 @@ The shipped templates include 21 presets and intentionally omit Spark IDs. Add `
 
 ```bash
 # Modern OpenCode (v1.0.210+)
-opencode run "write hello world to test.txt" --model=openai/gpt-5.2 --variant=medium
+opencode run "write hello world to test.txt" --model=openai/gpt-5.4 --variant=medium
 opencode run "write hello world to test.txt" --model=openai/gpt-5-codex --variant=medium
 
 # Legacy OpenCode (v1.0.209 and below)
-opencode run "write hello world to test.txt" --model=openai/gpt-5.2-medium
+opencode run "write hello world to test.txt" --model=openai/gpt-5.4-medium
 
 # Or start interactive session
 opencode
@@ -153,7 +153,7 @@ opencode
 
 You'll see all 21 GPT-5.x variants in the model selector!
 
-If `gpt-5-codex` or `gpt-5.3-codex-spark` returns an unsupported-model entitlement error, re-auth with `opencode auth login` or add another entitled account/workspace first. The plugin tries remaining accounts/workspaces before model fallback. See [Configuration](configuration.md) for strict vs fallback policy controls.
+If `gpt-5.4-pro`, `gpt-5-codex`, or `gpt-5.3-codex-spark` returns an unsupported-model entitlement error, re-auth with `opencode auth login` or add another entitled account/workspace first. The plugin tries remaining accounts/workspaces before model fallback. See [Configuration](configuration.md) for strict vs fallback policy controls.
 
 If you manually add Spark IDs and want to confirm effective upstream routing, run with `ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1` and inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json`.
 
@@ -206,7 +206,8 @@ Safe mode effects:
 
 | Model | Variants | Notes |
 |-------|----------|-------|
-| `gpt-5.2` | none, low, medium, high, xhigh | Latest GPT-5.2 |
+| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 |
+| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` |
 | `gpt-5-codex` | low, medium, high | Canonical Codex for code generation |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Optional manual model; entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
@@ -286,7 +287,7 @@ cat ~/.opencode/auth/openai.json
 
 ```bash
 # Enable logging to verify requests
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.2
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4
 
 # Check logs
 ls ~/.opencode/logs/codex-plugin/

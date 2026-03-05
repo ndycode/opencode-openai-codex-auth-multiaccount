@@ -10,6 +10,8 @@ export const arbQuotaKey = fc.oneof(
   fc.constant(undefined),
   fc.constantFrom(
     "default",
+    "gpt-5.4",
+    "gpt-5.4-pro",
     "gpt-5.2",
     "gpt-5.3-codex",
     "gpt-5.1-codex",
@@ -44,6 +46,8 @@ export const arbReasoningEffort = fc.constantFrom(
 );
 
 export const arbModel = fc.constantFrom(
+  "gpt-5.4",
+  "gpt-5.4-pro",
   "gpt-5.2",
   "gpt-5.3-codex",
   "gpt-5.2-codex",

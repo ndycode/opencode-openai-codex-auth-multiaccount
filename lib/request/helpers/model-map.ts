@@ -59,6 +59,25 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.1-codex-max-xhigh": "gpt-5.1-codex-max",
 
 	// ============================================================================
+	// GPT-5.4 Models (latest general-purpose family)
+	// ============================================================================
+	"gpt-5.4": "gpt-5.4",
+	"gpt-5.4-none": "gpt-5.4",
+	"gpt-5.4-low": "gpt-5.4",
+	"gpt-5.4-medium": "gpt-5.4",
+	"gpt-5.4-high": "gpt-5.4",
+	"gpt-5.4-xhigh": "gpt-5.4",
+
+	// ============================================================================
+	// GPT-5.4 Pro Models (optional/manual config)
+	// ============================================================================
+	"gpt-5.4-pro": "gpt-5.4-pro",
+	"gpt-5.4-pro-low": "gpt-5.4-pro",
+	"gpt-5.4-pro-medium": "gpt-5.4-pro",
+	"gpt-5.4-pro-high": "gpt-5.4-pro",
+	"gpt-5.4-pro-xhigh": "gpt-5.4-pro",
+
+	// ============================================================================
 	// GPT-5.2 Models (supports none/low/medium/high/xhigh per OpenAI API docs)
 	// ============================================================================
 	"gpt-5.2": "gpt-5.2",
