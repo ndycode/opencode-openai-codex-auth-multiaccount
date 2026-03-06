@@ -247,7 +247,7 @@ export function resolveTargetModelOverride(
 	const trimmedTarget = overrideTarget.trim();
 	if (!trimmedTarget) return undefined;
 
-	return normalizeModel(trimmedTarget);
+	return stripProviderPrefix(trimmedTarget);
 }
 
 /**

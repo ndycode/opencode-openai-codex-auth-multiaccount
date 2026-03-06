@@ -409,9 +409,9 @@ export function getModelTargetOverrides(
 	for (const [key, value] of Object.entries(overrides)) {
 		if (typeof key !== "string" || typeof value !== "string") continue;
 		const normalizedKey = normalizeKey(key);
-		const trimmedValue = value.trim();
-		if (!normalizedKey || !trimmedValue) continue;
-		normalized[normalizedKey] = trimmedValue;
+		const normalizedValue = normalizeKey(value);
+		if (!normalizedKey || !normalizedValue) continue;
+		normalized[normalizedKey] = normalizedValue;
 	}
 
 	return normalized;

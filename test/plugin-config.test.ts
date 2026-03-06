@@ -588,7 +588,19 @@ describe('Plugin Configuration', () => {
 
 			expect(result).toEqual({
 				'gpt-5-codex': 'gpt-5.4',
-				'gpt-5-codex-high': 'openai/gpt-5.4-pro',
+				'gpt-5-codex-high': 'gpt-5.4-pro',
+			});
+		});
+
+		it('normalizes custom target override values without forcing known-model fallbacks', () => {
+			const result = getModelTargetOverrides({
+				modelTargetOverrides: {
+					' GPT-5-CODEX ': ' OPENAI/O1-MINI ',
+				},
+			});
+
+			expect(result).toEqual({
+				'gpt-5-codex': 'o1-mini',
 			});
 		});
 

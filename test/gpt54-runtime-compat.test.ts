@@ -177,6 +177,33 @@ describe("GPT-5.4 runtime compatibility routing", () => {
 		expect(result.reasoning?.effort).toBe("low");
 	});
 
+	it("preserves explicit unknown override targets instead of silently mapping them to gpt-5.1", async () => {
+		const body: RequestBody = {
+			model: "gpt-5-codex",
+			input: [],
+		};
+		const userConfig: UserConfig = {
+			global: {
+				reasoningEffort: "medium",
+			},
+			models: {},
+		};
+
+		const result = await transformRequestBody(
+			body,
+			codexInstructions,
+			userConfig,
+			true,
+			false,
+			"hybrid",
+			30,
+			{ "gpt-5-codex": "o1-mini" },
+		);
+
+		expect(result.model).toBe("o1-mini");
+		expect(result.reasoning?.effort).toBe("medium");
+	});
+
 	it("keeps config merging behavior unchanged for compatibility alias entries", () => {
 		const userConfig: UserConfig = {
 			global: {
