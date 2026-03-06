@@ -107,11 +107,21 @@ export function formatStorageErrorHint(error: unknown, path: string): string {
 }
 
 let storageMutex: Promise<void> = Promise.resolve();
+let fallbackSeedMutex: Promise<void> = Promise.resolve();
 
 function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
   const previousMutex = storageMutex;
   let releaseLock: () => void;
   storageMutex = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  return previousMutex.then(fn).finally(() => releaseLock());
+}
+
+function withFallbackSeedLock<T>(fn: () => Promise<T>): Promise<T> {
+  const previousMutex = fallbackSeedMutex;
+  let releaseLock: () => void;
+  fallbackSeedMutex = new Promise<void>((resolve) => {
     releaseLock = resolve;
   });
   return previousMutex.then(fn).finally(() => releaseLock());
@@ -760,18 +770,28 @@ async function loadAccountsInternal(
       if (!globalFallback) return null;
 
       if (persistMigration) {
-        try {
-          await persistMigration(globalFallback);
-          log.info("Seeded project account storage from global fallback", {
-            path: getStoragePath(),
-            accounts: globalFallback.accounts.length,
-          });
-        } catch (persistError) {
-          log.warn("Failed to seed project storage from global fallback", {
-            path: getStoragePath(),
-            error: String(persistError),
-          });
-        }
+        await withFallbackSeedLock(async () => {
+          const seedPath = getStoragePath();
+          try {
+            await fs.access(seedPath);
+            return;
+          } catch {
+            // Another concurrent caller has not seeded the project path yet.
+          }
+
+          try {
+            await persistMigration(globalFallback);
+            log.info("Seeded project account storage from global fallback", {
+              path: seedPath,
+              accounts: globalFallback.accounts.length,
+            });
+          } catch (persistError) {
+            log.warn("Failed to seed project storage from global fallback", {
+              path: seedPath,
+              error: String(persistError),
+            });
+          }
+        });
       }
 
       return globalFallback;

@@ -501,6 +501,9 @@ describe("Codex Prompts Module", () => {
 					const writeTargets = mockedWriteFile.mock.calls.map(([target]) => String(target));
 					expect(rawGitHubCall?.[0]).toContain("gpt_5_2_prompt.md");
 					expect(writeTargets.some((target) => target.includes("gpt-5.4-pro-instructions.md"))).toBe(true);
+					expect(
+						writeTargets.some((target) => /gpt-5\.4-instructions\.md$/.test(target)),
+					).toBe(false);
 				});
 
 				it("should map gpt-5.3-codex-spark prompts to the current codex prompt file", async () => {

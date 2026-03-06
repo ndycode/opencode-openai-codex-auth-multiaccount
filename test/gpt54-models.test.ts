@@ -8,6 +8,8 @@ import { normalizeModel, getReasoningConfig } from "../lib/request/request-trans
  * Tests cover model normalization, family detection, and reasoning configuration
  */
 describe("GPT-5.4 Model Support", () => {
+	const SNAPSHOT = "2026-03-05";
+
 	describe("GPT-5.4 Model Normalization", () => {
 		it("should normalize gpt-5.4 base model", () => {
 			expect(normalizeModel("gpt-5.4")).toBe("gpt-5.4");
@@ -52,14 +54,14 @@ describe("GPT-5.4 Model Support", () => {
 			expect(MODEL_MAP["gpt-5.4-medium"]).toBe("gpt-5.4");
 			expect(MODEL_MAP["gpt-5.4-high"]).toBe("gpt-5.4");
 			expect(MODEL_MAP["gpt-5.4-xhigh"]).toBe("gpt-5.4");
-			expect(MODEL_MAP["gpt-5.4-2026-03-05"]).toBe("gpt-5.4");
-			expect(MODEL_MAP["gpt-5.4-2026-03-05-low"]).toBe("gpt-5.4");
+			expect(MODEL_MAP[`gpt-5.4-${SNAPSHOT}`]).toBe("gpt-5.4");
+			expect(MODEL_MAP[`gpt-5.4-${SNAPSHOT}-low`]).toBe("gpt-5.4");
 		});
 
 		it("should normalize GPT-5.4 snapshot aliases", () => {
-			expect(normalizeModel("gpt-5.4-2026-03-05")).toBe("gpt-5.4");
-			expect(normalizeModel("gpt-5.4-2026-03-05-high")).toBe("gpt-5.4");
-			expect(getNormalizedModel("gpt-5.4-2026-03-05-medium")).toBe("gpt-5.4");
+			expect(normalizeModel(`gpt-5.4-${SNAPSHOT}`)).toBe("gpt-5.4");
+			expect(normalizeModel(`gpt-5.4-${SNAPSHOT}-high`)).toBe("gpt-5.4");
+			expect(getNormalizedModel(`gpt-5.4-${SNAPSHOT}-medium`)).toBe("gpt-5.4");
 		});
 	});
 
@@ -107,14 +109,14 @@ describe("GPT-5.4 Model Support", () => {
 			expect(MODEL_MAP["gpt-5.4-pro-medium"]).toBe("gpt-5.4-pro");
 			expect(MODEL_MAP["gpt-5.4-pro-high"]).toBe("gpt-5.4-pro");
 			expect(MODEL_MAP["gpt-5.4-pro-xhigh"]).toBe("gpt-5.4-pro");
-			expect(MODEL_MAP["gpt-5.4-pro-2026-03-05"]).toBe("gpt-5.4-pro");
-			expect(MODEL_MAP["gpt-5.4-pro-2026-03-05-high"]).toBe("gpt-5.4-pro");
+			expect(MODEL_MAP[`gpt-5.4-pro-${SNAPSHOT}`]).toBe("gpt-5.4-pro");
+			expect(MODEL_MAP[`gpt-5.4-pro-${SNAPSHOT}-high`]).toBe("gpt-5.4-pro");
 		});
 
 		it("should normalize GPT-5.4-pro snapshot aliases", () => {
-			expect(normalizeModel("gpt-5.4-pro-2026-03-05")).toBe("gpt-5.4-pro");
-			expect(normalizeModel("gpt-5.4-pro-2026-03-05-high")).toBe("gpt-5.4-pro");
-			expect(getNormalizedModel("gpt-5.4-pro-2026-03-05-medium")).toBe("gpt-5.4-pro");
+			expect(normalizeModel(`gpt-5.4-pro-${SNAPSHOT}`)).toBe("gpt-5.4-pro");
+			expect(normalizeModel(`gpt-5.4-pro-${SNAPSHOT}-high`)).toBe("gpt-5.4-pro");
+			expect(getNormalizedModel(`gpt-5.4-pro-${SNAPSHOT}-medium`)).toBe("gpt-5.4-pro");
 		});
 
 		it("should prioritize -pro suffix over base model", () => {
@@ -144,8 +146,8 @@ describe("GPT-5.4 Model Support", () => {
 		it("should isolate gpt-5.4-pro family from gpt-5.4 base family", () => {
 			expect(getModelFamily("gpt-5.4")).toBe("gpt-5.4");
 			expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4-pro");
-			expect(getModelFamily("gpt-5.4-2026-03-05")).toBe("gpt-5.4");
-			expect(getModelFamily("gpt-5.4-pro-2026-03-05")).toBe("gpt-5.4-pro");
+			expect(getModelFamily(`gpt-5.4-${SNAPSHOT}`)).toBe("gpt-5.4");
+			expect(getModelFamily(`gpt-5.4-pro-${SNAPSHOT}`)).toBe("gpt-5.4-pro");
 		});
 
 		it("should not confuse gpt-5.4 with gpt-5.3 or gpt-5.2", () => {
@@ -228,7 +230,7 @@ describe("GPT-5.4 Model Support", () => {
 			expect(normalizeModel("gpt_5_4")).toBe("gpt-5.4");
 		});
 
-		it("should not match gpt-5.4x patterns as gpt-5.4", () => {
+		it("should route gpt-5.4x patterns through generic GPT-5 fallback to gpt-5.4", () => {
 			// Boundary-aware matching prevents accidental 5.4 family match, then generic GPT-5 fallback applies.
 			expect(normalizeModel("gpt-5.40")).toBe("gpt-5.4");
 			expect(normalizeModel("gpt-5.44")).toBe("gpt-5.4");

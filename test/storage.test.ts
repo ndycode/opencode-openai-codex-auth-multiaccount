@@ -1824,6 +1824,122 @@ describe("storage", () => {
       };
       expect(seeded.accounts?.[0]?.accountId).toBe("global-account");
     });
+
+    it("seeds project storage only once for concurrent global-fallback loads", async () => {
+      const fakeHome = join(testWorkDir, "home-fallback-concurrent");
+      const projectDir = join(testWorkDir, "project-fallback-concurrent");
+      const projectGitDir = join(projectDir, ".git");
+      const globalConfigDir = join(fakeHome, ".opencode");
+      const globalStoragePath = join(globalConfigDir, "openai-codex-accounts.json");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(projectGitDir, { recursive: true });
+      await fs.mkdir(globalConfigDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      const globalStorage = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "global-refresh-concurrent",
+            accountId: "global-account-concurrent",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+      await fs.writeFile(globalStoragePath, JSON.stringify(globalStorage), "utf-8");
+
+      const projectScopedPath = getStoragePath();
+      const originalRename = fs.rename.bind(fs);
+      let projectSeedWriteCount = 0;
+      const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (sourcePath, destinationPath) => {
+        if (String(destinationPath) === projectScopedPath) {
+          projectSeedWriteCount += 1;
+        }
+        return originalRename(sourcePath, destinationPath);
+      });
+
+      try {
+        const [first, second] = await Promise.all([loadAccounts(), loadAccounts()]);
+        expect(first?.accounts[0]?.accountId).toBe("global-account-concurrent");
+        expect(second?.accounts[0]?.accountId).toBe("global-account-concurrent");
+        expect(projectSeedWriteCount).toBe(1);
+      } finally {
+        renameSpy.mockRestore();
+      }
+    });
+
+    it("returns global fallback when project seed write fails", async () => {
+      const fakeHome = join(testWorkDir, "home-fallback-seed-fail");
+      const projectDir = join(testWorkDir, "project-fallback-seed-fail");
+      const projectGitDir = join(projectDir, ".git");
+      const globalConfigDir = join(fakeHome, ".opencode");
+      const globalStoragePath = join(globalConfigDir, "openai-codex-accounts.json");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(projectGitDir, { recursive: true });
+      await fs.mkdir(globalConfigDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      const globalStorage = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "global-refresh-fail",
+            accountId: "global-account-fail",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+      await fs.writeFile(globalStoragePath, JSON.stringify(globalStorage), "utf-8");
+
+      const projectScopedPath = getStoragePath();
+      const originalRename = fs.rename.bind(fs);
+      const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (sourcePath, destinationPath) => {
+        if (String(destinationPath) === projectScopedPath) {
+          const err = new Error("EPERM seed failure") as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        }
+        return originalRename(sourcePath, destinationPath);
+      });
+
+      try {
+        const loaded = await loadAccounts();
+        expect(loaded?.accounts[0]?.accountId).toBe("global-account-fail");
+        expect(existsSync(projectScopedPath)).toBe(false);
+      } finally {
+        renameSpy.mockRestore();
+      }
+    });
+
+    it("returns null when global fallback storage is corrupted", async () => {
+      const fakeHome = join(testWorkDir, "home-fallback-corrupted");
+      const projectDir = join(testWorkDir, "project-fallback-corrupted");
+      const projectGitDir = join(projectDir, ".git");
+      const globalConfigDir = join(fakeHome, ".opencode");
+      const globalStoragePath = join(globalConfigDir, "openai-codex-accounts.json");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(projectGitDir, { recursive: true });
+      await fs.mkdir(globalConfigDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      await fs.writeFile(globalStoragePath, "{ invalid json", "utf-8");
+
+      await expect(loadAccounts()).resolves.toBeNull();
+      expect(existsSync(getStoragePath())).toBe(false);
+    });
   });
 
   describe("saveAccounts EPERM/EBUSY retry logic", () => {
