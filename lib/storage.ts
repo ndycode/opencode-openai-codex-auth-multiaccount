@@ -669,6 +669,58 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   return loadAccountsInternal(saveAccounts);
 }
 
+function getGlobalAccountsStoragePath(): string {
+  return join(getConfigDir(), ACCOUNTS_FILE_NAME);
+}
+
+function shouldUseProjectGlobalFallback(): boolean {
+  return Boolean(currentStoragePath && currentProjectRoot);
+}
+
+async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
+  if (!shouldUseProjectGlobalFallback() || !currentStoragePath) {
+    return null;
+  }
+
+  const globalStoragePath = getGlobalAccountsStoragePath();
+  if (globalStoragePath === currentStoragePath) {
+    return null;
+  }
+
+  try {
+    const content = await fs.readFile(globalStoragePath, "utf-8");
+    const data = JSON.parse(content) as unknown;
+
+    const schemaErrors = getValidationErrors(AnyAccountStorageSchema, data);
+    if (schemaErrors.length > 0) {
+      log.warn("Global account storage schema validation warnings", {
+        path: globalStoragePath,
+        errors: schemaErrors.slice(0, 5),
+      });
+    }
+
+    const normalized = normalizeAccountStorage(data);
+    if (!normalized) return null;
+
+    log.info("Loaded global account storage as project fallback", {
+      from: globalStoragePath,
+      to: currentStoragePath,
+      accounts: normalized.accounts.length,
+    });
+    return normalized;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.warn("Failed to load global fallback account storage", {
+        from: globalStoragePath,
+        to: currentStoragePath,
+        error: String(error),
+      });
+    }
+    return null;
+  }
+}
+
 async function loadAccountsInternal(
   persistMigration: ((storage: AccountStorageV3) => Promise<void>) | null,
 ): Promise<AccountStorageV3 | null> {
@@ -704,7 +756,25 @@ async function loadAccountsInternal(
         ? await migrateLegacyProjectStorageIfNeeded(persistMigration)
         : null;
       if (migrated) return migrated;
-      return null;
+      const globalFallback = await loadGlobalAccountsFallback();
+      if (!globalFallback) return null;
+
+      if (persistMigration) {
+        try {
+          await persistMigration(globalFallback);
+          log.info("Seeded project account storage from global fallback", {
+            path: getStoragePath(),
+            accounts: globalFallback.accounts.length,
+          });
+        } catch (persistError) {
+          log.warn("Failed to seed project storage from global fallback", {
+            path: getStoragePath(),
+            error: String(persistError),
+          });
+        }
+      }
+
+      return globalFallback;
     }
     log.error("Failed to load account storage", { error: String(error) });
     return null;

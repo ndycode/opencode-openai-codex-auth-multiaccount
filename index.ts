@@ -1896,7 +1896,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                                 const url = rewriteUrlForCodex(originalUrl);
 
 							// Step 3: Transform request body with model-specific Codex instructions
-							// Instructions are fetched per model family (codex-max, codex, gpt-5.1)
+							// Instructions are fetched per model family (codex-max, codex, gpt-5.4, etc.)
 							// Capture original stream value before transformation
 							// generateText() sends no stream field, streamText() sends stream=true
 								const normalizeRequestInit = async (
@@ -1986,7 +1986,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let transformedBody: RequestBody | undefined = transformation?.body;
 										const promptCacheKey = transformedBody?.prompt_cache_key;
 										let model = transformedBody?.model;
-										let modelFamily = model ? getModelFamily(model) : "gpt-5.1";
+										let modelFamily = model ? getModelFamily(model) : "gpt-5.4";
 										let quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
 						const threadIdCandidate =
 							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")

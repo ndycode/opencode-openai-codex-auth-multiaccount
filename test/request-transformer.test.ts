@@ -35,13 +35,13 @@ describe('Request Transformer Module', () => {
 			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.4');
 		});
 
-		it('should return gpt-5.1 as default for unknown models', async () => {
-			expect(normalizeModel('unknown-model')).toBe('gpt-5.1');
-			expect(normalizeModel('gpt-4')).toBe('gpt-5.1');
+		it('should return gpt-5.4 as default for unknown models', async () => {
+			expect(normalizeModel('unknown-model')).toBe('gpt-5.4');
+			expect(normalizeModel('gpt-4')).toBe('gpt-5.4');
 		});
 
-		it('should return gpt-5.1 for undefined', async () => {
-			expect(normalizeModel(undefined)).toBe('gpt-5.1');
+		it('should return gpt-5.4 for undefined', async () => {
+			expect(normalizeModel(undefined)).toBe('gpt-5.4');
 		});
 
 		// Codex CLI preset name tests - legacy gpt-5 base aliases now map to gpt-5.4
@@ -173,7 +173,7 @@ describe('Request Transformer Module', () => {
 
 			it('should handle special characters', async () => {
 				expect(normalizeModel('my_gpt-5_codex')).toBe('gpt-5-codex');
-				expect(normalizeModel('gpt.5.high')).toBe('gpt-5.1');
+				expect(normalizeModel('gpt.5.high')).toBe('gpt-5.4');
 			});
 
 			it('should handle old verbose names', async () => {
@@ -182,7 +182,7 @@ describe('Request Transformer Module', () => {
 			});
 
 			it('should handle empty string', async () => {
-				expect(normalizeModel('')).toBe('gpt-5.1');
+				expect(normalizeModel('')).toBe('gpt-5.4');
 			});
 		});
 	});

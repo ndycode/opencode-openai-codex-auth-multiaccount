@@ -38,7 +38,7 @@ export {
  * @returns Normalized model name (e.g., "gpt-5-codex", "gpt-5.1-codex-max")
  */
 export function normalizeModel(model: string | undefined): string {
-	if (!model) return "gpt-5.1";
+	if (!model) return "gpt-5.4";
 
 	// Strip provider prefix if present (e.g., "openai/gpt-5-codex" → "gpt-5-codex")
 	const modelId = model.includes("/") ? model.split("/").pop() ?? model : model;
@@ -151,7 +151,7 @@ export function normalizeModel(model: string | undefined): string {
 	}
 
 	// Default fallback
-	return "gpt-5.1";
+	return "gpt-5.4";
 }
 
 /**

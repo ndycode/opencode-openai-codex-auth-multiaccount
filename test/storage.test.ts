@@ -1780,6 +1780,50 @@ describe("storage", () => {
       expect(existsSync(legacyStoragePath)).toBe(false);
       expect(existsSync(getStoragePath())).toBe(true);
     });
+
+    it("loads global storage as fallback when project-scoped storage is missing", async () => {
+      const fakeHome = join(testWorkDir, "home-fallback");
+      const projectDir = join(testWorkDir, "project-fallback");
+      const projectGitDir = join(projectDir, ".git");
+      const globalConfigDir = join(fakeHome, ".opencode");
+      const globalStoragePath = join(globalConfigDir, "openai-codex-accounts.json");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(projectGitDir, { recursive: true });
+      await fs.mkdir(globalConfigDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      const globalStorage = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "global-refresh",
+            accountId: "global-account",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+      await fs.writeFile(globalStoragePath, JSON.stringify(globalStorage), "utf-8");
+
+      const loaded = await loadAccounts();
+
+      expect(loaded).not.toBeNull();
+      expect(loaded?.accounts).toHaveLength(1);
+      expect(loaded?.accounts[0]?.accountId).toBe("global-account");
+
+      const projectScopedPath = getStoragePath();
+      expect(projectScopedPath).toContain(join(fakeHome, ".opencode", "projects"));
+      expect(existsSync(projectScopedPath)).toBe(true);
+
+      const seeded = JSON.parse(await fs.readFile(projectScopedPath, "utf-8")) as {
+        accounts?: Array<{ accountId?: string }>;
+      };
+      expect(seeded.accounts?.[0]?.accountId).toBe("global-account");
+    });
   });
 
   describe("saveAccounts EPERM/EBUSY retry logic", () => {

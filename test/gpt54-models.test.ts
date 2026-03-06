@@ -219,13 +219,13 @@ describe("GPT-5.4 Model Support", () => {
 
 		it("should handle gpt-5.4 with multiple spaces", () => {
 			// Multiple spaces are not explicitly handled, falls back to default
-			expect(normalizeModel("gpt  5.4")).toBe("gpt-5.1");
-			expect(normalizeModel("gpt   5.4   high")).toBe("gpt-5.1");
+			expect(normalizeModel("gpt  5.4")).toBe("gpt-5.4");
+			expect(normalizeModel("gpt   5.4   high")).toBe("gpt-5.4");
 		});
 
 		it("should handle gpt-5.4 with underscore separator", () => {
 			// Underscore separator not explicitly supported, falls back to default
-			expect(normalizeModel("gpt_5_4")).toBe("gpt-5.1");
+			expect(normalizeModel("gpt_5_4")).toBe("gpt-5.4");
 		});
 
 		it("should not match gpt-5.4x patterns as gpt-5.4", () => {
@@ -234,9 +234,9 @@ describe("GPT-5.4 Model Support", () => {
 			expect(normalizeModel("gpt-5.44")).toBe("gpt-5.4");
 		});
 
-		it("should handle empty/undefined model names defaulting to gpt-5.1", () => {
-			expect(normalizeModel(undefined)).toBe("gpt-5.1");
-			expect(normalizeModel("")).toBe("gpt-5.1");
+		it("should handle empty/undefined model names defaulting to gpt-5.4", () => {
+			expect(normalizeModel(undefined)).toBe("gpt-5.4");
+			expect(normalizeModel("")).toBe("gpt-5.4");
 		});
 	});
 

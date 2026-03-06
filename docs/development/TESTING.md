@@ -248,9 +248,9 @@ API receives: "gpt-5-codex" ✅
 ```
 User selects: (none - uses OpenCode default)
 Plugin receives: undefined or default from OpenCode
-normalizeModel: undefined → "gpt-5.1" ✅ (fallback)
+normalizeModel: undefined → "gpt-5.4" ✅ (fallback)
 Config lookup: models[undefined] → undefined
-API receives: "gpt-5.1" ✅
+API receives: "gpt-5.4" ✅
 ```
 
 **Result:** ✅ Works (safe fallback)
@@ -621,14 +621,14 @@ normalizeModel("gpt-5")                 // → "gpt-5.4" ✅
 normalizeModel("gpt-5-mini")            // → "gpt-5.4" ✅
 normalizeModel("gpt-5-nano")            // → "gpt-5.4" ✅
 normalizeModel("GPT 5.4 Pro High")      // → "gpt-5.4-pro" ✅
-normalizeModel(undefined)                 // → "gpt-5.1" ✅
-normalizeModel("random-model")          // → "gpt-5.1" ✅ (fallback)
+normalizeModel(undefined)                 // → "gpt-5.4" ✅
+normalizeModel("random-model")          // → "gpt-5.4" ✅ (fallback)
 ```
 
 **Implementation:**
 ```typescript
 export function normalizeModel(model: string | undefined): string {
-  if (!model) return "gpt-5.1";
+  if (!model) return "gpt-5.4";
 
   const modelId = model.includes("/") ? model.split("/").pop() ?? model : model;
   const mappedModel = getNormalizedModel(modelId);
@@ -660,14 +660,14 @@ export function normalizeModel(model: string | undefined): string {
   if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
     return "gpt-5.4";
   }
-  return "gpt-5.1";
+  return "gpt-5.4";
 }
 ```
 
 **Why this works:**
 - ✅ Case-insensitive (`.toLowerCase()` + `.includes()`)
 - ✅ Pattern-based (works with any naming)
-- ✅ Legacy GPT-5 fallback (`gpt-5*` aliases → `gpt-5.4`) + safe unknown fallback (`gpt-5.1`)
+- ✅ Legacy GPT-5 fallback (`gpt-5*` aliases → `gpt-5.4`) + safe unknown fallback (`gpt-5.4`)
 - ✅ Codex priority with explicit Codex Mini support (`codex-mini*` → `codex-mini-latest`)
 
 ---
@@ -741,9 +741,9 @@ describe('normalizeModel', () => {
   })
 
   test('handles edge cases', () => {
-    expect(normalizeModel(undefined)).toBe('gpt-5.1')
+    expect(normalizeModel(undefined)).toBe('gpt-5.4')
     expect(normalizeModel('codex-mini-latest')).toBe('gpt-5.1-codex-mini')
-    expect(normalizeModel('random')).toBe('gpt-5.1')
+    expect(normalizeModel('random')).toBe('gpt-5.4')
   })
 })
 

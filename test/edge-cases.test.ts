@@ -18,9 +18,9 @@ import type { InputItem, UserConfig } from "../lib/types.js";
 describe("Edge Cases and Boundary Conditions", () => {
 	describe("normalizeModel edge cases", () => {
 		it("should handle null-like values", () => {
-			expect(normalizeModel(undefined)).toBe("gpt-5.1");
-			expect(normalizeModel("")).toBe("gpt-5.1");
-			expect(normalizeModel("   ")).toBe("gpt-5.1");
+			expect(normalizeModel(undefined)).toBe("gpt-5.4");
+			expect(normalizeModel("")).toBe("gpt-5.4");
+			expect(normalizeModel("   ")).toBe("gpt-5.4");
 		});
 
 		it("should handle models with multiple slashes", () => {
@@ -40,13 +40,13 @@ describe("Edge Cases and Boundary Conditions", () => {
 
 		it("should handle models with mixed separators", () => {
 			// Mixed separators may miss explicit 5.4/pro patterns and fall through to generic GPT-5 fallback.
-			expect(normalizeModel("gpt_5.4-high")).toBe("gpt-5.1");
+			expect(normalizeModel("gpt_5.4-high")).toBe("gpt-5.4");
 			expect(normalizeModel("gpt-5_4 pro")).toBe("gpt-5.4");
 		});
 
 		it("should handle models with numeric-only names", () => {
-			expect(normalizeModel("5.4")).toBe("gpt-5.1");
-			expect(normalizeModel("5")).toBe("gpt-5.1");
+			expect(normalizeModel("5.4")).toBe("gpt-5.4");
+			expect(normalizeModel("5")).toBe("gpt-5.4");
 		});
 
 		it("should handle models with unicode characters", () => {
