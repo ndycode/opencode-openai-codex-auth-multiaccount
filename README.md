@@ -144,6 +144,7 @@ opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 Config templates intentionally omit Spark model IDs by default to reduce entitlement failures on unsupported accounts. Add Spark manually only if your workspace is entitled.
 
 Built-in compatibility routing is separate from fallback policy: the default plugin config keeps `gpt-5-codex` on upstream `gpt-5.4` even when `unsupportedCodexPolicy` remains `strict`.
+The shipped config also labels the `gpt-5-codex` selector as `GPT 5.4 (OAuth)` so current OpenCode TUI pickers surface `5.4` even before the host exposes a literal `openai/gpt-5.4` runtime entry.
 
 **Using variants:**
 ```bash
@@ -186,7 +187,7 @@ Add this to your `~/.config/opencode/opencode.json`:
           }
         },
         "gpt-5-codex": {
-          "name": "GPT 5 Codex (OAuth)",
+          "name": "GPT 5.4 (OAuth)",
           "limit": { "context": 272000, "output": 128000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
