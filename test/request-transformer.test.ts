@@ -2102,6 +2102,32 @@ describe('Request Transformer Module', () => {
 					expect(result.model).toBe('gpt-5.4');  // legacy gpt-5 aliases now map to gpt-5.4
 					expect(result.reasoning?.effort).toBe('minimal');  // Lightweight gpt-5-mini defaults to minimal
 				});
+
+				it('should preserve xhigh effort for gpt-5-mini (normalized to gpt-5.4)', async () => {
+					const body: RequestBody = {
+						model: 'gpt-5-mini',
+						input: [],
+						reasoning: { effort: 'xhigh' },
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+
+					expect(result.model).toBe('gpt-5.4');
+					expect(result.reasoning?.effort).toBe('xhigh');
+				});
+
+				it('should preserve xhigh effort for gpt-5-nano (normalized to gpt-5.4)', async () => {
+					const body: RequestBody = {
+						model: 'gpt-5-nano',
+						input: [],
+						reasoning: { effort: 'xhigh' },
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+
+					expect(result.model).toBe('gpt-5.4');
+					expect(result.reasoning?.effort).toBe('xhigh');
+				});
 			});
 
 			describe('Scenario 2: Custom preset names (new style)', () => {

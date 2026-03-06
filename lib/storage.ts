@@ -676,7 +676,7 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
  * @returns AccountStorageV3 if file exists and is valid, null otherwise
  */
 export async function loadAccounts(): Promise<AccountStorageV3 | null> {
-  return loadAccountsInternal(saveAccounts);
+  return withStorageLock(async () => loadAccountsInternal(saveAccountsUnlocked));
 }
 
 function getGlobalAccountsStoragePath(): string {
@@ -775,8 +775,16 @@ async function loadAccountsInternal(
           try {
             await fs.access(seedPath);
             return;
-          } catch {
-            // Another concurrent caller has not seeded the project path yet.
+          } catch (accessError) {
+            const accessCode = (accessError as NodeJS.ErrnoException).code;
+            if (accessCode !== "ENOENT") {
+              log.warn("Failed to inspect project seed path before fallback seeding", {
+                path: seedPath,
+                error: String(accessError),
+              });
+              return;
+            }
+            // File is missing; proceed with seed write.
           }
 
           try {

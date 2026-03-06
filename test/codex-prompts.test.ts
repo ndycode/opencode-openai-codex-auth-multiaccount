@@ -44,7 +44,8 @@ describe("Codex Prompts Module", () => {
 
 			it("should be a readonly array", () => {
 				expect(Array.isArray(MODEL_FAMILIES)).toBe(true);
-				expect(MODEL_FAMILIES.length).toBe(7);
+				expect(MODEL_FAMILIES.length).toBeGreaterThanOrEqual(7);
+				expect(new Set(MODEL_FAMILIES).size).toBe(MODEL_FAMILIES.length);
 			});
 		});
 

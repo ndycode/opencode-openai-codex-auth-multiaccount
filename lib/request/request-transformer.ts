@@ -426,6 +426,7 @@ export function getReasoningConfig(
 	userConfig: ConfigOptions = {},
 ): ReasoningConfig {
 	const normalizedName = modelName?.toLowerCase() ?? "";
+	const canonicalModelName = normalizeModel(modelName);
 
 	// Canonical GPT-5 Codex (stable) defaults to high and does not support "none".
 	const isGpt5Codex =
@@ -456,6 +457,10 @@ export function getReasoningConfig(
 	const isGpt52General =
 		(normalizedName.includes("gpt-5.2") || normalizedName.includes("gpt 5.2")) &&
 		!isGpt52Codex;
+	const canonicalSupportsXhigh =
+		canonicalModelName === "gpt-5.4" ||
+		canonicalModelName === "gpt-5.4-pro" ||
+		canonicalModelName === "gpt-5.2";
 	const isCodexMax =
 		normalizedName.includes("codex-max") ||
 		normalizedName.includes("codex max");
@@ -487,7 +492,12 @@ export function getReasoningConfig(
 
 	// GPT-5.4/5.2 general, GPT-5.4 Pro, legacy GPT-5.2/5.3 Codex aliases, and Codex Max support xhigh reasoning
 	const supportsXhigh =
-		isGpt54General || isGpt54Pro || isGpt52General || isGpt53Codex || isGpt52Codex || isCodexMax;
+		isGpt54General ||
+		isGpt54Pro ||
+		isGpt52General ||
+		isGpt53Codex ||
+		isGpt52Codex ||
+		isCodexMax;
 
 	// GPT 5.1/5.2/5.4 general support "none" reasoning per:
 	// - OpenAI API docs: "gpt-5.1 defaults to none, supports: none, low, medium, high"
@@ -496,7 +506,10 @@ export function getReasoningConfig(
 	// - Codex CLI: docs/config.md lists "none" as valid for model_reasoning_effort
 	// - gpt-5.2 and gpt-5.4 general models support: none, low, medium, high, xhigh
 	// - Codex/Pro models (including GPT-5 Codex, GPT-5.4 Pro, and legacy GPT-5.3/5.2 Codex aliases) do NOT support "none"
-	const supportsNone = isGpt54General || isGpt52General || isGpt51General;
+	const supportsNone =
+		isGpt54General ||
+		isGpt52General ||
+		isGpt51General;
 
 	// Default based on model type (Codex CLI defaults + plugin opinionated tuning)
 	// Note: OpenAI docs say gpt-5.1 defaults to "none", but we default to "medium"
@@ -531,7 +544,9 @@ export function getReasoningConfig(
 	}
 
 	// For models that don't support xhigh, downgrade to high
-	if (!supportsXhigh && effort === "xhigh") {
+	// Legacy aliases like gpt-5-mini/gpt-5-nano normalize to gpt-5.4, which supports xhigh.
+	const supportsRequestedXhigh = supportsXhigh || canonicalSupportsXhigh;
+	if (!supportsRequestedXhigh && effort === "xhigh") {
 		effort = "high";
 	}
 

@@ -1921,6 +1921,66 @@ describe("storage", () => {
       }
     });
 
+    it("skips seed write when project path access fails with non-ENOENT error", async () => {
+      const fakeHome = join(testWorkDir, "home-fallback-access-error");
+      const projectDir = join(testWorkDir, "project-fallback-access-error");
+      const projectGitDir = join(projectDir, ".git");
+      const globalConfigDir = join(fakeHome, ".opencode");
+      const globalStoragePath = join(globalConfigDir, "openai-codex-accounts.json");
+
+      await fs.mkdir(fakeHome, { recursive: true });
+      await fs.mkdir(projectGitDir, { recursive: true });
+      await fs.mkdir(globalConfigDir, { recursive: true });
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
+      setStoragePath(projectDir);
+
+      const globalStorage = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "global-refresh-access-error",
+            accountId: "global-account-access-error",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+      await fs.writeFile(globalStoragePath, JSON.stringify(globalStorage), "utf-8");
+
+      const projectScopedPath = getStoragePath();
+      const originalAccess = fs.access.bind(fs);
+      const originalRename = fs.rename.bind(fs);
+      let projectSeedWriteCount = 0;
+
+      const accessSpy = vi.spyOn(fs, "access").mockImplementation(async (path, mode) => {
+        if (String(path) === projectScopedPath) {
+          const err = new Error("EACCES access failure") as NodeJS.ErrnoException;
+          err.code = "EACCES";
+          throw err;
+        }
+        return originalAccess(path as string, mode);
+      });
+
+      const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (sourcePath, destinationPath) => {
+        if (String(destinationPath) === projectScopedPath) {
+          projectSeedWriteCount += 1;
+        }
+        return originalRename(sourcePath, destinationPath);
+      });
+
+      try {
+        const loaded = await loadAccounts();
+        expect(loaded?.accounts[0]?.accountId).toBe("global-account-access-error");
+        expect(projectSeedWriteCount).toBe(0);
+        expect(existsSync(projectScopedPath)).toBe(false);
+      } finally {
+        accessSpy.mockRestore();
+        renameSpy.mockRestore();
+      }
+    });
+
     it("returns null when global fallback storage is corrupted", async () => {
       const fakeHome = join(testWorkDir, "home-fallback-corrupted");
       const projectDir = join(testWorkDir, "project-fallback-corrupted");

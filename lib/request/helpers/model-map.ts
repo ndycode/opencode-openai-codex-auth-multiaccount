@@ -19,6 +19,7 @@ const DATED_ALIAS_EFFORT_SUFFIXES = [
 	"-high",
 	"-xhigh",
 ] as const;
+const GPT_54_SNAPSHOT_DATE = "2026-03-05" as const;
 
 function expandDatedAliases(prefix: string, target: string): Record<string, string> {
 	return Object.fromEntries(
@@ -82,7 +83,7 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.4-medium": "gpt-5.4",
 	"gpt-5.4-high": "gpt-5.4",
 	"gpt-5.4-xhigh": "gpt-5.4",
-	...expandDatedAliases("gpt-5.4-2026-03-05", "gpt-5.4"),
+	...expandDatedAliases(`gpt-5.4-${GPT_54_SNAPSHOT_DATE}`, "gpt-5.4"),
 
 	// ============================================================================
 	// GPT-5.4 Pro Models (optional/manual config)
@@ -93,7 +94,7 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.4-pro-medium": "gpt-5.4-pro",
 	"gpt-5.4-pro-high": "gpt-5.4-pro",
 	"gpt-5.4-pro-xhigh": "gpt-5.4-pro",
-	...expandDatedAliases("gpt-5.4-pro-2026-03-05", "gpt-5.4-pro"),
+	...expandDatedAliases(`gpt-5.4-pro-${GPT_54_SNAPSHOT_DATE}`, "gpt-5.4-pro"),
 
 	// ============================================================================
 	// GPT-5.2 Models (supports none/low/medium/high/xhigh per OpenAI API docs)
