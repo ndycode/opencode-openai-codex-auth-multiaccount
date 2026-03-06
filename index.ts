@@ -51,6 +51,7 @@ import {
 	getFallbackToGpt52OnUnsupportedGpt53,
 	getUnsupportedCodexPolicy,
 	getUnsupportedCodexFallbackChain,
+	getModelTargetOverrides,
 	getTokenRefreshSkewMs,
 	getSessionRecovery,
 	getAutoResume,
@@ -1805,6 +1806,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					getFallbackToGpt52OnUnsupportedGpt53(pluginConfig);
 				const unsupportedCodexFallbackChain =
 					getUnsupportedCodexFallbackChain(pluginConfig);
+				const modelTargetOverrides = getModelTargetOverrides(pluginConfig);
 				const toastDurationMs = getToastDurationMs(pluginConfig);
 				const fetchTimeoutMs = getFetchTimeoutMs(pluginConfig);
 				const streamStallTimeoutMs = getStreamStallTimeoutMs(pluginConfig);
@@ -1979,6 +1981,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 									fastSession: fastSessionEnabled,
 									fastSessionStrategy,
 									fastSessionMaxInputItems,
+									targetModelOverrides: modelTargetOverrides,
 									requestTransformMode,
 								},
 							);

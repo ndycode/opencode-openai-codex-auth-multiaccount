@@ -7,7 +7,11 @@ import type { Auth, OpencodeClient } from "@opencode-ai/sdk";
 import { queuedRefresh } from "../refresh-queue.js";
 import { logRequest, logError, logWarn } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
-import { transformRequestBody, normalizeModel } from "./request-transformer.js";
+import {
+	transformRequestBody,
+	normalizeModel,
+	resolveTargetModelOverride,
+} from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
@@ -279,6 +283,14 @@ export interface ErrorDiagnostics {
 	httpStatus?: number;
 }
 
+export interface TransformRequestForCodexOptions {
+	requestTransformMode?: "native" | "legacy";
+	fastSession?: boolean;
+	fastSessionStrategy?: "hybrid" | "always";
+	fastSessionMaxInputItems?: number;
+	targetModelOverrides?: Record<string, string>;
+}
+
 /**
  * Determines if the current auth token needs to be refreshed
  * @param auth - Current authentication state
@@ -383,12 +395,7 @@ export async function transformRequestForCodex(
 	userConfig: UserConfig,
 	codexMode = true,
 	parsedBody?: Record<string, unknown>,
-	options?: {
-		requestTransformMode?: "native" | "legacy";
-		fastSession?: boolean;
-		fastSessionStrategy?: "hybrid" | "always";
-		fastSessionMaxInputItems?: number;
-	},
+	options?: TransformRequestForCodexOptions,
 ): Promise<{ body: RequestBody; updatedInit: RequestInit } | undefined> {
 	const hasParsedBody =
 		parsedBody !== undefined &&
@@ -410,6 +417,14 @@ export async function transformRequestForCodex(
 		const requestTransformMode = options?.requestTransformMode ?? "legacy";
 
 		if (requestTransformMode === "native") {
+			const targetModel = resolveTargetModelOverride(
+				body.model,
+				options?.targetModelOverrides ?? {},
+			);
+			if (targetModel) {
+				body.model = targetModel;
+			}
+
 			logRequest(LOG_STAGES.BEFORE_TRANSFORM, {
 				url,
 				originalModel,
@@ -468,6 +483,7 @@ export async function transformRequestForCodex(
 			options?.fastSession ?? false,
 			options?.fastSessionStrategy ?? "hybrid",
 			options?.fastSessionMaxInputItems ?? 30,
+			options?.targetModelOverrides ?? {},
 		);
 
 		// Log transformed request

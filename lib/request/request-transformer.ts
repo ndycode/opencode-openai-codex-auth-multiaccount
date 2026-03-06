@@ -154,6 +154,102 @@ export function normalizeModel(model: string | undefined): string {
 	return "gpt-5.1";
 }
 
+type ResolvedModelLookup = {
+	requestedVariant: ConfigOptions["reasoningEffort"] | undefined;
+	directMatchKey?: string;
+	baseMatchKey?: string;
+};
+
+function stripProviderPrefix(name: string): string {
+	return name.includes("/") ? (name.split("/").pop() ?? name) : name;
+}
+
+function getVariantFromModelName(
+	name: string,
+): ConfigOptions["reasoningEffort"] | undefined {
+	const stripped = stripProviderPrefix(name).toLowerCase();
+	const match = stripped.match(/-(none|minimal|low|medium|high|xhigh)$/);
+	if (!match) return undefined;
+	const variant = match[1];
+	if (
+		variant === "none" ||
+		variant === "minimal" ||
+		variant === "low" ||
+		variant === "medium" ||
+		variant === "high" ||
+		variant === "xhigh"
+	) {
+		return variant;
+	}
+	return undefined;
+}
+
+function removeVariantSuffix(name: string): string {
+	return stripProviderPrefix(name).replace(
+		/-(none|minimal|low|medium|high|xhigh)$/i,
+		"",
+	);
+}
+
+function findModelEntryKey(
+	candidates: string[],
+	modelMap: UserConfig["models"],
+): string | undefined {
+	for (const key of candidates) {
+		if (modelMap[key]) return key;
+	}
+	return undefined;
+}
+
+function resolveModelLookup(
+	modelName: string,
+	userConfig: UserConfig = { global: {}, models: {} },
+): ResolvedModelLookup {
+	const modelMap = userConfig.models ?? {};
+	const strippedModelName = stripProviderPrefix(modelName);
+	const normalizedModelName = normalizeModel(strippedModelName);
+	const normalizedBaseModelName = normalizeModel(removeVariantSuffix(strippedModelName));
+	const baseModelName = removeVariantSuffix(strippedModelName);
+	const requestedVariant = getVariantFromModelName(strippedModelName);
+	const directMatchKey = findModelEntryKey([modelName, strippedModelName], modelMap);
+	const baseMatchKey = findModelEntryKey(
+		[baseModelName, normalizedBaseModelName, normalizedModelName],
+		modelMap,
+	);
+
+	return {
+		requestedVariant,
+		directMatchKey,
+		baseMatchKey,
+	};
+}
+
+export function resolveTargetModelOverride(
+	modelName: string,
+	targetModelOverrides: Record<string, string> = {},
+): string | undefined {
+	const strippedModelName = stripProviderPrefix(modelName).toLowerCase();
+	const baseModelName = removeVariantSuffix(strippedModelName).toLowerCase();
+	const normalizedModelName = normalizeModel(strippedModelName);
+	const normalizedBaseModelName = normalizeModel(baseModelName);
+	const overrideCandidates = [
+		modelName.toLowerCase(),
+		strippedModelName,
+		baseModelName,
+		normalizedBaseModelName,
+		normalizedModelName,
+	];
+	const overrideTarget = overrideCandidates
+		.map((candidate) => targetModelOverrides[candidate])
+		.find((candidate) => typeof candidate === "string");
+	if (typeof overrideTarget !== "string") return undefined;
+
+	const trimmedTarget = overrideTarget.trim();
+	if (!trimmedTarget) return undefined;
+
+	return normalizeModel(trimmedTarget);
+}
+
 /**
  * Extract configuration for a specific model
  * Merges global options with model-specific options (model-specific takes precedence)
@@ -166,73 +262,25 @@ export function getModelConfig(
 	userConfig: UserConfig = { global: {}, models: {} },
 ): ConfigOptions {
 	const globalOptions = userConfig.global ?? {};
-	const modelMap = userConfig.models ?? {};
-
-	const stripProviderPrefix = (name: string): string =>
-		name.includes("/") ? (name.split("/").pop() ?? name) : name;
-
-	const getVariantFromModelName = (
-		name: string,
-	): ConfigOptions["reasoningEffort"] | undefined => {
-		const stripped = stripProviderPrefix(name).toLowerCase();
-		const match = stripped.match(/-(none|minimal|low|medium|high|xhigh)$/);
-		if (!match) return undefined;
-		const variant = match[1];
-		if (
-			variant === "none" ||
-			variant === "minimal" ||
-			variant === "low" ||
-			variant === "medium" ||
-			variant === "high" ||
-			variant === "xhigh"
-		) {
-			return variant;
-		}
-		return undefined;
-	};
-
-	const removeVariantSuffix = (name: string): string =>
-		stripProviderPrefix(name).replace(/-(none|minimal|low|medium|high|xhigh)$/i, "");
-
-	const findModelEntry = (
-		candidates: string[],
-	):
-		| {
-				key: string;
-				entry: UserConfig["models"][string];
-		  }
-		| undefined => {
-		for (const key of candidates) {
-			const entry = modelMap[key];
-			if (entry) return { key, entry };
-		}
-		return undefined;
-	};
-
-	const strippedModelName = stripProviderPrefix(modelName);
-	const normalizedModelName = normalizeModel(strippedModelName);
-	const normalizedBaseModelName = normalizeModel(removeVariantSuffix(strippedModelName));
-	const baseModelName = removeVariantSuffix(strippedModelName);
-	const requestedVariant = getVariantFromModelName(strippedModelName);
+	const { requestedVariant, directMatchKey, baseMatchKey } = resolveModelLookup(
+		modelName,
+		userConfig,
+	);
+	const directMatch = directMatchKey ? userConfig.models?.[directMatchKey] : undefined;
+	const baseMatch = baseMatchKey ? userConfig.models?.[baseMatchKey] : undefined;
 
 	// 1) Honor exact per-model keys first (including variant-specific keys)
-	const directMatch = findModelEntry([modelName, strippedModelName]);
-	if (directMatch?.entry?.options) {
-		return { ...globalOptions, ...directMatch.entry.options };
+	if (directMatch?.options) {
+		return { ...globalOptions, ...directMatch.options };
 	}
 
 	// 2) Resolve to base model config (supports provider-prefixed names + aliases)
-	const baseMatch = findModelEntry([
-		baseModelName,
-		normalizedBaseModelName,
-		normalizedModelName,
-	]);
-	const baseOptions = baseMatch?.entry?.options ?? {};
+	const baseOptions = baseMatch?.options ?? {};
 
 	// 3) If model requested a variant, merge variant options from base model config
 	const variantConfig =
-		requestedVariant && baseMatch?.entry?.variants
-			? baseMatch.entry.variants[requestedVariant]
+		requestedVariant && baseMatch?.variants
+			? baseMatch.variants[requestedVariant]
 			: undefined;
 	let variantOptions: ConfigOptions = {};
 	if (variantConfig) {
@@ -877,6 +925,7 @@ export async function transformRequestBody(
 	fastSession = false,
 	fastSessionStrategy: FastSessionStrategy = "hybrid",
 	fastSessionMaxInputItems = 30,
+	targetModelOverrides: Record<string, string> = {},
 ): Promise<RequestBody> {
 	const originalModel = body.model;
 	const normalizedModel = normalizeModel(body.model);
@@ -885,18 +934,25 @@ export async function transformRequestBody(
 	// This allows per-model options like "gpt-5-codex-low" to work correctly
 	const lookupModel = originalModel || normalizedModel;
 	const modelConfig = getModelConfig(lookupModel, userConfig);
+	const targetModel = resolveTargetModelOverride(
+		lookupModel,
+		targetModelOverrides,
+	);
+	const apiModel = targetModel ?? normalizedModel;
+	const reasoningModel = targetModel ? apiModel : lookupModel;
 
 	// Debug: Log which config was resolved
 	logDebug(
-		`Model config lookup: "${lookupModel}" → normalized to "${normalizedModel}" for API`,
+		`Model config lookup: "${lookupModel}" → normalized to "${apiModel}" for API`,
 		{
 			hasModelSpecificConfig: !!userConfig.models?.[lookupModel],
 			resolvedConfig: modelConfig,
+			targetModel,
 		},
 	);
 
 	// Normalize model name for API call
-	body.model = normalizedModel;
+	body.model = apiModel;
 	const shouldApplyFastSessionTuning =
 		fastSession &&
 		(fastSessionStrategy === "always" ||
@@ -994,7 +1050,7 @@ export async function transformRequestBody(
 
 	// Configure reasoning (prefer existing body/provider options, then config defaults)
 	const reasoningConfig = resolveReasoningConfig(
-		lookupModel,
+		reasoningModel,
 		modelConfig,
 		body,
 	);
@@ -1013,7 +1069,7 @@ export async function transformRequestBody(
 	if (shouldApplyFastSessionTuning) {
 		// In fast-session mode, prioritize speed by clamping to minimum reasoning + verbosity.
 		// getReasoningConfig normalizes unsupported values per model family.
-		const fastReasoning = getReasoningConfig(lookupModel, {
+		const fastReasoning = getReasoningConfig(reasoningModel, {
 			reasoningEffort: "none",
 			reasoningSummary: "auto",
 		});

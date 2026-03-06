@@ -39,6 +39,7 @@ export const PluginConfigSchema = z.object({
 		z.string(),
 		z.array(z.string().min(1)),
 	).optional(),
+	modelTargetOverrides: z.record(z.string(), z.string().min(1)).optional(),
 	tokenRefreshSkewMs: z.number().min(0).optional(),
 	rateLimitToastDebounceMs: z.number().min(0).optional(),
 	toastDurationMs: z.number().min(1000).optional(),

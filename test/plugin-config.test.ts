@@ -17,6 +17,7 @@ import {
 	getRetryAllAccountsMaxRetries,
 	getFallbackToGpt52OnUnsupportedGpt53,
 	getUnsupportedCodexFallbackChain,
+	getModelTargetOverrides,
 	getRequestTransformMode,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
@@ -109,6 +110,7 @@ describe('Plugin Configuration', () => {
 				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 				unsupportedCodexFallbackChain: {},
+				modelTargetOverrides: {},
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -153,6 +155,7 @@ describe('Plugin Configuration', () => {
 				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 				unsupportedCodexFallbackChain: {},
+				modelTargetOverrides: {},
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -194,6 +197,7 @@ describe('Plugin Configuration', () => {
 				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 				unsupportedCodexFallbackChain: {},
+				modelTargetOverrides: {},
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -246,6 +250,7 @@ describe('Plugin Configuration', () => {
 		fallbackOnUnsupportedCodexModel: false,
 		fallbackToGpt52OnUnsupportedGpt53: true,
 		unsupportedCodexFallbackChain: {},
+		modelTargetOverrides: {},
 		tokenRefreshSkewMs: 60_000,
 		rateLimitToastDebounceMs: 60_000,
 		toastDurationMs: 5_000,
@@ -292,6 +297,7 @@ describe('Plugin Configuration', () => {
 			fallbackOnUnsupportedCodexModel: false,
 			fallbackToGpt52OnUnsupportedGpt53: true,
 			unsupportedCodexFallbackChain: {},
+			modelTargetOverrides: {},
 			tokenRefreshSkewMs: 60_000,
 			rateLimitToastDebounceMs: 60_000,
 			toastDurationMs: 5_000,
@@ -565,6 +571,33 @@ describe('Plugin Configuration', () => {
 				getUnsupportedCodexFallbackChain({
 					unsupportedCodexFallbackChain: {
 						'': ['   '],
+					},
+				}),
+			).toEqual({});
+		});
+	});
+
+	describe('getModelTargetOverrides', () => {
+		it('returns normalized manual target overrides', () => {
+			const result = getModelTargetOverrides({
+				modelTargetOverrides: {
+					'openai/gpt-5-codex': 'gpt-5.4',
+					' GPT-5-CODEX-HIGH ': ' openai/gpt-5.4-pro ',
+				},
+			});
+
+			expect(result).toEqual({
+				'gpt-5-codex': 'gpt-5.4',
+				'gpt-5-codex-high': 'openai/gpt-5.4-pro',
+			});
+		});
+
+		it('returns empty object for missing/invalid overrides', () => {
+			expect(getModelTargetOverrides({})).toEqual({});
+			expect(
+				getModelTargetOverrides({
+					modelTargetOverrides: {
+						'': '   ',
 					},
 				}),
 			).toEqual({});

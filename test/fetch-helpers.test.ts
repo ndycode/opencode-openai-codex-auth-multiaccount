@@ -801,6 +801,36 @@ describe('Fetch Helpers Module', () => {
 				expect(getInstructionsSpy).not.toHaveBeenCalled();
 			});
 
+			it('applies explicit target-model overrides in native mode', async () => {
+				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
+				type TransformRequestForCodexOptions =
+					import('../lib/request/fetch-helpers.js').TransformRequestForCodexOptions;
+				const getInstructionsSpy = vi.spyOn(codexPrompts, 'getCodexInstructions');
+				const requestBody = {
+					model: 'gpt-5-codex',
+					reasoning: { effort: 'medium', summary: 'auto' },
+					input: [{ type: 'message', role: 'user', content: 'Hello' }],
+				};
+				const options: TransformRequestForCodexOptions = {
+					requestTransformMode: 'native',
+					targetModelOverrides: { 'gpt-5-codex': 'gpt-5.4' },
+				};
+
+				const result = await transformRequestForCodex(
+					{ body: JSON.stringify(requestBody) },
+					'https://example.com',
+					{ global: {}, models: {} },
+					true,
+					undefined,
+					options,
+				);
+
+				expect(result).toBeDefined();
+				expect(result?.body.model).toBe('gpt-5.4');
+				expect(result?.body.reasoning).toEqual({ effort: 'medium', summary: 'auto' });
+				expect(getInstructionsSpy).not.toHaveBeenCalled();
+			});
+
 		it('returns undefined when init is undefined (line 166 coverage)', async () => {
 			const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
 			const result = await transformRequestForCodex(undefined, 'https://example.com', { global: {}, models: {} });

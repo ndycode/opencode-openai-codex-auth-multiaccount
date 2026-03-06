@@ -95,6 +95,7 @@ vi.mock("../lib/config.js", () => ({
 	getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
 	getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
 	getUnsupportedCodexFallbackChain: () => ({}),
+	getModelTargetOverrides: () => ({}),
 	getTokenRefreshSkewMs: () => 60000,
 	getSessionRecovery: () => false,
 	getAutoResume: () => false,

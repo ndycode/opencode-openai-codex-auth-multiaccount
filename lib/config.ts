@@ -42,6 +42,7 @@ const DEFAULT_CONFIG: PluginConfig = {
 	fallbackOnUnsupportedCodexModel: false,
 	fallbackToGpt52OnUnsupportedGpt53: true,
 	unsupportedCodexFallbackChain: {},
+	modelTargetOverrides: {},
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
 	toastDurationMs: 5_000,
@@ -385,6 +386,32 @@ export function getUnsupportedCodexFallbackChain(
 		if (targets.length > 0) {
 			normalized[normalizedKey] = targets;
 		}
+	}
+
+	return normalized;
+}
+
+export function getModelTargetOverrides(
+	pluginConfig: PluginConfig,
+): Record<string, string> {
+	const overrides = pluginConfig.modelTargetOverrides;
+	if (!overrides || typeof overrides !== "object") {
+		return {};
+	}
+
+	const normalizeKey = (value: string): string => {
+		const trimmed = value.trim().toLowerCase();
+		if (!trimmed) return "";
+		return trimmed.includes("/") ? (trimmed.split("/").pop() ?? trimmed) : trimmed;
+	};
+
+	const normalized: Record<string, string> = {};
+	for (const [key, value] of Object.entries(overrides)) {
+		if (typeof key !== "string" || typeof value !== "string") continue;
+		const normalizedKey = normalizeKey(key);
+		const trimmedValue = value.trim();
+		if (!normalizedKey || !trimmedValue) continue;
+		normalized[normalizedKey] = trimmedValue;
 	}
 
 	return normalized;
