@@ -118,6 +118,7 @@ Plugins can inject options via the `loader()` function.
 - **UI Display**: "GPT 5 Codex Medium (OAuth)" ✅
 - **Persistence**: `provider_id: "openai"` + `model_id: "gpt-5-codex-medium"` ✅
 - **Plugin lookup**: `models["gpt-5-codex-medium"]` → used to build Codex request ✅
+- **Effective upstream target**: built-in compatibility override rewrites `gpt-5-codex-*` requests to upstream `gpt-5.4` after config lookup ✅
 
 ### TUI Persistence
 
@@ -130,7 +131,7 @@ model_id = "gpt-5-codex"
 last_used = 2025-10-12T10:30:00Z
 ```
 
-**Key Point**: Custom display names are **UI-only**. The underlying `id` field is what gets persisted and sent to APIs.
+**Key Point**: Custom display names are **UI-only**. The underlying `id` field is what gets persisted by OpenCode; the plugin can still retarget the effective upstream model later.
 
 **Source**: `tmp/opencode/packages/tui/internal/app/state.go:54-79`
 

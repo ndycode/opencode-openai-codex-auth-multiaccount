@@ -28,10 +28,11 @@ This plugin bridges OpenCode and the ChatGPT Codex backend with explicit mode co
 3. **Full Context Preservation** - Sends complete message history and always includes `reasoning.encrypted_content`.
 4. **Stale-While-Revalidate Caching** - Keeps prompt/instruction fetches fast while avoiding GitHub rate limits; optional startup prewarm for first-turn latency.
 5. **Per-Model Configuration** - Enables quality presets with quick switching.
-6. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults.
-7. **Entitlement-Aware Fallback Flow** - Unsupported models try remaining accounts/workspaces first, then optional fallback chain if enabled.
-8. **Beginner Operations Layer** - Setup checklist/wizard, guided doctor flow, next-step recommender, and startup preflight summaries.
-9. **Safety-First Account Backup Flow** - Timestamped exports, import dry-run previews, and pre-import snapshots before apply when existing accounts are present.
+6. **Built-In Compatibility Targeting** - Keeps host-facing selectors like `gpt-5-codex` while routing the effective upstream request to real `gpt-5.4`.
+7. **Fast Session Mode** - Optional low-latency tuning (clamps reasoning/verbosity on trivial turns) without changing defaults.
+8. **Entitlement-Aware Fallback Flow** - Unsupported models try remaining accounts/workspaces first, then optional fallback chain if enabled.
+9. **Beginner Operations Layer** - Setup checklist/wizard, guided doctor flow, next-step recommender, and startup preflight summaries.
+10. **Safety-First Account Backup Flow** - Timestamped exports, import dry-run previews, and pre-import snapshots before apply when existing accounts are present.
 
 **Testing**: 1,767 tests plus integration coverage.
 

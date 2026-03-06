@@ -55,13 +55,13 @@ npm test
 | User Selects | Plugin Receives | Normalizes To | Config Lookup | API Receives | Result |
 |--------------|-----------------|---------------|---------------|--------------|--------|
 | `openai/gpt-5` | `"gpt-5"` | `"gpt-5.1"` | `models["gpt-5"]` → undefined | `"gpt-5.1"` | ✅ Uses global options |
-| `openai/gpt-5-codex` | `"gpt-5-codex"` | `"gpt-5-codex"` | `models["gpt-5-codex"]` → undefined | `"gpt-5-codex"` | ✅ Uses global options |
+| `openai/gpt-5-codex` | `"gpt-5-codex"` | `"gpt-5-codex"` | `models["gpt-5-codex"]` → undefined | `"gpt-5.4"` | ✅ Uses global options + built-in target override |
 | `openai/gpt-5-mini` | `"gpt-5-mini"` | `"gpt-5.1"` | `models["gpt-5-mini"]` → undefined | `"gpt-5.1"` | ✅ Uses global options |
 | `openai/gpt-5-nano` | `"gpt-5-nano"` | `"gpt-5.1"` | `models["gpt-5-nano"]` → undefined | `"gpt-5.1"` | ✅ Uses global options |
 
 **Expected Behavior:**
 - ✅ All models work with global options
-- ✅ Normalized correctly for API
+- ✅ Codex selector aliases can still route to a different real upstream model
 - ✅ No errors
 
 ---
@@ -96,14 +96,14 @@ npm test
 
 | User Selects | Plugin Receives | Config Lookup | Resolved Options | API Receives | Result |
 |--------------|-----------------|---------------|------------------|--------------|--------|
-| `openai/gpt-5-codex-low` | `"gpt-5-codex-low"` | Found ✅ | `{ reasoningEffort: "low" }` | `"gpt-5-codex"` | ✅ Per-model |
-| `openai/gpt-5-codex-high` | `"gpt-5-codex-high"` | Found ✅ | `{ reasoningEffort: "high" }` | `"gpt-5-codex"` | ✅ Per-model |
-| `openai/gpt-5-codex` | `"gpt-5-codex"` | Not found | `{ reasoningEffort: "medium" }` | `"gpt-5-codex"` | ✅ Global |
+| `openai/gpt-5-codex-low` | `"gpt-5-codex-low"` | Found ✅ | `{ reasoningEffort: "low" }` | `"gpt-5.4"` | ✅ Per-model + built-in target override |
+| `openai/gpt-5-codex-high` | `"gpt-5-codex-high"` | Found ✅ | `{ reasoningEffort: "high" }` | `"gpt-5.4"` | ✅ Per-model + built-in target override |
+| `openai/gpt-5-codex` | `"gpt-5-codex"` | Not found | `{ reasoningEffort: "medium" }` | `"gpt-5.4"` | ✅ Global + built-in target override |
 
 **Expected Behavior:**
 - ✅ Custom variants use per-model options
 - ✅ Default `gpt-5-codex` uses global options
-- ✅ Both normalize to `"gpt-5-codex"` for API
+- ✅ Both preserve the `gpt-5-codex` selector while routing upstream to real `gpt-5.4`
 
 ---
 
@@ -202,7 +202,7 @@ User selects: openai/GPT-5-CODEX-HIGH
 Plugin receives: "GPT-5-CODEX-HIGH"
 normalizeModel: "GPT-5-CODEX-HIGH" → "gpt-5-codex" ✅ (includes "codex")
 Config lookup: models["GPT-5-CODEX-HIGH"] → Found ✅
-API receives: "gpt-5-codex" ✅
+API receives: "gpt-5.4" ✅ (via built-in target override)
 ```
 
 **Result:** ✅ Works (case-insensitive includes())
@@ -228,7 +228,7 @@ User selects: openai/my-gpt5-codex-variant
 Plugin receives: "my-gpt5-codex-variant"
 normalizeModel: "my-gpt5-codex-variant" → "gpt-5-codex" ✅ (includes "codex")
 Config lookup: models["my-gpt5-codex-variant"] → Found ✅
-API receives: "gpt-5-codex" ✅
+API receives: "gpt-5.4" ✅ (via built-in target override)
 ```
 
 **Result:** ✅ Works (normalization handles it)
@@ -366,7 +366,7 @@ Turn 4: > now delete it
 - CLI: `--model=openai/gpt-5-codex-low` ✅
 - TUI: Shows "GPT 5 Codex Low (OAuth)" ✅
 - Plugin: Finds and applies per-model options ✅
-- API: Receives `"gpt-5-codex"` ✅
+- API: Receives `"gpt-5.4"` ✅
 
 **Result:** ✅ **Optimal experience**
 
@@ -405,7 +405,7 @@ DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5-codex-low
 
 ```
 [openai-codex-plugin] Debug logging ENABLED
-[openai-codex-plugin] Model config lookup: "gpt-5-codex-low" → normalized to "gpt-5-codex" for API {
+[openai-codex-plugin] Model config lookup: "gpt-5-codex-low" → normalized to "gpt-5.4" for API {
   hasModelSpecificConfig: true,
   resolvedConfig: {
     reasoningEffort: 'low',
@@ -429,7 +429,7 @@ DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5-codex
 
 ```
 [openai-codex-plugin] Debug logging ENABLED
-[openai-codex-plugin] Model config lookup: "gpt-5-codex" → normalized to "gpt-5-codex" for API {
+[openai-codex-plugin] Model config lookup: "gpt-5-codex" → normalized to "gpt-5.4" for API {
   hasModelSpecificConfig: false,
   resolvedConfig: {
     reasoningEffort: 'medium',

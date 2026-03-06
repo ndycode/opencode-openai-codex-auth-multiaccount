@@ -38,6 +38,7 @@ Both templates include:
 - Reasoning variants per model family
 - `store: false` and `include: ["reasoning.encrypted_content"]`
 - Context metadata (272k context / 128k output)
+- Built-in compatibility routing: `gpt-5-codex` targets real upstream `gpt-5.4` by default
 
 ## Spark model note
 
@@ -68,6 +69,7 @@ A barebones debug template is available at [`minimal-opencode.json`](./minimal-o
 ## Unsupported-model behavior
 
 Current defaults are strict entitlement handling:
+- `gpt-5-codex -> gpt-5.4` is a built-in compatibility target override, not fallback
 - `unsupportedCodexPolicy: "strict"` returns entitlement errors directly
 - set `unsupportedCodexPolicy: "fallback"` (or `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback`) to enable automatic fallback retries
 - `fallbackToGpt52OnUnsupportedGpt53: true` keeps the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge inside fallback mode

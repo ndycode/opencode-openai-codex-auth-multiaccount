@@ -153,6 +153,8 @@ opencode
 
 You'll see all 21 GPT-5.x variants in the model selector!
 
+By default, `gpt-5-codex` remains the OpenCode-facing selector/config key, but the plugin routes it to the real upstream `gpt-5.4` model. This is built-in compatibility routing, not fallback.
+
 If `gpt-5.4-pro`, `gpt-5-codex`, or `gpt-5.3-codex-spark` returns an unsupported-model entitlement error, re-auth with `opencode auth login` or add another entitled account/workspace first. The plugin tries remaining accounts/workspaces before model fallback. See [Configuration](configuration.md) for strict vs fallback policy controls.
 
 If you manually add Spark IDs and want to confirm effective upstream routing, run with `ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1` and inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json`.
@@ -208,7 +210,7 @@ Safe mode effects:
 |-------|----------|-------|
 | `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 |
 | `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` |
-| `gpt-5-codex` | low, medium, high | Canonical Codex for code generation |
+| `gpt-5-codex` | low, medium, high | Canonical Codex selector for code generation; routes to real upstream `gpt-5.4` by default |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Optional manual model; entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |

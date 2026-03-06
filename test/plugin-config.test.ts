@@ -110,7 +110,7 @@ describe('Plugin Configuration', () => {
 				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 				unsupportedCodexFallbackChain: {},
-				modelTargetOverrides: {},
+				modelTargetOverrides: { 'gpt-5-codex': 'gpt-5.4' },
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -155,7 +155,7 @@ describe('Plugin Configuration', () => {
 				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 				unsupportedCodexFallbackChain: {},
-				modelTargetOverrides: {},
+				modelTargetOverrides: { 'gpt-5-codex': 'gpt-5.4' },
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -197,7 +197,7 @@ describe('Plugin Configuration', () => {
 				fallbackOnUnsupportedCodexModel: false,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 				unsupportedCodexFallbackChain: {},
-				modelTargetOverrides: {},
+				modelTargetOverrides: { 'gpt-5-codex': 'gpt-5.4' },
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
@@ -250,7 +250,7 @@ describe('Plugin Configuration', () => {
 		fallbackOnUnsupportedCodexModel: false,
 		fallbackToGpt52OnUnsupportedGpt53: true,
 		unsupportedCodexFallbackChain: {},
-		modelTargetOverrides: {},
+		modelTargetOverrides: { 'gpt-5-codex': 'gpt-5.4' },
 		tokenRefreshSkewMs: 60_000,
 		rateLimitToastDebounceMs: 60_000,
 		toastDurationMs: 5_000,
@@ -297,7 +297,7 @@ describe('Plugin Configuration', () => {
 			fallbackOnUnsupportedCodexModel: false,
 			fallbackToGpt52OnUnsupportedGpt53: true,
 			unsupportedCodexFallbackChain: {},
-			modelTargetOverrides: {},
+			modelTargetOverrides: { 'gpt-5-codex': 'gpt-5.4' },
 			tokenRefreshSkewMs: 60_000,
 			rateLimitToastDebounceMs: 60_000,
 			toastDurationMs: 5_000,
@@ -578,6 +578,12 @@ describe('Plugin Configuration', () => {
 	});
 
 	describe('getModelTargetOverrides', () => {
+		it('includes the built-in gpt-5-codex -> gpt-5.4 compatibility alias by default', () => {
+			expect(getModelTargetOverrides({})).toEqual({
+				'gpt-5-codex': 'gpt-5.4',
+			});
+		});
+
 		it('returns normalized manual target overrides', () => {
 			const result = getModelTargetOverrides({
 				modelTargetOverrides: {
@@ -605,14 +611,15 @@ describe('Plugin Configuration', () => {
 		});
 
 		it('returns empty object for missing/invalid overrides', () => {
-			expect(getModelTargetOverrides({})).toEqual({});
 			expect(
 				getModelTargetOverrides({
 					modelTargetOverrides: {
 						'': '   ',
 					},
 				}),
-			).toEqual({});
+			).toEqual({
+				'gpt-5-codex': 'gpt-5.4',
+			});
 		});
 	});
 

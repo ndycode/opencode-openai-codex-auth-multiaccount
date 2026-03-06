@@ -3,6 +3,7 @@ import {
 	getModelConfig,
 	transformRequestBody,
 } from "../lib/request/request-transformer.js";
+import { getModelTargetOverrides } from "../lib/config.js";
 import type { RequestBody, UserConfig } from "../lib/types.js";
 
 const codexInstructions = "You are Codex.";
@@ -79,6 +80,26 @@ describe("GPT-5.4 runtime compatibility routing", () => {
 		expect(result.model).toBe("gpt-5.4");
 		expect(result.reasoning?.effort).toBe("high");
 		expect(result.reasoning?.summary).toBe("detailed");
+	});
+
+	it("uses the built-in gpt-5-codex compatibility alias without requiring user config", async () => {
+		const body: RequestBody = {
+			model: "gpt-5-codex",
+			input: [],
+		};
+
+		const result = await transformRequestBody(
+			body,
+			codexInstructions,
+			{ global: {}, models: {} },
+			true,
+			false,
+			"hybrid",
+			30,
+			getModelTargetOverrides({}),
+		);
+
+		expect(result.model).toBe("gpt-5.4");
 	});
 
 	it("honors exact legacy selectors before base compatibility aliases", async () => {

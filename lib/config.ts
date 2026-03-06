@@ -16,6 +16,9 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
+const DEFAULT_MODEL_TARGET_OVERRIDES = {
+	"gpt-5-codex": "gpt-5.4",
+} as const;
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -42,7 +45,7 @@ const DEFAULT_CONFIG: PluginConfig = {
 	fallbackOnUnsupportedCodexModel: false,
 	fallbackToGpt52OnUnsupportedGpt53: true,
 	unsupportedCodexFallbackChain: {},
-	modelTargetOverrides: {},
+	modelTargetOverrides: { ...DEFAULT_MODEL_TARGET_OVERRIDES },
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
 	toastDurationMs: 5_000,
@@ -95,10 +98,18 @@ export function loadPluginConfig(): PluginConfig {
 			logWarn(`Plugin config validation warnings: ${schemaErrors.slice(0, 3).join(", ")}`);
 		}
 
-		return {
+		const mergedConfig = {
 			...DEFAULT_CONFIG,
 			...(userConfig as Partial<PluginConfig>),
 		};
+		mergedConfig.modelTargetOverrides = {
+			...DEFAULT_MODEL_TARGET_OVERRIDES,
+			...(isRecord(userConfig) && isRecord(userConfig.modelTargetOverrides)
+				? userConfig.modelTargetOverrides
+				: {}),
+		};
+
+		return mergedConfig;
 	} catch (error) {
 		logWarn(
 			`Failed to load config from ${CONFIG_PATH}: ${(error as Error).message}`,
@@ -394,11 +405,6 @@ export function getUnsupportedCodexFallbackChain(
 export function getModelTargetOverrides(
 	pluginConfig: PluginConfig,
 ): Record<string, string> {
-	const overrides = pluginConfig.modelTargetOverrides;
-	if (!overrides || typeof overrides !== "object") {
-		return {};
-	}
-
 	const normalizeKey = (value: string): string => {
 		const trimmed = value.trim().toLowerCase();
 		if (!trimmed) return "";
@@ -406,6 +412,15 @@ export function getModelTargetOverrides(
 	};
 
 	const normalized: Record<string, string> = {};
+	for (const [key, value] of Object.entries(DEFAULT_MODEL_TARGET_OVERRIDES)) {
+		normalized[normalizeKey(key)] = normalizeKey(value);
+	}
+
+	const overrides = pluginConfig.modelTargetOverrides;
+	if (!overrides || typeof overrides !== "object") {
+		return normalized;
+	}
+
 	for (const [key, value] of Object.entries(overrides)) {
 		if (typeof key !== "string" || typeof value !== "string") continue;
 		const normalizedKey = normalizeKey(key);

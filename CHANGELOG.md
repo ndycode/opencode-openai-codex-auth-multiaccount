@@ -15,6 +15,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 ### changed
 
+- **built-in codex compatibility target**: `gpt-5-codex` now routes to real upstream `gpt-5.4` by default while strict entitlement errors remain unchanged.
 - **account storage schema**: V3 account metadata now includes optional `accountTags` and `accountNote`.
 - **docs refresh for operational flows**: README + docs portal/development guides updated to reflect beginner commands, safe mode, interactive picker behavior, and backup/import safeguards.
 - **test matrix expansion**: coverage now includes beginner UI helpers, safe-fix diagnostics edge cases, tag/note command behavior, and timestamped backup/import preview utilities.

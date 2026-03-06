@@ -468,7 +468,8 @@ AI SDK 2.0.50 introduced automatic use of `item_reference` items to reduce paylo
 - `id` defaults to: `"gpt-5-codex-low"` (config key)
 - `name` defaults to: `"gpt-5-codex-low"` (config key)
 - TUI shows: `"gpt-5-codex-low"` (less friendly)
-- Plugin normalizes: `"gpt-5-codex-low"` → `"gpt-5-codex"` for API
+- Plugin normalizes: `"gpt-5-codex-low"` → `"gpt-5-codex"`
+- Built-in target override maps the effective upstream request to `"gpt-5.4"`
 - **Works perfectly, just less user-friendly**
 
 ---
@@ -502,7 +503,8 @@ AI SDK 2.0.50 introduced automatic use of `item_reference` items to reduce paylo
 | **TUI display** | `name` field | `"GPT 5 Codex Low (OAuth)"` |
 | **Plugin config lookup** | Config Key | `models["gpt-5-codex-low"]` |
 | **AI SDK receives** | Config Key | `body.model = "gpt-5-codex-low"` |
-| **Plugin normalizes** | Transformed | `"gpt-5-codex"` (sent to API) |
+| **Plugin normalizes** | Transformed | `"gpt-5-codex"` (selector alias) |
+| **Effective upstream target** | `modelTargetOverrides` | `"gpt-5.4"` (default for `gpt-5-codex`) |
 | **TUI persistence** | Config Key | `model_id = "gpt-5-codex-low"` |
 | **Documentation** | `id` field | `"gpt-5-codex"` (base model) |
 | **Model sorting** | `id` field | Used for priority ranking |
@@ -523,6 +525,11 @@ id field is metadata 📝
   ├─ Documents base model
   ├─ Used for sorting
   └─ NOT sent to AI SDK (custom loader uses config key)
+
+modelTargetOverrides set the effective upstream target 🎯
+  ├─ Applied after config lookup / normalization
+  ├─ Default: `gpt-5-codex -> gpt-5.4`
+  └─ Does NOT change the host-facing config key
 
 name field is UI sugar 🎨
   └─ Makes TUI model picker user-friendly
@@ -548,8 +555,9 @@ const modelConfig = getModelConfig(normalizedModel, userConfig);  // Lookup "gpt
 **New Plugin Logic (Fixed):**
 ```typescript
 const originalModel = body.model;  // "gpt-5-codex-low" (config key)
-const normalizedModel = normalizeModel(body.model);  // "gpt-5-codex" (for API)
+const normalizedModel = normalizeModel(body.model);  // "gpt-5-codex" (selector alias)
 const modelConfig = getModelConfig(originalModel, userConfig);  // Lookup "gpt-5-codex-low" ✅
+const targetModel = resolveTargetModelOverride(originalModel, overrides);  // "gpt-5.4"
 ```
 
 **Fix:**
@@ -581,7 +589,8 @@ const modelConfig = getModelConfig(originalModel, userConfig);  // Lookup "gpt-5
 **Answer:**
 1. Plugin receives: `body.model = "my-custom-name"`
 2. Plugin normalizes: `"my-custom-name"` → `"gpt-5-codex"` (contains "codex")
-3. Plugin sends to API: `"gpt-5-codex"` ✅
+3. Built-in target override maps that selector to upstream `"gpt-5.4"`
+4. Plugin sends to API: `"gpt-5.4"` ✅
 
 **The `id` field is NOT used for this!**
 

@@ -297,7 +297,7 @@ let include: Vec<String> = if reasoning.is_some() {
 | **store Parameter** | `false` (ChatGPT) | `false` | ✅ |
 | **Message IDs** | Stripped in stateless | Stripped | ✅ |
 | **reasoning.encrypted_content** | ✅ Included | ✅ Included | ✅ |
-| **Model Normalization** | "gpt-5" / "gpt-5-codex" / "codex-mini-latest" | Same | ✅ |
+| **Model Normalization / Targeting** | catalog-driven model selection | normalizes host ids and applies built-in target overrides (for example `gpt-5-codex -> gpt-5.4`) | ⚠️ (intentional) |
 | **Reasoning Effort** | medium (default) | opinionated defaults by model family (for example GPT-5.3/5.2 Codex prefer `xhigh`) | ⚠️ (intentional) |
 | **Text Verbosity** | model-dependent defaults | config-driven (default: medium) | ✅ |
 

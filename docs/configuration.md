@@ -114,6 +114,9 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "retryAllAccountsRateLimited": true,
   "retryAllAccountsMaxWaitMs": 0,
   "retryAllAccountsMaxRetries": 3,
+  "modelTargetOverrides": {
+    "gpt-5-codex": "gpt-5.4"
+  },
   "unsupportedCodexPolicy": "strict",
   "fallbackOnUnsupportedCodexModel": false,
   "fallbackToGpt52OnUnsupportedGpt53": true,
@@ -146,6 +149,7 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
 | `retryAllAccountsMaxWaitMs` | `0` | max wait time in ms (0 = unlimited) |
 | `retryAllAccountsMaxRetries` | `Infinity` | max retry attempts (omit this key for unlimited retries) |
+| `modelTargetOverrides` | `{"gpt-5-codex":"gpt-5.4"}` | selector-to-upstream target rewrite map; default keeps the Codex selector on real upstream `gpt-5.4` |
 | `unsupportedCodexPolicy` | `strict` | unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry with configured fallback chain) |
 | `fallbackOnUnsupportedCodexModel` | `false` | legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
@@ -166,11 +170,33 @@ when `beginnerSafeMode` is enabled (`true` or `CODEX_AUTH_BEGINNER_SAFE_MODE=1`)
 
 this mode is intended for beginners who prefer quick failures + clearer recovery actions over long retry loops.
 
+### target model overrides
+
+`modelTargetOverrides` rewrites a host-facing selector to a different upstream model after config lookup but before the request is sent.
+
+the built-in default is:
+
+```json
+{
+  "modelTargetOverrides": {
+    "gpt-5-codex": "gpt-5.4"
+  }
+}
+```
+
+that means:
+- selecting `gpt-5-codex` in OpenCode keeps the same config key / UI selector
+- the plugin still applies Codex-specific tuning for that selector
+- the effective upstream request uses real `gpt-5.4`
+- explicit `gpt-5.4` selections remain exact and are not rewritten
+
 ### unsupported-model behavior + fallback chain
 
 by default the plugin is strict (`unsupportedCodexPolicy: "strict"`). it returns entitlement errors directly for unsupported models.
 
 set `unsupportedCodexPolicy: "fallback"` to enable model fallback after account/workspace attempts are exhausted.
+
+built-in compatibility routing is separate from fallback. `gpt-5-codex -> gpt-5.4` applies even in strict mode. fallback policy only controls retries after an explicit entitlement failure.
 
 defaults when fallback policy is enabled and `unsupportedCodexFallbackChain` is empty:
 - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)

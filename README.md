@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 
-OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.4`, `gpt-5-codex`, and `gpt-5.1-codex-max` (plus optional/manual `gpt-5.4-pro`, entitlement-gated Spark IDs, and legacy Codex aliases).
+OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with models like `gpt-5.4`, `gpt-5-codex`, and `gpt-5.1-codex-max` (plus optional/manual `gpt-5.4-pro`, entitlement-gated Spark IDs, and legacy Codex aliases). By default, the plugin keeps the OpenCode-facing `gpt-5-codex` selector but routes it to the real upstream `gpt-5.4` model.
 
 > [!NOTE]
 > **Renamed from `opencode-openai-codex-auth-multi`** — If you were using the old package, update your config to use `oc-chatgpt-multi-auth` instead. The rename was necessary because OpenCode blocks plugins containing `opencode-openai-codex-auth` in the name.
@@ -134,7 +134,7 @@ opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 |-------|----------|-------|
 | `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 with reasoning levels |
 | `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` |
-| `gpt-5-codex` | low, medium, high | Canonical Codex model for code generation (default: high) |
+| `gpt-5-codex` | low, medium, high | Canonical Codex selector for code generation; routes to real upstream `gpt-5.4` by default |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Spark IDs are supported by the plugin, but access is entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
 | `gpt-5.1-codex` | low, medium, high | Standard Codex |
@@ -142,6 +142,8 @@ opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 | `gpt-5.1` | none, low, medium, high | GPT-5.1 base model |
 
 Config templates intentionally omit Spark model IDs by default to reduce entitlement failures on unsupported accounts. Add Spark manually only if your workspace is entitled.
+
+Built-in compatibility routing is separate from fallback policy: the default plugin config keeps `gpt-5-codex` on upstream `gpt-5.4` even when `unsupportedCodexPolicy` remains `strict`.
 
 **Using variants:**
 ```bash
@@ -837,12 +839,15 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `retryAllAccountsRateLimited` | `true` | Wait and retry when all accounts are rate-limited |
 | `retryAllAccountsMaxWaitMs` | `0` | Max wait time (0 = unlimited) |
 | `retryAllAccountsMaxRetries` | `Infinity` | Max retry attempts |
+| `modelTargetOverrides` | `{"gpt-5-codex":"gpt-5.4"}` | Selector-to-upstream target rewrite map; default keeps the Codex selector on real upstream `gpt-5.4` |
 | `unsupportedCodexPolicy` | `strict` | Unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry next model in fallback chain) |
 | `fallbackOnUnsupportedCodexModel` | `false` | Legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | Legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
 | `unsupportedCodexFallbackChain` | `{}` | Optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`) |
 | `fetchTimeoutMs` | `60000` | Request timeout to Codex backend (ms) |
 | `streamStallTimeoutMs` | `45000` | Abort non-stream parsing if SSE stalls (ms) |
+
+Built-in compatibility routing is not fallback. `gpt-5-codex -> gpt-5.4` applies by default even in strict mode; fallback policy only controls what happens after an explicit unsupported-model entitlement error.
 
 Default unsupported-model fallback chain (used when `unsupportedCodexPolicy` is `fallback`):
 - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)

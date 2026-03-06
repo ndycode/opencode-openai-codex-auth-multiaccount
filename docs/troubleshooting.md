@@ -341,17 +341,18 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    opencode auth login
    ```
 2. Add another entitled account/workspace. The plugin tries remaining accounts/workspaces before model fallback.
-3. Enable fallback policy only if you want automatic model downgrades:
+3. Remember that `gpt-5-codex` already has a built-in compatibility target to real upstream `gpt-5.4`. That routing still applies in strict mode and is separate from fallback.
+4. Enable fallback policy only if you want automatic model downgrades after an explicit entitlement failure:
    ```bash
    CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode
    ```
-4. Default fallback chain (when policy is `fallback` and not overridden):
+5. Default fallback chain (when policy is `fallback` and not overridden):
    - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
    - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
    - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (if Spark IDs are selected manually)
    - `gpt-5.2-codex -> gpt-5-codex`
    - `gpt-5.1-codex -> gpt-5-codex`
-5. Configure a custom fallback chain in `~/.opencode/openai-codex-auth-config.json`:
+6. Configure a custom fallback chain in `~/.opencode/openai-codex-auth-config.json`:
    ```json
    {
      "unsupportedCodexPolicy": "fallback",
@@ -364,15 +365,15 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
      }
    }
    ```
-6. Use strict mode (no model fallback) for explicit entitlement failures:
+7. Use strict mode (no model fallback retries) for explicit entitlement failures:
    ```bash
    CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=strict opencode
    ```
-7. Legacy compatibility toggle (only controls `gpt-5.3-codex -> gpt-5.2-codex`):
+8. Legacy compatibility toggle (only controls `gpt-5.3-codex -> gpt-5.2-codex`):
    ```bash
    CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0 opencode
    ```
-8. Legacy generic fallback toggle compatibility:
+9. Legacy generic fallback toggle compatibility:
    ```bash
    CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1 opencode
    ```
