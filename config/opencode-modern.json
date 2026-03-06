@@ -196,7 +196,7 @@
           }
         },
         "gpt-5-codex": {
-          "name": "GPT 5.4 (OAuth)",
+          "name": "GPT 5 Codex (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000
