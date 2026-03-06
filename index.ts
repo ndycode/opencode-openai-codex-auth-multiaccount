@@ -183,6 +183,7 @@ import {
 	detectErrorType,
 	getRecoveryToastContent,
 } from "./lib/recovery.js";
+import { restoreExactOpenAIModels } from "./lib/provider-models.js";
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -1760,6 +1761,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						);
 						return {};
 					}
+				const restoredExactModels = restoreExactOpenAIModels(provider);
+				if (restoredExactModels.length > 0) {
+					logDebug(
+						`[${PLUGIN_NAME}] Restored exact OpenAI models after host Codex filter: ${restoredExactModels.join(", ")}`,
+					);
+				}
 				// Extract user configuration (global + per-model options)
 				const providerConfig = provider as
 					| { options?: Record<string, unknown>; models?: UserConfig["models"] }

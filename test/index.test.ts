@@ -564,6 +564,64 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result.baseURL).toBeDefined();
 			expect(result.fetch).toBeDefined();
 		});
+
+		it("restores exact gpt-5.4 into the provider model registry", async () => {
+			const getAuth = async () => ({
+				type: "oauth" as const,
+				access: "a",
+				refresh: "r",
+				expires: Date.now() + 60_000,
+				multiAccount: true,
+			});
+			const provider = {
+				options: {},
+				models: {
+					"gpt-5-codex": {
+						name: "GPT 5 Codex (OAuth)",
+					},
+					"gpt-5.2": {
+						name: "GPT 5.2 (OAuth)",
+					},
+				},
+			};
+
+			await plugin.auth.loader(getAuth, provider);
+
+			expect(provider.models["gpt-5.4"]).toMatchObject({
+				name: "GPT 5.4 (OAuth)",
+				limit: {
+					context: 1_047_576,
+					output: 128_000,
+				},
+			});
+		});
+
+		it("does not overwrite an existing exact gpt-5.4 provider entry", async () => {
+			const getAuth = async () => ({
+				type: "oauth" as const,
+				access: "a",
+				refresh: "r",
+				expires: Date.now() + 60_000,
+				multiAccount: true,
+			});
+			const existingModel = {
+				name: "Custom GPT 5.4",
+				limit: {
+					context: 222_222,
+					output: 11_111,
+				},
+			};
+			const provider = {
+				options: {},
+				models: {
+					"gpt-5.4": existingModel,
+				},
+			};
+
+			await plugin.auth.loader(getAuth, provider);
+
+			expect(provider.models["gpt-5.4"]).toBe(existingModel);
+		});
 	});
 
 	describe("codex-list tool", () => {
