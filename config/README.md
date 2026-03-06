@@ -37,7 +37,11 @@ Both templates include:
 - GPT-5.4, GPT-5 Codex, GPT-5.1, GPT-5.1 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex Mini
 - Reasoning variants per model family
 - `store: false` and `include: ["reasoning.encrypted_content"]`
-- Context metadata (272k context / 128k output)
+- Context metadata (`gpt-5.4*`: 1,000,000 context / 128,000 output; other shipped models: 272,000 / 128,000)
+
+If your OpenCode runtime supports global compaction tuning, you can also set:
+- `model_context_window = 1000000`
+- `model_auto_compact_token_limit = 900000`
 
 ## Spark model note
 

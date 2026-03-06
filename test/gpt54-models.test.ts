@@ -52,6 +52,14 @@ describe("GPT-5.4 Model Support", () => {
 			expect(MODEL_MAP["gpt-5.4-medium"]).toBe("gpt-5.4");
 			expect(MODEL_MAP["gpt-5.4-high"]).toBe("gpt-5.4");
 			expect(MODEL_MAP["gpt-5.4-xhigh"]).toBe("gpt-5.4");
+			expect(MODEL_MAP["gpt-5.4-2026-03-05"]).toBe("gpt-5.4");
+			expect(MODEL_MAP["gpt-5.4-2026-03-05-low"]).toBe("gpt-5.4");
+		});
+
+		it("should normalize GPT-5.4 snapshot aliases", () => {
+			expect(normalizeModel("gpt-5.4-2026-03-05")).toBe("gpt-5.4");
+			expect(normalizeModel("gpt-5.4-2026-03-05-high")).toBe("gpt-5.4");
+			expect(getNormalizedModel("gpt-5.4-2026-03-05-medium")).toBe("gpt-5.4");
 		});
 	});
 
@@ -99,6 +107,14 @@ describe("GPT-5.4 Model Support", () => {
 			expect(MODEL_MAP["gpt-5.4-pro-medium"]).toBe("gpt-5.4-pro");
 			expect(MODEL_MAP["gpt-5.4-pro-high"]).toBe("gpt-5.4-pro");
 			expect(MODEL_MAP["gpt-5.4-pro-xhigh"]).toBe("gpt-5.4-pro");
+			expect(MODEL_MAP["gpt-5.4-pro-2026-03-05"]).toBe("gpt-5.4-pro");
+			expect(MODEL_MAP["gpt-5.4-pro-2026-03-05-high"]).toBe("gpt-5.4-pro");
+		});
+
+		it("should normalize GPT-5.4-pro snapshot aliases", () => {
+			expect(normalizeModel("gpt-5.4-pro-2026-03-05")).toBe("gpt-5.4-pro");
+			expect(normalizeModel("gpt-5.4-pro-2026-03-05-high")).toBe("gpt-5.4-pro");
+			expect(getNormalizedModel("gpt-5.4-pro-2026-03-05-medium")).toBe("gpt-5.4-pro");
 		});
 
 		it("should prioritize -pro suffix over base model", () => {
@@ -121,8 +137,15 @@ describe("GPT-5.4 Model Support", () => {
 		});
 
 		it("should not confuse gpt-5.4-pro with base gpt-5.4", () => {
-			expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4");
-			expect(getModelFamily("gpt 5.4 pro")).toBe("gpt-5.4");
+			expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4-pro");
+			expect(getModelFamily("gpt 5.4 pro")).toBe("gpt-5.4-pro");
+		});
+
+		it("should isolate gpt-5.4-pro family from gpt-5.4 base family", () => {
+			expect(getModelFamily("gpt-5.4")).toBe("gpt-5.4");
+			expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4-pro");
+			expect(getModelFamily("gpt-5.4-2026-03-05")).toBe("gpt-5.4");
+			expect(getModelFamily("gpt-5.4-pro-2026-03-05")).toBe("gpt-5.4-pro");
 		});
 
 		it("should not confuse gpt-5.4 with gpt-5.3 or gpt-5.2", () => {
@@ -206,9 +229,9 @@ describe("GPT-5.4 Model Support", () => {
 		});
 
 		it("should not match gpt-5.4x patterns as gpt-5.4", () => {
-			// Boundary-aware matching prevents accidental family routing from nearby version strings.
-			expect(normalizeModel("gpt-5.40")).toBe("gpt-5.1");
-			expect(normalizeModel("gpt-5.44")).toBe("gpt-5.1");
+			// Boundary-aware matching prevents accidental 5.4 family match, then generic GPT-5 fallback applies.
+			expect(normalizeModel("gpt-5.40")).toBe("gpt-5.4");
+			expect(normalizeModel("gpt-5.44")).toBe("gpt-5.4");
 		});
 
 		it("should handle empty/undefined model names defaulting to gpt-5.1", () => {
@@ -220,7 +243,7 @@ describe("GPT-5.4 Model Support", () => {
 	describe("GPT-5.4 vs Other Models Priority", () => {
 		it("should prioritize gpt-5.4 over gpt-5.3/gpt-5.2 in pattern matching", () => {
 			expect(normalizeModel("gpt-5.4")).toBe("gpt-5.4");
-			expect(normalizeModel("gpt-5.3")).toBe("gpt-5.1");
+			expect(normalizeModel("gpt-5.3")).toBe("gpt-5.4");
 			expect(normalizeModel("gpt-5.2")).toBe("gpt-5.2");
 		});
 
@@ -236,6 +259,13 @@ describe("GPT-5.4 Model Support", () => {
 	});
 
 	describe("GPT-5.4 Integration with Existing Models", () => {
+		it("should map legacy gpt-5 aliases to gpt-5.4", () => {
+			expect(normalizeModel("gpt-5")).toBe("gpt-5.4");
+			expect(normalizeModel("gpt-5-mini")).toBe("gpt-5.4");
+			expect(normalizeModel("gpt-5-nano")).toBe("gpt-5.4");
+			expect(getNormalizedModel("gpt-5")).toBe("gpt-5.4");
+		});
+
 		it("should coexist with gpt-5.2 model", () => {
 			expect(normalizeModel("gpt-5.4")).toBe("gpt-5.4");
 			expect(normalizeModel("gpt-5.2")).toBe("gpt-5.2");

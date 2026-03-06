@@ -121,6 +121,19 @@ import { getModelFamily } from "../lib/prompts/codex.js";
 			});
 		});
 
+		describe("GPT-5.4 family split", () => {
+			it("should return gpt-5.4 for base gpt-5.4 models", () => {
+				expect(getModelFamily("gpt-5.4")).toBe("gpt-5.4");
+				expect(getModelFamily("gpt-5.4-2026-03-05-high")).toBe("gpt-5.4");
+			});
+
+			it("should return gpt-5.4-pro for gpt-5.4-pro models", () => {
+				expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4-pro");
+				expect(getModelFamily("gpt-5.4-pro-2026-03-05-high")).toBe("gpt-5.4-pro");
+				expect(getModelFamily("gpt 5.4 pro high")).toBe("gpt-5.4-pro");
+			});
+		});
+
 			describe("Priority order", () => {
 				it("should prioritize gpt-5.3-codex-spark over gpt-5.3-codex detection", () => {
 					expect(getModelFamily("gpt-5.3-codex-spark")).toBe("gpt-5-codex");

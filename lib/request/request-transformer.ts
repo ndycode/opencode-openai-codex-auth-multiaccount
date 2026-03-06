@@ -145,9 +145,9 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5-codex";
 	}
 
-	// 14. GPT-5 family (any variant) - default to 5.1
+	// 14. GPT-5 family (any variant) - default to 5.4 latest general model
 	if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
-		return "gpt-5.1";
+		return "gpt-5.4";
 	}
 
 	// Default fallback
@@ -939,12 +939,12 @@ export async function transformRequestBody(
 	if (body.input && Array.isArray(body.input)) {
 		let inputItems: InputItem[] = body.input;
 
-			if (shouldApplyFastSessionTuning) {
-				inputItems =
-					trimInputForFastSession(inputItems, fastSessionMaxInputItems, {
-						preferLatestUserOnly: shouldPreferLatestUserOnly,
-					}) ?? inputItems;
-			}
+		if (shouldApplyFastSessionTuning) {
+			inputItems =
+				trimInputForFastSession(inputItems, fastSessionMaxInputItems, {
+					preferLatestUserOnly: shouldPreferLatestUserOnly,
+				}) ?? inputItems;
+		}
 
 		// Debug: Log original input message IDs before filtering
 		const originalIds = inputItems

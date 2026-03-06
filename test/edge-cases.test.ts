@@ -39,9 +39,9 @@ describe("Edge Cases and Boundary Conditions", () => {
 		});
 
 		it("should handle models with mixed separators", () => {
-			// Mixed separators not explicitly handled, patterns may not match
+			// Mixed separators may miss explicit 5.4/pro patterns and fall through to generic GPT-5 fallback.
 			expect(normalizeModel("gpt_5.4-high")).toBe("gpt-5.1");
-			expect(normalizeModel("gpt-5_4 pro")).toBe("gpt-5.1");
+			expect(normalizeModel("gpt-5_4 pro")).toBe("gpt-5.4");
 		});
 
 		it("should handle models with numeric-only names", () => {

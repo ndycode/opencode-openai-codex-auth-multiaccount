@@ -206,8 +206,8 @@ Safe mode effects:
 
 | Model | Variants | Notes |
 |-------|----------|-------|
-| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 |
-| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` |
+| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 (1,000,000 context) |
+| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` (1,000,000 context) |
 | `gpt-5-codex` | low, medium, high | Canonical Codex for code generation |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Optional manual model; entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
@@ -215,7 +215,7 @@ Safe mode effects:
 | `gpt-5.1-codex-mini` | medium, high | Lightweight |
 | `gpt-5.1` | none, low, medium, high | Base model |
 
-**Total: 21 template presets** with 272k context / 128k output (+ optional Spark IDs when entitled).
+**Total: 21 template presets** with mixed context sizing: `gpt-5.4*` at 1,000,000 / 128,000 and other shipped families at 272,000 / 128,000 (+ optional Spark IDs when entitled).
 
 ---
 

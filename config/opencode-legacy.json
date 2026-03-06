@@ -18,7 +18,7 @@
         "gpt-5.4-none": {
           "name": "GPT 5.4 None (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 1000000,
             "output": 128000
           },
           "modalities": {
@@ -43,7 +43,7 @@
         "gpt-5.4-low": {
           "name": "GPT 5.4 Low (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 1000000,
             "output": 128000
           },
           "modalities": {
@@ -68,7 +68,7 @@
         "gpt-5.4-medium": {
           "name": "GPT 5.4 Medium (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 1000000,
             "output": 128000
           },
           "modalities": {
@@ -93,7 +93,7 @@
         "gpt-5.4-high": {
           "name": "GPT 5.4 High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 1000000,
             "output": 128000
           },
           "modalities": {
@@ -118,7 +118,7 @@
         "gpt-5.4-xhigh": {
           "name": "GPT 5.4 Extra High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 1000000,
             "output": 128000
           },
           "modalities": {

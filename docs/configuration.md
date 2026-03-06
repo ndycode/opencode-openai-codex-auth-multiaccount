@@ -46,6 +46,17 @@ controls how much thinking the model does.
 | `gpt-5.1` | none, low, medium, high |
 
 the shipped config templates include 21 presets and do not add optional IDs by default. add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only for entitled workspaces.
+for context sizing, shipped templates use:
+- `gpt-5.4` and `gpt-5.4-pro`: `context=1000000`, `output=128000`
+- other shipped families: `context=272000`, `output=128000`
+
+model normalization aliases:
+- legacy `gpt-5`, `gpt-5-mini`, `gpt-5-nano` map to `gpt-5.4`
+- snapshot ids `gpt-5.4-2026-03-05*` and `gpt-5.4-pro-2026-03-05*` map to stable `gpt-5.4` / `gpt-5.4-pro`
+
+if your OpenCode runtime supports global compaction tuning, you can set:
+- `model_context_window = 1000000`
+- `model_auto_compact_token_limit = 900000`
 
 what they mean:
 - `none` - no reasoning phase (base models only; auto-converts to `low` for codex/pro families, including `gpt-5-codex` and `gpt-5.4-pro`)

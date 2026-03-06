@@ -54,10 +54,10 @@ npm test
 
 | User Selects | Plugin Receives | Normalizes To | Config Lookup | API Receives | Result |
 |--------------|-----------------|---------------|---------------|--------------|--------|
-| `openai/gpt-5` | `"gpt-5"` | `"gpt-5.1"` | `models["gpt-5"]` → undefined | `"gpt-5.1"` | ✅ Uses global options |
+| `openai/gpt-5` | `"gpt-5"` | `"gpt-5.4"` | `models["gpt-5"]` → undefined | `"gpt-5.4"` | ✅ Uses global options |
 | `openai/gpt-5-codex` | `"gpt-5-codex"` | `"gpt-5-codex"` | `models["gpt-5-codex"]` → undefined | `"gpt-5-codex"` | ✅ Uses global options |
-| `openai/gpt-5-mini` | `"gpt-5-mini"` | `"gpt-5.1"` | `models["gpt-5-mini"]` → undefined | `"gpt-5.1"` | ✅ Uses global options |
-| `openai/gpt-5-nano` | `"gpt-5-nano"` | `"gpt-5.1"` | `models["gpt-5-nano"]` → undefined | `"gpt-5.1"` | ✅ Uses global options |
+| `openai/gpt-5-mini` | `"gpt-5-mini"` | `"gpt-5.4"` | `models["gpt-5-mini"]` → undefined | `"gpt-5.4"` | ✅ Uses global options |
+| `openai/gpt-5-nano` | `"gpt-5-nano"` | `"gpt-5.4"` | `models["gpt-5-nano"]` → undefined | `"gpt-5.4"` | ✅ Uses global options |
 
 **Expected Behavior:**
 - ✅ All models work with global options
@@ -274,9 +274,9 @@ API receives: "gpt-5.1" ✅
 ```
 User selects: openai/my-gpt-5-variant
 Plugin receives: "my-gpt-5-variant"
-normalizeModel: "my-gpt-5-variant" → "gpt-5.1" ✅ (includes "gpt-5", not "codex")
+normalizeModel: "my-gpt-5-variant" → "gpt-5.4" ✅ (includes "gpt-5", not "codex")
 Config lookup: models["my-gpt-5-variant"] → Found ✅
-API receives: "gpt-5.1" ✅
+API receives: "gpt-5.4" ✅
 ```
 
 **Result:** ✅ Works (correct model selected)
@@ -617,9 +617,9 @@ normalizeModel("codex-mini-latest")     // → "gpt-5.1-codex-mini" ✅
 normalizeModel("gpt-5.1-codex")         // → "gpt-5-codex" ✅
 normalizeModel("gpt-5.1")               // → "gpt-5.1" ✅
 normalizeModel("my-codex-model")        // → "gpt-5-codex" ✅
-normalizeModel("gpt-5")                 // → "gpt-5.1" ✅
-normalizeModel("gpt-5-mini")            // → "gpt-5.1" ✅
-normalizeModel("gpt-5-nano")            // → "gpt-5.1" ✅
+normalizeModel("gpt-5")                 // → "gpt-5.4" ✅
+normalizeModel("gpt-5-mini")            // → "gpt-5.4" ✅
+normalizeModel("gpt-5-nano")            // → "gpt-5.4" ✅
 normalizeModel("GPT 5.4 Pro High")      // → "gpt-5.4-pro" ✅
 normalizeModel(undefined)                 // → "gpt-5.1" ✅
 normalizeModel("random-model")          // → "gpt-5.1" ✅ (fallback)
@@ -658,7 +658,7 @@ export function normalizeModel(model: string | undefined): string {
     return "gpt-5-codex";
   }
   if (normalized.includes("gpt-5") || normalized.includes("gpt 5")) {
-    return "gpt-5.1";
+    return "gpt-5.4";
   }
   return "gpt-5.1";
 }
@@ -667,7 +667,7 @@ export function normalizeModel(model: string | undefined): string {
 **Why this works:**
 - ✅ Case-insensitive (`.toLowerCase()` + `.includes()`)
 - ✅ Pattern-based (works with any naming)
-- ✅ Safe fallback (unknown models → `gpt-5.1`)
+- ✅ Legacy GPT-5 fallback (`gpt-5*` aliases → `gpt-5.4`) + safe unknown fallback (`gpt-5.1`)
 - ✅ Codex priority with explicit Codex Mini support (`codex-mini*` → `codex-mini-latest`)
 
 ---
@@ -723,17 +723,17 @@ opencode run "test" --model=openai/gpt-5-codex
 ```typescript
 describe('normalizeModel', () => {
   test('handles all default models', () => {
-    expect(normalizeModel('gpt-5')).toBe('gpt-5.1')
+    expect(normalizeModel('gpt-5')).toBe('gpt-5.4')
     expect(normalizeModel('gpt-5-codex')).toBe('gpt-5-codex')
     expect(normalizeModel('gpt-5-codex-mini')).toBe('gpt-5.1-codex-mini')
-    expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.1')
-    expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.1')
+    expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.4')
+    expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.4')
   })
 
   test('handles custom preset names', () => {
     expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex')
     expect(normalizeModel('openai/gpt-5-codex-mini-high')).toBe('gpt-5.1-codex-mini')
-    expect(normalizeModel('gpt-5-high')).toBe('gpt-5.1')
+    expect(normalizeModel('gpt-5-high')).toBe('gpt-5.4')
   })
 
   test('handles legacy names', () => {

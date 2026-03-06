@@ -16,23 +16,23 @@ import type { RequestBody, UserConfig, InputItem } from '../lib/types.js';
 
 describe('Request Transformer Module', () => {
 	describe('normalizeModel', () => {
-		// NOTE: All gpt-5 models now normalize to gpt-5.1 as gpt-5 is being phased out
-		it('should normalize gpt-5-codex to gpt-5.1-codex', async () => {
+		// NOTE: legacy gpt-5 base aliases normalize to gpt-5.4; codex aliases stay on gpt-5-codex.
+		it('should normalize gpt-5-codex to canonical codex', async () => {
 			expect(normalizeModel('gpt-5-codex')).toBe('gpt-5-codex');
 		});
 
-		it('should normalize gpt-5 to gpt-5.1', async () => {
-			expect(normalizeModel('gpt-5')).toBe('gpt-5.1');
+		it('should normalize gpt-5 to gpt-5.4', async () => {
+			expect(normalizeModel('gpt-5')).toBe('gpt-5.4');
 		});
 
-		it('should normalize variants containing "codex" to gpt-5.1-codex', async () => {
+		it('should normalize variants containing "codex" to canonical codex', async () => {
 			expect(normalizeModel('openai/gpt-5-codex')).toBe('gpt-5-codex');
 			expect(normalizeModel('custom-gpt-5-codex-variant')).toBe('gpt-5-codex');
 		});
 
-		it('should normalize variants containing "gpt-5" to gpt-5.1', async () => {
-			expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.1');
-			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.1');
+		it('should normalize legacy gpt-5 variants to gpt-5.4', async () => {
+			expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.4');
+			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.4');
 		});
 
 		it('should return gpt-5.1 as default for unknown models', async () => {
@@ -44,24 +44,24 @@ describe('Request Transformer Module', () => {
 			expect(normalizeModel(undefined)).toBe('gpt-5.1');
 		});
 
-		// Codex CLI preset name tests - legacy gpt-5 models now map to gpt-5.1
+		// Codex CLI preset name tests - legacy gpt-5 base aliases now map to gpt-5.4
 		describe('Codex CLI preset names', () => {
-			it('should normalize all gpt-5-codex presets to gpt-5.1-codex', async () => {
+			it('should normalize all gpt-5-codex presets to canonical codex', async () => {
 				expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt-5-codex-medium')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt-5-codex-high')).toBe('gpt-5-codex');
 			});
 
-			it('should normalize all gpt-5 presets to gpt-5.1', async () => {
-				expect(normalizeModel('gpt-5-minimal')).toBe('gpt-5.1');
-				expect(normalizeModel('gpt-5-low')).toBe('gpt-5.1');
-				expect(normalizeModel('gpt-5-medium')).toBe('gpt-5.1');
-				expect(normalizeModel('gpt-5-high')).toBe('gpt-5.1');
+			it('should normalize all gpt-5 presets to gpt-5.4', async () => {
+				expect(normalizeModel('gpt-5-minimal')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5-low')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5-medium')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5-high')).toBe('gpt-5.4');
 			});
 
 			it('should prioritize codex over gpt-5 in model name', async () => {
 				// Model name contains BOTH "codex" and "gpt-5"
-				// Should return "gpt-5.1-codex" (codex checked first, maps to 5.1)
+				// Should return "gpt-5-codex" (codex checked first)
 				expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex');
 				expect(normalizeModel('my-gpt-5-codex-model')).toBe('gpt-5-codex');
 			});
@@ -99,6 +99,8 @@ describe('Request Transformer Module', () => {
 					expect(normalizeModel('gpt-5.4-high')).toBe('gpt-5.4');
 					expect(normalizeModel('gpt-5.4-xhigh')).toBe('gpt-5.4');
 					expect(normalizeModel('openai/gpt-5.4-xhigh')).toBe('gpt-5.4');
+					expect(normalizeModel('gpt-5.4-2026-03-05')).toBe('gpt-5.4');
+					expect(normalizeModel('gpt-5.4-2026-03-05-high')).toBe('gpt-5.4');
 			});
 
 			it('should normalize gpt-5.4-pro presets', async () => {
@@ -109,6 +111,8 @@ describe('Request Transformer Module', () => {
 					expect(normalizeModel('gpt-5.4-pro-high')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
 					expect(normalizeModel('openai/gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
+					expect(normalizeModel('gpt-5.4-pro-2026-03-05')).toBe('gpt-5.4-pro');
+					expect(normalizeModel('gpt-5.4-pro-2026-03-05-high')).toBe('gpt-5.4-pro');
 			});
 
 				it('should normalize gpt-5.3 codex presets', async () => {
@@ -145,11 +149,11 @@ describe('Request Transformer Module', () => {
 			});
 		});
 
-		// Edge case tests - legacy gpt-5 models now map to gpt-5.1
+		// Edge case tests - legacy gpt-5 base aliases now map to gpt-5.4
 		describe('Edge cases', () => {
 			it('should handle uppercase model names', async () => {
 				expect(normalizeModel('GPT-5-CODEX')).toBe('gpt-5-codex');
-				expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5.1');
+				expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5.4');
 				expect(normalizeModel('CODEx-MINI-LATEST')).toBe('gpt-5.1-codex-mini');
 				expect(normalizeModel('GPT-5.4-HIGH')).toBe('gpt-5.4');
 				expect(normalizeModel('GPT-5.4-PRO-HIGH')).toBe('gpt-5.4-pro');
@@ -157,13 +161,14 @@ describe('Request Transformer Module', () => {
 			});
 
 			it('should not misclassify unrelated gpt-5.4x model strings', async () => {
-				expect(normalizeModel('gpt-5.40')).toBe('gpt-5.1');
-				expect(normalizeModel('gpt-5.4pro')).toBe('gpt-5.1');
+				// Boundary-aware matching avoids false 5.4-family matches, then generic GPT-5 fallback applies.
+				expect(normalizeModel('gpt-5.40')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4pro')).toBe('gpt-5.4');
 			});
 
 			it('should handle mixed case', async () => {
 				expect(normalizeModel('Gpt-5-Codex-Low')).toBe('gpt-5-codex');
-				expect(normalizeModel('GpT-5-MeDiUm')).toBe('gpt-5.1');
+				expect(normalizeModel('GpT-5-MeDiUm')).toBe('gpt-5.4');
 			});
 
 			it('should handle special characters', async () => {
@@ -173,7 +178,7 @@ describe('Request Transformer Module', () => {
 
 			it('should handle old verbose names', async () => {
 				expect(normalizeModel('GPT 5 Codex Low (ChatGPT Subscription)')).toBe('gpt-5-codex');
-				expect(normalizeModel('GPT 5 High (ChatGPT Subscription)')).toBe('gpt-5.1');
+				expect(normalizeModel('GPT 5 High (ChatGPT Subscription)')).toBe('gpt-5.4');
 			});
 
 			it('should handle empty string', async () => {
@@ -729,7 +734,7 @@ describe('Request Transformer Module', () => {
 				input: [],
 			};
 			const result = await transformRequestBody(body, codexInstructions);
-			expect(result.model).toBe('gpt-5.1');  // gpt-5 now maps to gpt-5.1
+			expect(result.model).toBe('gpt-5.4');  // legacy gpt-5 aliases now map to gpt-5.4
 		});
 
 		it('should apply default reasoning config', async () => {
@@ -2086,7 +2091,7 @@ describe('Request Transformer Module', () => {
 					expect(result.store).toBe(false);
 				});
 
-				it('should handle gpt-5-mini normalizing to gpt-5.1', async () => {
+				it('should handle gpt-5-mini normalizing to gpt-5.4', async () => {
 					const body: RequestBody = {
 						model: 'gpt-5-mini',
 						input: []
@@ -2094,7 +2099,7 @@ describe('Request Transformer Module', () => {
 
 					const result = await transformRequestBody(body, codexInstructions);
 
-					expect(result.model).toBe('gpt-5.1');  // gpt-5 now maps to gpt-5.1
+					expect(result.model).toBe('gpt-5.4');  // legacy gpt-5 aliases now map to gpt-5.4
 					expect(result.reasoning?.effort).toBe('minimal');  // Lightweight gpt-5-mini defaults to minimal
 				});
 			});

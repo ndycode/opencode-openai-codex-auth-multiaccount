@@ -37,13 +37,14 @@ describe("Codex Prompts Module", () => {
 				expect(MODEL_FAMILIES).toContain("codex-max");
 				expect(MODEL_FAMILIES).toContain("codex");
 				expect(MODEL_FAMILIES).toContain("gpt-5.4");
+				expect(MODEL_FAMILIES).toContain("gpt-5.4-pro");
 				expect(MODEL_FAMILIES).toContain("gpt-5.2");
 				expect(MODEL_FAMILIES).toContain("gpt-5.1");
 			});
 
 			it("should be a readonly array", () => {
 				expect(Array.isArray(MODEL_FAMILIES)).toBe(true);
-				expect(MODEL_FAMILIES.length).toBe(6);
+				expect(MODEL_FAMILIES.length).toBe(7);
 			});
 		});
 
@@ -80,8 +81,10 @@ describe("Codex Prompts Module", () => {
 			it("should detect gpt-5.4 and gpt-5.4-pro", () => {
 				expect(getModelFamily("gpt-5.4")).toBe("gpt-5.4");
 				expect(getModelFamily("gpt-5.4-high")).toBe("gpt-5.4");
-				expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4");
-				expect(getModelFamily("gpt 5.4 pro")).toBe("gpt-5.4");
+				expect(getModelFamily("gpt-5.4-2026-03-05-high")).toBe("gpt-5.4");
+				expect(getModelFamily("gpt-5.4-pro")).toBe("gpt-5.4-pro");
+				expect(getModelFamily("gpt 5.4 pro")).toBe("gpt-5.4-pro");
+				expect(getModelFamily("gpt-5.4-pro-2026-03-05-high")).toBe("gpt-5.4-pro");
 			});
 
 			it("should not classify gpt-5.40 style names as gpt-5.4 family", () => {
@@ -475,6 +478,29 @@ describe("Codex Prompts Module", () => {
 							call[0].includes("raw.githubusercontent.com"),
 					);
 					expect(rawGitHubCall?.[0]).toContain("gpt_5_2_prompt.md");
+				});
+
+				it("should map gpt-5.4-pro prompts to gpt_5_2 prompt file with isolated cache key", async () => {
+					mockedReadFile.mockRejectedValue(new Error("ENOENT"));
+					mockFetch.mockResolvedValue({
+						ok: true,
+						json: () => Promise.resolve({ tag_name: "rust-v0.111.0" }),
+						text: () => Promise.resolve("content"),
+						headers: { get: () => "etag" },
+					});
+					mockedMkdir.mockResolvedValue(undefined);
+					mockedWriteFile.mockResolvedValue(undefined);
+
+					await getCodexInstructions("gpt-5.4-pro");
+					const fetchCalls = mockFetch.mock.calls;
+					const rawGitHubCall = fetchCalls.find(
+						(call) =>
+							typeof call[0] === "string" &&
+							call[0].includes("raw.githubusercontent.com"),
+					);
+					const writeTargets = mockedWriteFile.mock.calls.map(([target]) => String(target));
+					expect(rawGitHubCall?.[0]).toContain("gpt_5_2_prompt.md");
+					expect(writeTargets.some((target) => target.includes("gpt-5.4-pro-instructions.md"))).toBe(true);
 				});
 
 				it("should map gpt-5.3-codex-spark prompts to the current codex prompt file", async () => {

@@ -132,8 +132,8 @@ opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 
 | Model | Variants | Notes |
 |-------|----------|-------|
-| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 with reasoning levels |
-| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` |
+| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 with reasoning levels and 1,000,000 context window |
+| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` (also 1,000,000 context window) |
 | `gpt-5-codex` | low, medium, high | Canonical Codex model for code generation (default: high) |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Spark IDs are supported by the plugin, but access is entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context Codex |
@@ -142,6 +142,14 @@ opencode run "Hello" --model=openai/gpt-5.4 --variant=medium
 | `gpt-5.1` | none, low, medium, high | GPT-5.1 base model |
 
 Config templates intentionally omit Spark model IDs by default to reduce entitlement failures on unsupported accounts. Add Spark manually only if your workspace is entitled.
+
+Legacy and snapshot aliases supported by the plugin:
+- `gpt-5`, `gpt-5-mini`, `gpt-5-nano` normalize to `gpt-5.4`
+- `gpt-5.4-2026-03-05` and `gpt-5.4-pro-2026-03-05` (including effort suffix variants) normalize to their stable families
+
+If your OpenCode runtime supports global auto-compaction settings, set:
+- `model_context_window = 1000000`
+- `model_auto_compact_token_limit = 900000`
 
 **Using variants:**
 ```bash
@@ -173,7 +181,7 @@ Add this to your `~/.config/opencode/opencode.json`:
       "models": {
         "gpt-5.4": {
           "name": "GPT 5.4 (OAuth)",
-          "limit": { "context": 272000, "output": 128000 },
+          "limit": { "context": 1000000, "output": 128000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
             "none": { "reasoningEffort": "none" },

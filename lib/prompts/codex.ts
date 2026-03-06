@@ -49,6 +49,7 @@ export type ModelFamily =
 	| "codex-max"
 	| "codex"
 	| "gpt-5.4"
+	| "gpt-5.4-pro"
 	| "gpt-5.2"
 	| "gpt-5.1";
 
@@ -61,6 +62,7 @@ export const MODEL_FAMILIES: readonly ModelFamily[] = [
 	"codex-max",
 	"codex",
 	"gpt-5.4",
+	"gpt-5.4-pro",
 	"gpt-5.2",
 	"gpt-5.1",
 ] as const;
@@ -75,6 +77,8 @@ const PROMPT_FILES: Record<ModelFamily, string> = {
 	codex: "gpt_5_codex_prompt.md",
 	// As of Codex rust-v0.111.0, GPT-5.4 uses the same prompt file family as GPT-5.2.
 	"gpt-5.4": "gpt_5_2_prompt.md",
+	// GPT-5.4-pro uses the same core prompt file as GPT-5.4, but keeps isolated cache/family state.
+	"gpt-5.4-pro": "gpt_5_2_prompt.md",
 	"gpt-5.2": "gpt_5_2_prompt.md",
 	"gpt-5.1": "gpt_5_1_prompt.md",
 };
@@ -87,6 +91,7 @@ const CACHE_FILES: Record<ModelFamily, string> = {
 	"codex-max": "codex-max-instructions.md",
 	codex: "codex-instructions.md",
 	"gpt-5.4": "gpt-5.4-instructions.md",
+	"gpt-5.4-pro": "gpt-5.4-pro-instructions.md",
 	"gpt-5.2": "gpt-5.2-instructions.md",
 	"gpt-5.1": "gpt-5.1-instructions.md",
 };
@@ -119,6 +124,9 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 		normalizedModel.startsWith("codex-")
 	) {
 		return "codex";
+	}
+	if (/\bgpt(?:-| )5\.4(?:-| )pro(?:\b|[- ])/i.test(normalizedModel)) {
+		return "gpt-5.4-pro";
 	}
 	if (/\bgpt(?:-| )5\.4(?:\b|[- ])/i.test(normalizedModel)) {
 		return "gpt-5.4";
@@ -404,7 +412,7 @@ function refreshInstructionsInBackground(
  * Prewarm instruction caches for the provided models/families.
  */
 export function prewarmCodexInstructions(models: string[] = []): void {
-	const candidates = models.length > 0 ? models : ["gpt-5-codex", "gpt-5.4", "gpt-5.2", "gpt-5.1"];
+	const candidates = models.length > 0 ? models : ["gpt-5-codex", "gpt-5.4", "gpt-5.4-pro", "gpt-5.2", "gpt-5.1"];
 	for (const model of candidates) {
 		void getCodexInstructions(model).catch((error) => {
 			logDebug("Codex instruction prewarm failed", {

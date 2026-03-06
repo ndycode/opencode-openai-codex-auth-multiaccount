@@ -25,6 +25,22 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
 
+## [5.4.3] - 2026-03-06
+
+### added
+
+- **gpt-5.4 snapshot alias normalization**: added support for `gpt-5.4-2026-03-05*` and `gpt-5.4-pro-2026-03-05*` model IDs (including effort suffix variants).
+
+### changed
+
+- **legacy GPT-5 alias target updated**: `gpt-5`, `gpt-5-mini`, and `gpt-5-nano` now normalize to `gpt-5.4` as the default general family.
+- **gpt-5.4-pro family isolation**: prompt-family detection now keeps `gpt-5.4-pro` separate from `gpt-5.4` for independent prompt/cache handling while preserving fallback policy behavior (`gpt-5.4-pro -> gpt-5.4`).
+- **OpenCode 5.4 template limits updated**: shipped OpenCode config templates now set `gpt-5.4*` context to `1,000,000` (output remains `128,000`) and docs now include optional `model_context_window` / `model_auto_compact_token_limit` tuning guidance.
+
+### fixed
+
+- **5.4.3 regression/test coverage alignment**: expanded and corrected normalization, family-routing, and prompt-mapping tests for snapshot aliases, pro-family separation, and legacy alias behavior.
+
 ## [5.4.2] - 2026-03-05
 
 ### added

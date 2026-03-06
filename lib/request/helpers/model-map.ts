@@ -67,6 +67,12 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.4-medium": "gpt-5.4",
 	"gpt-5.4-high": "gpt-5.4",
 	"gpt-5.4-xhigh": "gpt-5.4",
+	"gpt-5.4-2026-03-05": "gpt-5.4",
+	"gpt-5.4-2026-03-05-none": "gpt-5.4",
+	"gpt-5.4-2026-03-05-low": "gpt-5.4",
+	"gpt-5.4-2026-03-05-medium": "gpt-5.4",
+	"gpt-5.4-2026-03-05-high": "gpt-5.4",
+	"gpt-5.4-2026-03-05-xhigh": "gpt-5.4",
 
 	// ============================================================================
 	// GPT-5.4 Pro Models (optional/manual config)
@@ -77,6 +83,12 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.4-pro-medium": "gpt-5.4-pro",
 	"gpt-5.4-pro-high": "gpt-5.4-pro",
 	"gpt-5.4-pro-xhigh": "gpt-5.4-pro",
+	"gpt-5.4-pro-2026-03-05": "gpt-5.4-pro",
+	"gpt-5.4-pro-2026-03-05-none": "gpt-5.4-pro",
+	"gpt-5.4-pro-2026-03-05-low": "gpt-5.4-pro",
+	"gpt-5.4-pro-2026-03-05-medium": "gpt-5.4-pro",
+	"gpt-5.4-pro-2026-03-05-high": "gpt-5.4-pro",
+	"gpt-5.4-pro-2026-03-05-xhigh": "gpt-5.4-pro",
 
 	// ============================================================================
 	// GPT-5.2 Models (supports none/low/medium/high/xhigh per OpenAI API docs)
@@ -128,11 +140,11 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5-codex-mini-high": "gpt-5.1-codex-mini",
 
 	// ============================================================================
-	// GPT-5 General Purpose Models (LEGACY - maps to gpt-5.1 as gpt-5 is being phased out)
+	// GPT-5 General Purpose Models (LEGACY - maps to gpt-5.4 latest)
 	// ============================================================================
-	"gpt-5": "gpt-5.1",
-	"gpt-5-mini": "gpt-5.1",
-	"gpt-5-nano": "gpt-5.1",
+	"gpt-5": "gpt-5.4",
+	"gpt-5-mini": "gpt-5.4",
+	"gpt-5-nano": "gpt-5.4",
 };
 
 /**
