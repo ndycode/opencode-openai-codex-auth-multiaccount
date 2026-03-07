@@ -763,7 +763,6 @@ describe("OpenAIOAuthPlugin", () => {
 		});
 
 		it("refreshes missing tokens before fetching usage", async () => {
-			const { saveAccounts } = await import("../lib/storage.js");
 			mockStorage.accounts = [
 				{ refreshToken: "r1", accountId: "acc-1", email: "user@example.com" },
 			];
@@ -783,53 +782,173 @@ describe("OpenAIOAuthPlugin", () => {
 
 			expect(result).toContain("100% left");
 			expect(mockStorage.accounts[0]?.accessToken).toBe("refreshed-access");
-			expect(saveAccounts).toHaveBeenCalled();
 		});
 
-	it("deduplicates accounts with same refreshToken", async () => {
-		mockStorage.accounts = [
-			{
-				refreshToken: "rt_same",
-				accountId: "acc-1",
-				email: "a@test.com",
-				accessToken: "access-1",
-				expiresAt: Date.now() + 3600_000,
-			},
-			{
-				refreshToken: "rt_same",
-				accountId: "acc-2",
-				email: "a@test.com",
-				accessToken: "access-2",
-				expiresAt: Date.now() + 3600_000,
-			},
-			{
-				refreshToken: "rt_other",
-				accountId: "acc-3",
-				email: "b@test.com",
-				accessToken: "access-3",
-				expiresAt: Date.now() + 3600_000,
-			},
-		];
-		globalThis.fetch = vi.fn().mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					rate_limit: {
-						primary_window: { used_percent: 50, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 1800 },
-						secondary_window: { used_percent: 50, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 86400 },
-					},
-				}),
-				{ status: 200, headers: { "content-type": "application/json" } },
-			),
-		);
+		it("deduplicates accounts with same refreshToken and keeps the active marker", async () => {
+			mockStorage.accounts = [
+				{
+					refreshToken: "rt_same",
+					accountId: "acc-1",
+					email: "a@test.com",
+					accessToken: "access-1",
+					expiresAt: Date.now() + 3600_000,
+				},
+				{
+					refreshToken: "rt_same",
+					accountId: "acc-2",
+					email: "a@test.com",
+					accessToken: "access-2",
+					expiresAt: Date.now() + 3600_000,
+				},
+				{
+					refreshToken: "rt_other",
+					accountId: "acc-3",
+					email: "b@test.com",
+					accessToken: "access-3",
+					expiresAt: Date.now() + 3600_000,
+				},
+			];
+			mockStorage.activeIndex = 1;
+			mockStorage.activeIndexByFamily = { codex: 1 };
+			globalThis.fetch = vi.fn().mockImplementation(async () =>
+				new Response(
+					JSON.stringify({
+						rate_limit: {
+							primary_window: {
+								used_percent: 50,
+								limit_window_seconds: 18000,
+								reset_at: Math.floor(Date.now() / 1000) + 1800,
+							},
+							secondary_window: {
+								used_percent: 50,
+								limit_window_seconds: 604800,
+								reset_at: Math.floor(Date.now() / 1000) + 86400,
+							},
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
 
-		const result = await plugin.tool["codex-limits"].execute();
+			const result = await plugin.tool["codex-limits"].execute();
 
-		expect(result).toBeDefined();
-		// Header should say "2 accounts" (not 3)
-		expect(result).toContain("2 account");
-		// fetch should be called exactly twice (once per unique refreshToken)
-		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-	});
+			expect(result).toContain("2 account");
+			expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+			expect(result).toContain("Account 1 (a@test.com, id:acc-1) [active]:");
+			expect(result.match(/Account 1 \(a@test\.com, id:acc-1\)/g)).toHaveLength(1);
+			expect(result).toContain("Account 3 (b@test.com, id:acc-3):");
+			expect(result).not.toContain("Account 2 (a@test.com, id:acc-2):");
+		});
+
+		it("does not deduplicate accounts that are missing refreshToken", async () => {
+			mockStorage.accounts = [
+				{
+					refreshToken: "",
+					accountId: "acc-1",
+					email: "missing-1@test.com",
+					accessToken: "access-1",
+					expiresAt: Date.now() + 3600_000,
+				},
+				{
+					refreshToken: "",
+					accountId: "acc-2",
+					email: "missing-2@test.com",
+					accessToken: "access-2",
+					expiresAt: Date.now() + 3600_000,
+				},
+				{
+					refreshToken: "rt_other",
+					accountId: "acc-3",
+					email: "other@test.com",
+					accessToken: "access-3",
+					expiresAt: Date.now() + 3600_000,
+				},
+			];
+			globalThis.fetch = vi.fn().mockImplementation(async () =>
+				new Response(
+					JSON.stringify({
+						rate_limit: {
+							primary_window: {
+								used_percent: 25,
+								limit_window_seconds: 18000,
+								reset_at: Math.floor(Date.now() / 1000) + 1800,
+							},
+							secondary_window: {
+								used_percent: 25,
+								limit_window_seconds: 604800,
+								reset_at: Math.floor(Date.now() / 1000) + 86400,
+							},
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			const result = await plugin.tool["codex-limits"].execute();
+
+			expect(result).toContain("3 account");
+			expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+			expect(result).toContain("Account 1 (missing-1@test.com, id:acc-1) [active]:");
+			expect(result).toContain("Account 2 (missing-2@test.com, id:acc-2):");
+			expect(result).toContain("Account 3 (other@test.com, id:acc-3):");
+		});
+
+		it("propagates rotated refresh tokens to duplicate stored accounts", async () => {
+			const { queuedRefresh } = await import("../lib/refresh-queue.js");
+			vi.mocked(queuedRefresh).mockResolvedValueOnce({
+				type: "success",
+				access: "rotated-access",
+				refresh: "rotated-refresh",
+				expires: Date.now() + 7200_000,
+			});
+			mockStorage.accounts = [
+				{
+					refreshToken: "stale-refresh",
+					accountId: "acc-1",
+					email: "a@test.com",
+					accessToken: "expired-access-1",
+					expiresAt: Date.now() - 1000,
+				},
+				{
+					refreshToken: "stale-refresh",
+					accountId: "acc-2",
+					email: "a@test.com",
+					accessToken: "expired-access-2",
+					expiresAt: Date.now() - 1000,
+				},
+			];
+			globalThis.fetch = vi.fn().mockImplementation(async () =>
+				new Response(
+					JSON.stringify({
+						rate_limit: {
+							primary_window: {
+								used_percent: 10,
+								limit_window_seconds: 18000,
+								reset_at: Math.floor(Date.now() / 1000) + 1800,
+							},
+							secondary_window: {
+								used_percent: 10,
+								limit_window_seconds: 604800,
+								reset_at: Math.floor(Date.now() / 1000) + 86400,
+							},
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			await plugin.tool["codex-limits"].execute();
+
+			expect(vi.mocked(queuedRefresh)).toHaveBeenCalledTimes(1);
+			expect(mockStorage.accounts.map((account) => account.refreshToken)).toEqual([
+				"rotated-refresh",
+				"rotated-refresh",
+			]);
+			expect(mockStorage.accounts.map((account) => account.accessToken)).toEqual([
+				"rotated-access",
+				"rotated-access",
+			]);
+		});
 	});
 
 	describe("codex-metrics tool", () => {

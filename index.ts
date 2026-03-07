@@ -4165,6 +4165,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				async execute() {
 					const ui = resolveUiRuntime();
 					const storage = await loadAccounts();
+					const usageFetchTimeoutMs = getFetchTimeoutMs(loadPluginConfig());
 					if (!storage || storage.accounts.length === 0) {
 						if (ui.v2Enabled) {
 							return [
@@ -4307,16 +4308,28 @@ while (attempted.size < Math.max(1, accountCount)) {
 							organizationId: params.organizationId,
 						});
 						headers.set("accept", "application/json");
+						const controller = new AbortController();
+						const timeout = setTimeout(() => controller.abort(), usageFetchTimeoutMs);
 
-						const response = await fetch(`${CODEX_BASE_URL}/wham/usage`, {
-							method: "GET",
-							headers,
-						});
-						if (!response.ok) {
-							const bodyText = await response.text().catch(() => "");
-							throw new Error(bodyText || `HTTP ${response.status}`);
+						try {
+							const response = await fetch(`${CODEX_BASE_URL}/wham/usage`, {
+								method: "GET",
+								headers,
+								signal: controller.signal,
+							});
+							if (!response.ok) {
+								const bodyText = await response.text().catch(() => "");
+								throw new Error(bodyText || `HTTP ${response.status}`);
+							}
+							return (await response.json()) as UsagePayload;
+						} catch (error) {
+							if (error instanceof Error && error.name === "AbortError") {
+								throw new Error(`Usage request timed out after ${usageFetchTimeoutMs}ms`);
+							}
+							throw error;
+						} finally {
+							clearTimeout(timeout);
 						}
-						return (await response.json()) as UsagePayload;
 					};
 
 					// Deduplicate accounts by refreshToken (same credential = same limits)
@@ -4325,8 +4338,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 					for (let i = 0; i < storage.accounts.length; i++) {
 						const acct = storage.accounts[i];
 						if (!acct) continue;
-						if (seenTokens.has(acct.refreshToken)) continue;
-						seenTokens.add(acct.refreshToken);
+						const refreshToken = typeof acct.refreshToken === "string" ? acct.refreshToken : "";
+						if (refreshToken && seenTokens.has(refreshToken)) continue;
+						if (refreshToken) seenTokens.add(refreshToken);
 						uniqueIndices.push(i);
 					}
 
@@ -4334,13 +4348,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 						? [...formatUiHeader(ui, "Codex limits"), ""]
 						: [`Codex limits (${uniqueIndices.length} account${uniqueIndices.length === 1 ? "" : "s"}):`, ""];
 					const activeIndex = resolveActiveIndex(storage, "codex");
+					const activeRefreshToken =
+						typeof activeIndex === "number" && activeIndex >= 0 && activeIndex < storage.accounts.length
+							? storage.accounts[activeIndex]?.refreshToken
+							: undefined;
 					let storageChanged = false;
 
 					for (const i of uniqueIndices) {
 						const account = storage.accounts[i];
 						if (!account) continue;
 						const label = formatCommandAccountLabel(account, i);
-						const activeSuffix = i === activeIndex ? (ui.v2Enabled ? ` ${formatUiBadge(ui, "active", "accent")}` : " [active]") : "";
+						const isActive = i === activeIndex || (!!activeRefreshToken && account.refreshToken === activeRefreshToken);
+						const activeSuffix = isActive ? (ui.v2Enabled ? ` ${formatUiBadge(ui, "active", "accent")}` : " [active]") : "";
 
 						try {
 							let accessToken = account.accessToken;
@@ -4350,13 +4369,34 @@ while (attempted.size < Math.max(1, accountCount)) {
 								typeof account.expiresAt !== "number" ||
 								account.expiresAt <= Date.now() + 30_000
 							) {
+								const previousRefreshToken = account.refreshToken;
 								const refreshResult = await queuedRefresh(account.refreshToken);
 								if (refreshResult.type !== "success") {
 									throw new Error(refreshResult.message ?? refreshResult.reason);
 								}
-								account.refreshToken = refreshResult.refresh;
-								account.accessToken = refreshResult.access;
-								account.expiresAt = refreshResult.expires;
+
+								const applyRefreshedCredentials = (
+									target: {
+										refreshToken: string;
+										accessToken?: string;
+										expiresAt?: number;
+									},
+								): void => {
+									target.refreshToken = refreshResult.refresh;
+									target.accessToken = refreshResult.access;
+									target.expiresAt = refreshResult.expires;
+								};
+
+								if (previousRefreshToken && refreshResult.refresh !== previousRefreshToken) {
+									for (const storedAccount of storage.accounts) {
+										if (storedAccount?.refreshToken === previousRefreshToken) {
+											applyRefreshedCredentials(storedAccount);
+										}
+									}
+								} else {
+									applyRefreshedCredentials(account);
+								}
+
 								accessToken = refreshResult.access;
 								storageChanged = true;
 							}
@@ -4379,7 +4419,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								payload.additional_rate_limits?.find((entry) => entry.limit_name === "code_review_rate_limit")?.rate_limit ??
 								null;
 							const codeReview = mapWindow(codeReviewRateLimit?.primary_window ?? null);
-						const credits = formatCredits(payload.credits ?? null);
+							const credits = formatCredits(payload.credits ?? null);
 							const additionalLimits = (payload.additional_rate_limits ?? []).filter(
 								(entry) => entry.limit_name !== "code_review_rate_limit",
 							);
@@ -4435,11 +4475,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					if (storageChanged) {
 						await saveAccounts(storage);
-						if (cachedAccountManager) {
-							const reloadedManager = await AccountManager.loadFromDisk();
-							cachedAccountManager = reloadedManager;
-							accountManagerPromise = Promise.resolve(reloadedManager);
-						}
+						invalidateAccountManagerCache();
 					}
 
 					while (lines.length > 0 && lines[lines.length - 1] === "") {
