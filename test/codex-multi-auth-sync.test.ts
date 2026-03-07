@@ -139,6 +139,35 @@ describe("codex-multi-auth sync", () => {
 		);
 	});
 
+	it("skips WAL-only roots when a later candidate has a real accounts file", async () => {
+		process.env.USERPROFILE = "C:\\Users\\tester";
+		process.env.HOME = "C:\\Users\\tester";
+		process.env.CODEX_HOME = "C:\\Users\\tester\\.codex";
+		const walOnlyPath = join(
+			"C:\\Users\\tester",
+			".codex",
+			"multi-auth",
+			"openai-codex-accounts.json.wal",
+		);
+		const laterRealJson = join(
+			"C:\\Users\\tester",
+			"DevTools",
+			"config",
+			"codex",
+			"multi-auth",
+			"openai-codex-accounts.json",
+		);
+		mockExistsSync.mockImplementation((candidate) => {
+			const path = String(candidate);
+			return path === walOnlyPath || path === laterRealJson;
+		});
+
+		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
+		expect(getCodexMultiAuthSourceRootDir()).toBe(
+			join("C:\\Users\\tester", "DevTools", "config", "codex", "multi-auth"),
+		);
+	});
+
 	it("delegates preview and apply to the existing importer", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;

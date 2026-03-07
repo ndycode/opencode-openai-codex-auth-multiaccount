@@ -173,6 +173,15 @@ vi.mock("../lib/recovery.js", () => ({
 }));
 
 vi.mock("../lib/codex-multi-auth-sync.js", () => ({
+	CodexMultiAuthSyncCapacityError: class CodexMultiAuthSyncCapacityError extends Error {
+		details: Record<string, unknown>;
+
+		constructor(details: Record<string, unknown>) {
+			super("capacity");
+			this.name = "CodexMultiAuthSyncCapacityError";
+			this.details = details;
+		}
+	},
 	previewSyncFromCodexMultiAuth: vi.fn(async () => ({
 		rootDir: "/tmp/codex-root",
 		accountsPath: "/tmp/codex-root/openai-codex-accounts.json",
@@ -190,6 +199,12 @@ vi.mock("../lib/codex-multi-auth-sync.js", () => ({
 		total: 4,
 		backupStatus: "created",
 		backupPath: "/tmp/codex-sync-backup.json",
+	})),
+	cleanupCodexMultiAuthSyncedOverlaps: vi.fn(async () => ({
+		before: 0,
+		after: 0,
+		removed: 0,
+		updated: 0,
 	})),
 }));
 
@@ -2632,6 +2647,70 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			version: 1,
 			accounts: [],
 		});
+	});
+
+	it("reloads storage after synced overlap cleanup before persisting auto-repair refreshes", async () => {
+		const cliModule = await import("../lib/cli.js");
+		const storageModule = await import("../lib/storage.js");
+		const syncModule = await import("../lib/codex-multi-auth-sync.js");
+
+		mockStorage.accounts = [
+			{
+				accountId: "org-keep",
+				organizationId: "org-keep",
+				accountIdSource: "org",
+				email: "keep@example.com",
+				refreshToken: "refresh-keep",
+			},
+			{
+				accountId: "org-overlap",
+				organizationId: "org-overlap",
+				accountIdSource: "org",
+				email: "overlap@example.com",
+				refreshToken: "refresh-overlap",
+			},
+		];
+		mockStorage.activeIndex = 0;
+		mockStorage.activeIndexByFamily = {};
+
+		vi.mocked(cliModule.promptLoginMode)
+			.mockResolvedValueOnce({ mode: "fix" })
+			.mockResolvedValueOnce({ mode: "cancel" });
+
+		vi.mocked(syncModule.cleanupCodexMultiAuthSyncedOverlaps).mockImplementationOnce(async () => {
+			mockStorage.accounts = [mockStorage.accounts[0]].filter(Boolean) as typeof mockStorage.accounts;
+			return {
+				before: 2,
+				after: 1,
+				removed: 1,
+				updated: 0,
+			};
+		});
+
+		vi.mocked(storageModule.loadAccounts).mockImplementation(async () => ({
+			version: mockStorage.version,
+			activeIndex: mockStorage.activeIndex,
+			activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+			accounts: mockStorage.accounts.map((account) => ({ ...account })),
+		}));
+		vi.mocked(storageModule.saveAccounts).mockImplementation(async (nextStorage) => {
+			mockStorage.version = nextStorage.version;
+			mockStorage.activeIndex = nextStorage.activeIndex;
+			mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
+			mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+		});
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({ client: mockClient } as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		const authResult = await autoMethod.authorize();
+		expect(authResult.instructions).toBe("Authentication cancelled");
+		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts[0]?.email).toBe("keep@example.com");
 	});
 });
 

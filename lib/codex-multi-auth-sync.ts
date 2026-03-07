@@ -268,7 +268,7 @@ function hasStorageSignals(dir: string): boolean {
 
 function hasAccountsStorage(dir: string): boolean {
 	return EXTERNAL_ACCOUNT_FILE_NAMES.some((fileName) => {
-		return existsSync(join(dir, fileName)) || existsSync(join(dir, `${fileName}.wal`));
+		return existsSync(join(dir, fileName));
 	});
 }
 

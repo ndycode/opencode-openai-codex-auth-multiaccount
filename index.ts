@@ -3882,8 +3882,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 							};
 
 							const runAutoRepairFromDashboard = async (): Promise<void> => {
-								const storage = await loadAccounts();
-								if (!storage || storage.accounts.length === 0) {
+								const initialStorage = await loadAccounts();
+								if (!initialStorage || initialStorage.accounts.length === 0) {
 									console.log("\nNo accounts available.\n");
 									return;
 								}
@@ -3892,6 +3892,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const cleanupResult = await cleanupCodexMultiAuthSyncedOverlaps();
 								if (cleanupResult.removed > 0) {
 									appliedFixes.push(`Removed ${cleanupResult.removed} synced overlap(s).`);
+								}
+								const storage = await loadAccounts();
+								if (!storage || storage.accounts.length === 0) {
+									console.log("\nNo accounts available after cleanup.\n");
+									return;
 								}
 
 								let changedByRefresh = false;
