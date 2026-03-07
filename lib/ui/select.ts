@@ -52,7 +52,7 @@ const ANSI_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 const ANSI_LEADING_REGEX = new RegExp("^\\x1b\\[[0-9;]*m");
 const CSI_FINAL_KEYS = new Set(["A", "B", "C", "D", "H", "F"]);
-const CSI_TILDE_PATTERN = /^(1|4|7|8)~$/;
+const CSI_TILDE_PATTERN = /^\d+~$/;
 
 export interface PendingInputSequence {
 	value: string;
@@ -239,16 +239,31 @@ export function tokenizeTerminalInput(rawInput: string): string[] {
 
 		const next = rawInput[index + 1];
 		const third = rawInput[index + 2];
-		const fourth = rawInput[index + 3];
-		if (next === "[" && third && CSI_FINAL_KEYS.has(third)) {
-			tokens.push(rawInput.slice(index, index + 3));
-			index += 3;
-			continue;
-		}
-		if (next === "[" && third && fourth && CSI_TILDE_PATTERN.test(`${third}${fourth}`)) {
-			tokens.push(rawInput.slice(index, index + 4));
-			index += 4;
-			continue;
+		if (next === "[") {
+			let cursor = index + 2;
+			let consumed = false;
+			while (cursor < rawInput.length) {
+				const current = rawInput.charAt(cursor);
+				if (CSI_FINAL_KEYS.has(current)) {
+					tokens.push(rawInput.slice(index, cursor + 1));
+					index = cursor + 1;
+					consumed = true;
+					break;
+				}
+				if (current === "~" && CSI_TILDE_PATTERN.test(rawInput.slice(index + 2, cursor + 1))) {
+					tokens.push(rawInput.slice(index, cursor + 1));
+					index = cursor + 1;
+					consumed = true;
+					break;
+				}
+				if (!/[0-9;]/.test(current)) {
+					break;
+				}
+				cursor += 1;
+			}
+			if (consumed) {
+				continue;
+			}
 		}
 		if (next === "O" && third && CSI_FINAL_KEYS.has(third)) {
 			tokens.push(rawInput.slice(index, index + 3));

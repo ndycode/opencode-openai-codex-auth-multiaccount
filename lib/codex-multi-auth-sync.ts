@@ -109,19 +109,35 @@ async function withNormalizedImportFile<T>(
 	storage: AccountStorageV3,
 	handler: (filePath: string) => Promise<T>,
 ): Promise<T> {
+	try {
+		const secureTempRoot = join(getResolvedUserHomeDir(), ".opencode", "tmp");
+		await fs.mkdir(secureTempRoot, { recursive: true, mode: 0o700 }).catch(() => undefined);
+		const tempDir = await fs.mkdtemp(join(secureTempRoot, "oc-chatgpt-multi-auth-sync-"));
+		await fs.chmod(tempDir, 0o700).catch(() => undefined);
+		const tempPath = join(tempDir, "accounts.json");
+		await fs.writeFile(tempPath, `${JSON.stringify(storage, null, 2)}\n`, {
+			encoding: "utf-8",
+			mode: 0o600,
+			flag: "wx",
+		});
+		try {
+			return await handler(tempPath);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+		}
+	} catch {
+		// fall back to the process temp directory if the secure path is unavailable
+	}
+
 	const tempDir = await fs.mkdtemp(join(tmpdir(), "oc-chatgpt-multi-auth-sync-"));
 	try {
 		await fs.chmod(tempDir, 0o700).catch(() => undefined);
-	} catch {
-		// best effort on platforms that ignore chmod
-	}
-	const tempPath = join(tempDir, "accounts.json");
-	await fs.writeFile(tempPath, `${JSON.stringify(storage, null, 2)}\n`, {
-		encoding: "utf-8",
-		mode: 0o600,
-		flag: "wx",
-	});
-	try {
+		const tempPath = join(tempDir, "accounts.json");
+		await fs.writeFile(tempPath, `${JSON.stringify(storage, null, 2)}\n`, {
+			encoding: "utf-8",
+			mode: 0o600,
+			flag: "wx",
+		});
 		return await handler(tempPath);
 	} finally {
 		await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
@@ -505,10 +521,19 @@ export async function syncFromCodexMultiAuth(
 	try {
 		result = await withNormalizedImportFile(
 			finalStorage,
-			(filePath) => importAccounts(filePath, {
-				preImportBackupPrefix: "codex-multi-auth-sync-backup",
-				backupMode: "required",
-			}),
+			(filePath) =>
+				importAccounts(
+					filePath,
+					{
+						preImportBackupPrefix: "codex-multi-auth-sync-backup",
+						backupMode: "required",
+					},
+					(normalizedStorage, existing) =>
+						filterSourceAccountsAgainstExistingEmails(
+							normalizedStorage,
+							existing?.accounts ?? [],
+						),
+				),
 		);
 	} catch (error) {
 		if (

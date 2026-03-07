@@ -157,9 +157,31 @@ export function savePluginConfigMutation(
 				(code === "EEXIST" || code === "EPERM") &&
 				existsSync(CONFIG_PATH)
 			) {
-				unlinkSync(CONFIG_PATH);
-				renameSync(tempPath, CONFIG_PATH);
-				return;
+				const backupPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.bak`;
+				renameSync(CONFIG_PATH, backupPath);
+				try {
+					renameSync(tempPath, CONFIG_PATH);
+					try {
+						unlinkSync(backupPath);
+					} catch {
+						// best effort backup cleanup
+					}
+					return;
+				} catch (retryError) {
+					try {
+						if (!existsSync(CONFIG_PATH)) {
+							renameSync(backupPath, CONFIG_PATH);
+						}
+					} catch {
+						// best effort config restore
+					}
+					try {
+						unlinkSync(tempPath);
+					} catch {
+						// best effort temp cleanup
+					}
+					throw retryError;
+				}
 			}
 			try {
 				unlinkSync(tempPath);
@@ -212,7 +234,13 @@ function withPluginConfigLock<T>(fn: () => T): T {
 					lockOwnerPid !== process.pid &&
 					!isProcessAlive(lockOwnerPid)
 				) {
-					unlinkSync(CONFIG_LOCK_PATH);
+					const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
+					renameSync(CONFIG_LOCK_PATH, staleLockPath);
+					try {
+						unlinkSync(staleLockPath);
+					} catch {
+						// best effort stale-lock cleanup
+					}
 					continue;
 				}
 			} catch {

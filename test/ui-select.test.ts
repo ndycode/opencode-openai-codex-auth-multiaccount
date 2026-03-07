@@ -57,4 +57,8 @@ describe("ui-select", () => {
 	it("tokenizes packed escape and control chunks", () => {
 		expect(tokenizeTerminalInput("\u001b[B\u0003")).toEqual(["\u001b[B", "\u0003"]);
 	});
+
+	it("tokenizes CSI tilde sequences without splitting numeric hotkeys", () => {
+		expect(tokenizeTerminalInput("\u001b[5~1")).toEqual(["\u001b[5~", "1"]);
+	});
 });

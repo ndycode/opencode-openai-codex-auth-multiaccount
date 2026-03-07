@@ -51,6 +51,11 @@ export interface ImportAccountsOptions {
 	backupMode?: ImportBackupMode;
 }
 
+type PrepareImportStorage = (
+	normalized: AccountStorageV3,
+	existing: AccountStorageV3 | null,
+) => AccountStorageV3;
+
 export type ImportBackupStatus = "created" | "skipped" | "failed";
 
 export interface ImportAccountsResult {
@@ -1362,6 +1367,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 export async function importAccounts(
 	filePath: string,
 	options: ImportAccountsOptions = {},
+	prepare?: PrepareImportStorage,
 ): Promise<ImportAccountsResult> {
   const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
   const backupMode = options.backupMode ?? "none";
@@ -1376,6 +1382,7 @@ export async function importAccounts(
     backupError,
   } =
     await withAccountStorageTransaction(async (existing, persist) => {
+      const preparedNormalized = prepare ? prepare(normalized, existing) : normalized;
       const existingStorage: AccountStorageV3 =
         existing ??
         ({
@@ -1411,7 +1418,7 @@ export async function importAccounts(
         }
       }
 
-      const merged = [...existingAccounts, ...normalized.accounts];
+      const merged = [...existingAccounts, ...preparedNormalized.accounts];
       const hasFiniteAccountLimit = Number.isFinite(ACCOUNT_LIMITS.MAX_ACCOUNTS);
 
       if (hasFiniteAccountLimit && merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
@@ -1460,7 +1467,7 @@ export async function importAccounts(
       await persist(newStorage);
 
       const imported = deduplicatedAccounts.length - existingAccounts.length;
-      const skipped = normalized.accounts.length - imported;
+      const skipped = preparedNormalized.accounts.length - imported;
       return {
         imported,
         total: deduplicatedAccounts.length,

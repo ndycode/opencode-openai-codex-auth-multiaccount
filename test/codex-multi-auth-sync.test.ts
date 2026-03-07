@@ -205,6 +205,7 @@ describe("codex-multi-auth sync", () => {
 				preImportBackupPrefix: "codex-multi-auth-sync-backup",
 				backupMode: "required",
 			},
+			expect.any(Function),
 		);
 	});
 
