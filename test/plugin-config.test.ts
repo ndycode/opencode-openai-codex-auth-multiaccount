@@ -862,6 +862,9 @@ describe('Plugin Configuration', () => {
 				if (String(filePath) === lockPath) {
 					return '424242';
 				}
+				if (String(filePath).includes('.stale')) {
+					return '424242';
+				}
 				return JSON.stringify({ codexMode: false });
 			});
 			mockWriteFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
@@ -875,7 +878,7 @@ describe('Plugin Configuration', () => {
 
 			try {
 				expect(() => setSyncFromCodexMultiAuthEnabled(true)).not.toThrow();
-				expect(mockUnlinkSync).toHaveBeenCalledWith(lockPath);
+				expect(mockUnlinkSync).toHaveBeenCalledWith(expect.stringContaining('.stale'));
 				expect(killSpy).toHaveBeenCalledWith(424242, 0);
 				expect(mockRenameSync).toHaveBeenCalled();
 			} finally {

@@ -3958,24 +3958,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 									};
 								};
 
-								const removeAccountsForSync = async (
-									targets: SyncRemovalTarget[],
-								): Promise<void> => {
+							const removeAccountsForSync = async (
+								targets: SyncRemovalTarget[],
+							): Promise<void> => {
+								const currentFlaggedStorage = await loadFlaggedAccounts();
+								const targetKeySet = new Set(
+									targets
+										.filter((target) => typeof target.refreshToken === "string" && target.refreshToken.length > 0)
+										.map((target) => getSyncRemovalTargetKey(target)),
+								);
+								let removedTargets: Array<{
+									index: number;
+									account: AccountStorageV3["accounts"][number];
+								}> = [];
+								await withAccountStorageTransaction(async (loadedStorage, persist) => {
 									const currentStorage =
-										(await loadAccounts()) ??
+										loadedStorage ??
 										({
 											version: 3,
 											accounts: [],
 											activeIndex: 0,
 											activeIndexByFamily: {},
 										} satisfies AccountStorageV3);
-									const currentFlaggedStorage = await loadFlaggedAccounts();
-									const targetKeySet = new Set(
-										targets
-											.filter((target) => typeof target.refreshToken === "string" && target.refreshToken.length > 0)
-											.map((target) => getSyncRemovalTargetKey(target)),
-									);
-									const removedTargets = currentStorage.accounts
+									removedTargets = currentStorage.accounts
 										.map((account, index) => ({ index, account }))
 										.filter((entry) =>
 											entry.account &&
@@ -4044,22 +4049,31 @@ while (attempted.size < Math.max(1, accountCount)) {
 											remappedFamilyIndex >= 0 ? remappedFamilyIndex : currentStorage.activeIndex;
 									}
 									clampActiveIndices(currentStorage);
-									await saveAccounts(currentStorage);
-									const removedRefreshTokens = new Set(
-										removedTargets.map((entry) => entry.account?.refreshToken).filter((token): token is string => Boolean(token)),
-									);
-									await saveFlaggedAccounts({
-										version: 1,
-										accounts: currentFlaggedStorage.accounts.filter(
-											(flagged) => !removedRefreshTokens.has(flagged.refreshToken),
-										),
-									});
-									invalidateAccountManagerCache();
-									const removedLabels = removedTargets
-										.map((entry) => entry.account?.email ?? `Account ${entry.index + 1}`)
-										.join(", ");
-									console.log(`\nRemoved ${removedTargets.length} account(s): ${removedLabels}\n`);
-								};
+									await persist(currentStorage);
+								});
+								if (removedTargets.length === 0) {
+									return;
+								}
+								const removedRefreshTokens = new Set(
+									removedTargets.map((entry) => entry.account?.refreshToken).filter((token): token is string => Boolean(token)),
+								);
+								await saveFlaggedAccounts({
+									version: 1,
+									accounts: currentFlaggedStorage.accounts.filter(
+										(flagged) => !removedRefreshTokens.has(flagged.refreshToken),
+									),
+								});
+								invalidateAccountManagerCache();
+								const removedLabels = removedTargets
+									.map((entry) => {
+										const accountId = entry.account?.accountId?.trim();
+										return accountId
+											? `Account ${entry.index + 1} [${accountId.slice(-6)}]`
+											: `Account ${entry.index + 1}`;
+									})
+									.join(", ");
+								console.log(`\nRemoved ${removedTargets.length} account(s): ${removedLabels}\n`);
+							};
 
 								const buildSyncRemovalPlan = async (indexes: number[]): Promise<{
 									previewLines: string[];

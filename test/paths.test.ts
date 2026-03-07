@@ -62,6 +62,11 @@ describe("Storage Paths Module", () => {
 			expect(first).toBe(second);
 			expect(first).toMatch(/^myproject-[a-f0-9]{12}$/);
 		});
+
+		it("preserves the legacy lowercase key prefix on Windows paths", () => {
+			const projectPath = "C:\\Users\\Test\\MyProject";
+			expect(getProjectStorageKey(projectPath)).toMatch(/^myproject-[a-f0-9]{12}$/);
+		});
 	});
 
 	describe("getProjectStorageKeyCandidates", () => {

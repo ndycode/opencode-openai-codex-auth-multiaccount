@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import * as logger from "../lib/logger.js";
 
 vi.mock("node:fs", async () => {
@@ -76,5 +78,75 @@ describe("plugin config lock retry", () => {
 		expect(lockAttempts).toBeGreaterThanOrEqual(2);
 		expect(mockWriteFileSync).toHaveBeenCalled();
 		expect(vi.mocked(logger.logWarn)).not.toHaveBeenCalled();
+	});
+
+	it("does not steal a live lock that replaced a stale one before rename", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		const configPath = path.join(os.homedir(), ".opencode", "openai-codex-auth-config.json");
+		const lockPath = `${configPath}.lock`;
+		let lockAttempts = 0;
+		let lockFilePresent = true;
+		const killSpy = vi.spyOn(process, "kill").mockImplementation((pid) => {
+			if (pid === 111) {
+				const error = new Error("process not found") as NodeJS.ErrnoException;
+				error.code = "ESRCH";
+				throw error;
+			}
+			return true as never;
+		});
+
+		mockExistsSync.mockImplementation((filePath) => String(filePath) === lockPath && lockFilePresent);
+		mockReadFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
+			const path = String(filePath);
+			if (path === lockPath) {
+				return lockAttempts === 1 ? "111" : "{}";
+			}
+			if (path.includes(".stale")) {
+				return "222";
+			}
+			return "{}";
+		});
+		mockRenameSync.mockImplementation((source, destination) => {
+			if (String(source) === lockPath) {
+				lockFilePresent = false;
+			}
+			if (String(destination) === lockPath) {
+				lockFilePresent = true;
+			}
+			return undefined;
+		});
+		mockWriteFileSync.mockImplementation((filePath) => {
+			const path = String(filePath);
+			if (path === lockPath) {
+				lockAttempts += 1;
+				if (lockAttempts === 1) {
+					const error = new Error("exists") as NodeJS.ErrnoException;
+					error.code = "EEXIST";
+					throw error;
+				}
+			}
+			return undefined;
+		});
+
+		const { savePluginConfigMutation } = await import("../lib/config.js");
+
+		try {
+			expect(() =>
+				savePluginConfigMutation((current) => ({
+					...current,
+					experimental: { syncFromCodexMultiAuth: { enabled: true } },
+				})),
+			).not.toThrow();
+			const lockRenameCalls = mockRenameSync.mock.calls.filter(
+				([source, destination]) =>
+					String(source) === lockPath || String(destination) === lockPath,
+			);
+			expect(lockRenameCalls).toHaveLength(2);
+			expect(String(lockRenameCalls[0]?.[0])).toBe(lockPath);
+			expect(String(lockRenameCalls[1]?.[1])).toBe(lockPath);
+			expect(killSpy).toHaveBeenCalledWith(111, 0);
+		} finally {
+			killSpy.mockRestore();
+		}
 	});
 });

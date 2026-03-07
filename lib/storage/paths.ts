@@ -97,15 +97,15 @@ export function getProjectStorageKeyCandidates(projectPath: string): string[] {
 	const normalizedProjectPath = normalizeProjectPath(projectPath);
 	const canonicalIdentity = getCanonicalProjectStorageIdentity(projectPath);
 	const candidates = [
-		buildProjectStorageKey(canonicalIdentity.projectNamePath, canonicalIdentity.identityPath),
-		buildProjectStorageKey(projectPath, normalizedProjectPath),
+		buildProjectStorageKey(normalizeProjectPath(canonicalIdentity.projectNamePath), canonicalIdentity.identityPath),
+		buildProjectStorageKey(normalizedProjectPath, normalizedProjectPath),
 	];
 	return Array.from(new Set(candidates));
 }
 
 export function getProjectStorageKey(projectPath: string): string {
 	const normalizedPath = normalizeProjectPath(projectPath);
-	return buildProjectStorageKey(projectPath, normalizedPath);
+	return buildProjectStorageKey(normalizedPath, normalizedPath);
 }
 
 /**

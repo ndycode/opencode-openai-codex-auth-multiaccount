@@ -56,7 +56,7 @@ const logEvent = (event) => {
 
 function sanitizeAuditValue(key, value) {
 	if (typeof value === "string") {
-		if (["utf8", "bytesHex", "token", "normalizedInput", "pending", "token"].includes(key)) {
+		if (["utf8", "bytesHex", "token", "normalizedInput", "pending", "hotkey"].includes(key)) {
 			return `[redacted:${value.length}]`;
 		}
 		if (value.includes("@")) {

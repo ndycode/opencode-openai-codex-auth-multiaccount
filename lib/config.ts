@@ -215,6 +215,54 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
+function tryRecoverStalePluginConfigLock(rawLockContents: string): boolean {
+	const lockOwnerPid = Number.parseInt(rawLockContents.trim(), 10);
+	if (
+		!Number.isFinite(lockOwnerPid) ||
+		lockOwnerPid === process.pid ||
+		isProcessAlive(lockOwnerPid)
+	) {
+		return false;
+	}
+
+	const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
+	try {
+		renameSync(CONFIG_LOCK_PATH, staleLockPath);
+	} catch {
+		return false;
+	}
+
+	try {
+		const movedLockContents = readFileSync(staleLockPath, "utf-8");
+		if (movedLockContents !== rawLockContents) {
+			try {
+				if (!existsSync(CONFIG_LOCK_PATH)) {
+					renameSync(staleLockPath, CONFIG_LOCK_PATH);
+				}
+			} catch {
+				// best effort restore when a live lock was moved unexpectedly
+			}
+			return false;
+		}
+	} catch {
+		try {
+			if (!existsSync(CONFIG_LOCK_PATH)) {
+				renameSync(staleLockPath, CONFIG_LOCK_PATH);
+			}
+		} catch {
+			// best effort restore when stale-lock verification fails
+		}
+		return false;
+	}
+
+	try {
+		unlinkSync(staleLockPath);
+	} catch {
+		// best effort stale-lock cleanup
+	}
+	return true;
+}
+
 function withPluginConfigLock<T>(fn: () => T): T {
 	mkdirSync(dirname(CONFIG_PATH), { recursive: true });
 	const deadline = Date.now() + 2_000;
@@ -225,25 +273,14 @@ function withPluginConfigLock<T>(fn: () => T): T {
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			const retryableLockError =
-				code === "EEXIST" || (process.platform === "win32" && code === "EPERM");
+				code === "EEXIST" || (process.platform === "win32" && (code === "EPERM" || code === "EBUSY"));
 			if (!retryableLockError || Date.now() >= deadline) {
 				throw error;
 			}
 			if (code === "EEXIST") {
 				try {
-					const lockOwnerPid = Number.parseInt(readFileSync(CONFIG_LOCK_PATH, "utf-8").trim(), 10);
-					if (
-						Number.isFinite(lockOwnerPid) &&
-						lockOwnerPid !== process.pid &&
-						!isProcessAlive(lockOwnerPid)
-					) {
-						const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
-						renameSync(CONFIG_LOCK_PATH, staleLockPath);
-						try {
-							unlinkSync(staleLockPath);
-						} catch {
-							// best effort stale-lock cleanup
-						}
+					const rawLockContents = readFileSync(CONFIG_LOCK_PATH, "utf-8");
+					if (tryRecoverStalePluginConfigLock(rawLockContents)) {
 						continue;
 					}
 				} catch {
