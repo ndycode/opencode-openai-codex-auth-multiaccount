@@ -369,10 +369,15 @@ export async function showSettingsMenu(
 
 	const action = await select<SettingsAction>(
 		[
-			{ label: UI_COPY.settings.back, value: "back" },
+			{ label: UI_COPY.settings.syncHeading, value: "cancel", kind: "heading" },
 			{ label: syncLabel, value: "toggle-sync", color: syncFromCodexMultiAuthEnabled ? "green" : "yellow" },
 			{ label: UI_COPY.settings.syncNow, value: "sync-now", color: "cyan" },
+			{ label: "", value: "cancel", separator: true },
+			{ label: UI_COPY.settings.maintenanceHeading, value: "cancel", kind: "heading" },
 			{ label: UI_COPY.settings.cleanupOverlaps, value: "cleanup-overlaps", color: "yellow" },
+			{ label: "", value: "cancel", separator: true },
+			{ label: UI_COPY.settings.navigationHeading, value: "cancel", kind: "heading" },
+			{ label: UI_COPY.settings.back, value: "back" },
 		],
 		{
 			message: UI_COPY.settings.title,

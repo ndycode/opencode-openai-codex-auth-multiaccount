@@ -29,8 +29,11 @@ export const UI_COPY = {
 	},
 	settings: {
 		title: "Settings",
-		subtitle: "Manage sync and cleanup options",
+		subtitle: "Organized controls for sync, maintenance, and future tools",
 		help: "↑↓ Move | Enter Select | Q Back",
+		syncHeading: "Sync",
+		maintenanceHeading: "Maintenance",
+		navigationHeading: "Navigation",
 		syncToggle: "Sync from codex-multi-auth",
 		syncNow: "Sync Now",
 		cleanupOverlaps: "Cleanup Synced Overlaps",

@@ -101,6 +101,9 @@ describe("auth-menu", () => {
 		const toggleItem = items.find((item) => item.value === "toggle-sync");
 		expect(toggleItem?.label).toContain("Sync from codex-multi-auth");
 		expect(toggleItem?.label).toContain("[enabled]");
+		expect(items.some((item) => item.label === "Sync")).toBe(true);
+		expect(items.some((item) => item.label === "Maintenance")).toBe(true);
+		expect(items.some((item) => item.label === "Navigation")).toBe(true);
 	});
 
 	it("preselects suggested prune candidates and exposes confirm action", async () => {
