@@ -60,17 +60,33 @@ vi.mock("../lib/storage.js", () => ({
 
 describe("codex-multi-auth sync", () => {
 	const mockExistsSync = vi.mocked(fs.existsSync);
-	const mockReadFileSync = vi.mocked(fs.readFileSync);
+	const originalReadFile = fs.promises.readFile.bind(fs.promises);
+	const mockReadFile = vi.spyOn(fs.promises, "readFile");
 	const originalEnv = {
 		CODEX_MULTI_AUTH_DIR: process.env.CODEX_MULTI_AUTH_DIR,
 		CODEX_HOME: process.env.CODEX_HOME,
 		USERPROFILE: process.env.USERPROFILE,
 		HOME: process.env.HOME,
 	};
+	const mockSourceStorageFile = (expectedPath: string, content: string) => {
+		mockReadFile.mockImplementation(async (filePath, options) => {
+			if (String(filePath) === expectedPath) {
+				return content;
+			}
+			return originalReadFile(
+				filePath as Parameters<typeof fs.promises.readFile>[0],
+				options as never,
+			);
+		});
+	};
 
 	beforeEach(() => {
 		vi.resetModules();
 		vi.clearAllMocks();
+		mockReadFile.mockReset();
+		mockReadFile.mockImplementation((path, options) =>
+			originalReadFile(path as Parameters<typeof fs.promises.readFile>[0], options as never),
+		);
 		delete process.env.CODEX_MULTI_AUTH_DIR;
 		delete process.env.CODEX_HOME;
 	});
@@ -80,6 +96,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_HOME = originalEnv.CODEX_HOME;
 		process.env.USERPROFILE = originalEnv.USERPROFILE;
 		process.env.HOME = originalEnv.HOME;
+		delete process.env.CODEX_AUTH_SYNC_MAX_ACCOUNTS;
 	});
 
 	it("prefers a project-scoped codex-multi-auth accounts file when present", async () => {
@@ -178,7 +195,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -228,7 +245,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -249,7 +266,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -276,7 +293,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -306,7 +323,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -404,7 +421,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -454,7 +471,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -471,7 +488,7 @@ describe("codex-multi-auth sync", () => {
 		);
 
 		const { loadCodexMultiAuthSourceStorage } = await import("../lib/codex-multi-auth-sync.js");
-		const resolved = loadCodexMultiAuthSourceStorage(process.cwd());
+		const resolved = await loadCodexMultiAuthSourceStorage(process.cwd());
 
 		expect(resolved.storage.accounts[0]?.organizationId).toBe("org-example123");
 	});
@@ -481,10 +498,73 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue("not valid json");
+		mockSourceStorageFile(globalPath, "not valid json");
 
 		const { loadCodexMultiAuthSourceStorage } = await import("../lib/codex-multi-auth-sync.js");
-		expect(() => loadCodexMultiAuthSourceStorage(process.cwd())).toThrow(/Invalid JSON/);
+		await expect(loadCodexMultiAuthSourceStorage(process.cwd())).rejects.toThrow(/Invalid JSON/);
+	});
+
+	it("enforces finite sync capacity override for prune-capable flows", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		process.env.CODEX_AUTH_SYNC_MAX_ACCOUNTS = "2";
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(globalPath, 
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-new-1",
+						organizationId: "org-new-1",
+						accountIdSource: "org",
+						email: "new-1@example.com",
+						refreshToken: "rt-new-1",
+						addedAt: 1,
+						lastUsed: 1,
+					},
+					{
+						accountId: "org-new-2",
+						organizationId: "org-new-2",
+						accountIdSource: "org",
+						email: "new-2@example.com",
+						refreshToken: "rt-new-2",
+						addedAt: 2,
+						lastUsed: 2,
+					},
+				],
+			}),
+		);
+
+		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							accountId: "org-existing",
+							organizationId: "org-existing",
+							accountIdSource: "org",
+							email: "existing@example.com",
+							refreshToken: "rt-existing",
+							addedAt: 10,
+							lastUsed: 10,
+						},
+					],
+				},
+				vi.fn(async () => {}),
+			),
+		);
+
+		const { previewSyncFromCodexMultiAuth, CodexMultiAuthSyncCapacityError } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(previewSyncFromCodexMultiAuth(process.cwd())).rejects.toBeInstanceOf(
+			CodexMultiAuthSyncCapacityError,
+		);
 	});
 
 	it("cleans up tagged synced overlaps by normalizing org-scoped identities first", async () => {
@@ -600,7 +680,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -664,7 +744,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,
@@ -719,7 +799,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
-		mockReadFileSync.mockReturnValue(
+		mockSourceStorageFile(globalPath, 
 			JSON.stringify({
 				version: 3,
 				activeIndex: 0,

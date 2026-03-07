@@ -48,8 +48,35 @@ const ESCAPE_TIMEOUT_MS = 50;
 mkdirSync(dirname(output), { recursive: true });
 
 const logEvent = (event) => {
-	appendFileSync(output, `${JSON.stringify({ ts: new Date().toISOString(), ...event })}\n`, "utf8");
+	appendFileSync(output, `${JSON.stringify(sanitizeAuditValue("event", { ts: new Date().toISOString(), ...event }))}\n`, {
+		encoding: "utf8",
+		mode: 0o600,
+	});
 };
+
+function sanitizeAuditValue(key, value) {
+	if (typeof value === "string") {
+		if (["utf8", "bytesHex", "token", "normalizedInput", "pending", "token"].includes(key)) {
+			return `[redacted:${value.length}]`;
+		}
+		if (value.includes("@")) {
+			return "[redacted-email]";
+		}
+		return value;
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => sanitizeAuditValue(key, entry));
+	}
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value).map(([entryKey, entryValue]) => [
+				entryKey,
+				sanitizeAuditValue(entryKey, entryValue),
+			]),
+		);
+	}
+	return value;
+}
 
 if (!process.stdin.isTTY || !process.stdout.isTTY) {
 	console.error("capture-tui-input requires a TTY");

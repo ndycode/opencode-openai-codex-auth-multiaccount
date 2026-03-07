@@ -1,6 +1,6 @@
 import { ANSI, isTTY, parseKey } from "./ansi.js";
 import type { UiTheme } from "./theme.js";
-import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 export interface MenuItem<T = string> {
@@ -72,7 +72,6 @@ function writeTuiAudit(event: Record<string, unknown>): void {
 			`${JSON.stringify(sanitizeAuditValue("event", { ts: new Date().toISOString(), ...event }))}\n`,
 			{ encoding: "utf8", mode: 0o600 },
 		);
-		chmodSync(logPath, 0o600);
 	} catch {
 		// best effort audit logging only
 	}

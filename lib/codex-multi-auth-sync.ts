@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join, win32 } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
@@ -21,6 +21,7 @@ const EXTERNAL_ACCOUNT_FILE_NAMES = [
 	"codex-accounts.json",
 ];
 const SYNC_ACCOUNT_TAG = "codex-multi-auth-sync";
+const SYNC_MAX_ACCOUNTS_OVERRIDE_ENV = "CODEX_AUTH_SYNC_MAX_ACCOUNTS";
 
 export interface CodexMultiAuthResolvedSource {
 	rootDir: string;
@@ -481,11 +482,23 @@ export function resolveCodexMultiAuthAccountsSource(projectPath = process.cwd())
 	);
 }
 
-export function loadCodexMultiAuthSourceStorage(
+function getSyncCapacityLimit(): number {
+	const override = (process.env[SYNC_MAX_ACCOUNTS_OVERRIDE_ENV] ?? "").trim();
+	if (override.length === 0) {
+		return ACCOUNT_LIMITS.MAX_ACCOUNTS;
+	}
+	const parsed = Number(override);
+	if (Number.isFinite(parsed) && parsed >= 0) {
+		return parsed;
+	}
+	return ACCOUNT_LIMITS.MAX_ACCOUNTS;
+}
+
+export async function loadCodexMultiAuthSourceStorage(
 	projectPath = process.cwd(),
-): CodexMultiAuthResolvedSource & { storage: AccountStorageV3 } {
+): Promise<CodexMultiAuthResolvedSource & { storage: AccountStorageV3 }> {
 	const resolved = resolveCodexMultiAuthAccountsSource(projectPath);
-	const raw = readFileSync(resolved.accountsPath, "utf-8");
+	const raw = await fs.readFile(resolved.accountsPath, "utf-8");
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw) as unknown;
@@ -507,7 +520,7 @@ export function loadCodexMultiAuthSourceStorage(
 async function loadPreparedCodexMultiAuthSourceStorage(
 	projectPath = process.cwd(),
 ): Promise<CodexMultiAuthResolvedSource & { storage: AccountStorageV3 }> {
-	const resolved = loadCodexMultiAuthSourceStorage(projectPath);
+	const resolved = await loadCodexMultiAuthSourceStorage(projectPath);
 	const currentStorage = await withAccountStorageTransaction((current) => Promise.resolve(current));
 	const preparedStorage = filterSourceAccountsAgainstExistingEmails(
 		resolved.storage,
@@ -540,33 +553,22 @@ export async function syncFromCodexMultiAuth(
 	projectPath = process.cwd(),
 ): Promise<CodexMultiAuthSyncResult> {
 	const resolved = await loadPreparedCodexMultiAuthSourceStorage(projectPath);
-	let result: ImportAccountsResult;
-	try {
-		result = await withNormalizedImportFile(
-			tagSyncedAccounts(resolved.storage),
-			(filePath) =>
-				importAccounts(
-					filePath,
-					{
-						preImportBackupPrefix: "codex-multi-auth-sync-backup",
-						backupMode: "required",
-					},
-					(normalizedStorage, existing) =>
-						filterSourceAccountsAgainstExistingEmails(
-							normalizedStorage,
-							existing?.accounts ?? [],
-						),
-				),
-		);
-	} catch (error) {
-		if (
-			error instanceof CodexMultiAuthSyncCapacityError ||
-			(error instanceof Error && /exceed(?: the)? maximum/i.test(error.message))
-		) {
-			await assertSyncWithinCapacity(await loadPreparedCodexMultiAuthSourceStorage(projectPath));
-		}
-		throw error;
-	}
+	const result: ImportAccountsResult = await withNormalizedImportFile(
+		tagSyncedAccounts(resolved.storage),
+		(filePath) =>
+			importAccounts(
+				filePath,
+				{
+					preImportBackupPrefix: "codex-multi-auth-sync-backup",
+					backupMode: "required",
+				},
+				(normalizedStorage, existing) =>
+					filterSourceAccountsAgainstExistingEmails(
+						normalizedStorage,
+						existing?.accounts ?? [],
+					),
+			),
+	);
 	return {
 		rootDir: resolved.rootDir,
 		accountsPath: resolved.accountsPath,
@@ -655,7 +657,10 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(): Promise<CodexMultiA
 async function assertSyncWithinCapacity(
 	resolved: CodexMultiAuthResolvedSource & { storage: AccountStorageV3 },
 ): Promise<void> {
-	if (!Number.isFinite(ACCOUNT_LIMITS.MAX_ACCOUNTS)) {
+	// Unlimited remains the default, but a finite override keeps the sync prune/capacity
+	// path testable and available for operators who intentionally enforce a soft cap.
+	const maxAccounts = getSyncCapacityLimit();
+	if (!Number.isFinite(maxAccounts)) {
 		return;
 	}
 	const details = await withAccountStorageTransaction<CodexMultiAuthSyncCapacityDetails | null>((current) => {
@@ -667,7 +672,7 @@ async function assertSyncWithinCapacity(
 		};
 		const sourceDedupedTotal = buildMergedDedupedAccounts([], resolved.storage.accounts).length;
 		const mergedAccounts = buildMergedDedupedAccounts(existing.accounts, resolved.storage.accounts);
-		if (mergedAccounts.length <= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+		if (mergedAccounts.length <= maxAccounts) {
 			return Promise.resolve(null);
 		}
 
@@ -676,7 +681,7 @@ async function assertSyncWithinCapacity(
 		const dedupedTotal = mergedAccounts.length;
 		const importableNewAccounts = Math.max(0, dedupedTotal - currentCount);
 		const skippedOverlaps = Math.max(0, sourceCount - importableNewAccounts);
-		if (sourceDedupedTotal > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+		if (sourceDedupedTotal > maxAccounts) {
 			return Promise.resolve({
 				rootDir: resolved.rootDir,
 				accountsPath: resolved.accountsPath,
@@ -685,8 +690,8 @@ async function assertSyncWithinCapacity(
 				sourceCount,
 				sourceDedupedTotal,
 				dedupedTotal: sourceDedupedTotal,
-				maxAccounts: ACCOUNT_LIMITS.MAX_ACCOUNTS,
-				needToRemove: sourceDedupedTotal - ACCOUNT_LIMITS.MAX_ACCOUNTS,
+				maxAccounts: maxAccounts,
+				needToRemove: sourceDedupedTotal - maxAccounts,
 				importableNewAccounts: sourceDedupedTotal,
 				skippedOverlaps: Math.max(0, sourceCount - sourceDedupedTotal),
 				suggestedRemovals: [],
@@ -722,7 +727,7 @@ async function assertSyncWithinCapacity(
 				}
 				return left.index - right.index;
 			})
-			.slice(0, Math.max(5, dedupedTotal - ACCOUNT_LIMITS.MAX_ACCOUNTS))
+			.slice(0, Math.max(5, dedupedTotal - maxAccounts))
 			.map(({ index, email, accountLabel, isCurrentAccount, score, reason }) => ({
 				index,
 				email,
@@ -740,8 +745,8 @@ async function assertSyncWithinCapacity(
 			sourceCount,
 			sourceDedupedTotal,
 			dedupedTotal,
-			maxAccounts: ACCOUNT_LIMITS.MAX_ACCOUNTS,
-			needToRemove: dedupedTotal - ACCOUNT_LIMITS.MAX_ACCOUNTS,
+			maxAccounts: maxAccounts,
+			needToRemove: dedupedTotal - maxAccounts,
 			importableNewAccounts,
 			skippedOverlaps,
 			suggestedRemovals,
