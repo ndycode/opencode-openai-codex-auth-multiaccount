@@ -1249,6 +1249,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 			const lines: Array<{ line: string; tone: "normal" | "muted" | "success" | "warning" | "danger" | "accent" }> = [];
 			let footer = "Running...";
+			let renderedLineCount = 0;
+			let hasRendered = false;
 			const stripAnsi = (value: string): string => sanitizeScreenText(value);
 			const truncateAnsi = (value: string, maxVisibleChars: number): string => {
 				if (maxVisibleChars <= 0) return "";
@@ -1274,6 +1276,24 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				}
 				return output + suffix;
 			};
+			const renderFrame = (frameLines: string[]) => {
+				const previousLineCount = renderedLineCount;
+				const nextLineCount = Math.max(previousLineCount, frameLines.length);
+
+				if (!hasRendered) {
+					process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
+				} else if (previousLineCount > 0) {
+					process.stdout.write(ANSI.up(previousLineCount));
+				}
+
+				for (let i = 0; i < nextLineCount; i += 1) {
+					const line = frameLines[i] ?? "";
+					process.stdout.write(`${ANSI.clearLine}${line}\n`);
+				}
+
+				renderedLineCount = nextLineCount;
+				hasRendered = true;
+			};
 			const render = () => {
 				const screenLines: string[] = [];
 				const columns = process.stdout.columns ?? 120;
@@ -1289,7 +1309,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				);
 				screenLines.push("");
 				screenLines.push(paintUiText(ui, sanitizeScreenText(footer), "muted"));
-				process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1) + screenLines.join("\n"));
+				renderFrame(screenLines);
 			};
 
 			render();
@@ -1451,10 +1471,30 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			if (!ui.v2Enabled || !isInteractiveTTY()) return null;
 
 			const stripAnsi = (value: string): string => sanitizeScreenText(value);
+			let renderedLineCount = 0;
+			let hasRendered = false;
 			const truncate = (value: string, maxVisibleChars: number): string => {
 				const visible = stripAnsi(value);
 				if (visible.length <= maxVisibleChars) return value;
 				return `${visible.slice(0, Math.max(0, maxVisibleChars - 3))}...`;
+			};
+			const renderFrame = (frameLines: string[]) => {
+				const previousLineCount = renderedLineCount;
+				const nextLineCount = Math.max(previousLineCount, frameLines.length);
+
+				if (!hasRendered) {
+					process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
+				} else if (previousLineCount > 0) {
+					process.stdout.write(ANSI.up(previousLineCount));
+				}
+
+				for (let i = 0; i < nextLineCount; i += 1) {
+					const line = frameLines[i] ?? "";
+					process.stdout.write(`${ANSI.clearLine}${line}\n`);
+				}
+
+				renderedLineCount = nextLineCount;
+				hasRendered = true;
 			};
 
 			const statusBadgeForRow = (row: CheckDashboardRow): string => {
@@ -1502,7 +1542,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				}
 				lines.push("");
 				lines.push(paintUiText(ui, sanitizeScreenText(footer), "muted"));
-				process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1) + lines.join("\n"));
+				renderFrame(lines);
 			};
 
 			return {
