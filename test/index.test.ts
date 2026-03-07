@@ -394,6 +394,7 @@ type PluginType = {
 		"codex-list": OptionalToolExecute<{ tag?: string }>;
 		"codex-switch": OptionalToolExecute<{ index?: number }>;
 		"codex-status": ToolExecute;
+		"codex-limits": ToolExecute;
 		"codex-metrics": ToolExecute;
 		"codex-help": ToolExecute<{ topic?: string }>;
 		"codex-setup": OptionalToolExecute<{ wizard?: boolean }>;
@@ -453,6 +454,7 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(plugin.tool["codex-list"]).toBeDefined();
 			expect(plugin.tool["codex-switch"]).toBeDefined();
 			expect(plugin.tool["codex-status"]).toBeDefined();
+			expect(plugin.tool["codex-limits"]).toBeDefined();
 			expect(plugin.tool["codex-metrics"]).toBeDefined();
 			expect(plugin.tool["codex-help"]).toBeDefined();
 			expect(plugin.tool["codex-setup"]).toBeDefined();
@@ -688,6 +690,146 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Account Status");
 			expect(result).toContain("Active index by model family");
 		});
+	});
+
+	describe("codex-limits tool", () => {
+		let originalFetch: typeof globalThis.fetch;
+
+		beforeEach(() => {
+			originalFetch = globalThis.fetch;
+		});
+
+		afterEach(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		it("returns error when no accounts", async () => {
+			mockStorage.accounts = [];
+			const result = await plugin.tool["codex-limits"].execute();
+			expect(result).toContain("No Codex accounts configured");
+		});
+
+		it("shows live usage windows from wham usage", async () => {
+			mockStorage.accounts = [
+				{
+					refreshToken: "r1",
+					accountId: "acc-1",
+					email: "user@example.com",
+					accessToken: "access-1",
+					expiresAt: Date.now() + 3600_000,
+				},
+			];
+			globalThis.fetch = vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						plan_type: "team",
+						rate_limit: {
+							primary_window: {
+								used_percent: 13,
+								limit_window_seconds: 18000,
+								reset_at: Math.floor(Date.now() / 1000) + 3600,
+							},
+							secondary_window: {
+								used_percent: 36,
+								limit_window_seconds: 604800,
+								reset_at: Math.floor(Date.now() / 1000) + 86400,
+							},
+						},
+						code_review_rate_limit: {
+							primary_window: {
+								used_percent: 0,
+								limit_window_seconds: 604800,
+								reset_at: Math.floor(Date.now() / 1000) + 7200,
+							},
+						},
+						credits: { unlimited: true, has_credits: true },
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			const result = await plugin.tool["codex-limits"].execute();
+
+			expect(result).toContain("Codex limits");
+			expect(result).toContain("5h limit: 87% left");
+			expect(result).toContain("Weekly limit: 64% left");
+			expect(result).toContain("Code review: 100% left");
+			expect(result).toContain("Plan: team");
+			expect(result).toContain("Credits: unlimited");
+			expect(globalThis.fetch).toHaveBeenCalledWith(
+				"https://chatgpt.com/backend-api/wham/usage",
+				expect.objectContaining({ method: "GET" }),
+			);
+		});
+
+		it("refreshes missing tokens before fetching usage", async () => {
+			const { saveAccounts } = await import("../lib/storage.js");
+			mockStorage.accounts = [
+				{ refreshToken: "r1", accountId: "acc-1", email: "user@example.com" },
+			];
+			globalThis.fetch = vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						rate_limit: {
+							primary_window: { used_percent: 0, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 1800 },
+							secondary_window: { used_percent: 0, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 3600 },
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			const result = await plugin.tool["codex-limits"].execute();
+
+			expect(result).toContain("100% left");
+			expect(mockStorage.accounts[0]?.accessToken).toBe("refreshed-access");
+			expect(saveAccounts).toHaveBeenCalled();
+		});
+
+	it("deduplicates accounts with same refreshToken", async () => {
+		mockStorage.accounts = [
+			{
+				refreshToken: "rt_same",
+				accountId: "acc-1",
+				email: "a@test.com",
+				accessToken: "access-1",
+				expiresAt: Date.now() + 3600_000,
+			},
+			{
+				refreshToken: "rt_same",
+				accountId: "acc-2",
+				email: "a@test.com",
+				accessToken: "access-2",
+				expiresAt: Date.now() + 3600_000,
+			},
+			{
+				refreshToken: "rt_other",
+				accountId: "acc-3",
+				email: "b@test.com",
+				accessToken: "access-3",
+				expiresAt: Date.now() + 3600_000,
+			},
+		];
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					rate_limit: {
+						primary_window: { used_percent: 50, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 1800 },
+						secondary_window: { used_percent: 50, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 86400 },
+					},
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			),
+		);
+
+		const result = await plugin.tool["codex-limits"].execute();
+
+		expect(result).toBeDefined();
+		// Header should say "2 accounts" (not 3)
+		expect(result).toContain("2 account");
+		// fetch should be called exactly twice (once per unique refreshToken)
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+	});
 	});
 
 	describe("codex-metrics tool", () => {
