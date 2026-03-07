@@ -157,7 +157,7 @@ import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-
 import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
 import { confirm } from "./lib/ui/confirm.js";
-import { ANSI, isTTY as isInteractiveTTY } from "./lib/ui/ansi.js";
+import { ANSI } from "./lib/ui/ansi.js";
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
@@ -1243,7 +1243,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			push: (line: string, tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent") => void;
 			finish: (summaryLines?: Array<{ line: string; tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent" }>) => Promise<void>;
 		} | null => {
-			if (!ui.v2Enabled || !isInteractiveTTY()) {
+			if (!ui.v2Enabled || !supportsInteractiveMenus()) {
 				return null;
 			}
 
@@ -1468,7 +1468,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			render: (progressText: string, footer?: string) => void;
 			finish: (progressText: string, footer?: string) => Promise<void>;
 		} | null => {
-			if (!ui.v2Enabled || !isInteractiveTTY()) return null;
+			if (!ui.v2Enabled || !supportsInteractiveMenus()) return null;
 
 			const stripAnsi = (value: string): string => sanitizeScreenText(value);
 			let renderedLineCount = 0;
