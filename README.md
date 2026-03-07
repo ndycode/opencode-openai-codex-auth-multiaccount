@@ -11,7 +11,7 @@ OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with mo
 ## What You Get
 
 - **GPT-5.4, GPT-5 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
-- **Multi-account support** — Add up to 20 ChatGPT accounts, health-aware rotation with automatic failover
+- **Multi-account support** — Add as many ChatGPT accounts as you need, health-aware rotation with automatic failover
 - **Per-project accounts** — Each project gets its own account storage (new in v4.10.0)
 - **Workspace-aware identity persistence** — Keeps workspace/org identity stable across token refresh and verify-flagged restore flows
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
