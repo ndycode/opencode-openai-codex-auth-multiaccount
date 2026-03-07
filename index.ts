@@ -25,6 +25,7 @@
 
 import { tool } from "@opencode-ai/plugin/tool";
 import { promises as fsPromises } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
 import {
@@ -1233,27 +1234,200 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		const SCREEN_CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]", "g");
 		const sanitizeScreenText = (value: string): string =>
 			value.replace(ANSI_STYLE_REGEX, "").replace(SCREEN_CONTROL_CHAR_REGEX, "").trim();
+		type OperationTone = "normal" | "muted" | "success" | "warning" | "danger" | "accent";
+
+		const styleOperationText = (
+			ui: UiRuntimeOptions,
+			text: string,
+			tone: OperationTone,
+		): string => {
+			if (ui.v2Enabled) {
+				const mappedTone =
+					tone === "accent" ? "accent" : tone === "normal" ? "normal" : tone;
+				return paintUiText(ui, text, mappedTone);
+			}
+			const ansiCode =
+				tone === "accent"
+					? ANSI.cyan
+					: tone === "success"
+						? ANSI.green
+						: tone === "warning"
+							? ANSI.yellow
+							: tone === "danger"
+								? ANSI.red
+								: tone === "muted"
+									? ANSI.dim
+									: "";
+			return ansiCode ? `${ansiCode}${text}${ANSI.reset}` : text;
+		};
+
+		const isAbortError = (error: unknown): boolean => {
+			if (!(error instanceof Error)) return false;
+			const maybe = error as Error & { code?: string };
+			return maybe.name === "AbortError" || maybe.code === "ABORT_ERR";
+		};
+
+		const waitForMenuReturn = async (
+			ui: UiRuntimeOptions,
+			options: {
+				promptText?: string;
+				autoReturnMs?: number;
+				pauseOnAnyKey?: boolean;
+			} = {},
+		): Promise<void> => {
+			if (!process.stdin.isTTY || !process.stdout.isTTY) {
+				return;
+			}
+
+			const promptText = options.promptText ?? "Press Enter to return to the dashboard.";
+			const autoReturnMs = options.autoReturnMs ?? 0;
+			const pauseOnAnyKey = options.pauseOnAnyKey ?? true;
+
+			try {
+				let chunk: Buffer | string | null;
+				do {
+					chunk = process.stdin.read();
+				} while (chunk !== null);
+			} catch {
+				// best effort drain
+			}
+
+			const writeInlineStatus = (message: string) => {
+				process.stdout.write(`\r${ANSI.clearLine}${styleOperationText(ui, message, "muted")}`);
+			};
+			const clearInlineStatus = () => {
+				process.stdout.write(`\r${ANSI.clearLine}`);
+			};
+
+			if (autoReturnMs > 0) {
+				if (!pauseOnAnyKey) {
+					await new Promise((resolve) => setTimeout(resolve, autoReturnMs));
+					return;
+				}
+
+				const wasRaw = process.stdin.isRaw ?? false;
+				const endAt = Date.now() + autoReturnMs;
+				let lastShownSeconds: number | null = null;
+				const renderCountdown = () => {
+					const remainingMs = Math.max(0, endAt - Date.now());
+					const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+					if (lastShownSeconds === remainingSeconds) return;
+					lastShownSeconds = remainingSeconds;
+					writeInlineStatus(`Returning to dashboard in ${remainingSeconds}s. Press any key to pause.`);
+				};
+
+				renderCountdown();
+				const pinned = await new Promise<boolean>((resolve) => {
+					let done = false;
+					const interval = setInterval(renderCountdown, 80);
+					let timeout: NodeJS.Timeout | null = setTimeout(() => {
+						timeout = null;
+						if (!done) {
+							done = true;
+							cleanup();
+							resolve(false);
+						}
+					}, autoReturnMs);
+					const onData = () => {
+						if (done) return;
+						done = true;
+						cleanup();
+						resolve(true);
+					};
+					const cleanup = () => {
+						clearInterval(interval);
+						if (timeout) {
+							clearTimeout(timeout);
+							timeout = null;
+						}
+						process.stdin.removeListener("data", onData);
+						try {
+							process.stdin.setRawMode(wasRaw);
+						} catch {
+							// best effort restore
+						}
+					};
+
+					try {
+						process.stdin.setRawMode(true);
+					} catch {
+						// best effort
+					}
+					process.stdin.on("data", onData);
+					process.stdin.resume();
+				});
+
+				clearInlineStatus();
+				if (!pinned) {
+					return;
+				}
+
+				writeInlineStatus("Paused. Press any key to return.");
+				await new Promise<void>((resolve) => {
+					const wasRaw = process.stdin.isRaw ?? false;
+					const onData = () => {
+						cleanup();
+						resolve();
+					};
+					const cleanup = () => {
+						process.stdin.removeListener("data", onData);
+						try {
+							process.stdin.setRawMode(wasRaw);
+						} catch {
+							// best effort restore
+						}
+					};
+
+					try {
+						process.stdin.setRawMode(true);
+					} catch {
+						// best effort fallback
+					}
+					process.stdin.on("data", onData);
+					process.stdin.resume();
+				});
+				clearInlineStatus();
+				return;
+			}
+
+			const rl = createInterface({
+				input: process.stdin,
+				output: process.stdout,
+			});
+			try {
+				process.stdout.write(`\r${ANSI.clearLine}`);
+				await rl.question(`${styleOperationText(ui, promptText, "muted")} `);
+			} catch (error) {
+				if (!isAbortError(error)) {
+					throw error;
+				}
+			} finally {
+				rl.close();
+				clearInlineStatus();
+			}
+		};
 
 		const createOperationScreen = (
 			ui: UiRuntimeOptions,
 			title: string,
 			subtitle?: string,
 		): {
-			push: (line: string, tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent") => void;
-			finish: (summaryLines?: Array<{ line: string; tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent" }>) => Promise<void>;
+			push: (line: string, tone?: OperationTone) => void;
+			finish: (
+				summaryLines?: Array<{ line: string; tone?: OperationTone }>,
+				options?: { failed?: boolean },
+			) => Promise<void>;
 			abort: () => void;
 		} | null => {
-			if (!ui.v2Enabled || !supportsInteractiveMenus()) {
+			if (!supportsInteractiveMenus()) {
 				return null;
 			}
 
-			const entries: Array<{
-				line: string;
-				tone: "normal" | "muted" | "success" | "warning" | "danger" | "accent";
-			}> = [];
+			const entries: Array<{ line: string; tone: OperationTone }> = [];
 			const spinnerFrames = ["-", "\\", "|", "/"];
 			let frame = 0;
 			let running = true;
+			let failed = false;
 			let initialized = false;
 			let timer: NodeJS.Timeout | null = null;
 			let closed = false;
@@ -1273,23 +1447,29 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const lines: string[] = [];
 				const maxVisibleLines = Math.max(8, (process.stdout.rows ?? 24) - 8);
 				const visibleEntries = entries.slice(-maxVisibleLines);
-				const spinner = running ? `${spinnerFrames[frame % spinnerFrames.length] ?? "-"} ` : "+ ";
-				const stageTone: "muted" | "accent" | "success" = running ? "accent" : "success";
+				const spinner = running
+					? `${spinnerFrames[frame % spinnerFrames.length] ?? "-"} `
+					: failed
+						? "x "
+						: "+ ";
+				const stageTone: OperationTone = failed ? "danger" : running ? "accent" : "success";
+				const stageText = running
+					? `${spinner}${sanitizeScreenText(subtitle ?? "Working")}`
+					: failed
+						? "Action failed"
+						: "Done";
 
-				lines.push(...formatUiHeader(ui, sanitizeScreenText(title)));
+				lines.push(styleOperationText(ui, sanitizeScreenText(title), "accent"));
+				lines.push(styleOperationText(ui, stageText, stageTone));
 				lines.push("");
-				if (subtitle) {
-					lines.push(paintUiText(ui, `${spinner}${sanitizeScreenText(subtitle)}`, stageTone));
-					lines.push("");
-				}
 				for (const entry of visibleEntries) {
-					lines.push(paintUiText(ui, sanitizeScreenText(entry.line), entry.tone));
+					lines.push(styleOperationText(ui, sanitizeScreenText(entry.line), entry.tone));
 				}
-				if (running) {
+				for (let i = visibleEntries.length; i < maxVisibleLines; i += 1) {
 					lines.push("");
-					lines.push(paintUiText(ui, "Working...", "muted"));
 				}
-
+				lines.push("");
+				if (running) lines.push(styleOperationText(ui, "Working...", "muted"));
 				process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1) + lines.join("\n"));
 				frame += 1;
 			};
@@ -1312,7 +1492,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					entries.push({ line: sanitizeScreenText(line), tone });
 					render();
 				},
-				finish: async (summaryLines) => {
+				finish: async (summaryLines, options) => {
 					ensureScreen();
 					if (summaryLines && summaryLines.length > 0) {
 						entries.push({ line: "", tone: "normal" });
@@ -1320,18 +1500,22 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							entries.push({ line: sanitizeScreenText(entry.line), tone: entry.tone ?? "normal" });
 						}
 					}
+					failed = options?.failed === true;
 					running = false;
 					if (timer) {
 						clearInterval(timer);
 						timer = null;
 					}
 					render();
-					await new Promise((resolve) => setTimeout(resolve, 2_000));
+					await waitForMenuReturn(ui, failed
+						? { promptText: "Press Enter to return to the dashboard." }
+						: { autoReturnMs: 2_000, pauseOnAnyKey: true });
 					dispose();
 				},
 				abort: dispose,
 			};
 		};
+		type DashboardOperationScreen = NonNullable<ReturnType<typeof createOperationScreen>>;
 
 		const getStatusMarker = (
 			ui: UiRuntimeOptions,
@@ -3441,16 +3625,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 							};
 
-							const verifyFlaggedAccounts = async (): Promise<void> => {
+							const verifyFlaggedAccounts = async (
+								screenOverride?: DashboardOperationScreen | null,
+							): Promise<void> => {
 								const ui = resolveUiRuntime();
-								const screen = createOperationScreen(
-									ui,
-									"Check Problem Accounts",
-									"Checking flagged accounts and attempting restore",
-								);
+								const screen =
+									screenOverride ??
+									createOperationScreen(
+										ui,
+										"Check Problem Accounts",
+										"Checking flagged accounts and attempting restore",
+									);
 								const emit = (
 									line: string,
-									tone: "normal" | "muted" | "success" | "warning" | "danger" | "accent" = "normal",
+									tone: OperationTone = "normal",
 								) => {
 									if (screen) {
 										screen.push(line, tone);
@@ -3468,8 +3656,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 									];
 									const restoreEmailCounts = buildEmailCountMap(restoreContext);
 									if (flaggedStorage.accounts.length === 0) {
-										emit("No flagged accounts to verify.");
-										if (screen) {
+									emit("No flagged accounts to verify.");
+										if (screen && !screenOverride) {
 											await screen.finish();
 											screenFinished = true;
 										}
@@ -3585,7 +3773,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										line: string;
 										tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent";
 									}> = [{ line: `Results: ${restored.length} restored, ${remaining.length} still flagged`, tone: remaining.length > 0 ? "warning" : "success" }];
-									if (screen) {
+									if (screen && !screenOverride) {
 										await screen.finish(summaryLines);
 										screenFinished = true;
 										return;
@@ -3596,7 +3784,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 									console.log("");
 								} finally {
-									if (screen && !screenFinished) {
+									if (screen && !screenFinished && !screenOverride) {
 										screen.abort();
 									}
 								}
@@ -3926,16 +4114,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 							};
 
-							const pickBestAccountFromDashboard = async (): Promise<void> => {
+							const pickBestAccountFromDashboard = async (
+								screenOverride?: DashboardOperationScreen | null,
+							): Promise<void> => {
 								const ui = resolveUiRuntime();
-								const screen = createOperationScreen(ui, "Best Account", "Comparing accounts");
+								const screen =
+									screenOverride ??
+									createOperationScreen(ui, "Best Account", "Comparing accounts");
 								let screenFinished = false;
 								try {
 									const storage = await loadAccounts();
 									if (!storage || storage.accounts.length === 0) {
 										if (screen) {
 											screen.push("No accounts available.", "warning");
-											await screen.finish();
+											if (!screenOverride) {
+												await screen.finish();
+											}
 											screenFinished = true;
 										} else {
 											console.log("\nNo accounts available.\n");
@@ -3958,7 +4152,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 										if (screen) {
 											screen.push(`Compared ${explainability.length} account(s).`, "muted");
 											screen.push("No eligible account available.", "warning");
-											await screen.finish();
+											if (!screenOverride) {
+												await screen.finish();
+											}
 											screenFinished = true;
 										} else {
 											console.log("\nNo eligible account available.\n");
@@ -3979,11 +4175,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (screen) {
 										screen.push(`Compared ${explainability.length} account(s); ${eligible.length} eligible.`, "muted");
 										screen.push(`${getStatusMarker(ui, "ok")} ${selectedLabel}`, "success");
+										screen.push(
+											`Availability ready | risk low | health ${best.healthScore} | tokens ${best.tokensAvailable}`,
+											"muted",
+										);
 										if (best.reasons.length > 0) {
 											screen.push(`Why: ${best.reasons.slice(0, 3).join("; ")}`, "muted");
 										}
-										screen.push(`Health ${best.healthScore}; tokens ${best.tokensAvailable}`, "muted");
-										await screen.finish([{ line: "Best account selected.", tone: "success" }]);
+										if (!screenOverride) {
+											await screen.finish([{ line: "Best account selected.", tone: "success" }]);
+										}
 										screenFinished = true;
 										return;
 									}
@@ -3993,23 +4194,46 @@ while (attempted.size < Math.max(1, accountCount)) {
 									const message = error instanceof Error ? error.message : String(error);
 									if (screen) {
 										screen.push(`Failed to pick best account: ${message}`, "danger");
-										await screen.finish();
+										if (!screenOverride) {
+											await screen.finish(undefined, { failed: true });
+										}
 										screenFinished = true;
 										return;
 									}
 									console.log(`\nFailed to pick best account: ${message}\n`);
 								} finally {
-									if (screen && !screenFinished) {
+									if (screen && !screenFinished && !screenOverride) {
 										screen.abort();
 									}
 								}
 							};
 
 							const runAutoRepairFromDashboard = async (): Promise<void> => {
+								const ui = resolveUiRuntime();
+								const screen = createOperationScreen(
+									ui,
+									"Auto-Fix",
+									"Checking and fixing common issues",
+								);
+								let screenFinished = false;
+								const emit = (
+									line: string,
+									tone: OperationTone = "normal",
+								) => {
+									if (screen) {
+										screen.push(line, tone);
+										return;
+									}
+									console.log(line);
+								};
 								try {
 									const initialStorage = await loadAccounts();
 									if (!initialStorage || initialStorage.accounts.length === 0) {
-										console.log("\nNo accounts available.\n");
+										emit("No accounts available.", "warning");
+										if (screen) {
+											await screen.finish();
+											screenFinished = true;
+										}
 										return;
 									}
 									const appliedFixes: string[] = [];
@@ -4017,10 +4241,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 									const cleanupResult = await cleanupCodexMultiAuthSyncedOverlaps();
 									if (cleanupResult.removed > 0) {
 										appliedFixes.push(`Removed ${cleanupResult.removed} synced overlap(s).`);
+										emit(`Removed ${cleanupResult.removed} synced overlap(s).`, "success");
 									}
 									const storage = await loadAccounts();
 									if (!storage || storage.accounts.length === 0) {
-										console.log("\nNo accounts available after cleanup.\n");
+										emit("No accounts available after cleanup.", "warning");
+										if (screen) {
+											await screen.finish();
+											screenFinished = true;
+										}
 										return;
 									}
 
@@ -4044,21 +4273,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (changedByRefresh) {
 										await saveAccounts(storage);
 										appliedFixes.push(`Refreshed ${refreshedCount} account token(s).`);
+										emit(`Refreshed ${refreshedCount} account token(s).`, "success");
 									}
-									await verifyFlaggedAccounts();
-									await pickBestAccountFromDashboard();
-									console.log("");
-									console.log("Auto-repair complete.");
+									await verifyFlaggedAccounts(screen);
+									await pickBestAccountFromDashboard(screen);
+									emit("");
+									emit("Auto-repair complete.", "success");
 									for (const entry of appliedFixes) {
-										console.log(`- ${entry}`);
+										emit(`- ${entry}`, "muted");
 									}
 									for (const entry of fixErrors) {
-										console.log(`- warning: ${entry}`);
+										emit(`- warning: ${entry}`, "warning");
 									}
-									console.log("");
+									if (screen) {
+										await screen.finish();
+										screenFinished = true;
+									} else {
+										console.log("");
+									}
 								} catch (error) {
 									const message = error instanceof Error ? error.message : String(error);
-									console.log(`\nAuto-repair failed: ${message}\n`);
+									if (screen) {
+										screen.push(`Auto-repair failed: ${message}`, "danger");
+										await screen.finish(undefined, { failed: true });
+										screenFinished = true;
+									} else {
+										console.log(`\nAuto-repair failed: ${message}\n`);
+									}
+								} finally {
+									if (screen && !screenFinished) {
+										screen.abort();
+									}
 								}
 							};
 

@@ -88,22 +88,30 @@ describe("auth-menu", () => {
 		expect(firstCall).toBeDefined();
 		const items = firstCall?.[0] as Array<{ label: string; value?: { type?: string } }>;
 		expect(items.some((item) => item.value?.type === "settings")).toBe(true);
+		expect(items.some((item) => item.label === "Settings" && item.kind === "heading")).toBe(true);
 	});
 
-	it("renders sync toggle state in settings menu", async () => {
-		vi.mocked(select).mockResolvedValueOnce("cancel");
+	it("renders settings hub categories before sync actions", async () => {
+		vi.mocked(select)
+			.mockResolvedValueOnce("sync")
+			.mockResolvedValueOnce("cancel");
 
 		await showSettingsMenu(true);
 
 		const firstCall = vi.mocked(select).mock.calls[0];
 		expect(firstCall).toBeDefined();
-		const items = firstCall?.[0] as Array<{ label: string; value?: string }>;
+		const hubItems = firstCall?.[0] as Array<{ label: string; value?: string; kind?: string }>;
+		expect(hubItems.some((item) => item.label === "Categories")).toBe(true);
+		expect(hubItems.some((item) => item.value === "sync")).toBe(true);
+		expect(hubItems.some((item) => item.value === "maintenance")).toBe(true);
+
+		const secondCall = vi.mocked(select).mock.calls[1];
+		expect(secondCall).toBeDefined();
+		const items = secondCall?.[0] as Array<{ label: string; value?: string }>;
 		const toggleItem = items.find((item) => item.value === "toggle-sync");
 		expect(toggleItem?.label).toContain("Sync from codex-multi-auth");
 		expect(toggleItem?.label).toContain("[enabled]");
 		expect(items.some((item) => item.label === "Sync")).toBe(true);
-		expect(items.some((item) => item.label === "Maintenance")).toBe(true);
-		expect(items.some((item) => item.value === "cleanup-duplicate-emails")).toBe(true);
 		expect(items.some((item) => item.label === "Navigation")).toBe(true);
 	});
 

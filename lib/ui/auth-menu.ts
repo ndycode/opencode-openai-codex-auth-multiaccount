@@ -61,6 +61,8 @@ export type SettingsAction =
 	| "back"
 	| "cancel";
 
+type SettingsHubAction = "sync" | "maintenance" | "back" | "cancel";
+
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 const ANSI_CSI_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
 const CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
@@ -256,11 +258,13 @@ export async function showAuthMenu(
 			{ label: UI_COPY.mainMenu.checkAccounts, value: { type: "check" }, color: "green" },
 			{ label: UI_COPY.mainMenu.bestAccount, value: { type: "forecast" }, color: "green" },
 			{ label: UI_COPY.mainMenu.fixIssues, value: { type: "fix" }, color: "green" },
-			{ label: UI_COPY.mainMenu.settings, value: { type: "settings" }, color: "green" },
 			{ label: "", value: { type: "cancel" }, separator: true },
 			{ label: UI_COPY.mainMenu.moreChecks, value: { type: "cancel" }, kind: "heading" },
 			{ label: UI_COPY.mainMenu.refreshChecks, value: { type: "deep-check" }, color: "green" },
 			{ label: verifyLabel, value: { type: "verify-flagged" }, color: flaggedCount > 0 ? "red" : "yellow" },
+			{ label: "", value: { type: "cancel" }, separator: true },
+			{ label: UI_COPY.mainMenu.settingsSection, value: { type: "cancel" }, kind: "heading" },
+			{ label: UI_COPY.mainMenu.settings, value: { type: "settings" }, color: "green" },
 			{ label: "", value: { type: "cancel" }, separator: true },
 			{ label: UI_COPY.mainMenu.accounts, value: { type: "cancel" }, kind: "heading" },
 		];
@@ -366,27 +370,22 @@ export async function showSettingsMenu(
 	syncFromCodexMultiAuthEnabled: boolean,
 ): Promise<SettingsAction> {
 	const ui = getUiRuntimeOptions();
-	const syncBadge = syncFromCodexMultiAuthEnabled
-		? formatUiBadge(ui, "enabled", "success")
-		: formatUiBadge(ui, "disabled", "danger");
-	const syncLabel = ui.v2Enabled
-		? `${UI_COPY.settings.syncToggle} ${syncBadge}`
-		: `${UI_COPY.settings.syncToggle} ${syncFromCodexMultiAuthEnabled ? `${ANSI.green}[enabled]${ANSI.reset}` : `${ANSI.red}[disabled]${ANSI.reset}`}`;
+	let focus: SettingsHubAction = "sync";
 
-	const action = await select<SettingsAction>(
-		[
-			{ label: UI_COPY.settings.syncHeading, value: "cancel", kind: "heading" },
-			{ label: syncLabel, value: "toggle-sync", color: syncFromCodexMultiAuthEnabled ? "green" : "yellow" },
-			{ label: UI_COPY.settings.syncNow, value: "sync-now", color: "cyan" },
-			{ label: "", value: "cancel", separator: true },
-			{ label: UI_COPY.settings.maintenanceHeading, value: "cancel", kind: "heading" },
-			{ label: UI_COPY.settings.cleanupDuplicateEmails, value: "cleanup-duplicate-emails", color: "yellow" },
-			{ label: UI_COPY.settings.cleanupOverlaps, value: "cleanup-overlaps", color: "yellow" },
+	while (true) {
+		const hubItems: MenuItem<SettingsHubAction>[] = [
+			{ label: UI_COPY.settings.sectionTitle, value: "cancel", kind: "heading" },
+			{ label: UI_COPY.settings.syncCategory, value: "sync", color: "green" },
+			{ label: UI_COPY.settings.maintenanceCategory, value: "maintenance", color: "green" },
 			{ label: "", value: "cancel", separator: true },
 			{ label: UI_COPY.settings.navigationHeading, value: "cancel", kind: "heading" },
-			{ label: UI_COPY.settings.back, value: "back" },
-		],
-		{
+			{ label: UI_COPY.settings.back, value: "back", color: "red" },
+		];
+		const initialCursor = hubItems.findIndex((item) => {
+			if (item.separator || item.disabled || item.kind === "heading") return false;
+			return item.value === focus;
+		});
+		const action = await select<SettingsHubAction>(hubItems, {
 			message: UI_COPY.settings.title,
 			subtitle: UI_COPY.settings.subtitle,
 			help: UI_COPY.settings.help,
@@ -394,10 +393,70 @@ export async function showSettingsMenu(
 			selectedEmphasis: "minimal",
 			focusStyle: "row-invert",
 			theme: ui.theme,
-		},
-	);
+			initialCursor: initialCursor >= 0 ? initialCursor : undefined,
+		});
 
-	return action ?? "cancel";
+		if (!action || action === "cancel" || action === "back") {
+			return action ?? "cancel";
+		}
+
+		if (action === "sync") {
+			const syncBadge = syncFromCodexMultiAuthEnabled
+				? formatUiBadge(ui, "enabled", "success")
+				: formatUiBadge(ui, "disabled", "danger");
+			const syncLabel = ui.v2Enabled
+				? `${UI_COPY.settings.syncToggle} ${syncBadge}`
+				: `${UI_COPY.settings.syncToggle} ${syncFromCodexMultiAuthEnabled ? `${ANSI.green}[enabled]${ANSI.reset}` : `${ANSI.red}[disabled]${ANSI.reset}`}`;
+			const syncAction = await select<SettingsAction>(
+				[
+					{ label: UI_COPY.settings.syncHeading, value: "cancel", kind: "heading" },
+					{ label: syncLabel, value: "toggle-sync", color: syncFromCodexMultiAuthEnabled ? "green" : "yellow" },
+					{ label: UI_COPY.settings.syncNow, value: "sync-now", color: "cyan" },
+					{ label: "", value: "cancel", separator: true },
+					{ label: UI_COPY.settings.navigationHeading, value: "cancel", kind: "heading" },
+					{ label: UI_COPY.settings.back, value: "back" },
+				],
+				{
+					message: UI_COPY.settings.title,
+					subtitle: UI_COPY.settings.syncCategory,
+					help: UI_COPY.settings.help,
+					clearScreen: true,
+					selectedEmphasis: "minimal",
+					focusStyle: "row-invert",
+					theme: ui.theme,
+				},
+			);
+			if (syncAction && syncAction !== "back" && syncAction !== "cancel") {
+				return syncAction;
+			}
+			focus = "sync";
+			continue;
+		}
+
+		const maintenanceAction = await select<SettingsAction>(
+			[
+				{ label: UI_COPY.settings.maintenanceHeading, value: "cancel", kind: "heading" },
+				{ label: UI_COPY.settings.cleanupDuplicateEmails, value: "cleanup-duplicate-emails", color: "yellow" },
+				{ label: UI_COPY.settings.cleanupOverlaps, value: "cleanup-overlaps", color: "yellow" },
+				{ label: "", value: "cancel", separator: true },
+				{ label: UI_COPY.settings.navigationHeading, value: "cancel", kind: "heading" },
+				{ label: UI_COPY.settings.back, value: "back" },
+			],
+			{
+				message: UI_COPY.settings.title,
+				subtitle: UI_COPY.settings.maintenanceCategory,
+				help: UI_COPY.settings.help,
+				clearScreen: true,
+				selectedEmphasis: "minimal",
+				focusStyle: "row-invert",
+				theme: ui.theme,
+			},
+		);
+		if (maintenanceAction && maintenanceAction !== "back" && maintenanceAction !== "cancel") {
+			return maintenanceAction;
+		}
+		focus = "maintenance";
+	}
 }
 
 export async function showAccountDetails(account: AccountInfo): Promise<AccountAction> {
