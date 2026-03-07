@@ -215,7 +215,7 @@ Safe mode effects:
 | `gpt-5.1-codex-mini` | medium, high | Lightweight |
 | `gpt-5.1` | none, low, medium, high | Base model |
 
-**Total: 21 shipped template presets** with mixed context sizing: shipped `gpt-5.4` at 1,000,000 / 128,000 and other shipped families at 272,000 / 128,000. Optional/manual IDs like `gpt-5.4-pro` and `gpt-5.3-codex-spark` are excluded from this count.
+**Total: 21 template presets** with mixed context sizing: shipped `gpt-5.4` presets at 1,000,000 / 128,000 and other shipped families at 272,000 / 128,000. Optional manual IDs such as `gpt-5.4-pro` and `gpt-5.3-codex-spark` are excluded from that count.
 
 ---
 
