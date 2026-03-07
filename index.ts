@@ -1387,21 +1387,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return `Account ${index + 1} (${details.join(", ")})`;
 		};
 
-		const hasUniqueEmailInAccounts = (
+		const buildEmailCountMap = (
 			accounts: Array<{ email?: string }>,
-			email: string | undefined,
-		): boolean => {
-			const normalizedEmail = sanitizeEmail(email);
-			if (!normalizedEmail) return false;
-			return accounts.filter((account) => sanitizeEmail(account.email) === normalizedEmail).length <= 1;
+		): Map<string, number> => {
+			const counts = new Map<string, number>();
+			for (const account of accounts) {
+				const normalizedEmail = sanitizeEmail(account.email);
+				if (!normalizedEmail) continue;
+				counts.set(normalizedEmail, (counts.get(normalizedEmail) ?? 0) + 1);
+			}
+			return counts;
 		};
 
 		const canHydrateCachedTokenForAccount = (
-			accounts: Array<{ email?: string }>,
+			emailCounts: Map<string, number>,
 			account: { email?: string; accountId?: string },
 			tokenAccountId: string | undefined,
 		): boolean => {
-			if (hasUniqueEmailInAccounts(accounts, account.email)) {
+			const normalizedEmail = sanitizeEmail(account.email);
+			if (normalizedEmail && (emailCounts.get(normalizedEmail) ?? 0) <= 1) {
 				return true;
 			}
 			return Boolean(tokenAccountId && account.accountId && tokenAccountId === account.accountId);
@@ -3150,6 +3154,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										? `Checking ${workingStorage.accounts.length} account(s) with full refresh + live validation`
 										: `Checking ${workingStorage.accounts.length} account(s) with quota validation`,
 								);
+								const emailCounts = buildEmailCountMap(workingStorage.accounts);
 								let screenFinished = false;
 								const emit = (
 									index: number,
@@ -3238,12 +3243,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 											const cached = await lookupCodexCliTokensByEmail(account.email);
 											const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
 											if (
-												cached &&
-												canHydrateCachedTokenForAccount(
-													workingStorage.accounts,
-													account,
-													cachedTokenAccountId,
-												) &&
+											cached &&
+											canHydrateCachedTokenForAccount(
+												emailCounts,
+												account,
+												cachedTokenAccountId,
+											) &&
 												(typeof cached.expiresAt !== "number" ||
 													!Number.isFinite(cached.expiresAt) ||
 													cached.expiresAt > nowMs)
@@ -3461,6 +3466,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										...(activeStorage?.accounts ?? []),
 										...flaggedStorage.accounts,
 									];
+									const restoreEmailCounts = buildEmailCountMap(restoreContext);
 									if (flaggedStorage.accounts.length === 0) {
 										emit("No flagged accounts to verify.");
 										if (screen) {
@@ -3496,7 +3502,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										if (
 											cached &&
 											canHydrateCachedTokenForAccount(
-												restoreContext,
+												restoreEmailCounts,
 												flagged,
 												cachedTokenAccountId,
 											) &&
@@ -3597,11 +3603,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 							};
 
 							const toggleCodexMultiAuthSyncSetting = (): void => {
-								const currentConfig = loadPluginConfig();
-								const enabled = getSyncFromCodexMultiAuthEnabled(currentConfig);
-								setSyncFromCodexMultiAuthEnabled(!enabled);
-								const nextLabel = !enabled ? "enabled" : "disabled";
-								console.log(`\nSync from codex-multi-auth ${nextLabel}.\n`);
+								try {
+									const currentConfig = loadPluginConfig();
+									const enabled = getSyncFromCodexMultiAuthEnabled(currentConfig);
+									setSyncFromCodexMultiAuthEnabled(!enabled);
+									const nextLabel = !enabled ? "enabled" : "disabled";
+									console.log(`\nSync from codex-multi-auth ${nextLabel}.\n`);
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									console.log(`\nFailed to update sync setting: ${message}\n`);
+								}
 							};
 
 							const runCodexMultiAuthSync = async (): Promise<void> => {
@@ -3756,8 +3767,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const restorePruneBackup = async (): Promise<void> => {
 									const currentBackup = pruneBackup;
 									if (!currentBackup) return;
-									pruneBackup = null;
 									await currentBackup.restore();
+									pruneBackup = null;
 								};
 								while (true) {
 									try {
