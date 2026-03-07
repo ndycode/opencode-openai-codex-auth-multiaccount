@@ -836,6 +836,30 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `toastDurationMs` | `5000` | How long toast notifications stay visible (ms) |
 | `beginnerSafeMode` | `false` | Beginner-safe retry profile: conservative retry budget, disables all-accounts wait/retry, and caps all-accounts retries |
 
+### Experimental Settings
+
+The auth dashboard now includes `Experimental settings` with a manual sync option for `codex-multi-auth`.
+
+Persist the toggle in `~/.opencode/openai-codex-auth-config.json`:
+
+```json
+{
+  "experimental": {
+    "syncFromCodexMultiAuth": {
+      "enabled": true
+    }
+  }
+}
+```
+
+When enabled, `Sync now` will auto-discover a `codex-multi-auth` account store from:
+- `CODEX_MULTI_AUTH_DIR`
+- `CODEX_HOME/multi-auth`
+- `~/DevTools/config/codex/multi-auth`
+- `~/.codex/multi-auth`
+
+It previews import impact first and skips duplicate overlaps using the existing dedupe-aware import flow.
+
 ### Retry Behavior
 
 | Option | Default | What It Does |

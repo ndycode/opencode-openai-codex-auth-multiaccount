@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { showAuthMenu, showAccountDetails, type AccountInfo } from "../lib/ui/auth-menu.js";
+import {
+	showAuthMenu,
+	showAccountDetails,
+	showSettingsMenu,
+	showSyncPruneMenu,
+	type AccountInfo,
+} from "../lib/ui/auth-menu.js";
 import { setUiRuntimeOptions, resetUiRuntimeOptions } from "../lib/ui/runtime.js";
 import { select } from "../lib/ui/select.js";
 import { confirm } from "../lib/ui/confirm.js";
@@ -71,5 +77,45 @@ describe("auth-menu", () => {
 		expect(vi.mocked(confirm)).toHaveBeenCalledWith(
 			expect.stringContaining("shared@example.com | workspace:Workspace A | id:org-aaaa...bb2222"),
 		);
+	});
+
+	it("shows settings in the main auth menu", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "cancel" });
+
+		await showAuthMenu([]);
+
+		const firstCall = vi.mocked(select).mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const items = firstCall?.[0] as Array<{ label: string; value?: { type?: string } }>;
+		expect(items.some((item) => item.value?.type === "settings")).toBe(true);
+	});
+
+	it("renders sync toggle state in settings menu", async () => {
+		vi.mocked(select).mockResolvedValueOnce("cancel");
+
+		await showSettingsMenu(true);
+
+		const firstCall = vi.mocked(select).mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const items = firstCall?.[0] as Array<{ label: string; value?: string }>;
+		const toggleItem = items.find((item) => item.value === "toggle-sync");
+		expect(toggleItem?.label).toContain("Sync from codex-multi-auth");
+		expect(toggleItem?.label).toContain("[enabled]");
+	});
+
+	it("preselects suggested prune candidates and exposes confirm action", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "confirm" });
+
+		const result = await showSyncPruneMenu(1, [
+			{ index: 0, email: "current@example.com", isCurrentAccount: true, score: -1000, reason: "current" },
+			{ index: 2, email: "old@example.com", score: 180, reason: "disabled, not present in codex-multi-auth source" },
+		]);
+
+		expect(result).toEqual([2]);
+		const firstCall = vi.mocked(select).mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const items = firstCall?.[0] as Array<{ label: string; value?: { type?: string } }>;
+		expect(items.some((item) => item.label.includes("Continue With Selected Accounts"))).toBe(true);
+		expect(firstCall?.[0][0]?.hint ?? "").toContain("score");
 	});
 });

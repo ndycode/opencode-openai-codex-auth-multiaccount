@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	loadPluginConfig,
+	savePluginConfigMutation,
 	getCodexMode,
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
@@ -20,6 +21,8 @@ import {
 	getRequestTransformMode,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
+	getSyncFromCodexMultiAuthEnabled,
+	setSyncFromCodexMultiAuthEnabled,
 } from '../lib/config.js';
 import type { PluginConfig } from '../lib/types.js';
 import * as fs from 'node:fs';
@@ -34,6 +37,8 @@ vi.mock('node:fs', async () => {
 		...actual,
 		existsSync: vi.fn(),
 		readFileSync: vi.fn(),
+		mkdirSync: vi.fn(),
+		writeFileSync: vi.fn(),
 	};
 });
 
@@ -49,6 +54,8 @@ vi.mock('../lib/logger.js', async () => {
 describe('Plugin Configuration', () => {
 	const mockExistsSync = vi.mocked(fs.existsSync);
 	const mockReadFileSync = vi.mocked(fs.readFileSync);
+	const mockMkdirSync = vi.mocked(fs.mkdirSync);
+	const mockWriteFileSync = vi.mocked(fs.writeFileSync);
 	const envKeys = [
 		'CODEX_MODE',
 		'CODEX_TUI_V2',
@@ -171,13 +178,20 @@ describe('Plugin Configuration', () => {
 
 		it('should merge user config with defaults', () => {
 			mockExistsSync.mockReturnValue(true);
-			mockReadFileSync.mockReturnValue(JSON.stringify({}));
+			mockReadFileSync.mockReturnValue(JSON.stringify({
+				experimental: { syncFromCodexMultiAuth: { enabled: true } },
+			}));
 
 			const config = loadPluginConfig();
 
 			expect(config).toEqual({
 				codexMode: true,
 				requestTransformMode: 'native',
+				experimental: {
+					syncFromCodexMultiAuth: {
+						enabled: true,
+					},
+				},
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -260,7 +274,7 @@ describe('Plugin Configuration', () => {
 		fetchTimeoutMs: 60_000,
 		streamStallTimeoutMs: 45_000,
 	});
-		expect(mockLogWarn).toHaveBeenCalled();
+	expect(mockLogWarn).toHaveBeenCalled();
 	});
 
 	it('should handle file read errors gracefully', () => {
@@ -737,6 +751,76 @@ describe('Plugin Configuration', () => {
 			process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS = '30000';
 			expect(getStreamStallTimeoutMs({})).toBe(30000);
 			delete process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS;
+		});
+	});
+
+	describe('experimental sync settings', () => {
+		it('defaults sync-from-codex-multi-auth to false', () => {
+			expect(getSyncFromCodexMultiAuthEnabled({})).toBe(false);
+		});
+
+		it('reads sync-from-codex-multi-auth from config', () => {
+			expect(
+				getSyncFromCodexMultiAuthEnabled({
+					experimental: {
+						syncFromCodexMultiAuth: {
+							enabled: true,
+						},
+					},
+				}),
+			).toBe(true);
+		});
+
+		it('persists sync-from-codex-multi-auth while preserving unrelated keys', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue(
+				JSON.stringify({
+					codexMode: false,
+					customKey: 'keep-me',
+				}),
+			);
+
+			setSyncFromCodexMultiAuthEnabled(true);
+
+			expect(mockMkdirSync).toHaveBeenCalledWith(
+				path.join(os.homedir(), '.opencode'),
+				{ recursive: true },
+			);
+			expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+			const [writtenPath, writtenContent] = mockWriteFileSync.mock.calls[0] ?? [];
+			expect(writtenPath).toBe(path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json'));
+			expect(JSON.parse(String(writtenContent))).toEqual({
+				codexMode: false,
+				customKey: 'keep-me',
+				experimental: {
+					syncFromCodexMultiAuth: {
+						enabled: true,
+					},
+				},
+			});
+		});
+
+		it('creates a new config file when enabling sync on a missing config', () => {
+			mockExistsSync.mockReturnValue(false);
+
+			setSyncFromCodexMultiAuthEnabled(true);
+
+			const [, writtenContent] = mockWriteFileSync.mock.calls[0] ?? [];
+			expect(JSON.parse(String(writtenContent))).toEqual({
+				experimental: {
+					syncFromCodexMultiAuth: {
+						enabled: true,
+					},
+				},
+			});
+		});
+
+		it('throws when mutating an invalid existing config file to avoid clobbering it', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('invalid json');
+
+			expect(() => savePluginConfigMutation((current) => current)).toThrow();
+			expect(mockWriteFileSync).not.toHaveBeenCalled();
 		});
 	});
 });

@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
@@ -18,6 +18,8 @@ const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
+
+type RawPluginConfig = Record<string, unknown>;
 
 /**
  * Default plugin configuration
@@ -104,6 +106,34 @@ export function loadPluginConfig(): PluginConfig {
 		);
 		return DEFAULT_CONFIG;
 	}
+}
+
+function readRawPluginConfig(): RawPluginConfig {
+	if (!existsSync(CONFIG_PATH)) {
+		return {};
+	}
+
+	const fileContent = readFileSync(CONFIG_PATH, "utf-8");
+	const normalizedFileContent = stripUtf8Bom(fileContent);
+	const parsed = JSON.parse(normalizedFileContent) as unknown;
+	if (!isRecord(parsed)) {
+		throw new Error("Plugin config root must be a JSON object");
+	}
+	return { ...parsed };
+}
+
+export function savePluginConfigMutation(
+	mutate: (current: RawPluginConfig) => RawPluginConfig,
+): void {
+	const current = readRawPluginConfig();
+	const next = mutate({ ...current });
+
+	if (!isRecord(next)) {
+		throw new Error("Plugin config mutation must return a JSON object");
+	}
+
+	mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+	writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
 }
 
 function stripUtf8Bom(content: string): string {
@@ -196,6 +226,24 @@ export function getRequestTransformMode(pluginConfig: PluginConfig): "native" | 
 
 export function getCodexTuiV2(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_TUI_V2", pluginConfig.codexTuiV2, true);
+}
+
+export function getSyncFromCodexMultiAuthEnabled(pluginConfig: PluginConfig): boolean {
+	return pluginConfig.experimental?.syncFromCodexMultiAuth?.enabled === true;
+}
+
+export function setSyncFromCodexMultiAuthEnabled(enabled: boolean): void {
+	savePluginConfigMutation((current) => {
+		const experimental = isRecord(current.experimental) ? { ...current.experimental } : {};
+		const syncSettings = isRecord(experimental.syncFromCodexMultiAuth)
+			? { ...experimental.syncFromCodexMultiAuth }
+			: {};
+
+		syncSettings.enabled = enabled;
+		experimental.syncFromCodexMultiAuth = syncSettings;
+		current.experimental = experimental;
+		return current;
+	});
 }
 
 export function getCodexTuiColorProfile(

@@ -165,6 +165,26 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
 | `rateLimitToastDebounceMs` | `60000` | debounce rate limit toasts |
+
+### Experimental Settings
+
+Enable manual sync from `codex-multi-auth`:
+
+```json
+{
+  "experimental": {
+    "syncFromCodexMultiAuth": {
+      "enabled": true
+    }
+  }
+}
+```
+
+When enabled, the auth dashboard can discover `codex-multi-auth` storage from:
+- `CODEX_MULTI_AUTH_DIR`
+- `CODEX_HOME/multi-auth`
+- `~/DevTools/config/codex/multi-auth`
+- `~/.codex/multi-auth`
 | `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
 | `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
 

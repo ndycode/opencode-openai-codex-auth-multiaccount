@@ -77,6 +77,7 @@ vi.mock("../lib/auth/server.js", () => ({
 vi.mock("../lib/cli.js", () => ({
 	promptLoginMode: vi.fn(async () => ({ mode: "add" })),
 	promptAddAnotherAccount: vi.fn(async () => false),
+	promptCodexMultiAuthSyncPrune: vi.fn(async () => null),
 }));
 
 vi.mock("../lib/config.js", () => ({
@@ -109,7 +110,9 @@ vi.mock("../lib/config.js", () => ({
 	getCodexTuiColorProfile: () => "ansi16",
 	getCodexTuiGlyphMode: () => "ascii",
 	getBeginnerSafeMode: () => false,
+	getSyncFromCodexMultiAuthEnabled: () => false,
 	loadPluginConfig: () => ({}),
+	setSyncFromCodexMultiAuthEnabled: vi.fn(),
 }));
 
 vi.mock("../lib/request/request-transformer.js", () => ({
@@ -167,6 +170,27 @@ vi.mock("../lib/recovery.js", () => ({
 	isRecoverableError: () => false,
 	detectErrorType: () => "unknown",
 	getRecoveryToastContent: () => ({ title: "Error", message: "Test" }),
+}));
+
+vi.mock("../lib/codex-multi-auth-sync.js", () => ({
+	previewSyncFromCodexMultiAuth: vi.fn(async () => ({
+		rootDir: "/tmp/codex-root",
+		accountsPath: "/tmp/codex-root/openai-codex-accounts.json",
+		scope: "global",
+		imported: 2,
+		skipped: 0,
+		total: 4,
+	})),
+	syncFromCodexMultiAuth: vi.fn(async () => ({
+		rootDir: "/tmp/codex-root",
+		accountsPath: "/tmp/codex-root/openai-codex-accounts.json",
+		scope: "global",
+		imported: 2,
+		skipped: 0,
+		total: 4,
+		backupStatus: "created",
+		backupPath: "/tmp/codex-sync-backup.json",
+	})),
 }));
 
 vi.mock("../lib/request/rate-limit-backoff.js", () => ({
@@ -471,8 +495,8 @@ describe("OpenAIOAuthPlugin", () => {
 
 		it("has two auth methods", () => {
 			expect(plugin.auth.methods).toHaveLength(2);
-			expect(plugin.auth.methods[0].label).toBe("ChatGPT Plus/Pro MULTI (Codex Subscription)");
-			expect(plugin.auth.methods[1].label).toBe("ChatGPT Plus/Pro MULTI (Manual URL Paste)");
+			expect(plugin.auth.methods[0].label).toBe("ChatGPT Plus/Pro (Browser Login)");
+			expect(plugin.auth.methods[1].label).toBe("ChatGPT Plus/Pro (Manual Paste)");
 		});
 
 		it("rejects manual OAuth callbacks with mismatched state", async () => {
