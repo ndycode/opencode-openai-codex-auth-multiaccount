@@ -157,7 +157,6 @@ import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-
 import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
 import { confirm } from "./lib/ui/confirm.js";
-import { ANSI } from "./lib/ui/ansi.js";
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
@@ -213,13 +212,6 @@ import {
  */
 // eslint-disable-next-line @typescript-eslint/require-await
 export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
-	const ANSI_STYLE_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
-	const ANSI_STYLE_PREFIX_REGEX = new RegExp("^\\x1b\\[[0-9;]*m");
-	const SCREEN_CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]", "g");
-	const sanitizeScreenText = (value: string): string =>
-		value.replace(ANSI_STYLE_REGEX, "").replace(SCREEN_CONTROL_CHAR_REGEX, "").trim();
 	initLogger(client);
 	let cachedAccountManager: AccountManager | null = null;
 	let accountManagerPromise: Promise<AccountManager> | null = null;
@@ -1243,159 +1235,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			push: (line: string, tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent") => void;
 			finish: (summaryLines?: Array<{ line: string; tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent" }>) => Promise<void>;
 		} | null => {
-			if (!ui.v2Enabled || !supportsInteractiveMenus()) {
-				return null;
-			}
-
-			const lines: Array<{ line: string; tone: "normal" | "muted" | "success" | "warning" | "danger" | "accent" }> = [];
-			let footer = "Running...";
-			let renderedLineCount = 0;
-			let hasRendered = false;
-			const stripAnsi = (value: string): string => sanitizeScreenText(value);
-			const truncateAnsi = (value: string, maxVisibleChars: number): string => {
-				if (maxVisibleChars <= 0) return "";
-				const visible = stripAnsi(value);
-				if (visible.length <= maxVisibleChars) return value;
-				const suffix = maxVisibleChars >= 3 ? "..." : ".".repeat(maxVisibleChars);
-				const keep = Math.max(0, maxVisibleChars - suffix.length);
-				let kept = 0;
-				let index = 0;
-				let output = "";
-				while (index < value.length && kept < keep) {
-					if (value[index] === "\x1b") {
-						const match = value.slice(index).match(ANSI_STYLE_PREFIX_REGEX);
-						if (match) {
-							output += match[0];
-							index += match[0].length;
-							continue;
-						}
-					}
-					output += value[index];
-					index += 1;
-					kept += 1;
-				}
-				return output + suffix;
-			};
-			const renderFrame = (frameLines: string[]) => {
-				const previousLineCount = renderedLineCount;
-				const nextLineCount = Math.max(previousLineCount, frameLines.length);
-
-				if (!hasRendered) {
-					process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
-				} else if (previousLineCount > 0) {
-					process.stdout.write(ANSI.up(previousLineCount));
-				}
-
-				for (let i = 0; i < nextLineCount; i += 1) {
-					const line = frameLines[i] ?? "";
-					process.stdout.write(`${ANSI.clearLine}${line}\n`);
-				}
-
-				renderedLineCount = nextLineCount;
-				hasRendered = true;
-			};
-			const render = () => {
-				const screenLines: string[] = [];
-				const columns = process.stdout.columns ?? 120;
-				screenLines.push(...formatUiHeader(ui, sanitizeScreenText(title)));
-				if (subtitle) {
-					screenLines.push(paintUiText(ui, sanitizeScreenText(subtitle), "muted"));
-				}
-				screenLines.push("");
-				screenLines.push(
-					...lines.map((entry) =>
-						truncateAnsi(paintUiText(ui, entry.line, entry.tone), Math.max(20, columns - 2)),
-					),
-				);
-				screenLines.push("");
-				screenLines.push(paintUiText(ui, sanitizeScreenText(footer), "muted"));
-				renderFrame(screenLines);
-			};
-
-			render();
-			return {
-				push: (line: string, tone = "normal") => {
-					lines.push({ line: sanitizeScreenText(line), tone });
-					render();
-				},
-				finish: async (summaryLines?: Array<{ line: string; tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent" }>) => {
-					if (summaryLines && summaryLines.length > 0) {
-						lines.push({ line: "", tone: "normal" });
-						for (const entry of summaryLines) {
-							lines.push({ line: sanitizeScreenText(entry.line), tone: entry.tone ?? "normal" });
-						}
-					}
-					footer = "Done.";
-					render();
-					const autoReturnMs = 2_000;
-					const { stdin } = process;
-					const wasRaw = stdin.isRaw ?? false;
-					const waitForAnyKey = async (message: string): Promise<void> => {
-						footer = message;
-						render();
-						await new Promise<void>((resolve) => {
-							const onData = () => {
-								stdin.off("data", onData);
-								resolve();
-							};
-							try {
-								stdin.setRawMode(true);
-							} catch {
-								resolve();
-								return;
-							}
-							stdin.resume();
-							stdin.on("data", onData);
-						});
-					};
-					let paused = false;
-					await new Promise<void>((resolve) => {
-						let finished = false;
-						let timer: ReturnType<typeof setInterval> | null = null;
-						const endAt = Date.now() + autoReturnMs;
-						const onData = () => {
-							if (finished) return;
-							paused = true;
-							finished = true;
-							if (timer) clearInterval(timer);
-							stdin.off("data", onData);
-							resolve();
-						};
-						try {
-							stdin.setRawMode(true);
-							stdin.resume();
-							stdin.on("data", onData);
-						} catch {
-							resolve();
-							return;
-						}
-						timer = setInterval(() => {
-							const remaining = Math.max(0, endAt - Date.now());
-							if (remaining <= 0) {
-								if (finished) return;
-								finished = true;
-								if (timer) {
-									clearInterval(timer);
-								}
-								stdin.off("data", onData);
-								resolve();
-								return;
-							}
-							footer = `Returning in ${Math.ceil(remaining / 1000)}s... Press any key to pause.`;
-							render();
-						}, 150);
-					});
-					if (paused) {
-						await waitForAnyKey("Paused. Press any key to continue.");
-					}
-					try {
-						stdin.setRawMode(wasRaw);
-						stdin.pause();
-					} catch {
-						// best effort restore
-					}
-				},
-			};
+			void ui;
+			void title;
+			void subtitle;
+			return null;
 		};
 
 		const getStatusMarker = (
@@ -1468,90 +1311,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			render: (progressText: string, footer?: string) => void;
 			finish: (progressText: string, footer?: string) => Promise<void>;
 		} | null => {
-			if (!ui.v2Enabled || !supportsInteractiveMenus()) return null;
-
-			const stripAnsi = (value: string): string => sanitizeScreenText(value);
-			let renderedLineCount = 0;
-			let hasRendered = false;
-			const truncate = (value: string, maxVisibleChars: number): string => {
-				const visible = stripAnsi(value);
-				if (visible.length <= maxVisibleChars) return value;
-				return `${visible.slice(0, Math.max(0, maxVisibleChars - 3))}...`;
-			};
-			const renderFrame = (frameLines: string[]) => {
-				const previousLineCount = renderedLineCount;
-				const nextLineCount = Math.max(previousLineCount, frameLines.length);
-
-				if (!hasRendered) {
-					process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
-				} else if (previousLineCount > 0) {
-					process.stdout.write(ANSI.up(previousLineCount));
-				}
-
-				for (let i = 0; i < nextLineCount; i += 1) {
-					const line = frameLines[i] ?? "";
-					process.stdout.write(`${ANSI.clearLine}${line}\n`);
-				}
-
-				renderedLineCount = nextLineCount;
-				hasRendered = true;
-			};
-
-			const statusBadgeForRow = (row: CheckDashboardRow): string => {
-				switch (row.status) {
-					case "current":
-						return `${formatUiBadge(ui, "current", "accent")} ${formatUiBadge(ui, "active", "success")}`;
-					case "ok":
-						return formatUiBadge(ui, "ok", "success");
-					case "warning":
-						return formatUiBadge(ui, "warning", "warning");
-					case "danger":
-						return formatUiBadge(ui, "error", "danger");
-					case "disabled":
-						return formatUiBadge(ui, "disabled", "danger");
-				}
-			};
-
-			const spinnerFrames = ["-", "\\", "|", "/"];
-			const render = (progressText: string, footer = "Running...") => {
-				const cols = process.stdout.columns ?? 120;
-				const spinner = spinnerFrames[Math.floor(Date.now() / 150) % spinnerFrames.length] ?? "-";
-				const lines: string[] = [];
-				lines.push(...formatUiHeader(ui, "Accounts Dashboard"));
-				lines.push(paintUiText(ui, sanitizeScreenText(`${spinner} ${progressText}`), "muted"));
-				lines.push("");
-				lines.push(paintUiText(ui, "Quick Actions", "muted"));
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Add New Account", "success")}`);
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Run Health Check", "success")}`);
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Pick Best Account", "success")}`);
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Auto-Repair Issues", "success")}`);
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Settings", "success")}`);
-				lines.push("");
-				lines.push(paintUiText(ui, "Advanced Checks", "muted"));
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Refresh All Accounts", "success")}`);
-				lines.push(` ${paintUiText(ui, "o", "muted")} ${paintUiText(ui, "Check Problem Accounts", "warning")}`);
-				lines.push("");
-				lines.push(paintUiText(ui, "Saved Accounts", "muted"));
-				for (const row of rows) {
-					const marker = row.index === selectedIndex ? ">" : "o";
-					const primary = `${row.index + 1}. ${sanitizeScreenText(row.email ?? `Account ${row.index + 1}`)}`;
-					lines.push(` ${paintUiText(ui, marker, row.index === selectedIndex ? "accent" : "muted")} ${truncate(`${paintUiText(ui, primary, row.index === selectedIndex ? "accent" : "heading")} ${statusBadgeForRow(row)}`, Math.max(20, cols - 4))}`);
-					if (row.index === selectedIndex && row.detail) {
-						lines.push(`   ${truncate(paintUiText(ui, `Limits: ${sanitizeScreenText(row.detail)}`, "muted"), Math.max(20, cols - 6))}`);
-					}
-				}
-				lines.push("");
-				lines.push(paintUiText(ui, sanitizeScreenText(footer), "muted"));
-				renderFrame(lines);
-			};
-
-			return {
-				render,
-				finish: async (progressText: string, footer = "Done.") => {
-					render(progressText, footer);
-					await new Promise((resolve) => setTimeout(resolve, 1200));
-				},
-			};
+			void ui;
+			void progressLabel;
+			void rows;
+			void selectedIndex;
+			return null;
 		};
 
 		const normalizeAccountTags = (raw: string): string[] => {
