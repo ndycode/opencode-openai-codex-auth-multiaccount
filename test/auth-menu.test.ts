@@ -118,4 +118,21 @@ describe("auth-menu", () => {
 		expect(items.some((item) => item.label.includes("Continue With Selected Accounts"))).toBe(true);
 		expect(firstCall?.[0][0]?.hint ?? "").toContain("score");
 	});
+
+	it("sanitizes quota summaries in account hints", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "cancel" });
+
+		await showAuthMenu([
+			{
+				index: 0,
+				email: "safe@example.com",
+				quotaSummary: "5h \u001b[31m100%\u001b[0m",
+			},
+		]);
+
+		const firstCall = vi.mocked(select).mock.calls[0];
+		const items = firstCall?.[0] as Array<{ hint?: string; value?: { type?: string } }>;
+		const accountRow = items.find((item) => item.value?.type === "select-account");
+		expect(accountRow?.hint ?? "").not.toContain("\u001b");
+	});
 });

@@ -186,8 +186,9 @@ function accountRowColor(account: AccountInfo): MenuItem<AuthMenuAction>["color"
 function formatAccountHint(account: AccountInfo, ui = getUiRuntimeOptions()): string {
 	const parts: string[] = [];
 	parts.push(ui.v2Enabled ? paintUiText(ui, `used ${formatRelativeTime(account.lastUsed)}`, "muted") : `used ${formatRelativeTime(account.lastUsed)}`);
-	if (account.quotaSummary?.trim()) {
-		parts.push(ui.v2Enabled ? paintUiText(ui, account.quotaSummary, "muted") : account.quotaSummary);
+	const quotaSummary = sanitizeTerminalText(account.quotaSummary);
+	if (quotaSummary) {
+		parts.push(ui.v2Enabled ? paintUiText(ui, quotaSummary, "muted") : quotaSummary);
 	}
 	return parts.join(ui.v2Enabled ? ` ${paintUiText(ui, "|", "muted")} ` : " | ");
 }

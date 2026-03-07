@@ -142,6 +142,19 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "fresh", deleteAll: true });
     });
 
+    it("routes fallback settings input to experimental sync actions", async () => {
+      mockRl.question
+        .mockResolvedValueOnce("s")
+        .mockResolvedValueOnce("i");
+
+      const { promptLoginMode } = await import("../lib/cli.js");
+      const result = await promptLoginMode([{ index: 0 }], {
+        syncFromCodexMultiAuthEnabled: true,
+      });
+
+      expect(result).toEqual({ mode: "experimental-sync-now" });
+    });
+
     it("is case insensitive", async () => {
       mockRl.question.mockResolvedValueOnce("A");
       

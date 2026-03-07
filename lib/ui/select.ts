@@ -167,10 +167,10 @@ export function coalesceTerminalInput(
 
 	if (nextPending) {
 		const base = nextPending.value;
-		if ((base === "\x1b[" || base === "[") && canCompleteCsi(nextInput)) {
+		if (nextPending.hasEscape && (base === "\x1b[" || base === "[") && canCompleteCsi(nextInput)) {
 			return { normalizedInput: `\x1b[${nextInput}`, pending: null };
 		}
-		if ((base === "\x1bO" || base === "O") && CSI_FINAL_KEYS.has(nextInput)) {
+		if (nextPending.hasEscape && (base === "\x1bO" || base === "O") && CSI_FINAL_KEYS.has(nextInput)) {
 			return { normalizedInput: `\x1bO${nextInput}`, pending: null };
 		}
 		if (base === "\x1b" && (nextInput === "[" || nextInput === "O")) {
@@ -181,14 +181,6 @@ export function coalesceTerminalInput(
 		}
 		nextInput = `${base}${nextInput}`;
 		nextPending = null;
-	}
-
-	if ((nextInput.startsWith("[") || nextInput.startsWith("O")) && nextInput.length > 1) {
-		const prefix = nextInput[0];
-		const remainder = nextInput.slice(1);
-		if ((prefix === "[" && canCompleteCsi(remainder)) || (prefix === "O" && CSI_FINAL_KEYS.has(remainder))) {
-			return { normalizedInput: `\x1b${nextInput}`, pending: null };
-		}
 	}
 
 	if (nextInput === "\x1b") {

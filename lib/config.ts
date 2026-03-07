@@ -109,25 +109,34 @@ export function loadPluginConfig(): PluginConfig {
 	}
 }
 
-function readRawPluginConfig(): RawPluginConfig {
+function readRawPluginConfig(recoverInvalid = false): RawPluginConfig {
 	if (!existsSync(CONFIG_PATH)) {
 		return {};
 	}
 
-	const fileContent = readFileSync(CONFIG_PATH, "utf-8");
-	const normalizedFileContent = stripUtf8Bom(fileContent);
-	const parsed = JSON.parse(normalizedFileContent) as unknown;
-	if (!isRecord(parsed)) {
-		throw new Error("Plugin config root must be a JSON object");
+	try {
+		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
+		const normalizedFileContent = stripUtf8Bom(fileContent);
+		const parsed = JSON.parse(normalizedFileContent) as unknown;
+		if (!isRecord(parsed)) {
+			throw new Error("Plugin config root must be a JSON object");
+		}
+		return { ...parsed };
+	} catch (error) {
+		if (recoverInvalid) {
+			logWarn(`Failed to read raw plugin config from ${CONFIG_PATH}: ${(error as Error).message}`);
+			return {};
+		}
+		throw error;
 	}
-	return { ...parsed };
 }
 
 export function savePluginConfigMutation(
 	mutate: (current: RawPluginConfig) => RawPluginConfig,
+	options: { recoverInvalidCurrent?: boolean } = {},
 ): void {
 	withPluginConfigLock(() => {
-		const current = readRawPluginConfig();
+		const current = readRawPluginConfig(options.recoverInvalidCurrent === true);
 		const next = mutate({ ...current });
 
 		if (!isRecord(next)) {
@@ -281,7 +290,7 @@ export function setSyncFromCodexMultiAuthEnabled(enabled: boolean): void {
 		experimental.syncFromCodexMultiAuth = syncSettings;
 		current.experimental = experimental;
 		return current;
-	});
+	}, { recoverInvalidCurrent: true });
 }
 
 export function getCodexTuiColorProfile(

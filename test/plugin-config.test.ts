@@ -839,6 +839,14 @@ describe('Plugin Configuration', () => {
 				'Plugin config root must be a JSON object',
 			);
 		});
+
+		it('recovers malformed config when toggling sync setting', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('invalid json');
+
+			expect(() => setSyncFromCodexMultiAuthEnabled(true)).not.toThrow();
+			expect(mockRenameSync).toHaveBeenCalled();
+		});
 	});
 });
 

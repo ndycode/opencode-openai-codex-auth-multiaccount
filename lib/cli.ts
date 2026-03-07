@@ -215,7 +215,36 @@ async function promptDeleteAllTypedConfirm(): Promise<boolean> {
 	}
 }
 
-async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+async function promptSettingsModeFallback(
+	rl: ReturnType<typeof createInterface>,
+	syncFromCodexMultiAuthEnabled: boolean,
+): Promise<LoginMenuResult | null> {
+	while (true) {
+		const syncState = syncFromCodexMultiAuthEnabled ? "enabled" : "disabled";
+		const answer = await rl.question(
+			`(t) toggle sync [${syncState}], (i) sync now, (c) cleanup overlaps, (b) back [t/i/c/b]: `,
+		);
+		const normalized = answer.trim().toLowerCase();
+		if (normalized === "t" || normalized === "toggle") {
+			return { mode: "experimental-toggle-sync" };
+		}
+		if (normalized === "i" || normalized === "import" || normalized === "sync") {
+			return { mode: "experimental-sync-now" };
+		}
+		if (normalized === "c" || normalized === "cleanup") {
+			return { mode: "experimental-cleanup-overlaps" };
+		}
+		if (normalized === "b" || normalized === "back") {
+			return null;
+		}
+		console.log("Use one of: t, i, c, b.");
+	}
+}
+
+async function promptLoginModeFallback(
+	existingAccounts: ExistingAccountInfo[],
+	options: LoginMenuOptions = {},
+): Promise<LoginMenuResult> {
 	const rl = createInterface({ input, output });
 	try {
 		if (existingAccounts.length > 0) {
@@ -232,7 +261,14 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
 			if (normalized === "a" || normalized === "add") return { mode: "add" };
 			if (normalized === "b" || normalized === "forecast") return { mode: "forecast" };
 			if (normalized === "x" || normalized === "fix") return { mode: "fix" };
-			if (normalized === "s" || normalized === "settings") return { mode: "settings" };
+			if (normalized === "s" || normalized === "settings") {
+				const settingsResult = await promptSettingsModeFallback(
+					rl,
+					options.syncFromCodexMultiAuthEnabled === true,
+				);
+				if (settingsResult) return settingsResult;
+				continue;
+			}
 			if (normalized === "f" || normalized === "fresh") return { mode: "fresh", deleteAll: true };
 			if (normalized === "c" || normalized === "check") return { mode: "check" };
 			if (normalized === "d" || normalized === "deep") return { mode: "deep-check" };
@@ -254,7 +290,7 @@ export async function promptLoginMode(
 	}
 
 	if (!isTTY()) {
-		return promptLoginModeFallback(existingAccounts);
+		return promptLoginModeFallback(existingAccounts, options);
 	}
 
 	while (true) {

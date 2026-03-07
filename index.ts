@@ -3781,6 +3781,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 										);
 
 										if (preview.imported <= 0) {
+											if (pruneBackup) {
+												try {
+													await pruneBackup.restore();
+												} catch (restoreError) {
+													logWarn(
+														`[${PLUGIN_NAME}] Failed to restore prune backup after zero-import preview: ${
+															restoreError instanceof Error ? restoreError.message : String(restoreError)
+														}`,
+													);
+												}
+												pruneBackup = null;
+											}
 											console.log("No new accounts to import.\n");
 											return;
 										}
@@ -3906,7 +3918,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 									return;
 								}
 								const now = Date.now();
-								const managerForFix = cachedAccountManager ?? (await AccountManager.loadFromDisk());
+								const managerForFix = await AccountManager.loadFromDisk();
+								cachedAccountManager = managerForFix;
 								const explainability = managerForFix.getSelectionExplainability("codex", undefined, now);
 								const eligible = explainability
 									.filter((entry) => entry.eligible)

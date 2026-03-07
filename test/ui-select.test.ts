@@ -9,11 +9,11 @@ describe("ui-select", () => {
 			pending: { value: "[", hasEscape: false },
 		});
 
-		const second = coalesceTerminalInput("B", first.pending as PendingInputSequence);
-		expect(second).toEqual({
-			normalizedInput: "\u001b[B",
-			pending: null,
-		});
+	const second = coalesceTerminalInput("B", first.pending as PendingInputSequence);
+	expect(second).toEqual({
+		normalizedInput: "[B",
+		pending: null,
+	});
 	});
 
 	it("reconstructs escape-plus-bracket chunks", () => {
@@ -39,7 +39,7 @@ describe("ui-select", () => {
 	it("reconstructs compact orphan sequences", () => {
 		const result = coalesceTerminalInput("[B", null);
 		expect(result).toEqual({
-			normalizedInput: "\u001b[B",
+			normalizedInput: "[B",
 			pending: null,
 		});
 	});
