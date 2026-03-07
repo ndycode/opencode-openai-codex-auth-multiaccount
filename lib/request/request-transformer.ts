@@ -263,6 +263,9 @@ export function applyFastSessionDefaults(
 	};
 }
 
+/**
+ * Resolves reasoning settings by layering transformed config with body/provider overrides.
+ */
 function resolveReasoningConfig(
 	modelName: string,
 	modelConfig: ConfigOptions,
@@ -283,6 +286,9 @@ function resolveReasoningConfig(
 	return getReasoningConfig(modelName, mergedConfig);
 }
 
+/**
+ * Picks effective text verbosity with body/provider values taking precedence.
+ */
 function resolveTextVerbosity(
 	modelConfig: ConfigOptions,
 	body: RequestBody,
@@ -296,6 +302,9 @@ function resolveTextVerbosity(
 	);
 }
 
+/**
+ * Resolves include fields and always preserves encrypted reasoning continuity payloads.
+ */
 function resolveInclude(modelConfig: ConfigOptions, body: RequestBody): string[] {
 	const providerOpenAI = body.providerOptions?.openai;
 	const base =
@@ -310,6 +319,9 @@ function resolveInclude(modelConfig: ConfigOptions, body: RequestBody): string[]
 	return include;
 }
 
+/**
+ * Parses a collaboration mode token from env/config text.
+ */
 function parseCollaborationMode(value: string | undefined): CollaborationMode | undefined {
 	if (!value) return undefined;
 	const normalized = value.trim().toLowerCase();
@@ -318,6 +330,9 @@ function parseCollaborationMode(value: string | undefined): CollaborationMode | 
 	return undefined;
 }
 
+/**
+ * Extracts plain text from mixed message-content payloads.
+ */
 function extractMessageText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
@@ -332,6 +347,9 @@ function extractMessageText(content: unknown): string {
 		.join("\n");
 }
 
+/**
+ * Detects active collaboration mode using explicit env overrides first, then prompt hints.
+ */
 function detectCollaborationMode(body: RequestBody): CollaborationMode {
 	const envMode =
 		parseCollaborationMode(process.env.CODEX_COLLABORATION_MODE) ??
@@ -362,6 +380,9 @@ function detectCollaborationMode(body: RequestBody): CollaborationMode {
 	return "unknown";
 }
 
+/**
+ * Removes tools that are only valid in plan mode when the request is not in plan mode.
+ */
 function sanitizePlanOnlyTools(tools: unknown, mode: CollaborationMode): unknown {
 	if (!Array.isArray(tools) || mode === "plan") return tools;
 
@@ -385,6 +406,9 @@ function sanitizePlanOnlyTools(tools: unknown, mode: CollaborationMode): unknown
 	return filtered;
 }
 
+/**
+ * Collects runtime tool names from either direct tool entries or function-wrapped definitions.
+ */
 function extractRuntimeToolNames(tools: unknown): string[] {
 	if (!Array.isArray(tools)) return [];
 
@@ -516,6 +540,10 @@ export function getReasoningConfig(
 	// for better coding assistance unless user explicitly requests "none".
 	// - Canonical GPT-5 Codex defaults to high in stable Codex.
 	// - Legacy GPT-5.3/5.2 Codex aliases default to xhigh for backward compatibility.
+	// - Legacy lightweight aliases (gpt-5-mini / gpt-5-nano) intentionally keep a
+	//   minimal default based on the original alias, even though normalization maps
+	//   them to gpt-5.4 which supports higher efforts. Explicit xhigh requests are
+	//   still honored below via supportsRequestedXhigh.
 	const defaultEffort: ReasoningConfig["effort"] = isCodexMini
 		? "medium"
 		: isGpt5Codex
@@ -557,7 +585,7 @@ export function getReasoningConfig(
 	}
 
 	// Normalize "minimal" to "low" for Codex families
-		// Codex CLI presets are low/medium/high (or xhigh for Codex Max / GPT-5.3/5.2 Codex)
+	// Codex CLI presets are low/medium/high (or xhigh for Codex Max / GPT-5.3/5.2 Codex)
 	if (isCodex && effort === "minimal") {
 		effort = "low";
 	}

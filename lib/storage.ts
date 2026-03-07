@@ -108,6 +108,10 @@ export function formatStorageErrorHint(error: unknown, path: string): string {
 
 let storageMutex: Promise<void> = Promise.resolve();
 
+/**
+ * Serializes storage I/O to keep account file reads/writes lock-step and avoid
+ * cross-request races during migration/seeding flows.
+ */
 function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
   const previousMutex = storageMutex;
   let releaseLock: () => void;
@@ -669,14 +673,24 @@ export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   return withStorageLock(async () => loadAccountsInternal(saveAccountsUnlocked));
 }
 
+/**
+ * Resolves the global (non-project) account storage path.
+ */
 function getGlobalAccountsStoragePath(): string {
   return join(getConfigDir(), ACCOUNTS_FILE_NAME);
 }
 
+/**
+ * Returns true when project-scoped storage is active and a global fallback is meaningful.
+ */
 function shouldUseProjectGlobalFallback(): boolean {
   return Boolean(currentStoragePath && currentProjectRoot);
 }
 
+/**
+ * Loads account data from global storage as a fallback when project storage is missing.
+ * Returns null for missing/unusable global storage and never throws to callers.
+ */
 async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
   if (!shouldUseProjectGlobalFallback() || !currentStoragePath) {
     return null;
@@ -721,6 +735,10 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
   }
 }
 
+/**
+ * Core account-loading routine shared by normal reads and transactional storage handlers.
+ * Handles schema normalization, legacy migration, and optional fallback seeding.
+ */
 async function loadAccountsInternal(
   persistMigration: ((storage: AccountStorageV3) => Promise<void>) | null,
 ): Promise<AccountStorageV3 | null> {
@@ -797,6 +815,10 @@ async function loadAccountsInternal(
   }
 }
 
+/**
+ * Writes account storage without acquiring the outer storage mutex.
+ * Callers must already be inside withStorageLock when using this helper directly.
+ */
 async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
   const path = getStoragePath();
   const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
@@ -847,6 +869,10 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
   }
 }
 
+/**
+ * Executes a read-modify-write transaction under the storage lock and exposes
+ * an unlocked persist callback so nested save operations do not deadlock.
+ */
 export async function withAccountStorageTransaction<T>(
   handler: (
     current: AccountStorageV3 | null,
