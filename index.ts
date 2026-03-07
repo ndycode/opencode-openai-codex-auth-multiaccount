@@ -1243,7 +1243,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			let initialized = false;
 			const ensureHeader = () => {
 				if (initialized) return;
-				process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
+				process.stdout.write(ANSI.altScreenOn + ANSI.hide + ANSI.clearScreen + ANSI.moveTo(1, 1));
 				for (const line of formatUiHeader(ui, title)) {
 					console.log(line);
 				}
@@ -1261,7 +1261,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					ensureHeader();
 					console.log(paintUiText(ui, line, tone));
 				},
-				finish: (summaryLines) => {
+				finish: async (summaryLines) => {
 					ensureHeader();
 					if (summaryLines && summaryLines.length > 0) {
 						console.log("");
@@ -1269,7 +1269,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							console.log(paintUiText(ui, entry.line, entry.tone ?? "normal"));
 						}
 					}
-					return Promise.resolve();
+					await new Promise((resolve) => setTimeout(resolve, 2_000));
+					process.stdout.write(ANSI.altScreenOff + ANSI.show + ANSI.clearScreen + ANSI.moveTo(1, 1));
 				},
 			};
 		};
