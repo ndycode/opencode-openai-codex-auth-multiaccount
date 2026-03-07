@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
@@ -11,6 +11,7 @@ import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
+const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
 const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
@@ -18,6 +19,8 @@ const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
+
+type RawPluginConfig = Record<string, unknown>;
 
 /**
  * Default plugin configuration
@@ -106,12 +109,160 @@ export function loadPluginConfig(): PluginConfig {
 	}
 }
 
+function readRawPluginConfig(recoverInvalid = false): RawPluginConfig {
+	if (!existsSync(CONFIG_PATH)) {
+		return {};
+	}
+
+	try {
+		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
+		const normalizedFileContent = stripUtf8Bom(fileContent);
+		const parsed = JSON.parse(normalizedFileContent) as unknown;
+		if (!isRecord(parsed)) {
+			throw new Error("Plugin config root must be a JSON object");
+		}
+		return { ...parsed };
+	} catch (error) {
+		if (recoverInvalid) {
+			logWarn(`Failed to read raw plugin config from ${CONFIG_PATH}: ${(error as Error).message}`);
+			return {};
+		}
+		throw error;
+	}
+}
+
+export function savePluginConfigMutation(
+	mutate: (current: RawPluginConfig) => RawPluginConfig,
+	options: { recoverInvalidCurrent?: boolean } = {},
+): void {
+	withPluginConfigLock(() => {
+		const current = readRawPluginConfig(options.recoverInvalidCurrent === true);
+		const next = mutate({ ...current });
+
+		if (!isRecord(next)) {
+			throw new Error("Plugin config mutation must return a JSON object");
+		}
+
+		const tempPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
+		writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+			encoding: "utf-8",
+			mode: 0o600,
+		});
+		try {
+			renameSync(tempPath, CONFIG_PATH);
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (
+				process.platform === "win32" &&
+				(code === "EEXIST" || code === "EPERM") &&
+				existsSync(CONFIG_PATH)
+			) {
+				const backupPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.bak`;
+				renameSync(CONFIG_PATH, backupPath);
+				try {
+					renameSync(tempPath, CONFIG_PATH);
+					try {
+						unlinkSync(backupPath);
+					} catch {
+						// best effort backup cleanup
+					}
+					return;
+				} catch (retryError) {
+					try {
+						if (!existsSync(CONFIG_PATH)) {
+							renameSync(backupPath, CONFIG_PATH);
+						}
+					} catch {
+						// best effort config restore
+					}
+					try {
+						unlinkSync(tempPath);
+					} catch {
+						// best effort temp cleanup
+					}
+					throw retryError;
+				}
+			}
+			try {
+				unlinkSync(tempPath);
+			} catch {
+				// best effort temp cleanup
+			}
+			throw error;
+		}
+	});
+}
+
 function stripUtf8Bom(content: string): string {
 	return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object";
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return code === "EPERM";
+	}
+}
+
+function withPluginConfigLock<T>(fn: () => T): T {
+	mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+	const deadline = Date.now() + 2_000;
+	while (true) {
+		try {
+			writeFileSync(CONFIG_LOCK_PATH, `${process.pid}`, { encoding: "utf-8", flag: "wx" });
+			break;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			const retryableLockError =
+				code === "EEXIST" || (process.platform === "win32" && code === "EPERM");
+			if (!retryableLockError || Date.now() >= deadline) {
+				throw error;
+			}
+			if (code === "EEXIST") {
+				try {
+					const lockOwnerPid = Number.parseInt(readFileSync(CONFIG_LOCK_PATH, "utf-8").trim(), 10);
+					if (
+						Number.isFinite(lockOwnerPid) &&
+						lockOwnerPid !== process.pid &&
+						!isProcessAlive(lockOwnerPid)
+					) {
+						const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
+						renameSync(CONFIG_LOCK_PATH, staleLockPath);
+						try {
+							unlinkSync(staleLockPath);
+						} catch {
+							// best effort stale-lock cleanup
+						}
+						continue;
+					}
+				} catch {
+					// best effort stale-lock recovery
+				}
+			}
+			sleepSync(25);
+		}
+	}
+
+	try {
+		return fn();
+	} finally {
+		try {
+			unlinkSync(CONFIG_LOCK_PATH);
+		} catch {
+			// best effort cleanup
+		}
+	}
 }
 
 /**
@@ -196,6 +347,24 @@ export function getRequestTransformMode(pluginConfig: PluginConfig): "native" | 
 
 export function getCodexTuiV2(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_TUI_V2", pluginConfig.codexTuiV2, true);
+}
+
+export function getSyncFromCodexMultiAuthEnabled(pluginConfig: PluginConfig): boolean {
+	return pluginConfig.experimental?.syncFromCodexMultiAuth?.enabled === true;
+}
+
+export function setSyncFromCodexMultiAuthEnabled(enabled: boolean): void {
+	savePluginConfigMutation((current) => {
+		const experimental = isRecord(current.experimental) ? { ...current.experimental } : {};
+		const syncSettings = isRecord(experimental.syncFromCodexMultiAuth)
+			? { ...experimental.syncFromCodexMultiAuth }
+			: {};
+
+		syncSettings.enabled = enabled;
+		experimental.syncFromCodexMultiAuth = syncSettings;
+		current.experimental = experimental;
+		return current;
+	});
 }
 
 export function getCodexTuiColorProfile(

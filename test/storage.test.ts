@@ -21,6 +21,7 @@ import {
   previewImportAccounts,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  cleanupDuplicateEmailAccounts,
 } from "../lib/storage.js";
 
 // Mocking the behavior we're about to implement for TDD
@@ -88,6 +89,76 @@ describe("storage", () => {
       expect(deduped).toHaveLength(1);
       expect(deduped[0]?.addedAt).toBe(now - 1500);
       expect(deduped[0]?.lastUsed).toBe(now);
+    });
+
+    it("cleans duplicate emails across local accounts and remaps active indices", async () => {
+      const testStoragePath = join(
+        tmpdir(),
+        `codex-clean-duplicate-emails-${Math.random().toString(36).slice(2)}.json`,
+      );
+      setStoragePathDirect(testStoragePath);
+
+      try {
+        await saveAccounts({
+          version: 3,
+          activeIndex: 0,
+          activeIndexByFamily: {
+            codex: 0,
+            "gpt-5.1": 1,
+          },
+          accounts: [
+            {
+              accountId: "org-older",
+              organizationId: "org-older",
+              accountIdSource: "org",
+              email: "shared@example.com",
+              refreshToken: "rt-older",
+              addedAt: 1,
+              lastUsed: 1,
+            },
+            {
+              accountId: "org-newer",
+              organizationId: "org-newer",
+              accountIdSource: "org",
+              email: "shared@example.com",
+              refreshToken: "rt-newer",
+              addedAt: 2,
+              lastUsed: 2,
+            },
+            {
+              accountId: "org-unique",
+              organizationId: "org-unique",
+              accountIdSource: "org",
+              email: "unique@example.com",
+              refreshToken: "rt-unique",
+              addedAt: 3,
+              lastUsed: 3,
+            },
+          ],
+        });
+
+        await expect(cleanupDuplicateEmailAccounts()).resolves.toEqual({
+          before: 3,
+          after: 2,
+          removed: 1,
+        });
+
+        const loaded = await loadAccounts();
+        expect(loaded?.accounts).toHaveLength(2);
+        expect(loaded?.accounts[0]).toMatchObject({
+          accountId: "org-newer",
+          organizationId: "org-newer",
+          email: "shared@example.com",
+          refreshToken: "rt-newer",
+        });
+        expect(loaded?.accounts[1]?.email).toBe("unique@example.com");
+        expect(loaded?.activeIndex).toBe(0);
+        expect(loaded?.activeIndexByFamily?.codex).toBe(0);
+        expect(loaded?.activeIndexByFamily?.["gpt-5.1"]).toBe(0);
+      } finally {
+        setStoragePathDirect(null);
+        await fs.rm(testStoragePath, { force: true });
+      }
     });
   });
 
@@ -591,11 +662,10 @@ describe("storage", () => {
       );
     });
 
-    it("should enforce MAX_ACCOUNTS during import", async () => {
-       // @ts-ignore
-      const { importAccounts } = await import("../lib/storage.js");
-      
-      const manyAccounts = Array.from({ length: 21 }, (_, i) => ({
+    it("allows importing more than the old account cap when unlimited", async () => {
+       const { importAccounts } = await import("../lib/storage.js");
+       
+       const manyAccounts = Array.from({ length: 21 }, (_, i) => ({
         accountId: `acct${i}`,
         refreshToken: `ref${i}`,
         addedAt: Date.now(),
@@ -609,8 +679,40 @@ describe("storage", () => {
       };
       await fs.writeFile(exportPath, JSON.stringify(toImport));
       
-      // @ts-ignore
-      await expect(importAccounts(exportPath)).rejects.toThrow(/exceed maximum/);
+      await expect(importAccounts(exportPath)).resolves.toMatchObject({
+        imported: 21,
+        total: 21,
+        skipped: 0,
+      });
+    });
+
+    it("never reports a negative imported count when dedupe shrinks existing storage", async () => {
+      const { importAccounts } = await import("../lib/storage.js");
+
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          { accountId: "existing-a", refreshToken: "shared-refresh", email: "shared@example.com", addedAt: 1, lastUsed: 1 },
+          { accountId: "existing-b", refreshToken: "shared-refresh", email: "shared@example.com", addedAt: 2, lastUsed: 2 },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            { accountId: "existing-b", refreshToken: "shared-refresh", email: "shared@example.com", addedAt: 3, lastUsed: 3 },
+          ],
+        }),
+      );
+
+      await expect(importAccounts(exportPath)).resolves.toMatchObject({
+        imported: 0,
+        skipped: 1,
+      });
     });
 
     it("should fail export when no accounts exist", async () => {

@@ -74,8 +74,8 @@ export const PLATFORM_OPENERS = {
 
 /** OAuth authorization labels */
 export const AUTH_LABELS = {
-	OAUTH: "ChatGPT Plus/Pro MULTI (Codex Subscription)",
-	OAUTH_MANUAL: "ChatGPT Plus/Pro MULTI (Manual URL Paste)",
+	OAUTH: "ChatGPT Plus/Pro (Browser Login)",
+	OAUTH_MANUAL: "ChatGPT Plus/Pro (Manual Paste)",
 	API_KEY: "Manually enter API Key MULTI",
 	INSTRUCTIONS:
 		"A browser window should open. If it doesn't, copy the URL and open it manually.",
@@ -86,7 +86,7 @@ export const AUTH_LABELS = {
 /** Multi-account configuration */
 export const ACCOUNT_LIMITS = {
 	/** Maximum number of OAuth accounts that can be registered */
-	MAX_ACCOUNTS: 20,
+	MAX_ACCOUNTS: Number.POSITIVE_INFINITY,
 	/** Cooldown period (ms) after auth failure before retrying account */
 	AUTH_FAILURE_COOLDOWN_MS: 30_000,
 	/** Number of consecutive auth failures before auto-removing account */

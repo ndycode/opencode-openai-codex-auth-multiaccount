@@ -142,6 +142,19 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "fresh", deleteAll: true });
     });
 
+    it("routes fallback settings input to experimental sync actions", async () => {
+      mockRl.question
+        .mockResolvedValueOnce("s")
+        .mockResolvedValueOnce("i");
+
+      const { promptLoginMode } = await import("../lib/cli.js");
+      const result = await promptLoginMode([{ index: 0 }], {
+        syncFromCodexMultiAuthEnabled: true,
+      });
+
+      expect(result).toEqual({ mode: "experimental-sync-now" });
+    });
+
     it("is case insensitive", async () => {
       mockRl.question.mockResolvedValueOnce("A");
       
@@ -154,7 +167,7 @@ describe("CLI Module", () => {
     it("re-prompts on invalid input then accepts valid", async () => {
       mockRl.question
         .mockResolvedValueOnce("invalid")
-        .mockResolvedValueOnce("x")
+        .mockResolvedValueOnce("invalid-again")
         .mockResolvedValueOnce("a");
       
       const { promptLoginMode } = await import("../lib/cli.js");
@@ -219,6 +232,43 @@ describe("CLI Module", () => {
 			await promptLoginMode([{ index: 0, accountLabel: "Personal" }]);
 			
 			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("1. workspace:Personal"));
+		});
+	});
+
+	describe("promptCodexMultiAuthSyncPrune", () => {
+		it("uses suggested removals on empty input", async () => {
+			mockRl.question.mockResolvedValueOnce("");
+
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(1, [
+				{ index: 2, email: "old@example.com", reason: "least recently used" },
+				{ index: 3, email: "disabled@example.com", reason: "disabled", isCurrentAccount: false },
+			]);
+
+			expect(result).toEqual([2]);
+		});
+
+		it("parses comma-separated account numbers", async () => {
+			mockRl.question.mockResolvedValueOnce("2, 4");
+
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(2, [
+				{ index: 1, email: "one@example.com", reason: "least recently used" },
+				{ index: 3, email: "two@example.com", reason: "disabled" },
+			]);
+
+			expect(result).toEqual([1, 3]);
+		});
+
+		it("returns null when pruning is cancelled", async () => {
+			mockRl.question.mockResolvedValueOnce("q");
+
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(1, [
+				{ index: 0, email: "one@example.com", reason: "least recently used" },
+			]);
+
+			expect(result).toBeNull();
 		});
 	});
 
@@ -437,6 +487,14 @@ describe("CLI Module", () => {
 			];
 			const result = await promptAccountSelection(candidates, { defaultIndex: 1 });
 			expect(result).toEqual(candidates[1]);
+		});
+
+		it("promptCodexMultiAuthSyncPrune returns null in non-interactive mode", async () => {
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(1, [
+				{ index: 0, email: "one@example.com", reason: "least recently used" },
+			]);
+			expect(result).toBeNull();
 		});
 	});
 });

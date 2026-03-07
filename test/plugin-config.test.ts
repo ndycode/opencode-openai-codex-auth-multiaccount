@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	loadPluginConfig,
+	savePluginConfigMutation,
 	getCodexMode,
 	getCodexTuiV2,
 	getCodexTuiColorProfile,
@@ -20,6 +21,8 @@ import {
 	getRequestTransformMode,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
+	getSyncFromCodexMultiAuthEnabled,
+	setSyncFromCodexMultiAuthEnabled,
 } from '../lib/config.js';
 import type { PluginConfig } from '../lib/types.js';
 import * as fs from 'node:fs';
@@ -34,6 +37,10 @@ vi.mock('node:fs', async () => {
 		...actual,
 		existsSync: vi.fn(),
 		readFileSync: vi.fn(),
+		mkdirSync: vi.fn(),
+		renameSync: vi.fn(),
+		unlinkSync: vi.fn(),
+		writeFileSync: vi.fn(),
 	};
 });
 
@@ -49,6 +56,10 @@ vi.mock('../lib/logger.js', async () => {
 describe('Plugin Configuration', () => {
 	const mockExistsSync = vi.mocked(fs.existsSync);
 	const mockReadFileSync = vi.mocked(fs.readFileSync);
+	const mockMkdirSync = vi.mocked(fs.mkdirSync);
+	const mockRenameSync = vi.mocked(fs.renameSync);
+	const mockUnlinkSync = vi.mocked(fs.unlinkSync);
+	const mockWriteFileSync = vi.mocked(fs.writeFileSync);
 	const envKeys = [
 		'CODEX_MODE',
 		'CODEX_TUI_V2',
@@ -171,13 +182,20 @@ describe('Plugin Configuration', () => {
 
 		it('should merge user config with defaults', () => {
 			mockExistsSync.mockReturnValue(true);
-			mockReadFileSync.mockReturnValue(JSON.stringify({}));
+			mockReadFileSync.mockReturnValue(JSON.stringify({
+				experimental: { syncFromCodexMultiAuth: { enabled: true } },
+			}));
 
 			const config = loadPluginConfig();
 
 			expect(config).toEqual({
 				codexMode: true,
 				requestTransformMode: 'native',
+				experimental: {
+					syncFromCodexMultiAuth: {
+						enabled: true,
+					},
+				},
 				codexTuiV2: true,
 				codexTuiColorProfile: 'truecolor',
 				codexTuiGlyphMode: 'ascii',
@@ -260,7 +278,7 @@ describe('Plugin Configuration', () => {
 		fetchTimeoutMs: 60_000,
 		streamStallTimeoutMs: 45_000,
 	});
-		expect(mockLogWarn).toHaveBeenCalled();
+	expect(mockLogWarn).toHaveBeenCalled();
 	});
 
 	it('should handle file read errors gracefully', () => {
@@ -737,6 +755,132 @@ describe('Plugin Configuration', () => {
 			process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS = '30000';
 			expect(getStreamStallTimeoutMs({})).toBe(30000);
 			delete process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS;
+		});
+	});
+
+	describe('experimental sync settings', () => {
+		it('defaults sync-from-codex-multi-auth to false', () => {
+			expect(getSyncFromCodexMultiAuthEnabled({})).toBe(false);
+		});
+
+		it('reads sync-from-codex-multi-auth from config', () => {
+			expect(
+				getSyncFromCodexMultiAuthEnabled({
+					experimental: {
+						syncFromCodexMultiAuth: {
+							enabled: true,
+						},
+					},
+				}),
+			).toBe(true);
+		});
+
+		it('persists sync-from-codex-multi-auth while preserving unrelated keys', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue(
+				JSON.stringify({
+					codexMode: false,
+					customKey: 'keep-me',
+				}),
+			);
+
+			setSyncFromCodexMultiAuthEnabled(true);
+
+			expect(mockMkdirSync).toHaveBeenCalledWith(
+				path.join(os.homedir(), '.opencode'),
+				{ recursive: true },
+			);
+			expect(mockWriteFileSync).toHaveBeenCalledTimes(2);
+			// calls[0] is the lock file write, calls[1] is the temp config write
+			const [writtenPath, writtenContent] = mockWriteFileSync.mock.calls[1] ?? [];
+			expect(String(writtenPath)).toContain('.tmp');
+			expect(mockRenameSync).toHaveBeenCalled();
+			expect(JSON.parse(String(writtenContent))).toEqual({
+				codexMode: false,
+				customKey: 'keep-me',
+				experimental: {
+					syncFromCodexMultiAuth: {
+						enabled: true,
+					},
+				},
+			});
+			expect(mockUnlinkSync).not.toHaveBeenCalledWith(
+				path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json'),
+			);
+		});
+
+		it('creates a new config file when enabling sync on a missing config', () => {
+			mockExistsSync.mockReturnValue(false);
+
+			setSyncFromCodexMultiAuthEnabled(true);
+
+			const [, writtenContent] = mockWriteFileSync.mock.calls[1] ?? [];
+			expect(JSON.parse(String(writtenContent))).toEqual({
+				experimental: {
+					syncFromCodexMultiAuth: {
+						enabled: true,
+					},
+				},
+			});
+		});
+
+		it('throws when mutating an invalid existing config file to avoid clobbering it', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('invalid json');
+
+			expect(() => savePluginConfigMutation((current) => current)).toThrow();
+			expect(mockRenameSync).not.toHaveBeenCalled();
+		});
+
+		it('rejects array roots when reading raw plugin config', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('[]');
+
+			expect(() => savePluginConfigMutation((current) => current)).toThrow(
+				'Plugin config root must be a JSON object',
+			);
+		});
+
+		it('throws when toggling sync setting on malformed config to preserve existing settings', () => {
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue('invalid json');
+
+			expect(() => setSyncFromCodexMultiAuthEnabled(true)).toThrow();
+			expect(mockRenameSync).not.toHaveBeenCalled();
+		});
+
+		it('recovers stale config lock files before mutating config', () => {
+			const configPath = path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json');
+			const lockPath = `${configPath}.lock`;
+			const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+				const error = new Error('process not found') as NodeJS.ErrnoException;
+				error.code = 'ESRCH';
+				throw error;
+			});
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
+				if (String(filePath) === lockPath) {
+					return '424242';
+				}
+				return JSON.stringify({ codexMode: false });
+			});
+			mockWriteFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
+				if (String(filePath) === lockPath && mockWriteFileSync.mock.calls.length === 1) {
+					const error = new Error('exists') as NodeJS.ErrnoException;
+					error.code = 'EEXIST';
+					throw error;
+				}
+				return undefined;
+			});
+
+			try {
+				expect(() => setSyncFromCodexMultiAuthEnabled(true)).not.toThrow();
+				expect(mockUnlinkSync).toHaveBeenCalledWith(lockPath);
+				expect(killSpy).toHaveBeenCalledWith(424242, 0);
+				expect(mockRenameSync).toHaveBeenCalled();
+			} finally {
+				killSpy.mockRestore();
+			}
 		});
 	});
 });

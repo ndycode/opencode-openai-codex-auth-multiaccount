@@ -26,6 +26,11 @@ describe("PluginConfigSchema", () => {
 	it("accepts valid full config", () => {
 		const config = {
 			codexMode: true,
+			experimental: {
+				syncFromCodexMultiAuth: {
+					enabled: true,
+				},
+			},
 			fastSession: true,
 			retryProfile: "balanced",
 			retryBudgetOverrides: {
