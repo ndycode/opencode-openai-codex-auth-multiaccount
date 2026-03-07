@@ -686,6 +686,35 @@ describe("storage", () => {
       });
     });
 
+    it("never reports a negative imported count when dedupe shrinks existing storage", async () => {
+      const { importAccounts } = await import("../lib/storage.js");
+
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          { accountId: "existing-a", refreshToken: "shared-refresh", email: "shared@example.com", addedAt: 1, lastUsed: 1 },
+          { accountId: "existing-b", refreshToken: "shared-refresh", email: "shared@example.com", addedAt: 2, lastUsed: 2 },
+        ],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [
+            { accountId: "existing-b", refreshToken: "shared-refresh", email: "shared@example.com", addedAt: 3, lastUsed: 3 },
+          ],
+        }),
+      );
+
+      await expect(importAccounts(exportPath)).resolves.toMatchObject({
+        imported: 0,
+        skipped: 1,
+      });
+    });
+
     it("should fail export when no accounts exist", async () => {
       const { exportAccounts } = await import("../lib/storage.js");
       setStoragePathDirect(testStoragePath);

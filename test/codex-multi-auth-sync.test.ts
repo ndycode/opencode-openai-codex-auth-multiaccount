@@ -4,6 +4,10 @@ import * as os from "node:os";
 import { join } from "node:path";
 import { findProjectRoot, getProjectStorageKey } from "../lib/storage/paths.js";
 
+vi.mock("../lib/logger.js", () => ({
+	logWarn: vi.fn(),
+}));
+
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
 	return {
@@ -264,6 +268,36 @@ describe("codex-multi-auth sync", () => {
 			);
 		} finally {
 			mkdtempSpy.mockRestore();
+		}
+	});
+
+	it("logs a warning when secure temp cleanup fails", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockReadFileSync.mockReturnValue(
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				accounts: [{ refreshToken: "sync-refresh", addedAt: 1, lastUsed: 1 }],
+			}),
+		);
+
+		const rmSpy = vi.spyOn(fs.promises, "rm").mockRejectedValueOnce(new Error("cleanup blocked"));
+		const loggerModule = await import("../lib/logger.js");
+
+		try {
+			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				accountsPath: globalPath,
+				imported: 2,
+			});
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to remove temporary codex sync directory"),
+			);
+		} finally {
+			rmSpy.mockRestore();
 		}
 	});
 

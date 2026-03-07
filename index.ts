@@ -3482,8 +3482,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 													refreshResult.message ?? refreshResult.reason ?? "refresh failed";
 												emit(i, `error: ${message}`, "danger");
 												if (deepProbe && isFlaggableFailure(refreshResult)) {
+													const flaggedKey = getSyncRemovalTargetKey({
+														refreshToken: account.refreshToken,
+														organizationId: account.organizationId,
+														accountId: account.accountId,
+													});
 													const existingIndex = flaggedStorage.accounts.findIndex(
-														(flagged) => flagged.refreshToken === account.refreshToken,
+														(flagged) =>
+															getSyncRemovalTargetKey({
+																refreshToken: flagged.refreshToken,
+																organizationId: flagged.organizationId,
+																accountId: flagged.accountId,
+															}) === flaggedKey,
 													);
 													const flaggedRecord: FlaggedAccountMetadataV1 = {
 														...account,
@@ -3496,7 +3506,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 													} else {
 														flaggedStorage.accounts.push(flaggedRecord);
 													}
-													removeFromActive.add(account.refreshToken);
+													removeFromActive.add(flaggedKey);
 													flaggedChanged = true;
 												}
 												continue;
@@ -3587,7 +3597,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 									if (removeFromActive.size > 0) {
 										workingStorage.accounts = workingStorage.accounts.filter(
-											(account) => !removeFromActive.has(account.refreshToken),
+											(account) =>
+												!removeFromActive.has(
+													getSyncRemovalTargetKey({
+														refreshToken: account.refreshToken,
+														organizationId: account.organizationId,
+														accountId: account.accountId,
+													}),
+												),
 										);
 										clampActiveIndices(workingStorage);
 										storageChanged = true;

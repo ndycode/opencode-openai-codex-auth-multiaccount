@@ -2,6 +2,7 @@ import { existsSync, readFileSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join, win32 } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
+import { logWarn } from "./logger.js";
 import {
 	deduplicateAccounts,
 	deduplicateAccountsByEmail,
@@ -121,7 +122,10 @@ async function withNormalizedImportFile<T>(
 		try {
 			return await handler(tempPath);
 		} finally {
-			await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+			await fs.rm(tempDir, { recursive: true, force: true }).catch((error: unknown) => {
+				const message = error instanceof Error ? error.message : String(error);
+				logWarn(`Failed to remove temporary codex sync directory ${tempDir}: ${message}`);
+			});
 		}
 	};
 

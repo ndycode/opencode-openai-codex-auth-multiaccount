@@ -224,27 +224,31 @@ function withPluginConfigLock<T>(fn: () => T): T {
 			break;
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
-			if (code !== "EEXIST" || Date.now() >= deadline) {
+			const retryableLockError =
+				code === "EEXIST" || (process.platform === "win32" && code === "EPERM");
+			if (!retryableLockError || Date.now() >= deadline) {
 				throw error;
 			}
-			try {
-				const lockOwnerPid = Number.parseInt(readFileSync(CONFIG_LOCK_PATH, "utf-8").trim(), 10);
-				if (
-					Number.isFinite(lockOwnerPid) &&
-					lockOwnerPid !== process.pid &&
-					!isProcessAlive(lockOwnerPid)
-				) {
-					const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
-					renameSync(CONFIG_LOCK_PATH, staleLockPath);
-					try {
-						unlinkSync(staleLockPath);
-					} catch {
-						// best effort stale-lock cleanup
+			if (code === "EEXIST") {
+				try {
+					const lockOwnerPid = Number.parseInt(readFileSync(CONFIG_LOCK_PATH, "utf-8").trim(), 10);
+					if (
+						Number.isFinite(lockOwnerPid) &&
+						lockOwnerPid !== process.pid &&
+						!isProcessAlive(lockOwnerPid)
+					) {
+						const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
+						renameSync(CONFIG_LOCK_PATH, staleLockPath);
+						try {
+							unlinkSync(staleLockPath);
+						} catch {
+							// best effort stale-lock cleanup
+						}
+						continue;
 					}
-					continue;
+				} catch {
+					// best effort stale-lock recovery
 				}
-			} catch {
-				// best effort stale-lock recovery
 			}
 			sleepSync(25);
 		}

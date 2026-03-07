@@ -1470,8 +1470,8 @@ export async function importAccounts(
 
       await persist(newStorage);
 
-      const imported = deduplicatedAccounts.length - existingAccounts.length;
-      const skipped = skippedByPrepare + (preparedNormalized.accounts.length - imported);
+      const imported = Math.max(0, deduplicatedAccounts.length - existingAccounts.length);
+      const skipped = skippedByPrepare + Math.max(0, preparedNormalized.accounts.length - imported);
       return {
         imported,
         total: deduplicatedAccounts.length,
