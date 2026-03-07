@@ -1605,6 +1605,38 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return `${target.organizationId ?? ""}|${target.accountId ?? ""}|${target.refreshToken}`;
 		};
 
+		const getAccountIdentityKeys = (
+			account: {
+				refreshToken: string;
+				organizationId?: string;
+				accountId?: string;
+			},
+		): string[] => {
+			const keys: string[] = [];
+			if (account.organizationId) keys.push(`org:${account.organizationId}`);
+			if (account.accountId) keys.push(`account:${account.accountId}`);
+			keys.push(`refresh:${account.refreshToken}`);
+			return keys;
+		};
+
+		const findAccountIndexByIdentityKeys = (
+			accounts: AccountStorageV3["accounts"],
+			identityKeys: string[],
+		): number => {
+			if (identityKeys.length === 0) return -1;
+			for (const identityKey of identityKeys) {
+				const index = accounts.findIndex((account) =>
+					getAccountIdentityKeys({
+						refreshToken: account.refreshToken,
+						organizationId: account.organizationId,
+						accountId: account.accountId,
+					}).includes(identityKey),
+				);
+				if (index >= 0) return index;
+			}
+			return -1;
+		};
+
 		const normalizeAccountTags = (raw: string): string[] => {
 			return Array.from(
 				new Set(
@@ -3890,6 +3922,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (removedTargets.length !== targetKeySet.size) {
 										throw new Error("Selected accounts changed before removal. Re-run sync and confirm again.");
 									}
+									const activeAccountIdentityKeys = getAccountIdentityKeys({
+										refreshToken:
+											currentStorage.accounts[currentStorage.activeIndex]?.refreshToken ?? "",
+										organizationId:
+											currentStorage.accounts[currentStorage.activeIndex]?.organizationId,
+										accountId: currentStorage.accounts[currentStorage.activeIndex]?.accountId,
+									});
+									const familyActiveIdentityKeys = Object.fromEntries(
+										MODEL_FAMILIES.map((family) => {
+											const familyIndex = currentStorage.activeIndexByFamily?.[family] ?? currentStorage.activeIndex;
+											const familyAccount = currentStorage.accounts[familyIndex];
+											return [
+												family,
+												familyAccount
+													? getAccountIdentityKeys({
+															refreshToken: familyAccount.refreshToken,
+															organizationId: familyAccount.organizationId,
+															accountId: familyAccount.accountId,
+														})
+													: [],
+											];
+										}),
+									) as Partial<Record<ModelFamily, string[]>>;
 									currentStorage.accounts = currentStorage.accounts.filter(
 										(account) =>
 											!targetKeySet.has(
@@ -3900,6 +3955,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 												}),
 											),
 									);
+									const remappedActiveIndex = findAccountIndexByIdentityKeys(
+										currentStorage.accounts,
+										activeAccountIdentityKeys,
+									);
+									currentStorage.activeIndex =
+										remappedActiveIndex >= 0
+											? remappedActiveIndex
+											: Math.min(currentStorage.activeIndex, Math.max(0, currentStorage.accounts.length - 1));
+									currentStorage.activeIndexByFamily = currentStorage.activeIndexByFamily ?? {};
+									for (const family of MODEL_FAMILIES) {
+										const remappedFamilyIndex = findAccountIndexByIdentityKeys(
+											currentStorage.accounts,
+											familyActiveIdentityKeys[family] ?? [],
+										);
+										currentStorage.activeIndexByFamily[family] =
+											remappedFamilyIndex >= 0 ? remappedFamilyIndex : currentStorage.activeIndex;
+									}
 									clampActiveIndices(currentStorage);
 									await saveAccounts(currentStorage);
 									const removedRefreshTokens = new Set(

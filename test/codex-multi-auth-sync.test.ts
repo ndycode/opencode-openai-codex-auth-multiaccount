@@ -409,17 +409,25 @@ describe("codex-multi-auth sync", () => {
 		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ email?: string }> };
-			expect(parsed.accounts.map((account) => account.email)).toEqual(["new@example.com"]);
-			return { imported: 1, skipped: 0, total: 1 };
+			expect(parsed.accounts.map((account) => account.email)).toEqual([
+				"shared@example.com",
+				"shared@example.com",
+				"new@example.com",
+			]);
+			return { imported: 3, skipped: 0, total: 3 };
 		});
 		vi.mocked(storageModule.importAccounts).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ email?: string }> };
-			expect(parsed.accounts.map((account) => account.email)).toEqual(["new@example.com"]);
+			expect(parsed.accounts.map((account) => account.email)).toEqual([
+				"shared@example.com",
+				"shared@example.com",
+				"new@example.com",
+			]);
 			return {
-				imported: 1,
+				imported: 3,
 				skipped: 0,
-				total: 1,
+				total: 3,
 				backupStatus: "created",
 				backupPath: "/tmp/filtered-sync-backup.json",
 			};
@@ -429,14 +437,14 @@ describe("codex-multi-auth sync", () => {
 
 		await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
 			accountsPath: globalPath,
-			imported: 1,
-			total: 1,
+			imported: 3,
+			total: 3,
 			skipped: 0,
 		});
 		await expect(syncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
 			accountsPath: globalPath,
-			imported: 1,
-			total: 1,
+			imported: 3,
+			total: 3,
 			skipped: 0,
 		});
 	});
@@ -588,6 +596,70 @@ describe("codex-multi-auth sync", () => {
 
 		const { previewSyncFromCodexMultiAuth, CodexMultiAuthSyncCapacityError } = await import("../lib/codex-multi-auth-sync.js");
 		await expect(previewSyncFromCodexMultiAuth(process.cwd())).rejects.toBeInstanceOf(
+			CodexMultiAuthSyncCapacityError,
+		);
+	});
+
+	it("enforces finite sync capacity override during apply", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		process.env.CODEX_AUTH_SYNC_MAX_ACCOUNTS = "2";
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-new-1",
+						organizationId: "org-new-1",
+						accountIdSource: "org",
+						email: "new-1@example.com",
+						refreshToken: "rt-new-1",
+						addedAt: 1,
+						lastUsed: 1,
+					},
+					{
+						accountId: "org-new-2",
+						organizationId: "org-new-2",
+						accountIdSource: "org",
+						email: "new-2@example.com",
+						refreshToken: "rt-new-2",
+						addedAt: 2,
+						lastUsed: 2,
+					},
+				],
+			}),
+		);
+
+		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							accountId: "org-existing",
+							organizationId: "org-existing",
+							accountIdSource: "org",
+							email: "existing@example.com",
+							refreshToken: "rt-existing",
+							addedAt: 10,
+							lastUsed: 10,
+						},
+					],
+				},
+				vi.fn(async () => {}),
+			),
+		);
+
+		const { syncFromCodexMultiAuth, CodexMultiAuthSyncCapacityError } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(syncFromCodexMultiAuth(process.cwd())).rejects.toBeInstanceOf(
 			CodexMultiAuthSyncCapacityError,
 		);
 	});

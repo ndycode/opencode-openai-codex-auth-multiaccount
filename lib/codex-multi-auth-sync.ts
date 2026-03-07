@@ -176,6 +176,10 @@ function deduplicateSourceAccountsByEmail(
 	const emailToIndex = new Map<string, number>();
 
 	for (const account of deduplicatedInput) {
+		if (normalizeIdentity(account.organizationId) || normalizeIdentity(account.accountId)) {
+			deduplicated.push(account);
+			continue;
+		}
 		const normalizedEmail = normalizeIdentity(account.email);
 		if (!normalizedEmail) {
 			deduplicated.push(account);
@@ -208,22 +212,62 @@ function deduplicateSourceAccountsByEmail(
 	return deduplicated;
 }
 
+function buildExistingSyncIdentityState(existingAccounts: AccountStorageV3["accounts"]): {
+	organizationIds: Set<string>;
+	accountIds: Set<string>;
+	refreshTokens: Set<string>;
+	legacyEmails: Set<string>;
+} {
+	const organizationIds = new Set<string>();
+	const accountIds = new Set<string>();
+	const refreshTokens = new Set<string>();
+	const legacyEmails = new Set<string>();
+
+	for (const account of existingAccounts) {
+		const organizationId = normalizeIdentity(account.organizationId);
+		const accountId = normalizeIdentity(account.accountId);
+		const refreshToken = normalizeIdentity(account.refreshToken);
+		const email = normalizeIdentity(account.email);
+		if (organizationId) organizationIds.add(organizationId);
+		if (accountId) accountIds.add(accountId);
+		if (refreshToken) refreshTokens.add(refreshToken);
+		if (!organizationId && !accountId && email) {
+			legacyEmails.add(email);
+		}
+	}
+
+	return {
+		organizationIds,
+		accountIds,
+		refreshTokens,
+		legacyEmails,
+	};
+}
+
 function filterSourceAccountsAgainstExistingEmails(
 	sourceStorage: AccountStorageV3,
 	existingAccounts: AccountStorageV3["accounts"],
 ): AccountStorageV3 {
-	const existingEmails = new Set(
-		existingAccounts
-			.map((account) => normalizeIdentity(account.email))
-			.filter((email): email is string => typeof email === "string" && email.length > 0),
-	);
+	const existingState = buildExistingSyncIdentityState(existingAccounts);
 
 	return {
 		...sourceStorage,
 		accounts: deduplicateSourceAccountsByEmail(sourceStorage.accounts).filter((account) => {
+			const organizationId = normalizeIdentity(account.organizationId);
+			if (organizationId) {
+				return !existingState.organizationIds.has(organizationId);
+			}
+			const accountId = normalizeIdentity(account.accountId);
+			if (accountId) {
+				return !existingState.accountIds.has(accountId);
+			}
+			const refreshToken = normalizeIdentity(account.refreshToken);
+			if (refreshToken && existingState.refreshTokens.has(refreshToken)) {
+				return false;
+			}
 			const normalizedEmail = normalizeIdentity(account.email);
 			if (!normalizedEmail) return true;
-			return !existingEmails.has(normalizedEmail);
+			return !existingState.legacyEmails.has(normalizedEmail);
 		}),
 	};
 }
@@ -238,6 +282,96 @@ function buildMergedDedupedAccounts(
 		activeIndex: 0,
 		activeIndexByFamily: {},
 	}).accounts;
+}
+
+function computeSyncCapacityDetails(
+	resolved: CodexMultiAuthResolvedSource,
+	sourceStorage: AccountStorageV3,
+	existing: AccountStorageV3,
+	maxAccounts: number,
+): CodexMultiAuthSyncCapacityDetails | null {
+	const sourceDedupedTotal = buildMergedDedupedAccounts([], sourceStorage.accounts).length;
+	const mergedAccounts = buildMergedDedupedAccounts(existing.accounts, sourceStorage.accounts);
+	if (mergedAccounts.length <= maxAccounts) {
+		return null;
+	}
+
+	const currentCount = existing.accounts.length;
+	const sourceCount = sourceStorage.accounts.length;
+	const dedupedTotal = mergedAccounts.length;
+	const importableNewAccounts = Math.max(0, dedupedTotal - currentCount);
+	const skippedOverlaps = Math.max(0, sourceCount - importableNewAccounts);
+	if (sourceDedupedTotal > maxAccounts) {
+		return {
+			rootDir: resolved.rootDir,
+			accountsPath: resolved.accountsPath,
+			scope: resolved.scope,
+			currentCount,
+			sourceCount,
+			sourceDedupedTotal,
+			dedupedTotal: sourceDedupedTotal,
+			maxAccounts,
+			needToRemove: sourceDedupedTotal - maxAccounts,
+			importableNewAccounts: 0,
+			skippedOverlaps: Math.max(0, sourceCount - sourceDedupedTotal),
+			suggestedRemovals: [],
+		};
+	}
+
+	const sourceIdentities = buildSourceIdentitySet(sourceStorage);
+	const suggestedRemovals = existing.accounts
+		.map((account, index) => {
+			const matchesSource = accountMatchesSource(account, sourceIdentities);
+			const isCurrentAccount = index === existing.activeIndex;
+			const hypotheticalAccounts = existing.accounts.filter((_, candidateIndex) => candidateIndex !== index);
+			const hypotheticalTotal = buildMergedDedupedAccounts(hypotheticalAccounts, sourceStorage.accounts).length;
+			const capacityRelief = Math.max(0, dedupedTotal - hypotheticalTotal);
+			return {
+				index,
+				email: account.email,
+				accountLabel: account.accountLabel,
+				isCurrentAccount,
+				enabled: account.enabled !== false,
+				matchesSource,
+				lastUsed: account.lastUsed ?? 0,
+				capacityRelief,
+				score: buildRemovalScore(account, { matchesSource, isCurrentAccount, capacityRelief }),
+				reason: buildRemovalExplanation(account, { matchesSource, capacityRelief }),
+			};
+		})
+		.sort((left, right) => {
+			if (left.score !== right.score) {
+				return right.score - left.score;
+			}
+			if (left.lastUsed !== right.lastUsed) {
+				return left.lastUsed - right.lastUsed;
+			}
+			return left.index - right.index;
+		})
+		.slice(0, Math.max(5, dedupedTotal - maxAccounts))
+		.map(({ index, email, accountLabel, isCurrentAccount, score, reason }) => ({
+			index,
+			email,
+			accountLabel,
+			isCurrentAccount,
+			score,
+			reason,
+		}));
+
+	return {
+		rootDir: resolved.rootDir,
+		accountsPath: resolved.accountsPath,
+		scope: resolved.scope,
+		currentCount,
+		sourceCount,
+		sourceDedupedTotal,
+		dedupedTotal,
+		maxAccounts,
+		needToRemove: dedupedTotal - maxAccounts,
+		importableNewAccounts,
+		skippedOverlaps,
+		suggestedRemovals,
+	};
 }
 
 function normalizeIdentity(value: string | undefined): string | undefined {
@@ -611,21 +745,43 @@ export async function syncFromCodexMultiAuth(
 	projectPath = process.cwd(),
 ): Promise<CodexMultiAuthSyncResult> {
 	const resolved = await loadPreparedCodexMultiAuthSourceStorage(projectPath);
+	await assertSyncWithinCapacity(resolved);
 	const result: ImportAccountsResult = await withNormalizedImportFile(
 		tagSyncedAccounts(resolved.storage),
-		(filePath) =>
-			importAccounts(
+		(filePath) => {
+			const maxAccounts = getSyncCapacityLimit();
+			return importAccounts(
 				filePath,
 				{
 					preImportBackupPrefix: "codex-multi-auth-sync-backup",
 					backupMode: "required",
 				},
-				(normalizedStorage, existing) =>
-					filterSourceAccountsAgainstExistingEmails(
+				(normalizedStorage, existing) => {
+					const filteredStorage = filterSourceAccountsAgainstExistingEmails(
 						normalizedStorage,
 						existing?.accounts ?? [],
-					),
-			),
+					);
+					if (Number.isFinite(maxAccounts)) {
+						const details = computeSyncCapacityDetails(
+							resolved,
+							filteredStorage,
+							existing ??
+								({
+									version: 3,
+									accounts: [],
+									activeIndex: 0,
+									activeIndexByFamily: {},
+								} satisfies AccountStorageV3),
+							maxAccounts,
+						);
+						if (details) {
+							throw new CodexMultiAuthSyncCapacityError(details);
+						}
+					}
+					return filteredStorage;
+				},
+			);
+		},
 	);
 	return {
 		rootDir: resolved.rootDir,
@@ -744,87 +900,7 @@ async function assertSyncWithinCapacity(
 			activeIndex: 0,
 			activeIndexByFamily: {},
 		};
-		const sourceDedupedTotal = buildMergedDedupedAccounts([], resolved.storage.accounts).length;
-		const mergedAccounts = buildMergedDedupedAccounts(existing.accounts, resolved.storage.accounts);
-		if (mergedAccounts.length <= maxAccounts) {
-			return Promise.resolve(null);
-		}
-
-		const currentCount = existing.accounts.length;
-		const sourceCount = resolved.storage.accounts.length;
-		const dedupedTotal = mergedAccounts.length;
-		const importableNewAccounts = Math.max(0, dedupedTotal - currentCount);
-		const skippedOverlaps = Math.max(0, sourceCount - importableNewAccounts);
-		if (sourceDedupedTotal > maxAccounts) {
-			return Promise.resolve({
-				rootDir: resolved.rootDir,
-				accountsPath: resolved.accountsPath,
-				scope: resolved.scope,
-				currentCount,
-				sourceCount,
-				sourceDedupedTotal,
-				dedupedTotal: sourceDedupedTotal,
-				maxAccounts: maxAccounts,
-				needToRemove: sourceDedupedTotal - maxAccounts,
-				importableNewAccounts: 0,
-				skippedOverlaps: Math.max(0, sourceCount - sourceDedupedTotal),
-				suggestedRemovals: [],
-			} satisfies CodexMultiAuthSyncCapacityDetails);
-		}
-		const sourceIdentities = buildSourceIdentitySet(resolved.storage);
-		const suggestedRemovals = existing.accounts
-			.map((account, index) => {
-				const matchesSource = accountMatchesSource(account, sourceIdentities);
-				const isCurrentAccount = index === existing.activeIndex;
-				const hypotheticalAccounts = existing.accounts.filter((_, candidateIndex) => candidateIndex !== index);
-				const hypotheticalTotal = buildMergedDedupedAccounts(hypotheticalAccounts, resolved.storage.accounts).length;
-				const capacityRelief = Math.max(0, dedupedTotal - hypotheticalTotal);
-				return {
-					index,
-					email: account.email,
-					accountLabel: account.accountLabel,
-					isCurrentAccount,
-					enabled: account.enabled !== false,
-					matchesSource,
-					lastUsed: account.lastUsed ?? 0,
-					capacityRelief,
-					score: buildRemovalScore(account, { matchesSource, isCurrentAccount, capacityRelief }),
-					reason: buildRemovalExplanation(account, { matchesSource, capacityRelief }),
-				};
-			})
-			.sort((left, right) => {
-				if (left.score !== right.score) {
-					return right.score - left.score;
-				}
-				if (left.lastUsed !== right.lastUsed) {
-					return left.lastUsed - right.lastUsed;
-				}
-				return left.index - right.index;
-			})
-			.slice(0, Math.max(5, dedupedTotal - maxAccounts))
-			.map(({ index, email, accountLabel, isCurrentAccount, score, reason }) => ({
-				index,
-				email,
-				accountLabel,
-				isCurrentAccount,
-				score,
-				reason,
-			}));
-
-		return Promise.resolve({
-			rootDir: resolved.rootDir,
-			accountsPath: resolved.accountsPath,
-			scope: resolved.scope,
-			currentCount,
-			sourceCount,
-			sourceDedupedTotal,
-			dedupedTotal,
-			maxAccounts: maxAccounts,
-			needToRemove: dedupedTotal - maxAccounts,
-			importableNewAccounts,
-			skippedOverlaps,
-			suggestedRemovals,
-		} satisfies CodexMultiAuthSyncCapacityDetails);
+		return Promise.resolve(computeSyncCapacityDetails(resolved, resolved.storage, existing, maxAccounts));
 	});
 
 	if (details) {
