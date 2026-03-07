@@ -212,7 +212,9 @@ import {
  */
 // eslint-disable-next-line @typescript-eslint/require-await
 export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 	const ANSI_STYLE_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 	const ANSI_STYLE_PREFIX_REGEX = new RegExp("^\\x1b\\[[0-9;]*m");
 	initLogger(client);
 	let cachedAccountManager: AccountManager | null = null;

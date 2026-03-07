@@ -1,6 +1,6 @@
 import { ANSI, isTTY, parseKey } from "./ansi.js";
 import type { UiTheme } from "./theme.js";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 export interface MenuItem<T = string> {
@@ -47,7 +47,9 @@ export interface SelectOptions<T = string> {
 }
 
 const ESCAPE_TIMEOUT_MS = 50;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 const ANSI_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 const ANSI_LEADING_REGEX = new RegExp("^\\x1b\\[[0-9;]*m");
 const CSI_FINAL_KEYS = new Set(["A", "B", "C", "D", "H", "F"]);
 const CSI_TILDE_PATTERN = /^(1|4|7|8)~$/;
@@ -63,12 +65,14 @@ function writeTuiAudit(event: Record<string, unknown>): void {
 		const home = process.env.USERPROFILE ?? process.env.HOME;
 		if (!home) return;
 		const logDir = join(home, ".opencode", "logs");
-		mkdirSync(logDir, { recursive: true });
+		mkdirSync(logDir, { recursive: true, mode: 0o700 });
+		const logPath = join(logDir, "codex-tui-audit.log");
 		appendFileSync(
-			join(logDir, "codex-tui-audit.log"),
+			logPath,
 			`${JSON.stringify({ ts: new Date().toISOString(), ...event })}\n`,
-			"utf8",
+			{ encoding: "utf8", mode: 0o600 },
 		);
+		chmodSync(logPath, 0o600);
 	} catch {
 		// best effort audit logging only
 	}

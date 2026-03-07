@@ -55,6 +55,7 @@ export type AuthMenuAction =
 export type AccountAction = "back" | "delete" | "refresh" | "toggle" | "set-current" | "cancel";
 export type SettingsAction = "toggle-sync" | "sync-now" | "cleanup-overlaps" | "back" | "cancel";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 const ANSI_CSI_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
 const CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 export interface SyncPruneCandidate {
