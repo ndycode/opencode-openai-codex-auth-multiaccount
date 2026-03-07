@@ -1825,7 +1825,7 @@ describe("storage", () => {
       expect(seeded.accounts?.[0]?.accountId).toBe("global-account");
     });
 
-    it("seeds project storage only once for concurrent global-fallback loads", async () => {
+    it("seeds project storage only once across serialized global-fallback loads", async () => {
       const fakeHome = join(testWorkDir, "home-fallback-concurrent");
       const projectDir = join(testWorkDir, "project-fallback-concurrent");
       const projectGitDir = join(projectDir, ".git");

@@ -207,7 +207,7 @@ Safe mode effects:
 | Model | Variants | Notes |
 |-------|----------|-------|
 | `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 (1,000,000 context) |
-| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; fallback default is `gpt-5.4-pro -> gpt-5.4` (1,000,000 context) |
+| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; when `unsupportedCodexPolicy=fallback`, fallback includes `gpt-5.4-pro -> gpt-5.4` (1,000,000 context) |
 | `gpt-5-codex` | low, medium, high | Canonical Codex for code generation |
 | `gpt-5.3-codex-spark` | low, medium, high, xhigh | Optional manual model; entitlement-gated by account/workspace |
 | `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
