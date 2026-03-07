@@ -279,6 +279,11 @@ vi.mock("../lib/storage.js", () => ({
 			await callback(loadedStorage, persist);
 		},
 	),
+	cleanupDuplicateEmailAccounts: vi.fn(async () => ({
+		before: 0,
+		after: 0,
+		removed: 0,
+	})),
 	clearAccounts: vi.fn(async () => {}),
 	setStoragePath: vi.fn(),
 	exportAccounts: vi.fn(async () => {}),
@@ -2711,6 +2716,60 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(authResult.instructions).toBe("Authentication cancelled");
 		expect(mockStorage.accounts).toHaveLength(1);
 		expect(mockStorage.accounts[0]?.email).toBe("keep@example.com");
+	});
+
+	it("runs duplicate email cleanup from maintenance settings", async () => {
+		const cliModule = await import("../lib/cli.js");
+		const storageModule = await import("../lib/storage.js");
+
+		mockStorage.accounts = [
+			{
+				accountId: "org-older",
+				organizationId: "org-older",
+				accountIdSource: "org",
+				email: "shared@example.com",
+				refreshToken: "refresh-older",
+				lastUsed: 1,
+			},
+			{
+				accountId: "org-newer",
+				organizationId: "org-newer",
+				accountIdSource: "org",
+				email: "shared@example.com",
+				refreshToken: "refresh-newer",
+				lastUsed: 2,
+			},
+		];
+		mockStorage.activeIndex = 0;
+		mockStorage.activeIndexByFamily = {};
+
+		vi.mocked(cliModule.promptLoginMode)
+			.mockResolvedValueOnce({ mode: "maintenance-clean-duplicate-emails" })
+			.mockResolvedValueOnce({ mode: "cancel" });
+
+		vi.mocked(storageModule.cleanupDuplicateEmailAccounts).mockImplementationOnce(async () => {
+			mockStorage.accounts = [mockStorage.accounts[1]].filter(Boolean) as typeof mockStorage.accounts;
+			mockStorage.activeIndex = 0;
+			mockStorage.activeIndexByFamily = {};
+			return {
+				before: 2,
+				after: 1,
+				removed: 1,
+			};
+		});
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({ client: mockClient } as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		const authResult = await autoMethod.authorize();
+		expect(authResult.instructions).toBe("Authentication cancelled");
+		expect(vi.mocked(storageModule.cleanupDuplicateEmailAccounts)).toHaveBeenCalledTimes(1);
+		expect(mockStorage.accounts).toHaveLength(1);
+		expect(mockStorage.accounts[0]?.accountId).toBe("org-newer");
 	});
 });
 

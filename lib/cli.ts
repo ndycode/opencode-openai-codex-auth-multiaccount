@@ -140,6 +140,7 @@ export type LoginMode =
 	| "experimental-toggle-sync"
 	| "experimental-sync-now"
 	| "experimental-cleanup-overlaps"
+	| "maintenance-clean-duplicate-emails"
 	| "fresh"
 	| "manage"
 	| "check"
@@ -222,7 +223,7 @@ async function promptSettingsModeFallback(
 	while (true) {
 		const syncState = syncFromCodexMultiAuthEnabled ? "enabled" : "disabled";
 		const answer = await rl.question(
-			`(t) toggle sync [${syncState}], (i) sync now, (c) cleanup overlaps, (b) back [t/i/c/b]: `,
+			`(t) toggle sync [${syncState}], (i) sync now, (c) cleanup overlaps, (d) clean duplicate emails, (b) back [t/i/c/d/b]: `,
 		);
 		const normalized = answer.trim().toLowerCase();
 		if (normalized === "t" || normalized === "toggle") {
@@ -234,10 +235,13 @@ async function promptSettingsModeFallback(
 		if (normalized === "c" || normalized === "cleanup") {
 			return { mode: "experimental-cleanup-overlaps" };
 		}
+		if (normalized === "d" || normalized === "dedupe" || normalized === "duplicates") {
+			return { mode: "maintenance-clean-duplicate-emails" };
+		}
 		if (normalized === "b" || normalized === "back") {
 			return null;
 		}
-		console.log("Use one of: t, i, c, b.");
+		console.log("Use one of: t, i, c, d, b.");
 	}
 }
 
@@ -311,6 +315,7 @@ export async function promptLoginMode(
 				if (settingsAction === "toggle-sync") return { mode: "experimental-toggle-sync" };
 				if (settingsAction === "sync-now") return { mode: "experimental-sync-now" };
 				if (settingsAction === "cleanup-overlaps") return { mode: "experimental-cleanup-overlaps" };
+				if (settingsAction === "cleanup-duplicate-emails") return { mode: "maintenance-clean-duplicate-emails" };
 				continue;
 			}
 			case "fresh":

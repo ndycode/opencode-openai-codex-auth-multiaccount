@@ -103,6 +103,7 @@ describe("auth-menu", () => {
 		expect(toggleItem?.label).toContain("[enabled]");
 		expect(items.some((item) => item.label === "Sync")).toBe(true);
 		expect(items.some((item) => item.label === "Maintenance")).toBe(true);
+		expect(items.some((item) => item.value === "cleanup-duplicate-emails")).toBe(true);
 		expect(items.some((item) => item.label === "Navigation")).toBe(true);
 	});
 

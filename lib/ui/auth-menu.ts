@@ -53,7 +53,13 @@ export type AuthMenuAction =
 	| { type: "cancel" };
 
 export type AccountAction = "back" | "delete" | "refresh" | "toggle" | "set-current" | "cancel";
-export type SettingsAction = "toggle-sync" | "sync-now" | "cleanup-overlaps" | "back" | "cancel";
+export type SettingsAction =
+	| "toggle-sync"
+	| "sync-now"
+	| "cleanup-duplicate-emails"
+	| "cleanup-overlaps"
+	| "back"
+	| "cancel";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 const ANSI_CSI_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
@@ -374,6 +380,7 @@ export async function showSettingsMenu(
 			{ label: UI_COPY.settings.syncNow, value: "sync-now", color: "cyan" },
 			{ label: "", value: "cancel", separator: true },
 			{ label: UI_COPY.settings.maintenanceHeading, value: "cancel", kind: "heading" },
+			{ label: UI_COPY.settings.cleanupDuplicateEmails, value: "cleanup-duplicate-emails", color: "yellow" },
 			{ label: UI_COPY.settings.cleanupOverlaps, value: "cleanup-overlaps", color: "yellow" },
 			{ label: "", value: "cancel", separator: true },
 			{ label: UI_COPY.settings.navigationHeading, value: "cancel", kind: "heading" },

@@ -112,6 +112,7 @@ import {
 	loadAccounts,
 	saveAccounts,
 	withAccountStorageTransaction,
+	cleanupDuplicateEmailAccounts,
 	clearAccounts,
 	setStoragePath,
 	exportAccounts,
@@ -3918,6 +3919,27 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 							};
 
+							const runDuplicateEmailCleanup = async (): Promise<void> => {
+								try {
+									const result = await cleanupDuplicateEmailAccounts();
+									if (result.removed > 0) {
+										invalidateAccountManagerCache();
+										console.log("");
+										console.log("Duplicate email cleanup complete.");
+										console.log(`Before: ${result.before}`);
+										console.log(`After: ${result.after}`);
+										console.log(`Removed duplicates: ${result.removed}`);
+										console.log("");
+										return;
+									}
+
+									console.log("\nNo duplicate emails found.\n");
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									console.log(`\nDuplicate email cleanup failed: ${message}\n`);
+								}
+							};
+
 							const pickBestAccountFromDashboard = async (): Promise<void> => {
 								const storage = await loadAccounts();
 								if (!storage || storage.accounts.length === 0) {
@@ -4108,6 +4130,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 									if (menuResult.mode === "experimental-cleanup-overlaps") {
 										await runCodexMultiAuthOverlapCleanup();
+										continue;
+									}
+									if (menuResult.mode === "maintenance-clean-duplicate-emails") {
+										await runDuplicateEmailCleanup();
 										continue;
 									}
 
