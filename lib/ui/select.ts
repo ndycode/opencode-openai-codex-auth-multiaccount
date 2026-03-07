@@ -502,6 +502,15 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
 					clearInterval(refreshTimer);
 					refreshTimer = null;
 				}
+				if (options.clearScreen) {
+					stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1));
+				} else if (renderedLines > 0) {
+					stdout.write(ANSI.up(renderedLines));
+					for (let i = 0; i < renderedLines; i += 1) {
+						stdout.write(`${ANSI.clearLine}\n`);
+					}
+					stdout.write(ANSI.up(renderedLines));
+				}
 				stdout.write(ANSI.show);
 			} catch {
 				// best effort cleanup
