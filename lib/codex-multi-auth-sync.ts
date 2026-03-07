@@ -496,18 +496,25 @@ export async function syncFromCodexMultiAuth(
 	projectPath = process.cwd(),
 ): Promise<CodexMultiAuthSyncResult> {
 	const resolved = await loadPreparedCodexMultiAuthSourceStorage(projectPath);
+	const currentStorage = await withAccountStorageTransaction((current) => Promise.resolve(current));
+	const finalStorage = filterSourceAccountsAgainstExistingEmails(
+		resolved.storage,
+		currentStorage?.accounts ?? [],
+	);
 	let result: ImportAccountsResult;
 	try {
 		result = await withNormalizedImportFile(
-			resolved.storage,
+			finalStorage,
 			(filePath) => importAccounts(filePath, {
 				preImportBackupPrefix: "codex-multi-auth-sync-backup",
 				backupMode: "required",
 			}),
 		);
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		if (message.includes("exceed maximum")) {
+		if (
+			error instanceof CodexMultiAuthSyncCapacityError ||
+			(error instanceof Error && /exceed(?: the)? maximum/i.test(error.message))
+		) {
 			await assertSyncWithinCapacity(resolved);
 		}
 		throw error;

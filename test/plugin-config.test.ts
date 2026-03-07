@@ -791,6 +791,7 @@ describe('Plugin Configuration', () => {
 				{ recursive: true },
 			);
 			expect(mockWriteFileSync).toHaveBeenCalledTimes(2);
+			// calls[0] is the lock file write, calls[1] is the temp config write
 			const [writtenPath, writtenContent] = mockWriteFileSync.mock.calls[1] ?? [];
 			expect(String(writtenPath)).toContain('.tmp');
 			expect(mockRenameSync).toHaveBeenCalled();

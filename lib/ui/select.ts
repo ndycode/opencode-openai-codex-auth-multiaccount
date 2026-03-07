@@ -191,10 +191,16 @@ export function coalesceTerminalInput(
 
 	if (nextPending) {
 		const base = nextPending.value;
-		if (nextPending.hasEscape && (base === "\x1b[" || base === "[") && canCompleteCsi(nextInput)) {
+		if (nextPending.hasEscape && base === "\x1b[" && canCompleteCsi(nextInput)) {
 			return { normalizedInput: `\x1b[${nextInput}`, pending: null };
 		}
-		if (nextPending.hasEscape && (base === "\x1bO" || base === "O") && CSI_FINAL_KEYS.has(nextInput)) {
+		if (nextPending.hasEscape && /^\x1b\[\d+$/.test(base) && canCompleteCsi(nextInput)) {
+			return { normalizedInput: `${base}${nextInput}`, pending: null };
+		}
+		if (nextPending.hasEscape && (base === "\x1b[" || /^\x1b\[\d+$/.test(base)) && /^\d+$/.test(nextInput)) {
+			return { normalizedInput: null, pending: { value: `${base}${nextInput}`, hasEscape: true } };
+		}
+		if (nextPending.hasEscape && base === "\x1bO" && CSI_FINAL_KEYS.has(nextInput)) {
 			return { normalizedInput: `\x1bO${nextInput}`, pending: null };
 		}
 		if (base === "\x1b" && (nextInput === "[" || nextInput === "O")) {
@@ -214,7 +220,7 @@ export function coalesceTerminalInput(
 		return { normalizedInput: null, pending: { value: nextInput, hasEscape: true } };
 	}
 	if (nextInput === "[" || nextInput === "O") {
-		return { normalizedInput: null, pending: { value: nextInput, hasEscape: false } };
+		return { normalizedInput: nextInput, pending: null };
 	}
 
 	return { normalizedInput: nextInput, pending: nextPending };
@@ -374,16 +380,68 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
 			linesWritten += 1;
 		};
 
+		const itemRowCost = (item: MenuItem<T>, selected: boolean): number => {
+			if (item.separator || item.kind === "heading") {
+				return 1;
+			}
+			let cost = 1;
+			if (item.hint) {
+				const hintLines = item.hint.split("\n").length;
+				if (selected) {
+					cost += Math.min(3, hintLines);
+				} else if (options.showHintsForUnselected ?? true) {
+					cost += Math.min(2, hintLines);
+				}
+			}
+			return cost;
+		};
+
 		const subtitleLines = subtitleText ? 2 : 0;
 		const fixedLines = 2 + subtitleLines + 2;
-		const maxVisibleItems = Math.max(1, Math.min(items.length, rows - fixedLines - 1));
+		const availableItemRows = Math.max(1, rows - fixedLines);
 
 		let windowStart = 0;
 		let windowEnd = items.length;
-		if (items.length > maxVisibleItems) {
-			windowStart = cursor - Math.floor(maxVisibleItems / 2);
-			windowStart = Math.max(0, Math.min(windowStart, items.length - maxVisibleItems));
-			windowEnd = windowStart + maxVisibleItems;
+		const totalRenderedRows = items.reduce(
+			(total, item, index) => total + itemRowCost(item, index === cursor),
+			0,
+		);
+		if (totalRenderedRows > availableItemRows) {
+			windowStart = cursor;
+			windowEnd = cursor + 1;
+			let usedRows = itemRowCost(items[cursor] as MenuItem<T>, true);
+			let up = cursor - 1;
+			let down = cursor + 1;
+
+			while (true) {
+				const upCost =
+					up >= 0 ? itemRowCost(items[up] as MenuItem<T>, false) : Number.POSITIVE_INFINITY;
+				const downCost =
+					down < items.length
+						? itemRowCost(items[down] as MenuItem<T>, false)
+						: Number.POSITIVE_INFINITY;
+				const preferUp = upCost <= downCost;
+
+				if (preferUp && up >= 0 && usedRows + upCost <= availableItemRows) {
+					usedRows += upCost;
+					windowStart = up;
+					up -= 1;
+					continue;
+				}
+				if (down < items.length && usedRows + downCost <= availableItemRows) {
+					usedRows += downCost;
+					windowEnd = down + 1;
+					down += 1;
+					continue;
+				}
+				if (up >= 0 && usedRows + upCost <= availableItemRows) {
+					usedRows += upCost;
+					windowStart = up;
+					up -= 1;
+					continue;
+				}
+				break;
+			}
 		}
 
 		const visibleItems = items.slice(windowStart, windowEnd);
@@ -463,8 +521,10 @@ export async function select<T>(items: MenuItem<T>[], options: SelectOptions<T>)
 		}
 
 		const windowHint = items.length > visibleItems.length ? ` (${windowStart + 1}-${windowEnd}/${items.length})` : "";
-		const backLabel = "Q Back";
-		const helpText = options.help ?? `↑↓ Move | Enter Select | ${backLabel}${windowHint}`;
+		const backLabel = options.allowEscape === false ? "" : "Q Back";
+		const helpText =
+			options.help ??
+			`↑↓ Move | Enter Select${backLabel ? ` | ${backLabel}` : ""}${windowHint}`;
 		writeLine(` ${muted}${truncateAnsi(helpText, Math.max(1, columns - 2))}${reset}`);
 		writeLine(`${border}+${reset}`);
 

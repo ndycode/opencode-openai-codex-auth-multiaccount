@@ -338,7 +338,9 @@ export async function promptLoginMode(
 			case "select-account": {
 				const accountAction = await showAccountDetails(action.account);
 				if (accountAction === "delete") {
-					return { mode: "manage", deleteAccountIndex: action.account.index };
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", deleteAccountIndex: index };
+					continue;
 				}
 				if (accountAction === "set-current") {
 					const index = resolveAccountSourceIndex(action.account);
@@ -346,10 +348,14 @@ export async function promptLoginMode(
 					continue;
 				}
 				if (accountAction === "refresh") {
-					return { mode: "manage", refreshAccountIndex: action.account.index };
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", refreshAccountIndex: index };
+					continue;
 				}
 				if (accountAction === "toggle") {
-					return { mode: "manage", toggleAccountIndex: action.account.index };
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", toggleAccountIndex: index };
+					continue;
 				}
 				continue;
 			}

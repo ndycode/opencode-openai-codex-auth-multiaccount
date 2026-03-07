@@ -5,15 +5,9 @@ describe("ui-select", () => {
 	it("reconstructs orphan bracket arrow chunks", () => {
 		const first = coalesceTerminalInput("[", null);
 		expect(first).toEqual({
-			normalizedInput: null,
-			pending: { value: "[", hasEscape: false },
+			normalizedInput: "[",
+			pending: null,
 		});
-
-	const second = coalesceTerminalInput("B", first.pending as PendingInputSequence);
-	expect(second).toEqual({
-		normalizedInput: "[B",
-		pending: null,
-	});
 	});
 
 	it("reconstructs escape-plus-bracket chunks", () => {
@@ -40,6 +34,22 @@ describe("ui-select", () => {
 		const result = coalesceTerminalInput("[B", null);
 		expect(result).toEqual({
 			normalizedInput: "[B",
+			pending: null,
+		});
+	});
+
+	it("keeps split CSI numeric tails pending until the final byte arrives", () => {
+		const first = coalesceTerminalInput("\u001b", null);
+		const second = coalesceTerminalInput("[", first.pending as PendingInputSequence);
+		const third = coalesceTerminalInput("1", second.pending as PendingInputSequence);
+		expect(third).toEqual({
+			normalizedInput: null,
+			pending: { value: "\u001b[1", hasEscape: true },
+		});
+
+		const fourth = coalesceTerminalInput("~", third.pending as PendingInputSequence);
+		expect(fourth).toEqual({
+			normalizedInput: "\u001b[1~",
 			pending: null,
 		});
 	});

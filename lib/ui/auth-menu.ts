@@ -544,10 +544,7 @@ export async function showSyncPruneMenu(
 				if (input === " ") {
 					const current = items[context.cursor];
 					if (current?.value.type === "toggle") {
-						const candidate = current.value.candidate;
-						if (selected.has(candidate.index)) selected.delete(candidate.index);
-						else selected.add(candidate.index);
-						context.requestRerender();
+						return current.value;
 					}
 					return undefined;
 				}
