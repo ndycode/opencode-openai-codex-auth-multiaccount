@@ -4308,6 +4308,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return redacted ? `HTTP ${status}: ${redacted.slice(0, 200)}` : `HTTP ${status}`;
 					};
 
+					const isAbortError = (error: unknown): boolean =>
+						(error instanceof Error && error.name === "AbortError") ||
+						(typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError");
+
+					const usageFetchTimeoutMs = getFetchTimeoutMs(loadPluginConfig());
+
 					const fetchUsage = async (params: {
 						accountId: string;
 						accessToken: string;
@@ -4318,7 +4324,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						});
 						headers.set("accept", "application/json");
 						const controller = new AbortController();
-						const timeout = setTimeout(() => controller.abort(), getFetchTimeoutMs(loadPluginConfig()));
+						const timeout = setTimeout(() => controller.abort(), usageFetchTimeoutMs);
 
 						try {
 							const response = await fetch(`${CODEX_BASE_URL}/wham/usage`, {
@@ -4327,12 +4333,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 								signal: controller.signal,
 							});
 							if (!response.ok) {
-								const bodyText = await response.text().catch(() => "");
+								let bodyText = "";
+								try {
+									bodyText = await response.text();
+								} catch (error) {
+									if (isAbortError(error) || controller.signal.aborted) {
+										throw new Error("Usage request timed out");
+									}
+								}
+								if (controller.signal.aborted) {
+									throw new Error("Usage request timed out");
+								}
 								throw new Error(sanitizeUsageErrorMessage(response.status, bodyText));
 							}
 							return (await response.json()) as UsagePayload;
 						} catch (error) {
-							if (error instanceof Error && error.name === "AbortError") {
+							if (isAbortError(error)) {
 								throw new Error("Usage request timed out");
 							}
 							throw error;
@@ -4366,8 +4382,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 					for (const i of uniqueIndices) {
 						const account = storage.accounts[i];
 						if (!account) continue;
-						const label = formatCommandAccountLabel(account, i);
-						const isActive = i === activeIndex || (!!activeRefreshToken && account.refreshToken === activeRefreshToken);
+						const sharesActiveCredential =
+							!!activeRefreshToken && account.refreshToken === activeRefreshToken;
+						const displayIndex = sharesActiveCredential ? activeIndex : i;
+						const displayAccount =
+							typeof displayIndex === "number" && displayIndex >= 0
+								? storage.accounts[displayIndex] ?? account
+								: account;
+						const label = formatCommandAccountLabel(displayAccount, displayIndex ?? i);
+						const isActive = i === activeIndex || sharesActiveCredential;
 						const activeSuffix = isActive ? (ui.v2Enabled ? ` ${formatUiBadge(ui, "active", "accent")}` : " [active]") : "";
 
 						try {
