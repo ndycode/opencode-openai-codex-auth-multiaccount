@@ -210,6 +210,15 @@ describe("codex-multi-auth sync", () => {
 		);
 	});
 
+	it("rejects CODEX_MULTI_AUTH_DIR values that are not local absolute paths on Windows", async () => {
+		process.env.CODEX_MULTI_AUTH_DIR = "\\\\server\\share\\multi-auth";
+		process.env.USERPROFILE = "C:\\Users\\tester";
+		process.env.HOME = "C:\\Users\\tester";
+
+		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
+		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/local absolute path/i);
+	});
+
 	it("does not retry through a fallback temp directory when the handler throws", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
@@ -356,6 +365,56 @@ describe("codex-multi-auth sync", () => {
 		});
 	});
 
+	it("deduplicates email-less source accounts by identity before import", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockReadFileSync.mockReturnValue(
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-shared",
+						organizationId: "org-shared",
+						accountIdSource: "org",
+						refreshToken: "rt-shared",
+						addedAt: 1,
+						lastUsed: 1,
+					},
+					{
+						accountId: "org-shared",
+						organizationId: "org-shared",
+						accountIdSource: "org",
+						refreshToken: "rt-shared",
+						addedAt: 2,
+						lastUsed: 2,
+					},
+				],
+			}),
+		);
+
+		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.deduplicateAccounts).mockImplementationOnce((accounts) => [accounts[1]]);
+		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
+			const raw = await fs.promises.readFile(filePath, "utf8");
+			const parsed = JSON.parse(raw) as { accounts: Array<{ refreshToken?: string }> };
+			expect(parsed.accounts).toHaveLength(1);
+			expect(parsed.accounts[0]?.refreshToken).toBe("rt-shared");
+			return { imported: 1, skipped: 0, total: 1 };
+		});
+
+		const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+			accountsPath: globalPath,
+			imported: 1,
+			total: 1,
+			skipped: 0,
+		});
+	});
+
 	it("normalizes org-scoped source accounts to include organizationId before import", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
@@ -394,8 +453,37 @@ describe("codex-multi-auth sync", () => {
 		expect(() => loadCodexMultiAuthSourceStorage(process.cwd())).toThrow(/Invalid JSON/);
 	});
 
-	it("cleans up existing overlaps by normalizing org-scoped identities first", async () => {
+	it("cleans up tagged synced overlaps by normalizing org-scoped identities first", async () => {
 		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							accountId: "org-example123",
+							accountIdSource: "org",
+							accountTags: ["codex-multi-auth-sync"],
+							refreshToken: "sync-refresh",
+							addedAt: 1,
+							lastUsed: 1,
+						},
+						{
+							accountId: "org-example123",
+							organizationId: "org-example123",
+							accountIdSource: "org",
+							accountTags: ["codex-multi-auth-sync"],
+							refreshToken: "sync-refresh",
+							addedAt: 2,
+							lastUsed: 2,
+						},
+					],
+				},
+				vi.fn(async () => {}),
+			),
+		);
 		vi.mocked(storageModule.normalizeAccountStorage).mockImplementationOnce((value: unknown) => {
 			const record = value as {
 				version: 3;
@@ -414,6 +502,62 @@ describe("codex-multi-auth sync", () => {
 			after: 1,
 			removed: 1,
 			updated: 0,
+		});
+	});
+
+	it("limits overlap cleanup to accounts tagged from codex-multi-auth sync", async () => {
+		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							refreshToken: "legacy-a",
+							email: "shared@example.com",
+							addedAt: 1,
+							lastUsed: 1,
+						},
+						{
+							refreshToken: "legacy-b",
+							email: "shared@example.com",
+							addedAt: 2,
+							lastUsed: 2,
+						},
+						{
+							accountId: "org-sync",
+							organizationId: "org-sync",
+							accountIdSource: "org",
+							accountTags: ["codex-multi-auth-sync"],
+							email: "sync@example.com",
+							refreshToken: "sync-token",
+							addedAt: 3,
+							lastUsed: 3,
+						},
+						{
+							accountId: "org-sync",
+							organizationId: "org-sync",
+							accountIdSource: "org",
+							accountTags: ["codex-multi-auth-sync"],
+							email: "sync@example.com",
+							refreshToken: "sync-token",
+							addedAt: 4,
+							lastUsed: 4,
+						},
+					],
+				},
+				vi.fn(async () => {}),
+			),
+		);
+
+		const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(cleanupCodexMultiAuthSyncedOverlaps()).resolves.toEqual({
+			before: 4,
+			after: 4,
+			removed: 0,
+			updated: 1,
 		});
 	});
 

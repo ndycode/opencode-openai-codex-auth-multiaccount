@@ -19,6 +19,7 @@ const EXTERNAL_ACCOUNT_FILE_NAMES = [
 	"openai-codex-accounts.json",
 	"codex-accounts.json",
 ];
+const SYNC_ACCOUNT_TAG = "codex-multi-auth-sync";
 
 export interface CodexMultiAuthResolvedSource {
 	rootDir: string;
@@ -153,10 +154,11 @@ function selectNewestByTimestamp<T extends { addedAt?: number; lastUsed?: number
 function deduplicateSourceAccountsByEmail(
 	accounts: AccountStorageV3["accounts"],
 ): AccountStorageV3["accounts"] {
+	const deduplicatedInput = deduplicateAccounts(accounts);
 	const deduplicated: AccountStorageV3["accounts"] = [];
 	const emailToIndex = new Map<string, number>();
 
-	for (const account of accounts) {
+	for (const account of deduplicatedInput) {
 		const normalizedEmail = normalizeIdentity(account.email);
 		if (!normalizedEmail) {
 			deduplicated.push(account);
@@ -359,10 +361,46 @@ function getCodexHomeDir(): string {
 	return fromEnv.length > 0 ? fromEnv : join(getResolvedUserHomeDir(), ".codex");
 }
 
+function validateCodexMultiAuthRootDir(pathValue: string): string {
+	const trimmed = pathValue.trim();
+	if (trimmed.length === 0) {
+		throw new Error("CODEX_MULTI_AUTH_DIR must not be empty");
+	}
+	if (process.platform === "win32") {
+		const normalized = trimmed.replace(/\//g, "\\");
+		if (normalized.startsWith("\\\\") || normalized.startsWith("\\?\\") || normalized.startsWith("\\.\\")) {
+			throw new Error("CODEX_MULTI_AUTH_DIR must use a local absolute path on Windows");
+		}
+		if (!/^[a-zA-Z]:\\/.test(normalized)) {
+			throw new Error("CODEX_MULTI_AUTH_DIR must be an absolute local path");
+		}
+		return normalized;
+	}
+	if (!trimmed.startsWith("/")) {
+		throw new Error("CODEX_MULTI_AUTH_DIR must be an absolute path");
+	}
+	return trimmed;
+}
+
+function tagSyncedAccounts(storage: AccountStorageV3): AccountStorageV3 {
+	return {
+		...storage,
+		accounts: storage.accounts.map((account) => {
+			const existingTags = Array.isArray(account.accountTags) ? account.accountTags : [];
+			return {
+				...account,
+				accountTags: existingTags.includes(SYNC_ACCOUNT_TAG)
+					? existingTags
+					: [...existingTags, SYNC_ACCOUNT_TAG],
+			};
+		}),
+	};
+}
+
 export function getCodexMultiAuthSourceRootDir(): string {
 	const fromEnv = (process.env.CODEX_MULTI_AUTH_DIR ?? "").trim();
 	if (fromEnv.length > 0) {
-		return fromEnv;
+		return validateCodexMultiAuthRootDir(fromEnv);
 	}
 
 	const userHome = getResolvedUserHomeDir();
@@ -501,7 +539,7 @@ export async function syncFromCodexMultiAuth(
 	let result: ImportAccountsResult;
 	try {
 		result = await withNormalizedImportFile(
-			resolved.storage,
+			tagSyncedAccounts(resolved.storage),
 			(filePath) =>
 				importAccounts(
 					filePath,
@@ -521,7 +559,7 @@ export async function syncFromCodexMultiAuth(
 			error instanceof CodexMultiAuthSyncCapacityError ||
 			(error instanceof Error && /exceed(?: the)? maximum/i.test(error.message))
 		) {
-			await assertSyncWithinCapacity(resolved);
+			await assertSyncWithinCapacity(await loadPreparedCodexMultiAuthSourceStorage(projectPath));
 		}
 		throw error;
 	}
@@ -547,8 +585,10 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(): Promise<CodexMultiA
 			activeIndexByFamily: {},
 		};
 		const before = existing.accounts.length;
-		const normalized = normalizeAccountStorage(normalizeSourceStorage(existing));
-		if (!normalized) {
+		const syncedAccounts = existing.accounts.filter((account) =>
+			Array.isArray(account.accountTags) && account.accountTags.includes(SYNC_ACCOUNT_TAG),
+		);
+		if (syncedAccounts.length === 0) {
 			return {
 				before,
 				after: before,
@@ -556,6 +596,27 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(): Promise<CodexMultiA
 				updated: 0,
 			};
 		}
+		const preservedAccounts = existing.accounts.filter(
+			(account) => !(Array.isArray(account.accountTags) && account.accountTags.includes(SYNC_ACCOUNT_TAG)),
+		);
+		const normalizedSyncedStorage = normalizeAccountStorage(
+			normalizeSourceStorage({
+				...existing,
+				accounts: syncedAccounts,
+			}),
+		);
+		if (!normalizedSyncedStorage) {
+			return {
+				before,
+				after: before,
+				removed: 0,
+				updated: 0,
+			};
+		}
+		const normalized = {
+			...existing,
+			accounts: [...preservedAccounts, ...normalizedSyncedStorage.accounts],
+		} satisfies AccountStorageV3;
 
 		const after = normalized.accounts.length;
 		const removed = Math.max(0, before - after);
