@@ -993,7 +993,7 @@ describe("OpenAIOAuthPlugin", () => {
 			];
 			globalThis.fetch = vi.fn().mockResolvedValue(
 				new Response(
-					"upstream said Authorization: Bearer secret-token and jwt eyJabc.eyJdef.sig and sk-abcdefghijklmnopqrstuvwx and deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					"upstream said Authorization: Bearer secret-token and jwt eyJabc.eyJdef.sig and sk-abcdefghijklmnopqrstuvwx and sk-live_abcd.efgh:ijklmnopqrst and deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 					{ status: 401, headers: { "content-type": "text/plain" } },
 				),
 			);
@@ -1006,6 +1006,7 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).not.toContain("secret-token");
 			expect(result).not.toContain("eyJabc.eyJdef.sig");
 			expect(result).not.toContain("sk-abcdefghijklmnopqrstuvwx");
+			expect(result).not.toContain("sk-live_abcd.efgh:ijklmnopqrst");
 			expect(result).not.toContain("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
 		});
 

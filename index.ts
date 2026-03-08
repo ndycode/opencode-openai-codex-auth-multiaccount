@@ -4303,7 +4303,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						const redacted = normalized
 							.replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
 							.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted-token]")
-							.replace(/\bsk-[A-Za-z0-9]{20,}\b/g, "[redacted-token]")
+							.replace(/\bsk-[A-Za-z0-9][A-Za-z0-9._:-]{19,}\b/gi, "[redacted-token]")
 							.replace(/\b[a-f0-9]{40,}\b/gi, "[redacted-token]");
 						return redacted ? `HTTP ${status}: ${redacted.slice(0, 200)}` : `HTTP ${status}`;
 					};
