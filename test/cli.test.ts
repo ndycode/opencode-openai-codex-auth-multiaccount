@@ -164,6 +164,15 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "add" });
     });
 
+		it("accepts 'best' for the forecast action", async () => {
+			mockRl.question.mockResolvedValueOnce("best");
+
+			const { promptLoginMode } = await import("../lib/cli.js");
+			const result = await promptLoginMode([{ index: 0 }]);
+
+			expect(result).toEqual({ mode: "forecast" });
+		});
+
     it("re-prompts on invalid input then accepts valid", async () => {
       mockRl.question
         .mockResolvedValueOnce("invalid")

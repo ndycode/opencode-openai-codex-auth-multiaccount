@@ -208,7 +208,12 @@ async function promptSearchQuery(current: string): Promise<string> {
 	const rl = createInterface({ input, output });
 	try {
 		const suffix = current ? ` (${current})` : "";
-		const answer = await rl.question(`Search${suffix} (blank clears): `);
+		let answer: string;
+		try {
+			answer = await rl.question(`Search${suffix} (blank clears): `);
+		} catch {
+			return current;
+		}
 		return answer.trim().toLowerCase();
 	} finally {
 		rl.close();

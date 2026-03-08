@@ -263,7 +263,7 @@ async function promptLoginModeFallback(
 			const answer = await rl.question(UI_COPY.fallback.selectModePrompt);
 			const normalized = answer.trim().toLowerCase();
 			if (normalized === "a" || normalized === "add") return { mode: "add" };
-			if (normalized === "b" || normalized === "forecast") return { mode: "forecast" };
+			if (normalized === "b" || normalized === "best" || normalized === "forecast") return { mode: "forecast" };
 			if (normalized === "x" || normalized === "fix") return { mode: "fix" };
 			if (normalized === "s" || normalized === "settings") {
 				const settingsResult = await promptSettingsModeFallback(
