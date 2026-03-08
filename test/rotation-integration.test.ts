@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { AccountManager } from "../lib/accounts.js";
-import { getTokenTracker, DEFAULT_TOKEN_BUCKET_CONFIG } from "../lib/rotation.js";
+import {
+  getTokenTracker,
+  getHealthTracker,
+  DEFAULT_TOKEN_BUCKET_CONFIG,
+  DEFAULT_HEALTH_SCORE_CONFIG,
+} from "../lib/rotation.js";
 import {
   deduplicateAccounts,
   deduplicateAccountsByEmail,
@@ -170,10 +175,12 @@ describe("Multi-Account Rotation Integration", () => {
 
     it("clears token tracker state after account removal renumbers indices", () => {
       getTokenTracker().drain(0, "codex", 50);
+      getHealthTracker().recordFailure(0, "codex");
       const firstAccount = manager.setActiveIndex(0);
       expect(firstAccount).not.toBeNull();
       manager.removeAccount(firstAccount!);
       expect(getTokenTracker().getTokens(0, "codex")).toBe(DEFAULT_TOKEN_BUCKET_CONFIG.maxTokens);
+      expect(getHealthTracker().getScore(0, "codex")).toBe(DEFAULT_HEALTH_SCORE_CONFIG.maxScore);
     });
 
     it("returns null when all accounts are rate-limited", () => {

@@ -682,28 +682,23 @@ export class AccountManager {
 		const currentIndex = this.currentAccountIndexByFamily[family];
 		let alreadyCheckedCurrentIndex = -1;
 
+		const currentAccount =
+			currentIndex >= 0 && currentIndex < count ? this.accounts[currentIndex] : undefined;
 		if (
-			currentIndex >= 0 &&
-			currentIndex < count &&
-			((currentAccount) =>
-				!!currentAccount && !attemptedAccountKeys.has(getRequestAttemptKey(currentAccount)))(
-				this.accounts[currentIndex],
-			)
+			currentAccount &&
+			!attemptedAccountKeys.has(getRequestAttemptKey(currentAccount))
 		) {
-			const currentAccount = this.accounts[currentIndex];
-			if (currentAccount) {
-				const availability = this.getAccountAvailabilitySnapshot(
-					currentAccount,
-					family,
-					model,
-					tokenTracker,
-				);
-				if (availability.eligible) {
-					currentAccount.lastUsed = nowMs();
-					return currentAccount;
-				}
-				alreadyCheckedCurrentIndex = currentIndex;
+			const availability = this.getAccountAvailabilitySnapshot(
+				currentAccount,
+				family,
+				model,
+				tokenTracker,
+			);
+			if (availability.eligible) {
+				currentAccount.lastUsed = nowMs();
+				return currentAccount;
 			}
+			alreadyCheckedCurrentIndex = currentIndex;
 		}
 
 		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
@@ -726,6 +721,8 @@ export class AccountManager {
 			})
 			.filter((account): account is AccountWithMetrics => account !== null);
 
+		// Every entry passed here is already request-eligible, so hybrid scoring only
+		// ranks eligible candidates and does not rely on the LRU unavailable fallback.
 		const selected = selectHybridAccount(
 			accountsWithMetrics,
 			healthTracker,
