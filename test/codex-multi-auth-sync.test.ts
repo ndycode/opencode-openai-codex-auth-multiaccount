@@ -724,6 +724,45 @@ describe("codex-multi-auth sync", () => {
 		}
 	});
 
+	it("retries Windows-style EBUSY temp cleanup until it succeeds", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [{ refreshToken: "sync-refresh", addedAt: 1, lastUsed: 1 }],
+			}),
+		);
+
+		const rmSpy = vi
+			.spyOn(fs.promises, "rm")
+			.mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+			.mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+			.mockResolvedValueOnce(undefined);
+		const loggerModule = await import("../lib/logger.js");
+
+		try {
+			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				accountsPath: globalPath,
+				imported: 2,
+				skipped: 0,
+				total: 4,
+			});
+			expect(rmSpy).toHaveBeenCalledTimes(3);
+			expect(vi.mocked(loggerModule.logWarn)).not.toHaveBeenCalledWith(
+				expect.stringContaining("Failed to remove temporary codex sync directory"),
+			);
+		} finally {
+			rmSpy.mockRestore();
+		}
+	});
+
 	it("finds the project-scoped codex-multi-auth source across same-repo worktrees", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
@@ -1251,6 +1290,43 @@ describe("codex-multi-auth sync", () => {
 		const { syncFromCodexMultiAuth, CodexMultiAuthSyncCapacityError } = await import("../lib/codex-multi-auth-sync.js");
 		await expect(syncFromCodexMultiAuth(process.cwd())).rejects.toBeInstanceOf(
 			CodexMultiAuthSyncCapacityError,
+		);
+	});
+
+	it("ignores a zero sync capacity override and warns instead of disabling sync", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		process.env.CODEX_AUTH_SYNC_MAX_ACCOUNTS = "0";
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-new-1",
+						organizationId: "org-new-1",
+						accountIdSource: "org",
+						email: "new-1@example.com",
+						refreshToken: "rt-new-1",
+						addedAt: 1,
+						lastUsed: 1,
+					},
+				],
+			}),
+		);
+
+		const loggerModule = await import("../lib/logger.js");
+		const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+
+		await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+			accountsPath: globalPath,
+		});
+		expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+			expect.stringContaining('CODEX_AUTH_SYNC_MAX_ACCOUNTS override value "0" is not a positive finite number; ignoring.'),
 		);
 	});
 

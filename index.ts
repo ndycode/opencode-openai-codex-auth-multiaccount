@@ -3688,10 +3688,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 								try {
 									const flaggedStorage = await loadFlaggedAccounts();
 									const activeStorage = await loadAccounts();
-									const restoreContext = [
-										...(activeStorage?.accounts ?? []),
-										...flaggedStorage.accounts,
-									];
 									if (flaggedStorage.accounts.length === 0) {
 									emit("No flagged accounts to verify.");
 										if (screen && !screenOverride) {
@@ -3724,7 +3720,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const cached = await lookupCodexCliTokensByEmail(flagged.email);
 										const now = Date.now();
 										const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
-										const restoreEmailCounts = buildEmailCountMap(restoreContext);
+										const restoreEmailCounts = buildEmailCountMap([
+											...(activeStorage?.accounts ?? []),
+											...remaining,
+											flagged,
+											...flaggedStorage.accounts.slice(i + 1).filter(Boolean),
+										]);
 										if (
 											cached &&
 											canHydrateCachedTokenForAccount(

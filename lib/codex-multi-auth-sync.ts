@@ -137,7 +137,10 @@ async function removeNormalizedImportTempDir(
 		} catch (cleanupError) {
 			lastMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
 			if (attempt < TEMP_CLEANUP_RETRY_DELAYS_MS.length) {
-				await sleepAsync(TEMP_CLEANUP_RETRY_DELAYS_MS[attempt] ?? 0);
+				const delayMs = TEMP_CLEANUP_RETRY_DELAYS_MS[attempt];
+				if (delayMs !== undefined) {
+					await sleepAsync(delayMs);
+				}
 				continue;
 			}
 		}
@@ -805,9 +808,12 @@ function getSyncCapacityLimit(): number {
 		return ACCOUNT_LIMITS.MAX_ACCOUNTS;
 	}
 	const parsed = Number(override);
-	if (Number.isFinite(parsed) && parsed >= 0) {
+	if (Number.isFinite(parsed) && parsed > 0) {
 		return parsed;
 	}
+	logWarn(
+		`${SYNC_MAX_ACCOUNTS_OVERRIDE_ENV} override value "${override}" is not a positive finite number; ignoring.`,
+	);
 	return ACCOUNT_LIMITS.MAX_ACCOUNTS;
 }
 

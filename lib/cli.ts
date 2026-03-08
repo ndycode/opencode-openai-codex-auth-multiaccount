@@ -345,6 +345,7 @@ export async function promptLoginMode(
 			case "set-current-account": {
 				const index = resolveAccountSourceIndex(action.account);
 				if (index >= 0) return { mode: "manage", switchAccountIndex: index };
+				console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
 				continue;
 			}
 			case "select-account": {
@@ -352,21 +353,25 @@ export async function promptLoginMode(
 				if (accountAction === "delete") {
 					const index = resolveAccountSourceIndex(action.account);
 					if (index >= 0) return { mode: "manage", deleteAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
 					continue;
 				}
 				if (accountAction === "set-current") {
 					const index = resolveAccountSourceIndex(action.account);
 					if (index >= 0) return { mode: "manage", switchAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
 					continue;
 				}
 				if (accountAction === "refresh") {
 					const index = resolveAccountSourceIndex(action.account);
 					if (index >= 0) return { mode: "manage", refreshAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
 					continue;
 				}
 				if (accountAction === "toggle") {
 					const index = resolveAccountSourceIndex(action.account);
 					if (index >= 0) return { mode: "manage", toggleAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
 					continue;
 				}
 				continue;
