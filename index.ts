@@ -4328,6 +4328,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						target.accessToken = result.access;
 						target.expiresAt = result.expires;
 					};
+					const usageErrorBodyMaxChars = 4096;
 
 					const persistRefreshedCredentials = async (params: {
 						previousRefreshToken: string;
@@ -4392,6 +4393,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 							if (updated) {
 								await persist(latestStorage);
 							}
+							if (!updated) {
+								logWarn(
+									`[${PLUGIN_NAME}] persistRefreshedCredentials could not find a matching stored account. Refreshed credentials remain in-memory for this invocation only.`,
+									{
+										accountId: params.accountId,
+										organizationId: params.organizationId,
+										email: params.email,
+									},
+								);
+							}
 
 							return updated;
 						});
@@ -4420,7 +4431,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							if (!response.ok) {
 								let bodyText = "";
 								try {
-									bodyText = await response.text();
+									bodyText = (await response.text()).slice(0, usageErrorBodyMaxChars);
 								} catch (error) {
 									if (isAbortError(error) || controller.signal.aborted) {
 										throw new Error("Usage request timed out");
@@ -4507,7 +4518,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									applyRefreshedCredentials(account, refreshResult);
 								}
 
-								const persistedRefresh = await persistRefreshedCredentials({
+								await persistRefreshedCredentials({
 									previousRefreshToken,
 									accountId: account.accountId,
 									organizationId: account.organizationId,
@@ -4516,7 +4527,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								});
 
 								accessToken = refreshResult.access;
-								storageChanged = storageChanged || persistedRefresh;
+								storageChanged = true;
 							}
 
 							const effectiveAccount = sharesActiveCredential ? effectiveDisplayAccount : account;

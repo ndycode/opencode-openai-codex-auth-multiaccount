@@ -1051,6 +1051,71 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(reloadedStorage?.accounts[1]?.accessToken).toBe("still-valid");
 		});
 
+		it("warns when refreshed credentials cannot be persisted to any stored account", async () => {
+			const { queuedRefresh } = await import("../lib/refresh-queue.js");
+			const { withAccountStorageTransaction } = await import("../lib/storage.js");
+			const loggerModule = await import("../lib/logger.js");
+			vi.mocked(queuedRefresh).mockResolvedValueOnce({
+				type: "success",
+				access: "orphaned-access",
+				refresh: "orphaned-refresh",
+				expires: Date.now() + 7200_000,
+			});
+			vi.mocked(withAccountStorageTransaction).mockImplementationOnce(
+				async (
+					handler: (
+						current: typeof mockStorage | null,
+						persist: (storage: typeof mockStorage) => Promise<void>,
+					) => Promise<boolean>,
+				) =>
+					await handler(
+						{
+							version: 3,
+							accounts: [
+								{
+									refreshToken: "different-refresh",
+									accountId: "acc-x",
+									email: "different@test.com",
+								},
+							],
+							activeIndex: 0,
+							activeIndexByFamily: {},
+						},
+						async () => {},
+					),
+			);
+			mockStorage.accounts = [
+				{
+					refreshToken: "stale-refresh",
+					accountId: "acc-1",
+					email: "user@example.com",
+					accessToken: "",
+					expiresAt: Date.now() - 1000,
+				},
+			];
+			globalThis.fetch = vi.fn().mockImplementation(async () =>
+				new Response(
+					JSON.stringify({
+						rate_limit: {
+							primary_window: { used_percent: 0, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 1800 },
+							secondary_window: { used_percent: 0, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 86400 },
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			await plugin.tool["codex-limits"].execute();
+
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				expect.stringContaining("persistRefreshedCredentials could not find a matching stored account"),
+				expect.objectContaining({
+					accountId: "acc-1",
+					email: "user@example.com",
+				}),
+			);
+		});
+
 		it("redacts upstream auth material from usage fetch errors", async () => {
 			mockStorage.accounts = [
 				{
