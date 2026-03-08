@@ -68,6 +68,8 @@ npx -y oc-chatgpt-multi-auth@latest
 
 This writes the config to `~/.config/opencode/opencode.json`, backs up existing config, and clears the plugin cache.
 
+After install, run `codex-doctor` once to confirm your local auth and account health are ready.
+
 > Want legacy config (OpenCode v1.0.209 and below)? Add `--legacy` flag.
 
 **Option C: Manual setup**
