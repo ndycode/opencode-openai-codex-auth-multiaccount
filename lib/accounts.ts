@@ -216,6 +216,15 @@ type AccountAvailabilitySnapshot = {
 	eligible: boolean;
 };
 
+function getRequestAttemptKey(account: Pick<ManagedAccount, "refreshToken" | "organizationId" | "accountId" | "addedAt">): string {
+	return [
+		account.refreshToken,
+		account.organizationId ?? "",
+		account.accountId ?? "",
+		String(account.addedAt),
+	].join("::");
+}
+
 export class AccountManager {
 	private accounts: ManagedAccount[] = [];
 	private cursorByFamily: Record<ModelFamily, number> = initFamilyState(0);
@@ -419,6 +428,10 @@ export class AccountManager {
 			...account,
 			rateLimitResetTimes: { ...account.rateLimitResetTimes },
 		}));
+	}
+
+	getRequestAttemptKey(account: ManagedAccount): string {
+		return getRequestAttemptKey(account);
 	}
 
 	private getAccountAvailabilitySnapshot(
@@ -659,16 +672,20 @@ export class AccountManager {
 		const count = this.accounts.length;
 		if (count === 0) return null;
 
-		const attemptedIndices = options.attemptedIndices ?? new Set<number>();
+		const attemptedAccountKeys = options.attemptedAccountKeys ?? new Set<string>();
 		const quotaKey = model ? `${family}:${model}` : family;
 		const healthTracker = getHealthTracker();
 		const tokenTracker = getTokenTracker();
 		const currentIndex = this.currentAccountIndexByFamily[family];
+		let alreadyCheckedCurrentIndex = -1;
 
 		if (
 			currentIndex >= 0 &&
 			currentIndex < count &&
-			!attemptedIndices.has(currentIndex)
+			((currentAccount) =>
+				!!currentAccount && !attemptedAccountKeys.has(getRequestAttemptKey(currentAccount)))(
+				this.accounts[currentIndex],
+			)
 		) {
 			const currentAccount = this.accounts[currentIndex];
 			if (currentAccount) {
@@ -682,13 +699,15 @@ export class AccountManager {
 					currentAccount.lastUsed = nowMs();
 					return currentAccount;
 				}
+				alreadyCheckedCurrentIndex = currentIndex;
 			}
 		}
 
 		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
 			.map((account): AccountWithMetrics | null => {
 				if (!account) return null;
-				if (attemptedIndices.has(account.index)) return null;
+				if (account.index === alreadyCheckedCurrentIndex) return null;
+				if (attemptedAccountKeys.has(getRequestAttemptKey(account))) return null;
 				const availability = this.getAccountAvailabilitySnapshot(
 					account,
 					family,
@@ -950,6 +969,11 @@ export class AccountManager {
 		this.accounts.forEach((acc, index) => {
 			acc.index = index;
 		});
+		if (this.lastToastAccountIndex === idx) {
+			this.lastToastAccountIndex = -1;
+		} else if (this.lastToastAccountIndex > idx) {
+			this.lastToastAccountIndex -= 1;
+		}
 		// Trackers are keyed by account index, so any removal that renumbers accounts
 		// must clear in-memory tracker state to avoid leaking waits/health to new occupants.
 		resetTrackers();

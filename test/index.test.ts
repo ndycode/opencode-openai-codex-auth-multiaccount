@@ -304,13 +304,17 @@ vi.mock("../lib/accounts.js", () => {
 		getNextRequestEligibleForFamilyHybrid(
 			_family?: unknown,
 			_model?: unknown,
-			options?: { attemptedIndices?: ReadonlySet<number> },
+			options?: { attemptedAccountKeys?: ReadonlySet<string> },
 		) {
 			const account = this.accounts[0];
-			if (!account || options?.attemptedIndices?.has(account.index)) {
+			if (!account || options?.attemptedAccountKeys?.has(`mock::${account.index}`)) {
 				return null;
 			}
 			return account;
+		}
+
+		getRequestAttemptKey(account: { index: number }) {
+			return `mock::${account.index}`;
 		}
 
 		getSelectionExplainability() {
@@ -2032,7 +2036,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		}>,
 		overrides?: {
 			select?: (
-				attemptedIndices: ReadonlySet<number>,
+				attemptedAccountKeys: ReadonlySet<string>,
 				model?: string | null,
 			) => (typeof accounts)[number] | null;
 			consumeToken?: (
@@ -2048,15 +2052,16 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		getNextRequestEligibleForFamilyHybrid: (
 			_family: string,
 			model?: string | null,
-			options?: { attemptedIndices?: ReadonlySet<number> },
+			options?: { attemptedAccountKeys?: ReadonlySet<string> },
 		) => {
 			if (overrides?.select) {
-				return overrides.select(options?.attemptedIndices ?? new Set<number>(), model);
+				return overrides.select(options?.attemptedAccountKeys ?? new Set<string>(), model);
 			}
 			return (
-				accounts.find((account) => !(options?.attemptedIndices?.has(account.index) ?? false)) ?? null
+				accounts.find((account) => !(options?.attemptedAccountKeys?.has(`mock::${account.index}`) ?? false)) ?? null
 			);
 		},
+		getRequestAttemptKey: (account: { index: number }) => `mock::${account.index}`,
 		getSelectionExplainability: () =>
 			accounts.map((account, index) => ({
 				index,
@@ -2199,6 +2204,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const customManager = createRequestAwareManager(accounts, {
 			consumeToken: (account) => account.index !== 0,
 		});
+		const recordRateLimitSpy = vi.fn();
+		customManager.recordRateLimit = recordRateLimitSpy;
 		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
 		vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
 			(_init, _accountId, accessToken) =>
@@ -2220,6 +2227,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			(vi.mocked(globalThis.fetch).mock.calls[0]?.[1] as RequestInit | undefined)?.headers,
 		).get("authorization");
 		expect(authorization).toBe("Bearer access-acc-2");
+		expect(recordRateLimitSpy).not.toHaveBeenCalled();
 	});
 
 	it("rotates to the next account after a 5xx response", async () => {
@@ -2537,21 +2545,22 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				getNextRequestEligibleForFamilyHybrid: (
 					family: string,
 					currentModel?: string,
-					options?: { attemptedIndices?: ReadonlySet<number> },
+					options?: { attemptedAccountKeys?: ReadonlySet<string> },
 				) => {
-					const attemptedIndices = options?.attemptedIndices ?? new Set<number>();
+					const attemptedAccountKeys = options?.attemptedAccountKeys ?? new Set<string>();
 					for (let remaining = 0; remaining < customManager.getAccountCount(); remaining++) {
 						const candidate = customManager.getCurrentOrNextForFamilyHybrid(
 							family,
 							currentModel,
 						);
 						if (!candidate) return null;
-						if (!attemptedIndices.has(candidate.index)) {
+						if (!attemptedAccountKeys.has(`mock::${candidate.index}`)) {
 							return candidate;
 						}
 					}
 					return null;
 				},
+				getRequestAttemptKey: (account: { index: number }) => `mock::${account.index}`,
 				getSelectionExplainability: () => [
 					{
 						index: 0,

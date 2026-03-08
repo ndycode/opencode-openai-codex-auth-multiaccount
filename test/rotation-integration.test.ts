@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { AccountManager } from "../lib/accounts.js";
+import { getTokenTracker } from "../lib/rotation.js";
 import {
   deduplicateAccounts,
   deduplicateAccountsByEmail,
@@ -158,12 +159,21 @@ describe("Multi-Account Rotation Integration", () => {
 
     it("request selector skips attempted accounts and returns the next eligible account", () => {
       const family: ModelFamily = "codex";
+      const attemptedKey = manager.getRequestAttemptKey(manager.getAccountsSnapshot()[0]!);
 
       const selected = manager.getNextRequestEligibleForFamilyHybrid(family, undefined, {
-        attemptedIndices: new Set([0]),
+        attemptedAccountKeys: new Set([attemptedKey]),
       });
 
       expect(selected?.index).toBe(1);
+    });
+
+    it("clears token tracker state after account removal renumbers indices", () => {
+      getTokenTracker().drain(0, "codex", 50);
+      const firstAccount = manager.setActiveIndex(0);
+      expect(firstAccount).not.toBeNull();
+      manager.removeAccount(firstAccount!);
+      expect(getTokenTracker().getTokens(0, "codex")).toBeGreaterThan(0);
     });
 
     it("returns null when all accounts are rate-limited", () => {

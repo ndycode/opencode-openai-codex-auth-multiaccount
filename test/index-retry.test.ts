@@ -58,10 +58,14 @@ vi.mock("../lib/accounts.js", () => {
 		getNextRequestEligibleForFamilyHybrid(
 			_family?: unknown,
 			_model?: unknown,
-			options?: { attemptedIndices?: ReadonlySet<number> },
+			options?: { attemptedAccountKeys?: ReadonlySet<string> },
 		) {
-			if (options?.attemptedIndices?.has(0)) return null;
+			if (options?.attemptedAccountKeys?.has("mock::0")) return null;
 			return this.getCurrentOrNextForFamily();
+		}
+
+		getRequestAttemptKey() {
+			return "mock::0";
 		}
 
 		getSelectionExplainability() {

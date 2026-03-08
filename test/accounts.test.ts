@@ -2151,7 +2151,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored as never);
       const selected = manager.getNextRequestEligibleForFamilyHybrid("codex", undefined, {
-        attemptedIndices: new Set([0]),
+        attemptedAccountKeys: new Set([manager.getRequestAttemptKey(manager.getAccountsSnapshot()[0]!)]),
       });
 
       expect(selected).not.toBeNull();

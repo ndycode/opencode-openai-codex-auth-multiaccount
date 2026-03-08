@@ -2075,16 +2075,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						}
 					};
 
-							let allRateLimitedRetries = 0;
-							let emptyResponseRetries = 0;
-							const attemptedUnsupportedFallbackModels = new Set<string>();
+								let allRateLimitedRetries = 0;
+								let emptyResponseRetries = 0;
+								const attemptedUnsupportedFallbackModels = new Set<string>();
 							if (model) {
 								attemptedUnsupportedFallbackModels.add(model);
 							}
 
 							while (true) {
 										let accountCount = accountManager.getAccountCount();
-										const attempted = new Set<number>();
+										const attempted = new Set<string>();
 										let restartAccountTraversalWithFallback = false;
 
 while (attempted.size < Math.max(1, accountCount)) {
@@ -2102,13 +2102,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 					explainability: selectionExplainability,
 				};
 				const account = accountManager.getNextRequestEligibleForFamilyHybrid(modelFamily, model, {
-					attemptedIndices: attempted,
+					attemptedAccountKeys: attempted,
 					pidOffsetEnabled,
 				});
 				if (!account) {
 					break;
 				}
-							attempted.add(account.index);
+							attempted.add(accountManager.getRequestAttemptKey(account));
 							runtimeMetrics.lastSelectedAccountIndex = account.index;
 							runtimeMetrics.lastQuotaKey = quotaKey;
 							if (runtimeMetrics.lastSelectionSnapshot) {

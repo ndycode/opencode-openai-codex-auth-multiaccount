@@ -312,7 +312,7 @@ export interface HybridSelectionOptions {
 }
 
 export interface RequestHybridSelectionOptions {
-  attemptedIndices?: ReadonlySet<number>;
+  attemptedAccountKeys?: ReadonlySet<string>;
   pidOffsetEnabled?: boolean;
 }
 
