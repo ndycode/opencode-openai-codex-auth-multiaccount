@@ -229,6 +229,12 @@ function isProcessAlive(pid: number): boolean {
 		return true;
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ESRCH") {
+			return false;
+		}
+		if (process.platform === "win32" && code === "EPERM") {
+			return false;
+		}
 		return code === "EPERM";
 	}
 }

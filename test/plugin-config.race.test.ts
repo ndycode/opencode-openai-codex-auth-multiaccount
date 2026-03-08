@@ -149,4 +149,65 @@ describe("plugin config lock retry", () => {
 			killSpy.mockRestore();
 		}
 	});
+
+	it("recovers stale locks on Windows when the pid probe returns EPERM", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		const configPath = path.join(os.homedir(), ".opencode", "openai-codex-auth-config.json");
+		const lockPath = `${configPath}.lock`;
+		let lockAttempts = 0;
+		let lockFilePresent = true;
+		const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+			const error = new Error("permission denied") as NodeJS.ErrnoException;
+			error.code = "EPERM";
+			throw error;
+		});
+
+		mockExistsSync.mockImplementation((filePath) => String(filePath) === lockPath && lockFilePresent);
+		mockReadFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
+			const pathValue = String(filePath);
+			if (pathValue === lockPath) {
+				return "111";
+			}
+			if (pathValue.includes(".stale")) {
+				return "111";
+			}
+			return "{}";
+		});
+		mockRenameSync.mockImplementation((source, destination) => {
+			if (String(source) === lockPath) {
+				lockFilePresent = false;
+			}
+			if (String(destination) === lockPath) {
+				lockFilePresent = true;
+			}
+			return undefined;
+		});
+		mockWriteFileSync.mockImplementation((filePath) => {
+			const pathValue = String(filePath);
+			if (pathValue === lockPath) {
+				lockAttempts += 1;
+				if (lockAttempts === 1) {
+					const error = new Error("exists") as NodeJS.ErrnoException;
+					error.code = "EEXIST";
+					throw error;
+				}
+			}
+			return undefined;
+		});
+
+		const { savePluginConfigMutation } = await import("../lib/config.js");
+
+		try {
+			await expect(
+				savePluginConfigMutation((current) => ({
+					...current,
+					experimental: { syncFromCodexMultiAuth: { enabled: true } },
+				})),
+			).resolves.toBeUndefined();
+			expect(killSpy).toHaveBeenCalledWith(111, 0);
+			expect(mockRenameSync).toHaveBeenCalled();
+		} finally {
+			killSpy.mockRestore();
+		}
+	});
 });

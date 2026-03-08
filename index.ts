@@ -4202,9 +4202,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 										console.log(`Skipped: ${result.skipped}`);
 										console.log(`Total: ${result.total}`);
 										console.log(`Auto-backup: ${backupLabel}`);
-										if (result.tempCleanupWarning) {
-											console.log(result.tempCleanupWarning);
-										}
 										console.log("");
 										return;
 									} catch (error) {
@@ -4506,8 +4503,44 @@ while (attempted.size < Math.max(1, accountCount)) {
 										appliedFixes.push(`Removed ${cleanupResult.removed} synced overlap(s).`);
 										emit(`Removed ${cleanupResult.removed} synced overlap(s).`, "success");
 									}
-									const storage = await loadAccounts();
-									if (!storage || storage.accounts.length === 0) {
+									const refreshedStorage = await withAccountStorageTransaction(
+										async (loadedStorage, persist) => {
+											if (!loadedStorage || loadedStorage.accounts.length === 0) {
+												return null;
+											}
+											const workingStorage: AccountStorageV3 = {
+												...loadedStorage,
+												accounts: loadedStorage.accounts.map((account) => ({ ...account })),
+												activeIndexByFamily: { ...(loadedStorage.activeIndexByFamily ?? {}) },
+											};
+
+											let changedByRefresh = false;
+											let refreshedCount = 0;
+											for (const account of workingStorage.accounts) {
+												try {
+													const refreshResult = await queuedRefresh(account.refreshToken);
+													if (refreshResult.type === "success") {
+														account.refreshToken = refreshResult.refresh;
+														account.accessToken = refreshResult.access;
+														account.expiresAt = refreshResult.expires;
+														changedByRefresh = true;
+														refreshedCount += 1;
+													}
+												} catch (error) {
+													fixErrors.push(error instanceof Error ? error.message : String(error));
+												}
+											}
+
+											if (changedByRefresh) {
+												await persist(workingStorage);
+											}
+											return {
+												changedByRefresh,
+												refreshedCount,
+											};
+										},
+									);
+									if (!refreshedStorage) {
 										emit("No accounts available after cleanup.", "warning");
 										if (screen) {
 											await screen.finish();
@@ -4516,27 +4549,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return;
 									}
 
-									let changedByRefresh = false;
-									let refreshedCount = 0;
-									for (const account of storage.accounts) {
-										try {
-											const refreshResult = await queuedRefresh(account.refreshToken);
-											if (refreshResult.type === "success") {
-												account.refreshToken = refreshResult.refresh;
-												account.accessToken = refreshResult.access;
-												account.expiresAt = refreshResult.expires;
-												changedByRefresh = true;
-												refreshedCount += 1;
-											}
-										} catch (error) {
-											fixErrors.push(error instanceof Error ? error.message : String(error));
-										}
-									}
-
-									if (changedByRefresh) {
-										await saveAccounts(storage);
-										appliedFixes.push(`Refreshed ${refreshedCount} account token(s).`);
-										emit(`Refreshed ${refreshedCount} account token(s).`, "success");
+									if (refreshedStorage.changedByRefresh) {
+										appliedFixes.push(`Refreshed ${refreshedStorage.refreshedCount} account token(s).`);
+										emit(`Refreshed ${refreshedStorage.refreshedCount} account token(s).`, "success");
 									}
 									await verifyFlaggedAccounts(screen);
 									await pickBestAccountFromDashboard(screen);

@@ -40,8 +40,6 @@ export interface CodexMultiAuthSyncResult extends CodexMultiAuthSyncPreview {
 	backupStatus: ImportAccountsResult["backupStatus"];
 	backupPath?: string;
 	backupError?: string;
-	tempCleanupWarning?: string;
-	tempCleanupPath?: string;
 }
 
 export interface CodexMultiAuthCleanupResult {
