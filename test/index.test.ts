@@ -711,6 +711,8 @@ describe("OpenAIOAuthPlugin", () => {
 
 		beforeEach(() => {
 			originalFetch = globalThis.fetch;
+			mockStorage.activeIndex = 0;
+			mockStorage.activeIndexByFamily = {};
 		});
 
 		afterEach(() => {

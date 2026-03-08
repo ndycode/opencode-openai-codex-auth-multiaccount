@@ -4312,6 +4312,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 						(error instanceof Error && error.name === "AbortError") ||
 						(typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError");
 
+					const applyRefreshedCredentials = (
+						target: {
+							refreshToken: string;
+							accessToken?: string;
+							expiresAt?: number;
+						},
+						result: {
+							refresh: string;
+							access: string;
+							expires: number;
+						},
+					): void => {
+						target.refreshToken = result.refresh;
+						target.accessToken = result.access;
+						target.expiresAt = result.expires;
+					};
+
 					const usageFetchTimeoutMs = getFetchTimeoutMs(loadPluginConfig());
 
 					const fetchUsage = async (params: {
@@ -4387,8 +4404,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 							!!activeRefreshToken && account.refreshToken === activeRefreshToken;
 						const displayIndex =
 							sharesActiveCredential && typeof activeIndex === "number" ? activeIndex : i;
-						const displayAccount = storage.accounts[displayIndex] ?? account;
-						const label = formatCommandAccountLabel(displayAccount, displayIndex);
+						const displayAccount = storage.accounts[displayIndex];
+						if (sharesActiveCredential && !displayAccount) {
+							throw new Error(`Active account entry missing for index ${displayIndex}`);
+						}
+						const effectiveDisplayAccount = displayAccount ?? account;
+						const label = formatCommandAccountLabel(effectiveDisplayAccount, displayIndex);
 						const isActive = i === activeIndex || sharesActiveCredential;
 						const activeSuffix = isActive ? (ui.v2Enabled ? ` ${formatUiBadge(ui, "active", "accent")}` : " [active]") : "";
 
@@ -4406,35 +4427,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 									throw new Error(refreshResult.message ?? refreshResult.reason);
 								}
 
-								const applyRefreshedCredentials = (
-									target: {
-										refreshToken: string;
-										accessToken?: string;
-										expiresAt?: number;
-									},
-								): void => {
-									target.refreshToken = refreshResult.refresh;
-									target.accessToken = refreshResult.access;
-									target.expiresAt = refreshResult.expires;
-								};
-
 								let refreshedCount = 0;
 								for (const storedAccount of storage.accounts) {
 									if (!storedAccount) continue;
 									if (previousRefreshToken && storedAccount.refreshToken === previousRefreshToken) {
-										applyRefreshedCredentials(storedAccount);
+										applyRefreshedCredentials(storedAccount, refreshResult);
 										refreshedCount += 1;
 									}
 								}
 								if (refreshedCount === 0) {
-									applyRefreshedCredentials(account);
+									applyRefreshedCredentials(account, refreshResult);
 								}
 
 								accessToken = refreshResult.access;
 								storageChanged = true;
 							}
 
-							const effectiveAccount = sharesActiveCredential ? displayAccount : account;
+							const effectiveAccount = sharesActiveCredential ? effectiveDisplayAccount : account;
 							const accountId = effectiveAccount.accountId ?? extractAccountId(accessToken);
 							if (!accountId) {
 								throw new Error("Missing account id");
