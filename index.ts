@@ -4329,6 +4329,74 @@ while (attempted.size < Math.max(1, accountCount)) {
 						target.expiresAt = result.expires;
 					};
 
+					const persistRefreshedCredentials = async (params: {
+						previousRefreshToken: string;
+						accountId?: string;
+						organizationId?: string;
+						email?: string;
+						refreshResult: {
+							refresh: string;
+							access: string;
+							expires: number;
+						};
+					}): Promise<boolean> => {
+						return await withAccountStorageTransaction(async (current, persist) => {
+							const latestStorage: AccountStorageV3 =
+								current ??
+								({
+									version: 3,
+									accounts: [],
+									activeIndex: 0,
+									activeIndexByFamily: {},
+								} satisfies AccountStorageV3);
+
+							let updated = false;
+							if (params.previousRefreshToken) {
+								for (const storedAccount of latestStorage.accounts) {
+									if (storedAccount.refreshToken === params.previousRefreshToken) {
+										applyRefreshedCredentials(storedAccount, params.refreshResult);
+										updated = true;
+									}
+								}
+							}
+
+							if (!updated) {
+								const normalizedOrganizationId = params.organizationId?.trim() ?? "";
+								const normalizedEmail = params.email?.trim().toLowerCase();
+								const fallbackTarget =
+									(params.accountId
+										? latestStorage.accounts.find(
+												(storedAccount) =>
+													storedAccount.accountId === params.accountId &&
+													(storedAccount.organizationId?.trim() ?? "") === normalizedOrganizationId,
+											)
+										: undefined) ??
+									(params.accountId
+										? latestStorage.accounts.find(
+												(storedAccount) => storedAccount.accountId === params.accountId,
+											)
+										: undefined) ??
+									(normalizedEmail
+										? latestStorage.accounts.find(
+												(storedAccount) =>
+													storedAccount.email?.trim().toLowerCase() === normalizedEmail,
+											)
+										: undefined);
+
+								if (fallbackTarget) {
+									applyRefreshedCredentials(fallbackTarget, params.refreshResult);
+									updated = true;
+								}
+							}
+
+							if (updated) {
+								await persist(latestStorage);
+							}
+
+							return updated;
+						});
+					};
+
 					const usageFetchTimeoutMs = getFetchTimeoutMs(loadPluginConfig());
 
 					const fetchUsage = async (params: {
@@ -4439,8 +4507,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 									applyRefreshedCredentials(account, refreshResult);
 								}
 
+								const persistedRefresh = await persistRefreshedCredentials({
+									previousRefreshToken,
+									accountId: account.accountId,
+									organizationId: account.organizationId,
+									email: account.email,
+									refreshResult,
+								});
+
 								accessToken = refreshResult.access;
-								storageChanged = true;
+								storageChanged = storageChanged || persistedRefresh;
 							}
 
 							const effectiveAccount = sharesActiveCredential ? effectiveDisplayAccount : account;
@@ -4517,7 +4593,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					if (storageChanged) {
-						await saveAccounts(storage);
 						invalidateAccountManagerCache();
 					}
 

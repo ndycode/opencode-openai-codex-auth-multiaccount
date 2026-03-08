@@ -1002,6 +1002,55 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(reloadedStorage?.accounts[0]?.expiresAt).toBe(refreshedExpires);
 		});
 
+		it("updates only the single matching stored account during refresh propagation", async () => {
+			const { queuedRefresh } = await import("../lib/refresh-queue.js");
+			const { loadAccounts } = await import("../lib/storage.js");
+			const refreshedExpires = Date.now() + 7200_000;
+			vi.mocked(queuedRefresh).mockResolvedValueOnce({
+				type: "success",
+				access: "matched-access",
+				refresh: "matched-refresh",
+				expires: refreshedExpires,
+			});
+			mockStorage.accounts = [
+				{
+					refreshToken: "single-match",
+					accountId: "acc-1",
+					email: "match@test.com",
+					accessToken: "",
+					expiresAt: Date.now() - 1000,
+				},
+				{
+					refreshToken: "other-refresh",
+					accountId: "acc-2",
+					email: "other@test.com",
+					accessToken: "still-valid",
+					expiresAt: Date.now() + 3600_000,
+				},
+			];
+			globalThis.fetch = vi.fn().mockImplementation(async () =>
+				new Response(
+					JSON.stringify({
+						rate_limit: {
+							primary_window: { used_percent: 15, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 1800 },
+							secondary_window: { used_percent: 15, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 86400 },
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			await plugin.tool["codex-limits"].execute();
+
+			expect(vi.mocked(queuedRefresh)).toHaveBeenCalledWith("single-match");
+			const reloadedStorage = await vi.mocked(loadAccounts)();
+			expect(reloadedStorage?.accounts[0]?.refreshToken).toBe("matched-refresh");
+			expect(reloadedStorage?.accounts[0]?.accessToken).toBe("matched-access");
+			expect(reloadedStorage?.accounts[0]?.expiresAt).toBe(refreshedExpires);
+			expect(reloadedStorage?.accounts[1]?.refreshToken).toBe("other-refresh");
+			expect(reloadedStorage?.accounts[1]?.accessToken).toBe("still-valid");
+		});
+
 		it("redacts upstream auth material from usage fetch errors", async () => {
 			mockStorage.accounts = [
 				{
