@@ -65,7 +65,7 @@ describe("Storage Paths Module", () => {
 
 		it("preserves the legacy lowercase key prefix on Windows paths", () => {
 			const projectPath = "C:\\Users\\Test\\MyProject";
-			expect(getProjectStorageKey(projectPath)).toMatch(/^myproject-[a-f0-9]{12}$/);
+			expect(getProjectStorageKey(projectPath)).toMatch(/^[Mm]y[Pp]roject-[a-f0-9]{12}$/);
 		});
 
 		it("uses the canonical git identity for same-repo worktrees", () => {

@@ -1421,7 +1421,7 @@ function previewImportAccountsAgainstExistingNormalized(
 	}
 
 	const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
-	const imported = deduplicatedAccounts.length - existingAccounts.length;
+	const imported = Math.max(0, deduplicatedAccounts.length - existingAccounts.length);
 	const skipped = normalized.accounts.length - imported;
 	return {
 		imported,

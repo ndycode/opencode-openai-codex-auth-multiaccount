@@ -1221,17 +1221,50 @@ describe("storage", () => {
       expect(result?.activeIndex).toBe(0);
     });
 
-    it("clamps out-of-bounds activeIndex", () => {
-      const data = {
+		it("clamps out-of-bounds activeIndex", () => {
+			const data = {
         version: 3,
         activeIndex: 100,
         accounts: [{ refreshToken: "t1", accountId: "A" }, { refreshToken: "t2", accountId: "B" }],
       };
       const result = normalizeAccountStorage(data);
-      expect(result?.activeIndex).toBe(1);
-    });
+			expect(result?.activeIndex).toBe(1);
+		});
 
-    it("filters out accounts with empty refreshToken", () => {
+		it("preview import never reports a negative imported count after deduplication", async () => {
+			const { previewImportAccountsWithExistingStorage } = await import("../lib/storage.js");
+			const tempDir = await fs.mkdtemp(join(tmpdir(), "storage-preview-"));
+			const filePath = join(tempDir, "accounts.json");
+			await fs.writeFile(
+				filePath,
+				JSON.stringify({
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{ accountId: "org-a", organizationId: "org-a", accountIdSource: "org", refreshToken: "rt-a", addedAt: 1, lastUsed: 1 },
+					],
+				}),
+				"utf8",
+			);
+			try {
+				const result = await previewImportAccountsWithExistingStorage(filePath, {
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{ accountId: "org-a", organizationId: "org-a", accountIdSource: "org", refreshToken: "rt-a", addedAt: 2, lastUsed: 2 },
+						{ accountId: "org-a", organizationId: "org-a", accountIdSource: "org", refreshToken: "rt-a", addedAt: 3, lastUsed: 3 },
+					],
+				});
+				expect(result.imported).toBe(0);
+				expect(result.skipped).toBeGreaterThanOrEqual(1);
+			} finally {
+				await fs.rm(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it("filters out accounts with empty refreshToken", () => {
       const data = {
         version: 3,
         accounts: [
