@@ -910,6 +910,7 @@ export async function syncFromCodexMultiAuth(
 				},
 			);
 		},
+		{ postSuccessCleanupFailureMode: "warn" },
 	);
 	return {
 		rootDir: resolved.rootDir,
@@ -1123,16 +1124,14 @@ export class CodexMultiAuthSyncCapacityError extends Error {
 }
 
 export async function previewCodexMultiAuthSyncedOverlapCleanup(): Promise<CodexMultiAuthCleanupResult> {
-	return withAccountStorageTransaction(async (current) => {
-		const fallback = current ?? {
-			version: 3 as const,
-			accounts: [],
-			activeIndex: 0,
-			activeIndexByFamily: {},
-		};
-		const existing = await loadRawCodexMultiAuthOverlapCleanupStorage(fallback);
-		return buildCodexMultiAuthOverlapCleanupPlan(existing).result;
-	});
+	const current = await loadAccounts();
+	const existing = current ?? {
+		version: 3 as const,
+		accounts: [],
+		activeIndex: 0,
+		activeIndexByFamily: {},
+	};
+	return buildCodexMultiAuthOverlapCleanupPlan(existing).result;
 }
 
 export async function cleanupCodexMultiAuthSyncedOverlaps(): Promise<CodexMultiAuthCleanupResult> {

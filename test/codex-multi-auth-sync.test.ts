@@ -409,6 +409,37 @@ describe("codex-multi-auth sync", () => {
 		});
 	});
 
+	it("keeps overlap cleanup preview on the read-only path without the storage transaction lock", async () => {
+		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async () => {
+			throw new Error("overlap preview should not take write transaction lock");
+		});
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
+				{
+					accountId: "org-sync",
+					organizationId: "org-sync",
+					accountIdSource: "org",
+					accountTags: ["codex-multi-auth-sync"],
+					refreshToken: "sync-token",
+					addedAt: 2,
+					lastUsed: 2,
+				},
+			],
+		});
+
+		const { previewCodexMultiAuthSyncedOverlapCleanup } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(previewCodexMultiAuthSyncedOverlapCleanup()).resolves.toEqual({
+			before: 1,
+			after: 1,
+			removed: 0,
+			updated: 0,
+		});
+	});
+
 	it("uses a single account snapshot for preview capacity filtering and preview counts", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
@@ -1614,7 +1645,7 @@ describe("codex-multi-auth sync", () => {
 		});
 	});
 
-	it("fails sync when temporary import cleanup cannot remove sensitive data after apply", async () => {
+	it("warns instead of failing when post-success temp cleanup cannot remove sync data", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
 		const globalPath = join(rootDir, "openai-codex-accounts.json");
@@ -1634,9 +1665,11 @@ describe("codex-multi-auth sync", () => {
 		try {
 			const { syncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
 
-			await expect(syncFromCodexMultiAuth(process.cwd())).rejects.toThrow(
-				/Failed to remove temporary codex sync directory/,
-			);
+			await expect(syncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				accountsPath: globalPath,
+				imported: 2,
+				backupStatus: "created",
+			});
 			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to remove temporary codex sync directory"),
 			);
