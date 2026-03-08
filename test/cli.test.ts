@@ -543,7 +543,16 @@ describe("CLI Module", () => {
 		});
 
 		it("promptLoginMode returns add immediately when TTY is unavailable without env overrides", async () => {
+			const originalEnv = {
+				OPENCODE_TUI: process.env.OPENCODE_TUI,
+				OPENCODE_DESKTOP: process.env.OPENCODE_DESKTOP,
+				TERM_PROGRAM: process.env.TERM_PROGRAM,
+				ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
+			};
 			delete process.env.OPENCODE_TUI;
+			delete process.env.OPENCODE_DESKTOP;
+			delete process.env.TERM_PROGRAM;
+			delete process.env.ELECTRON_RUN_AS_NODE;
 			const { stdin, stdout } = await import("node:process");
 			const origInputTTY = stdin.isTTY;
 			const origOutputTTY = stdout.isTTY;
@@ -558,12 +567,27 @@ describe("CLI Module", () => {
 			} finally {
 				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
 				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
-				process.env.OPENCODE_TUI = "1";
+				for (const [key, value] of Object.entries(originalEnv)) {
+					if (value === undefined) {
+						delete process.env[key];
+					} else {
+						process.env[key] = value;
+					}
+				}
 			}
 		});
 
 		it("promptCodexMultiAuthSyncPrune returns null when TTY is unavailable without env overrides", async () => {
+			const originalEnv = {
+				OPENCODE_TUI: process.env.OPENCODE_TUI,
+				OPENCODE_DESKTOP: process.env.OPENCODE_DESKTOP,
+				TERM_PROGRAM: process.env.TERM_PROGRAM,
+				ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
+			};
 			delete process.env.OPENCODE_TUI;
+			delete process.env.OPENCODE_DESKTOP;
+			delete process.env.TERM_PROGRAM;
+			delete process.env.ELECTRON_RUN_AS_NODE;
 			const { stdin, stdout } = await import("node:process");
 			const origInputTTY = stdin.isTTY;
 			const origOutputTTY = stdout.isTTY;
@@ -580,7 +604,13 @@ describe("CLI Module", () => {
 			} finally {
 				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
 				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
-				process.env.OPENCODE_TUI = "1";
+				for (const [key, value] of Object.entries(originalEnv)) {
+					if (value === undefined) {
+						delete process.env[key];
+					} else {
+						process.env[key] = value;
+					}
+				}
 			}
 		});
 	});

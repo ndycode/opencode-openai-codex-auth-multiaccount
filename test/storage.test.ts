@@ -2075,13 +2075,6 @@ describe("storage", () => {
         "utf-8",
       );
 
-      const preview = await previewDuplicateEmailCleanup();
-      expect(preview).toEqual({
-        before: 1,
-        after: 1,
-        removed: 0,
-      });
-
       const result = await cleanupDuplicateEmailAccounts();
       expect(result).toEqual({
         before: 1,
@@ -2093,6 +2086,13 @@ describe("storage", () => {
       const migrated = await loadAccounts();
       expect(migrated?.accounts).toHaveLength(1);
       expect(migrated?.accounts[0]?.refreshToken).toBe("legacy-newer");
+
+      const preview = await previewDuplicateEmailCleanup();
+      expect(preview).toEqual({
+        before: 1,
+        after: 1,
+        removed: 0,
+      });
     });
 
     it("loads global storage as fallback when project-scoped storage is missing", async () => {

@@ -5,6 +5,12 @@ type FlaggedSnapshot<TAccount extends object> = {
 	accounts: TAccount[];
 };
 
+function cloneWithoutAccessToken<TAccount extends object>(account: TAccount): TAccount {
+	const clone = structuredClone(account) as TAccount & { accessToken?: unknown };
+	delete clone.accessToken;
+	return clone as TAccount;
+}
+
 export function createSyncPruneBackupPayload<TFlaggedAccount extends object>(
 	currentAccountsStorage: AccountStorageV3,
 	currentFlaggedStorage: FlaggedSnapshot<TFlaggedAccount>,
@@ -17,20 +23,12 @@ export function createSyncPruneBackupPayload<TFlaggedAccount extends object>(
 		version: 1,
 		accounts: {
 			...currentAccountsStorage,
-			accounts: currentAccountsStorage.accounts.map((account) => {
-				const clone = { ...account };
-				delete clone.accessToken;
-				return clone;
-			}),
+			accounts: currentAccountsStorage.accounts.map((account) => cloneWithoutAccessToken(account)),
 			activeIndexByFamily: { ...(currentAccountsStorage.activeIndexByFamily ?? {}) },
 		},
 		flagged: {
 			...currentFlaggedStorage,
-			accounts: currentFlaggedStorage.accounts.map((flagged) => {
-				const clone = { ...(flagged as TFlaggedAccount & { accessToken?: unknown }) };
-				delete clone.accessToken;
-				return clone as TFlaggedAccount;
-			}),
+			accounts: currentFlaggedStorage.accounts.map((flagged) => cloneWithoutAccessToken(flagged)),
 		},
 	};
 }

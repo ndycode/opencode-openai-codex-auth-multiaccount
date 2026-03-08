@@ -3359,7 +3359,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 										? `Checking ${workingStorage.accounts.length} account(s) with full refresh + live validation`
 										: `Checking ${workingStorage.accounts.length} account(s) with quota validation`,
 								);
-								const emailCounts = buildEmailCountMap(workingStorage.accounts);
 								let screenFinished = false;
 								const emit = (
 									index: number,
@@ -3447,6 +3446,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										if (!accessToken) {
 											const cached = await lookupCodexCliTokensByEmail(account.email);
 											const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
+											const emailCounts = buildEmailCountMap(workingStorage.accounts);
 											if (
 											cached &&
 											canHydrateCachedTokenForAccount(
@@ -3692,7 +3692,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 										...(activeStorage?.accounts ?? []),
 										...flaggedStorage.accounts,
 									];
-									const restoreEmailCounts = buildEmailCountMap(restoreContext);
 									if (flaggedStorage.accounts.length === 0) {
 									emit("No flagged accounts to verify.");
 										if (screen && !screenOverride) {
@@ -3725,6 +3724,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const cached = await lookupCodexCliTokensByEmail(flagged.email);
 										const now = Date.now();
 										const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
+										const restoreEmailCounts = buildEmailCountMap(restoreContext);
 										if (
 											cached &&
 											canHydrateCachedTokenForAccount(
