@@ -923,7 +923,7 @@ export class AccountManager {
 			}
 
 			const tokenWaitMs = tokenTracker.getWaitTimeUntilTokenAvailable(account.index, quotaKey);
-			if (Number.isFinite(tokenWaitMs) && tokenWaitMs > 0) {
+			if (tokenWaitMs > 0) {
 				accountWaits.push(tokenWaitMs);
 			}
 
@@ -932,7 +932,9 @@ export class AccountManager {
 			}
 		}
 
-		return waitTimes.length > 0 ? Math.min(...waitTimes) : 0;
+		if (waitTimes.length === 0) return 0;
+		const minWait = Math.min(...waitTimes);
+		return Number.isFinite(minWait) ? minWait : Number.MAX_SAFE_INTEGER;
 	}
 
 	removeAccount(account: ManagedAccount): boolean {

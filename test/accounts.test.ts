@@ -894,6 +894,14 @@ describe("AccountManager", () => {
   });
 
   describe("getMinWaitTimeForFamily", () => {
+    beforeEach(() => {
+      resetTrackers();
+    });
+
+    afterEach(() => {
+      resetTrackers();
+    });
+
     it("returns 0 when accounts are available", () => {
       const now = Date.now();
       const stored = {
@@ -1008,6 +1016,33 @@ describe("AccountManager", () => {
       const waitTime = manager.getMinWaitTimeForFamily("codex");
       expect(waitTime).toBeGreaterThan(20000);
       expect(waitTime).toBeLessThanOrEqual(30000);
+    });
+
+    it("returns a large finite wait when token refill is disabled", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          {
+            refreshToken: "token-1",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      const tracker = getTokenTracker() as unknown as {
+        config: { tokensPerMinute: number };
+        drain: (accountIndex: number, quotaKey?: string, drainAmount?: number) => void;
+      };
+      tracker.config.tokensPerMinute = 0;
+      tracker.drain(0, "codex", 50);
+
+      const waitTime = manager.getMinWaitTimeForFamily("codex");
+      expect(waitTime).toBe(Number.MAX_SAFE_INTEGER);
     });
   });
 

@@ -2259,7 +2259,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 								// Consume a token before making the request for proactive rate limiting
 								const tokenConsumed = accountManager.consumeToken(account, modelFamily, model);
 								if (!tokenConsumed) {
-									accountManager.recordRateLimit(account, modelFamily, model);
 									runtimeMetrics.accountRotations++;
 									runtimeMetrics.lastError =
 										`Local token bucket depleted for account ${account.index + 1} (${modelFamily}${model ? `:${model}` : ""})`;

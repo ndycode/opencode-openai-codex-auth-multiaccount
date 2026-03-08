@@ -55,7 +55,12 @@ vi.mock("../lib/accounts.js", () => {
 			return this.getCurrentOrNextForFamily();
 		}
 
-		getNextRequestEligibleForFamilyHybrid() {
+		getNextRequestEligibleForFamilyHybrid(
+			_family?: unknown,
+			_model?: unknown,
+			options?: { attemptedIndices?: ReadonlySet<number> },
+		) {
+			if (options?.attemptedIndices?.has(0)) return null;
 			return this.getCurrentOrNextForFamily();
 		}
 

@@ -2309,7 +2309,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(response.status).toBe(429);
-		expect(await response.text()).toContain("All 2 account(s) are rate-limited");
+		expect(await response.text()).toContain("Try again in 12s");
 	});
 
 	it("falls back from gpt-5.4-pro to gpt-5.4 when unsupported fallback is enabled", async () => {
@@ -2532,9 +2532,17 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 					options?: { attemptedIndices?: ReadonlySet<number> },
 				) => {
 					const attemptedIndices = options?.attemptedIndices ?? new Set<number>();
-					const candidate = customManager.getCurrentOrNextForFamilyHybrid(family, currentModel);
-					if (!candidate) return null;
-					return attemptedIndices.has(candidate.index) ? null : candidate;
+					for (let remaining = 0; remaining < customManager.getAccountCount(); remaining++) {
+						const candidate = customManager.getCurrentOrNextForFamilyHybrid(
+							family,
+							currentModel,
+						);
+						if (!candidate) return null;
+						if (!attemptedIndices.has(candidate.index)) {
+							return candidate;
+						}
+					}
+					return null;
 				},
 				getSelectionExplainability: () => [
 					{
