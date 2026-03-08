@@ -215,10 +215,21 @@ const mockStorage = {
 	activeIndexByFamily: {} as Record<string, number>,
 };
 
+const cloneMockStorage = () => ({
+	...mockStorage,
+	accounts: mockStorage.accounts.map((account) => ({ ...account })),
+	activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+});
+
 vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "/mock/path/accounts.json",
-	loadAccounts: vi.fn(async () => mockStorage),
-	saveAccounts: vi.fn(async () => {}),
+	loadAccounts: vi.fn(async () => cloneMockStorage()),
+	saveAccounts: vi.fn(async (nextStorage: typeof mockStorage) => {
+		mockStorage.version = nextStorage.version;
+		mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+		mockStorage.activeIndex = nextStorage.activeIndex;
+		mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
+	}),
 	withAccountStorageTransaction: vi.fn(
 		async (
 			callback: (
@@ -226,11 +237,7 @@ vi.mock("../lib/storage.js", () => ({
 				persist: (nextStorage: typeof mockStorage) => Promise<void>,
 			) => Promise<void>,
 		) => {
-			const loadedStorage = {
-				...mockStorage,
-				accounts: mockStorage.accounts.map((account) => ({ ...account })),
-				activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
-			};
+			const loadedStorage = cloneMockStorage();
 			const persist = async (nextStorage: typeof mockStorage) => {
 				mockStorage.version = nextStorage.version;
 				mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
@@ -879,12 +886,14 @@ describe("OpenAIOAuthPlugin", () => {
 		});
 
 		it("propagates refreshed credentials to duplicate stored accounts", async () => {
+			const { loadAccounts } = await import("../lib/storage.js");
 			const { queuedRefresh } = await import("../lib/refresh-queue.js");
+			const rotatedExpires = Date.now() + 7200_000;
 			vi.mocked(queuedRefresh).mockResolvedValueOnce({
 				type: "success",
 				access: "rotated-access",
 				refresh: "rotated-refresh",
-				expires: Date.now() + 7200_000,
+				expires: rotatedExpires,
 			});
 			mockStorage.accounts = [
 				{
@@ -917,24 +926,31 @@ describe("OpenAIOAuthPlugin", () => {
 			await plugin.tool["codex-limits"].execute();
 
 			expect(vi.mocked(queuedRefresh)).toHaveBeenCalledTimes(1);
-			expect(mockStorage.accounts.map((account) => account.refreshToken)).toEqual([
+			expect(vi.mocked(queuedRefresh)).toHaveBeenCalledWith("stale-refresh");
+			const reloadedStorage = await vi.mocked(loadAccounts)();
+			expect(reloadedStorage?.accounts.map((account) => account.refreshToken)).toEqual([
 				"rotated-refresh",
 				"rotated-refresh",
 			]);
-			expect(mockStorage.accounts.map((account) => account.accessToken)).toEqual([
+			expect(reloadedStorage?.accounts.map((account) => account.accessToken)).toEqual([
 				"rotated-access",
 				"rotated-access",
+			]);
+			expect(reloadedStorage?.accounts.map((account) => account.expiresAt)).toEqual([
+				rotatedExpires,
+				rotatedExpires,
 			]);
 		});
 
 		it("updates the current account when refreshed credentials do not fan out", async () => {
 			const { queuedRefresh } = await import("../lib/refresh-queue.js");
-			const { saveAccounts } = await import("../lib/storage.js");
+			const { loadAccounts } = await import("../lib/storage.js");
+			const refreshedExpires = Date.now() + 7200_000;
 			vi.mocked(queuedRefresh).mockResolvedValueOnce({
 				type: "success",
 				access: "single-access",
 				refresh: "single-refresh",
-				expires: Date.now() + 7200_000,
+				expires: refreshedExpires,
 			});
 			mockStorage.accounts = [
 				{
@@ -959,9 +975,10 @@ describe("OpenAIOAuthPlugin", () => {
 
 			await plugin.tool["codex-limits"].execute();
 
-			expect(mockStorage.accounts[0]?.refreshToken).toBe("single-refresh");
-			expect(mockStorage.accounts[0]?.accessToken).toBe("single-access");
-			expect(vi.mocked(saveAccounts)).toHaveBeenCalled();
+			const reloadedStorage = await vi.mocked(loadAccounts)();
+			expect(reloadedStorage?.accounts[0]?.refreshToken).toBe("single-refresh");
+			expect(reloadedStorage?.accounts[0]?.accessToken).toBe("single-access");
+			expect(reloadedStorage?.accounts[0]?.expiresAt).toBe(refreshedExpires);
 		});
 
 		it("redacts upstream auth material from usage fetch errors", async () => {
@@ -976,7 +993,7 @@ describe("OpenAIOAuthPlugin", () => {
 			];
 			globalThis.fetch = vi.fn().mockResolvedValue(
 				new Response(
-					'upstream said Authorization: Bearer secret-token and jwt eyJabc.eyJdef.sig',
+					"upstream said Authorization: Bearer secret-token and jwt eyJabc.eyJdef.sig and sk-abcdefghijklmnopqrstuvwx and deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 					{ status: 401, headers: { "content-type": "text/plain" } },
 				),
 			);
@@ -985,8 +1002,11 @@ describe("OpenAIOAuthPlugin", () => {
 
 			expect(result).toContain("Error: HTTP 401:");
 			expect(result).toContain("Bearer [redacted]");
+			expect(result).toContain("[redacted-token]");
 			expect(result).not.toContain("secret-token");
 			expect(result).not.toContain("eyJabc.eyJdef.sig");
+			expect(result).not.toContain("sk-abcdefghijklmnopqrstuvwx");
+			expect(result).not.toContain("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
 		});
 
 		it("surfaces usage fetch timeouts without leaking raw abort errors", async () => {
@@ -1000,27 +1020,34 @@ describe("OpenAIOAuthPlugin", () => {
 					expiresAt: Date.now() + 3600_000,
 				},
 			];
-			globalThis.fetch = vi.fn().mockImplementation(async (_input, init) => {
-				const signal = init?.signal as AbortSignal | undefined;
-				return await new Promise<Response>((_resolve, reject) => {
-					signal?.addEventListener(
-						"abort",
-						() => {
-							reject(new DOMException("The operation was aborted.", "AbortError"));
-						},
-						{ once: true },
-					);
+			try {
+				globalThis.fetch = vi.fn().mockImplementation(async (_input, init) => {
+					const signal = init?.signal as AbortSignal | undefined;
+					return {
+						ok: false,
+						status: 504,
+						headers: new Headers({ "content-type": "text/plain" }),
+						text: async () =>
+							await new Promise<string>((_resolve, reject) => {
+								signal?.addEventListener(
+									"abort",
+									() => reject(new DOMException("The operation was aborted.", "AbortError")),
+									{ once: true },
+								);
+							}),
+					} as Response;
 				});
-			});
 
-			const resultPromise = plugin.tool["codex-limits"].execute();
-			await vi.runAllTimersAsync();
-			const result = await resultPromise;
+				const resultPromise = plugin.tool["codex-limits"].execute();
+				await vi.runAllTimersAsync();
+				const result = await resultPromise;
 
-			expect(result).toContain("Error: Usage request timed out");
-			expect(result).not.toContain("AbortError");
-			expect(result).not.toContain("DOMException");
-			vi.useRealTimers();
+				expect(result).toContain("Error: Usage request timed out");
+				expect(result).not.toContain("AbortError");
+				expect(result).not.toContain("DOMException");
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 
