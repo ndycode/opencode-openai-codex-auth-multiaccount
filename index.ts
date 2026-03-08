@@ -4340,6 +4340,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (isAbortError(error) || controller.signal.aborted) {
 										throw new Error("Usage request timed out");
 									}
+									throw error;
 								}
 								if (controller.signal.aborted) {
 									throw new Error("Usage request timed out");
