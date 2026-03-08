@@ -3366,14 +3366,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 									tone: "normal" | "muted" | "success" | "warning" | "danger" | "accent" = "normal",
 								) => {
 									const account = workingStorage.accounts[index];
-									const label = formatCommandAccountLabel(account, index);
+									const label = sanitizeScreenText(formatCommandAccountLabel(account, index));
+									const safeDetail = sanitizeScreenText(detail);
 									const prefix =
 										tone === "danger"
 											? getStatusMarker(ui, "error")
 											: tone === "warning"
 												? getStatusMarker(ui, "warning")
 												: getStatusMarker(ui, "ok");
-									const line = `${prefix} ${label} | ${detail}`;
+									const line = sanitizeScreenText(`${prefix} ${label} | ${safeDetail}`);
 									if (screen) {
 										screen.push(line, tone);
 										return;
@@ -3678,11 +3679,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 									line: string,
 									tone: OperationTone = "normal",
 								) => {
+									const safeLine = sanitizeScreenText(line);
 									if (screen) {
-										screen.push(line, tone);
+										screen.push(safeLine, tone);
 										return;
 									}
-									console.log(line);
+									console.log(safeLine);
 								};
 								let screenFinished = false;
 								try {
@@ -3720,8 +3722,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 										const cached = await lookupCodexCliTokensByEmail(flagged.email);
 										const now = Date.now();
 										const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
+										const restoredIdentityContext = restored.map((entry) => ({
+											email: sanitizeEmail(extractAccountEmail(entry.access, entry.idToken)),
+										}));
 										const restoreEmailCounts = buildEmailCountMap([
 											...(activeStorage?.accounts ?? []),
+											...restoredIdentityContext,
 											...remaining,
 											flagged,
 											...flaggedStorage.accounts.slice(i + 1).filter(Boolean),
@@ -4469,11 +4475,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 									line: string,
 									tone: OperationTone = "normal",
 								) => {
+									const safeLine = sanitizeScreenText(line);
 									if (screen) {
-										screen.push(line, tone);
+										screen.push(safeLine, tone);
 										return;
 									}
-									console.log(line);
+									console.log(safeLine);
 								};
 								try {
 									const initialStorage = await loadAccounts();

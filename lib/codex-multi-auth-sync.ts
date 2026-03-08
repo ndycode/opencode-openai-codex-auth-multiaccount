@@ -129,14 +129,16 @@ async function removeNormalizedImportTempDir(
 	tempPath: string,
 	options: NormalizedImportFileOptions,
 ): Promise<void> {
+	const retryableCodes = new Set(["EBUSY", "EAGAIN", "ENOTEMPTY"]);
 	let lastMessage = "unknown cleanup failure";
 	for (let attempt = 0; attempt <= TEMP_CLEANUP_RETRY_DELAYS_MS.length; attempt += 1) {
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true });
 			return;
 		} catch (cleanupError) {
+			const code = (cleanupError as NodeJS.ErrnoException).code;
 			lastMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-			if (attempt < TEMP_CLEANUP_RETRY_DELAYS_MS.length) {
+			if ((!code || retryableCodes.has(code)) && attempt < TEMP_CLEANUP_RETRY_DELAYS_MS.length) {
 				const delayMs = TEMP_CLEANUP_RETRY_DELAYS_MS[attempt];
 				if (delayMs !== undefined) {
 					await sleepAsync(delayMs);
@@ -811,9 +813,13 @@ function getSyncCapacityLimit(): number {
 	if (Number.isFinite(parsed) && parsed > 0) {
 		return parsed;
 	}
-	logWarn(
-		`${SYNC_MAX_ACCOUNTS_OVERRIDE_ENV} override value "${override}" is not a positive finite number; ignoring.`,
-	);
+	const message = `${SYNC_MAX_ACCOUNTS_OVERRIDE_ENV} override value "${override}" is not a positive finite number; ignoring.`;
+	logWarn(message);
+	try {
+		process.stderr.write(`${message}\n`);
+	} catch {
+		// best-effort warning for non-interactive shells
+	}
 	return ACCOUNT_LIMITS.MAX_ACCOUNTS;
 }
 
@@ -1101,7 +1107,13 @@ async function loadRawCodexMultiAuthOverlapCleanupStorage(
 		throw new Error("Invalid raw storage snapshot for synced overlap cleanup.");
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
-		if (code === "ENOENT" || code === "EBUSY" || code === "EACCES" || code === "EPERM") {
+		if (code === "ENOENT" || code === "EBUSY") {
+			return fallback;
+		}
+		if (code === "EACCES" || code === "EPERM") {
+			logWarn(
+				`Permission denied reading raw storage snapshot for synced overlap cleanup (${code}); using transaction snapshot fallback.`,
+			);
 			return fallback;
 		}
 		const message = error instanceof Error ? error.message : String(error);
