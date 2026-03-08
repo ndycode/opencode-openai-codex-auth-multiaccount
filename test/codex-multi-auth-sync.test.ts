@@ -409,6 +409,61 @@ describe("codex-multi-auth sync", () => {
 		});
 	});
 
+	it("uses a single account snapshot for preview capacity filtering and preview counts", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{ email: "existing@example.com", refreshToken: "rt-source-1", addedAt: 1, lastUsed: 1 },
+					{ email: "new@example.com", refreshToken: "rt-source-2", addedAt: 2, lastUsed: 2 },
+				],
+			}),
+		);
+
+		const storageModule = await import("../lib/storage.js");
+		const firstSnapshot = {
+			version: 3 as const,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
+				{
+					email: "existing@example.com",
+					refreshToken: "rt-existing",
+					addedAt: 10,
+					lastUsed: 10,
+				},
+			],
+		};
+		const secondSnapshot = {
+			version: 3 as const,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [],
+		};
+		vi.mocked(storageModule.loadAccounts)
+			.mockResolvedValueOnce(firstSnapshot)
+			.mockResolvedValueOnce(secondSnapshot);
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockImplementationOnce(async (_filePath, existing) => {
+			expect(existing).toBe(firstSnapshot);
+			return { imported: 1, skipped: 0, total: 2 };
+		});
+
+		const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+			accountsPath: globalPath,
+			imported: 1,
+			total: 2,
+		});
+		expect(vi.mocked(storageModule.loadAccounts)).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not retry through a fallback temp directory when the handler throws", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;

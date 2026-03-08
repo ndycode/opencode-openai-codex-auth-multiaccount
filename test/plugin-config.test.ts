@@ -41,7 +41,9 @@ vi.mock('node:fs', async () => {
 			...actual.promises,
 			mkdir: vi.fn(),
 			readFile: vi.fn(),
+			readdir: vi.fn(),
 			rename: vi.fn(),
+			stat: vi.fn(),
 			unlink: vi.fn(),
 			writeFile: vi.fn(),
 		},
@@ -62,9 +64,12 @@ describe('Plugin Configuration', () => {
 	const mockReadFileSync = vi.mocked(fs.readFileSync);
 	const mockMkdir = vi.mocked(fs.promises.mkdir);
 	const mockReadFile = vi.mocked(fs.promises.readFile);
+	const mockReaddir = vi.mocked(fs.promises.readdir);
 	const mockRename = vi.mocked(fs.promises.rename);
+	const mockStat = vi.mocked(fs.promises.stat);
 	const mockUnlink = vi.mocked(fs.promises.unlink);
 	const mockWriteFile = vi.mocked(fs.promises.writeFile);
+	const mockLogWarn = vi.mocked(logger.logWarn);
 	const envKeys = [
 		'CODEX_MODE',
 		'CODEX_TUI_V2',
@@ -91,7 +96,9 @@ describe('Plugin Configuration', () => {
 		mockReadFileSync.mockReturnValue('{}');
 		mockMkdir.mockResolvedValue(undefined);
 		mockReadFile.mockResolvedValue('{}');
+		mockReaddir.mockResolvedValue([]);
 		mockRename.mockResolvedValue(undefined);
+		mockStat.mockResolvedValue({ mtimeMs: Date.now() } as fs.Stats);
 		mockUnlink.mockResolvedValue(undefined);
 		mockWriteFile.mockResolvedValue(undefined);
 	});
@@ -926,6 +933,63 @@ describe('Plugin Configuration', () => {
 				expect(mockUnlink).toHaveBeenCalledWith(expect.stringContaining('.stale'));
 				expect(killSpy).toHaveBeenCalledWith(424242, 0);
 				expect(mockRename).toHaveBeenCalled();
+			} finally {
+				killSpy.mockRestore();
+			}
+		});
+
+		it('sweeps old stale lock artifacts before acquiring the config lock', async () => {
+			const configPath = path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json');
+			const stalePath = `${configPath}.lock.424242.777777.1700000000000.stale`;
+			mockReaddir.mockResolvedValue([
+				{ isFile: () => true, name: path.basename(stalePath) } as fs.Dirent,
+			]);
+			mockStat.mockResolvedValue({
+				mtimeMs: Date.now() - (25 * 60 * 60 * 1000),
+			} as fs.Stats);
+
+			await expect(setSyncFromCodexMultiAuthEnabled(true)).resolves.toBeUndefined();
+			expect(mockUnlink).toHaveBeenCalledWith(stalePath);
+		});
+
+		it('warns when stale lock cleanup cannot remove a recovered stale file', async () => {
+			const configPath = path.join(os.homedir(), '.opencode', 'openai-codex-auth-config.json');
+			const lockPath = `${configPath}.lock`;
+			const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+				const error = new Error('process not found') as NodeJS.ErrnoException;
+				error.code = 'ESRCH';
+				throw error;
+			});
+			mockExistsSync.mockReturnValue(true);
+			mockReadFile.mockImplementation(async (filePath: fs.PathLike | number) => {
+				if (String(filePath) === lockPath) {
+					return '424242';
+				}
+				if (String(filePath).includes('.stale')) {
+					return '424242';
+				}
+				return JSON.stringify({ codexMode: false });
+			});
+			mockWriteFile.mockImplementation(async (filePath) => {
+				if (String(filePath) === lockPath && mockWriteFile.mock.calls.length === 1) {
+					const error = new Error('exists') as NodeJS.ErrnoException;
+					error.code = 'EEXIST';
+					throw error;
+				}
+				return undefined;
+			});
+			mockUnlink.mockImplementation(async (filePath) => {
+				if (String(filePath).includes('.stale')) {
+					throw new Error('stale unlink blocked');
+				}
+				return undefined;
+			});
+
+			try {
+				await expect(setSyncFromCodexMultiAuthEnabled(true)).resolves.toBeUndefined();
+				expect(mockLogWarn).toHaveBeenCalledWith(
+					expect.stringContaining('Failed to remove stale plugin config lock artifact'),
+				);
 			} finally {
 				killSpy.mockRestore();
 			}
