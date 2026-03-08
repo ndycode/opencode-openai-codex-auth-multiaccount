@@ -24,9 +24,32 @@ vi.mock("../lib/storage.js", () => ({
 	deduplicateAccounts: vi.fn((accounts) => accounts),
 	deduplicateAccountsByEmail: vi.fn((accounts) => accounts),
 	getStoragePath: vi.fn(() => "/tmp/opencode-accounts.json"),
+	loadAccounts: vi.fn(async () => ({
+		version: 3,
+		activeIndex: 0,
+		activeIndexByFamily: {},
+		accounts: [
+			{
+				accountId: "org-example123",
+				accountIdSource: "org",
+				refreshToken: "sync-refresh",
+				addedAt: 1,
+				lastUsed: 1,
+			},
+			{
+				accountId: "org-example123",
+				organizationId: "org-example123",
+				accountIdSource: "org",
+				refreshToken: "sync-refresh",
+				addedAt: 2,
+				lastUsed: 2,
+			},
+		],
+	})),
 	saveAccounts: vi.fn(async () => {}),
 	clearAccounts: vi.fn(async () => {}),
 	previewImportAccounts: vi.fn(async () => ({ imported: 2, skipped: 0, total: 4 })),
+	previewImportAccountsWithExistingStorage: vi.fn(async () => ({ imported: 2, skipped: 0, total: 4 })),
 	importAccounts: vi.fn(async () => ({
 		imported: 2,
 		skipped: 0,
@@ -133,6 +156,12 @@ describe("codex-multi-auth sync", () => {
 		const storageModule = await import("../lib/storage.js");
 		vi.mocked(storageModule.previewImportAccounts).mockReset();
 		vi.mocked(storageModule.previewImportAccounts).mockResolvedValue({ imported: 2, skipped: 0, total: 4 });
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockReset();
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockResolvedValue({
+			imported: 2,
+			skipped: 0,
+			total: 4,
+		});
 		vi.mocked(storageModule.importAccounts).mockReset();
 		vi.mocked(storageModule.importAccounts).mockResolvedValue({
 			imported: 2,
@@ -141,6 +170,8 @@ describe("codex-multi-auth sync", () => {
 			backupStatus: "created",
 			backupPath: "/tmp/codex-multi-auth-sync-backup.json",
 		});
+		vi.mocked(storageModule.loadAccounts).mockReset();
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue(defaultTransactionalStorage());
 		vi.mocked(storageModule.normalizeAccountStorage).mockReset();
 		vi.mocked(storageModule.normalizeAccountStorage).mockImplementation((value: unknown) => value as never);
 		vi.mocked(storageModule.withAccountStorageTransaction).mockReset();
@@ -306,8 +337,9 @@ describe("codex-multi-auth sync", () => {
 			backupStatus: "created",
 		});
 
-		expect(vi.mocked(storageModule.previewImportAccounts)).toHaveBeenCalledWith(
+		expect(vi.mocked(storageModule.previewImportAccountsWithExistingStorage)).toHaveBeenCalledWith(
 			expect.stringContaining("oc-chatgpt-multi-auth-sync-"),
+			expect.any(Object),
 		);
 		expect(vi.mocked(storageModule.importAccounts)).toHaveBeenCalledWith(
 			expect.stringContaining("oc-chatgpt-multi-auth-sync-"),
@@ -328,6 +360,55 @@ describe("codex-multi-auth sync", () => {
 		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/local absolute path/i);
 	});
 
+	it("accepts extended-length local Windows paths for CODEX_MULTI_AUTH_DIR", async () => {
+		process.env.USERPROFILE = "C:\\Users\\tester";
+		process.env.HOME = "C:\\Users\\tester";
+
+		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
+
+		process.env.CODEX_MULTI_AUTH_DIR = "\\\\?\\C:\\Users\\tester\\multi-auth";
+		expect(getCodexMultiAuthSourceRootDir()).toBe("\\\\?\\C:\\Users\\tester\\multi-auth");
+
+		process.env.CODEX_MULTI_AUTH_DIR = "\\\\.\\C:\\Users\\tester\\multi-auth";
+		expect(getCodexMultiAuthSourceRootDir()).toBe("\\\\.\\C:\\Users\\tester\\multi-auth");
+	});
+
+	it("rejects extended UNC Windows paths for CODEX_MULTI_AUTH_DIR", async () => {
+		process.env.CODEX_MULTI_AUTH_DIR = "\\\\?\\UNC\\server\\share\\multi-auth";
+		process.env.USERPROFILE = "C:\\Users\\tester";
+		process.env.HOME = "C:\\Users\\tester";
+
+		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
+		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/UNC network share/i);
+	});
+
+	it("keeps preview sync on the read-only path without the storage transaction lock", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [{ refreshToken: "sync-refresh", addedAt: 1, lastUsed: 1 }],
+			}),
+		);
+
+		const storageModule = await import("../lib/storage.js");
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async () => {
+			throw new Error("preview should not take write transaction lock");
+		});
+
+		const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+			accountsPath: globalPath,
+			imported: 2,
+		});
+	});
+
 	it("does not retry through a fallback temp directory when the handler throws", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
@@ -342,11 +423,13 @@ describe("codex-multi-auth sync", () => {
 		);
 
 		const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.previewImportAccounts).mockRejectedValueOnce(new Error("preview failed"));
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockRejectedValueOnce(
+			new Error("preview failed"),
+		);
 
 		const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
 		await expect(previewSyncFromCodexMultiAuth(process.cwd())).rejects.toThrow("preview failed");
-		expect(vi.mocked(storageModule.previewImportAccounts)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(storageModule.previewImportAccountsWithExistingStorage)).toHaveBeenCalledTimes(1);
 	});
 
 	it("surfaces secure temp directory creation failures instead of falling back to system tmpdir", async () => {
@@ -524,6 +607,8 @@ describe("codex-multi-auth sync", () => {
 		const tempRoot = join(fakeHome, ".opencode", "tmp");
 		const staleDir = join(tempRoot, "oc-chatgpt-multi-auth-sync-stale-test");
 		const staleFile = join(staleDir, "accounts.json");
+		const recentDir = join(tempRoot, "oc-chatgpt-multi-auth-sync-recent-test");
+		const recentFile = join(recentDir, "accounts.json");
 		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
 		mockSourceStorageFile(
 			globalPath,
@@ -538,9 +623,14 @@ describe("codex-multi-auth sync", () => {
 		try {
 			await fs.promises.mkdir(staleDir, { recursive: true });
 			await fs.promises.writeFile(staleFile, "sensitive", "utf8");
-			const oldTime = new Date(Date.now() - (65 * 60 * 1000));
+			await fs.promises.mkdir(recentDir, { recursive: true });
+			await fs.promises.writeFile(recentFile, "recent", "utf8");
+			const oldTime = new Date(Date.now() - (15 * 60 * 1000));
+			const recentTime = new Date(Date.now() - (2 * 60 * 1000));
 			await fs.promises.utimes(staleDir, oldTime, oldTime);
 			await fs.promises.utimes(staleFile, oldTime, oldTime);
+			await fs.promises.utimes(recentDir, recentTime, recentTime);
+			await fs.promises.utimes(recentFile, recentTime, recentTime);
 
 			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
 			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
@@ -550,6 +640,7 @@ describe("codex-multi-auth sync", () => {
 			});
 
 			await expect(fs.promises.stat(staleDir)).rejects.toThrow();
+			await expect(fs.promises.stat(recentDir)).resolves.toBeTruthy();
 		} finally {
 			await fs.promises.rm(fakeHome, { recursive: true, force: true });
 		}
@@ -614,11 +705,9 @@ describe("codex-multi-auth sync", () => {
 				},
 			],
 		};
-		vi.mocked(storageModule.withAccountStorageTransaction)
-			.mockImplementationOnce(async (handler) => handler(currentStorage, vi.fn(async () => {})))
-			.mockImplementationOnce(async (handler) => handler(currentStorage, vi.fn(async () => {})));
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue(currentStorage);
 
-		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ email?: string }> };
 			expect(parsed.accounts.map((account) => account.email)).toEqual([
@@ -692,10 +781,8 @@ describe("codex-multi-auth sync", () => {
 				},
 			],
 		};
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(currentStorage, vi.fn(async () => {})),
-		);
-		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue(currentStorage);
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ refreshToken?: string }> };
 			expect(parsed.accounts).toHaveLength(1);
@@ -745,7 +832,7 @@ describe("codex-multi-auth sync", () => {
 
 		const storageModule = await import("../lib/storage.js");
 		vi.mocked(storageModule.deduplicateAccounts).mockImplementationOnce((accounts) => [accounts[1]]);
-		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ refreshToken?: string }> };
 			expect(parsed.accounts).toHaveLength(1);
@@ -835,27 +922,22 @@ describe("codex-multi-auth sync", () => {
 		);
 
 		const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
 				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [
-						{
-							accountId: "org-existing",
-							organizationId: "org-existing",
-							accountIdSource: "org",
-							email: "existing@example.com",
-							refreshToken: "rt-existing",
-							addedAt: 10,
-							lastUsed: 10,
-						},
-					],
+					accountId: "org-existing",
+					organizationId: "org-existing",
+					accountIdSource: "org",
+					email: "existing@example.com",
+					refreshToken: "rt-existing",
+					addedAt: 10,
+					lastUsed: 10,
 				},
-				vi.fn(async () => {}),
-			),
-		);
+			],
+		});
 
 		const { previewSyncFromCodexMultiAuth, CodexMultiAuthSyncCapacityError } = await import("../lib/codex-multi-auth-sync.js");
 		await expect(previewSyncFromCodexMultiAuth(process.cwd())).rejects.toBeInstanceOf(
@@ -981,17 +1063,12 @@ describe("codex-multi-auth sync", () => {
 		);
 
 		const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
-				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [],
-				},
-				vi.fn(async () => {}),
-			),
-		);
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [],
+		});
 
 		const { previewSyncFromCodexMultiAuth, CodexMultiAuthSyncCapacityError } = await import("../lib/codex-multi-auth-sync.js");
 		let thrown: unknown;
@@ -1142,6 +1219,82 @@ describe("codex-multi-auth sync", () => {
 		});
 		expect(persisted?.accounts).toHaveLength(1);
 		expect(persisted?.accounts[0]?.organizationId).toBe("org-sync");
+	});
+
+	it("migrates v1 raw overlap snapshots without collapsing duplicate tagged rows before cleanup", async () => {
+		const storageModule = await import("../lib/storage.js");
+		let persisted: AccountStorageV3 | null = null;
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: { codex: 0 },
+					accounts: [
+						{
+							accountId: "org-sync",
+							accountIdSource: "org",
+							accountTags: ["codex-multi-auth-sync"],
+							refreshToken: "sync-token",
+							addedAt: 1,
+							lastUsed: 1,
+						},
+					],
+				},
+				vi.fn(async (next) => {
+					persisted = next;
+				}),
+			),
+		);
+		mockSourceStorageFile(
+			"/tmp/opencode-accounts.json",
+			JSON.stringify({
+				version: 1,
+				activeIndex: 1,
+				accounts: [
+					{
+						accountId: "org-sync",
+						accountIdSource: "org",
+						accountTags: ["codex-multi-auth-sync"],
+						refreshToken: "sync-token",
+						addedAt: 1,
+						lastUsed: 1,
+					},
+					{
+						accountId: "org-sync",
+						organizationId: "org-sync",
+						accountIdSource: "org",
+						accountTags: ["codex-multi-auth-sync"],
+						refreshToken: "sync-token",
+						addedAt: 2,
+						lastUsed: 2,
+					},
+				],
+			}),
+		);
+		vi.mocked(storageModule.normalizeAccountStorage).mockImplementationOnce((value: unknown) => {
+			const record = value as {
+				version: 3;
+				activeIndex: number;
+				activeIndexByFamily: Record<string, number>;
+				accounts: Array<Record<string, unknown>>;
+			};
+			return {
+				...record,
+				accounts: [record.accounts[1]],
+			};
+		});
+
+		const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(cleanupCodexMultiAuthSyncedOverlaps()).resolves.toEqual({
+			before: 2,
+			after: 1,
+			removed: 1,
+			updated: 0,
+		});
+		expect(persisted?.accounts).toHaveLength(1);
+		expect(persisted?.accounts[0]?.organizationId).toBe("org-sync");
+		expect(persisted?.activeIndexByFamily?.codex).toBe(0);
 	});
 
 	it("falls back to in-memory overlap cleanup state on transient Windows lock errors", async () => {
@@ -1460,28 +1613,23 @@ describe("codex-multi-auth sync", () => {
 		);
 
 		const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
+		vi.mocked(storageModule.loadAccounts).mockResolvedValue({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
 				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [
-						{
-							accountId: "org-local",
-							organizationId: "org-local",
-							accountIdSource: "org",
-							email: "local@example.com",
-							refreshToken: "rt-local",
-							addedAt: 1,
-							lastUsed: 1,
-						},
-					],
+					accountId: "org-local",
+					organizationId: "org-local",
+					accountIdSource: "org",
+					email: "local@example.com",
+					refreshToken: "rt-local",
+					addedAt: 1,
+					lastUsed: 1,
 				},
-				vi.fn(async () => {}),
-			),
-		);
-		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
+			],
+		});
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ accountId?: string }> };
 			expect(parsed.accounts).toHaveLength(21);
@@ -1522,7 +1670,7 @@ describe("codex-multi-auth sync", () => {
 			}),
 		);
 		const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.previewImportAccounts).mockImplementationOnce(async (filePath) => {
+		vi.mocked(storageModule.previewImportAccountsWithExistingStorage).mockImplementationOnce(async (filePath) => {
 			const raw = await fs.promises.readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as { accounts: Array<{ accountId?: string }> };
 			expect(parsed.accounts).toHaveLength(50);
