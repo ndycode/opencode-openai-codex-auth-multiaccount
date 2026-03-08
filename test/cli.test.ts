@@ -270,6 +270,26 @@ describe("CLI Module", () => {
 
 			expect(result).toBeNull();
 		});
+
+		it("uses the readline fallback when menus are unavailable but interaction is still allowed", async () => {
+			const { stdin, stdout } = await import("node:process");
+			const origInputTTY = stdin.isTTY;
+			const origOutputTTY = stdout.isTTY;
+			Object.defineProperty(stdin, "isTTY", { value: false, writable: true, configurable: true });
+			Object.defineProperty(stdout, "isTTY", { value: false, writable: true, configurable: true });
+			mockRl.question.mockResolvedValueOnce("1");
+
+			try {
+				const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+				const result = await promptCodexMultiAuthSyncPrune(1, [
+					{ index: 0, email: "one@example.com", reason: "least recently used" },
+				]);
+				expect(result).toEqual([0]);
+			} finally {
+				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
+				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
+			}
+		});
 	});
 
 	describe("isNonInteractiveMode", () => {
@@ -495,6 +515,27 @@ describe("CLI Module", () => {
 				{ index: 0, email: "one@example.com", reason: "least recently used" },
 			]);
 			expect(result).toBeNull();
+		});
+
+		it("promptLoginMode still falls back to readline when TTY is unavailable but non-interactive flags are absent", async () => {
+			delete process.env.OPENCODE_TUI;
+			const { stdin, stdout } = await import("node:process");
+			const origInputTTY = stdin.isTTY;
+			const origOutputTTY = stdout.isTTY;
+			Object.defineProperty(stdin, "isTTY", { value: false, writable: true, configurable: true });
+			Object.defineProperty(stdout, "isTTY", { value: false, writable: true, configurable: true });
+			mockRl.question.mockResolvedValueOnce("a");
+
+			try {
+				const { promptLoginMode } = await import("../lib/cli.js");
+				const result = await promptLoginMode([{ index: 0 }]);
+				expect(result).toEqual({ mode: "add" });
+				expect(mockRl.question).toHaveBeenCalled();
+			} finally {
+				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
+				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
+				process.env.OPENCODE_TUI = "1";
+			}
 		});
 	});
 });

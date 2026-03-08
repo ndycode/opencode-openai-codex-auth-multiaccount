@@ -4,14 +4,12 @@ import { join, win32 } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
 import { logWarn } from "./logger.js";
 import {
-	clearAccounts,
 	deduplicateAccounts,
 	deduplicateAccountsByEmail,
 	getStoragePath,
 	importAccounts,
 	normalizeAccountStorage,
 	previewImportAccounts,
-	saveAccounts,
 	withAccountStorageTransaction,
 	type AccountStorageV3,
 	type ImportAccountsResult,
@@ -777,63 +775,43 @@ export async function syncFromCodexMultiAuth(
 ): Promise<CodexMultiAuthSyncResult> {
 	const resolved = await loadPreparedCodexMultiAuthSourceStorage(projectPath);
 	await assertSyncWithinCapacity(resolved);
-	const preSyncStorage = await withAccountStorageTransaction((current) => Promise.resolve(current));
-	let result: ImportAccountsResult;
-	try {
-		result = await withNormalizedImportFile(
-			tagSyncedAccounts(resolved.storage),
-			(filePath) => {
-				const maxAccounts = getSyncCapacityLimit();
-				return importAccounts(
-					filePath,
-					{
-						preImportBackupPrefix: "codex-multi-auth-sync-backup",
-						backupMode: "required",
-					},
-					(normalizedStorage, existing) => {
-						const filteredStorage = filterSourceAccountsAgainstExistingEmails(
-							normalizedStorage,
-							existing?.accounts ?? [],
+	const result: ImportAccountsResult = await withNormalizedImportFile(
+		tagSyncedAccounts(resolved.storage),
+		(filePath) => {
+			const maxAccounts = getSyncCapacityLimit();
+			return importAccounts(
+				filePath,
+				{
+					preImportBackupPrefix: "codex-multi-auth-sync-backup",
+					backupMode: "required",
+				},
+				(normalizedStorage, existing) => {
+					const filteredStorage = filterSourceAccountsAgainstExistingEmails(
+						normalizedStorage,
+						existing?.accounts ?? [],
+					);
+					if (Number.isFinite(maxAccounts)) {
+						const details = computeSyncCapacityDetails(
+							resolved,
+							filteredStorage,
+							existing ??
+								({
+									version: 3,
+									accounts: [],
+									activeIndex: 0,
+									activeIndexByFamily: {},
+								} satisfies AccountStorageV3),
+							maxAccounts,
 						);
-						if (Number.isFinite(maxAccounts)) {
-							const details = computeSyncCapacityDetails(
-								resolved,
-								filteredStorage,
-								existing ??
-									({
-										version: 3,
-										accounts: [],
-										activeIndex: 0,
-										activeIndexByFamily: {},
-									} satisfies AccountStorageV3),
-								maxAccounts,
-							);
-							if (details) {
-								throw new CodexMultiAuthSyncCapacityError(details);
-							}
+						if (details) {
+							throw new CodexMultiAuthSyncCapacityError(details);
 						}
-						return filteredStorage;
-					},
-				);
-			},
-		);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		if (message.includes("Failed to remove temporary codex sync directory")) {
-			try {
-				if (preSyncStorage) {
-					await saveAccounts(preSyncStorage);
-				} else {
-					await clearAccounts();
-				}
-			} catch (rollbackError) {
-				const rollbackMessage =
-					rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-				throw new Error(`${message}. Sync rollback failed: ${rollbackMessage}`);
-			}
-		}
-		throw error;
-	}
+					}
+					return filteredStorage;
+				},
+			);
+		},
+	);
 	return {
 		rootDir: resolved.rootDir,
 		accountsPath: resolved.accountsPath,

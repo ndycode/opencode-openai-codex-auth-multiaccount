@@ -1609,6 +1609,21 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return `${target.organizationId ?? ""}|${target.accountId ?? ""}|${target.refreshToken}`;
 		};
 
+		const findAccountIndexByExactIdentity = (
+			accounts: AccountStorageV3["accounts"],
+			target: SyncRemovalTarget | null | undefined,
+		): number => {
+			if (!target || !target.refreshToken) return -1;
+			const targetKey = getSyncRemovalTargetKey(target);
+			return accounts.findIndex((account) =>
+				getSyncRemovalTargetKey({
+					refreshToken: account.refreshToken,
+					organizationId: account.organizationId,
+					accountId: account.accountId,
+				}) === targetKey,
+			);
+		};
+
 		const getAccountIdentityKeys = (
 			account: {
 				refreshToken: string;
@@ -4002,29 +4017,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (removedTargets.length !== targetKeySet.size) {
 										throw new Error("Selected accounts changed before removal. Re-run sync and confirm again.");
 									}
-									const activeAccountIdentityKeys = getAccountIdentityKeys({
+									const activeAccountIdentity = {
 										refreshToken:
 											currentStorage.accounts[currentStorage.activeIndex]?.refreshToken ?? "",
 										organizationId:
 											currentStorage.accounts[currentStorage.activeIndex]?.organizationId,
 										accountId: currentStorage.accounts[currentStorage.activeIndex]?.accountId,
-									});
-									const familyActiveIdentityKeys = Object.fromEntries(
+									} satisfies SyncRemovalTarget;
+									const familyActiveIdentities = Object.fromEntries(
 										MODEL_FAMILIES.map((family) => {
 											const familyIndex = currentStorage.activeIndexByFamily?.[family] ?? currentStorage.activeIndex;
 											const familyAccount = currentStorage.accounts[familyIndex];
 											return [
 												family,
 												familyAccount
-													? getAccountIdentityKeys({
+													? ({
 															refreshToken: familyAccount.refreshToken,
 															organizationId: familyAccount.organizationId,
 															accountId: familyAccount.accountId,
-														})
-													: [],
+														} satisfies SyncRemovalTarget)
+													: null,
 											];
 										}),
-									) as Partial<Record<ModelFamily, string[]>>;
+									) as Partial<Record<ModelFamily, SyncRemovalTarget | null>>;
 									currentStorage.accounts = currentStorage.accounts.filter(
 										(account) =>
 											!targetKeySet.has(
@@ -4035,9 +4050,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 												}),
 											),
 									);
-									const remappedActiveIndex = findAccountIndexByIdentityKeys(
+									const remappedActiveIndex = findAccountIndexByExactIdentity(
 										currentStorage.accounts,
-										activeAccountIdentityKeys,
+										activeAccountIdentity,
 									);
 									currentStorage.activeIndex =
 										remappedActiveIndex >= 0
@@ -4045,9 +4060,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 											: Math.min(currentStorage.activeIndex, Math.max(0, currentStorage.accounts.length - 1));
 									currentStorage.activeIndexByFamily = currentStorage.activeIndexByFamily ?? {};
 									for (const family of MODEL_FAMILIES) {
-										const remappedFamilyIndex = findAccountIndexByIdentityKeys(
+										const remappedFamilyIndex = findAccountIndexByExactIdentity(
 											currentStorage.accounts,
-											familyActiveIdentityKeys[family] ?? [],
+											familyActiveIdentities[family] ?? null,
 										);
 										currentStorage.activeIndexByFamily[family] =
 											remappedFamilyIndex >= 0 ? remappedFamilyIndex : currentStorage.activeIndex;

@@ -144,51 +144,69 @@ export async function savePluginConfigMutation(
 		}
 
 		const tempPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
-		writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
-			encoding: "utf-8",
-			mode: 0o600,
-		});
+		let tempFilePresent = false;
 		try {
-			renameSync(tempPath, CONFIG_PATH);
-		} catch (error) {
-			const code = (error as NodeJS.ErrnoException).code;
-			if (
-				process.platform === "win32" &&
-				(code === "EEXIST" || code === "EPERM") &&
-				existsSync(CONFIG_PATH)
-			) {
-				const backupPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.bak`;
-				renameSync(CONFIG_PATH, backupPath);
-				try {
-					renameSync(tempPath, CONFIG_PATH);
+			writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+				encoding: "utf-8",
+				mode: 0o600,
+			});
+			tempFilePresent = true;
+			try {
+				renameSync(tempPath, CONFIG_PATH);
+				tempFilePresent = false;
+				return;
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (
+					process.platform === "win32" &&
+					(code === "EEXIST" || code === "EPERM") &&
+					existsSync(CONFIG_PATH)
+				) {
+					const backupPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.bak`;
+					let backupMoved = false;
 					try {
-						unlinkSync(backupPath);
-					} catch {
-						// best effort backup cleanup
-					}
-					return;
-				} catch (retryError) {
-					try {
-						if (!existsSync(CONFIG_PATH)) {
-							renameSync(backupPath, CONFIG_PATH);
+						renameSync(CONFIG_PATH, backupPath);
+						backupMoved = true;
+						renameSync(tempPath, CONFIG_PATH);
+						tempFilePresent = false;
+						try {
+							unlinkSync(backupPath);
+						} catch {
+							// best effort backup cleanup
 						}
-					} catch {
-						// best effort config restore
+						return;
+					} catch (retryError) {
+						if (backupMoved) {
+							try {
+								if (!existsSync(CONFIG_PATH)) {
+									renameSync(backupPath, CONFIG_PATH);
+									backupMoved = false;
+								}
+							} catch {
+								// best effort config restore
+							}
+						}
+						throw retryError;
+					} finally {
+						if (backupMoved) {
+							try {
+								unlinkSync(backupPath);
+							} catch {
+								// best effort backup cleanup
+							}
+						}
 					}
-					try {
-						unlinkSync(tempPath);
-					} catch {
-						// best effort temp cleanup
-					}
-					throw retryError;
+				}
+				throw error;
+			}
+		} finally {
+			if (tempFilePresent) {
+				try {
+					unlinkSync(tempPath);
+				} catch {
+					// best effort temp cleanup
 				}
 			}
-			try {
-				unlinkSync(tempPath);
-			} catch {
-				// best effort temp cleanup
-			}
-			throw error;
 		}
 	});
 }

@@ -13,7 +13,6 @@ import { UI_COPY } from "./ui/copy.js";
 
 export function isNonInteractiveMode(): boolean {
 	if (process.env.FORCE_INTERACTIVE_MODE === "1") return false;
-	if (!input.isTTY || !output.isTTY) return true;
 	if (process.env.OPENCODE_TUI === "1") return true;
 	if (process.env.OPENCODE_DESKTOP === "1") return true;
 	if (process.env.TERM_PROGRAM === "opencode") return true;

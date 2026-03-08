@@ -1131,7 +1131,6 @@ describe("codex-multi-auth sync", () => {
 			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to remove temporary codex sync directory"),
 			);
-			expect(vi.mocked(storageModule.saveAccounts)).toHaveBeenCalledTimes(1);
 		} finally {
 			rmSpy.mockRestore();
 		}

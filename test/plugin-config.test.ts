@@ -82,6 +82,12 @@ describe('Plugin Configuration', () => {
 			originalEnv[key] = process.env[key];
 		}
 		vi.clearAllMocks();
+		mockExistsSync.mockReturnValue(false);
+		mockReadFileSync.mockReturnValue('{}');
+		mockMkdirSync.mockImplementation(() => undefined);
+		mockRenameSync.mockImplementation(() => undefined);
+		mockUnlinkSync.mockImplementation(() => undefined);
+		mockWriteFileSync.mockImplementation(() => undefined);
 	});
 
 	afterEach(() => {
@@ -847,6 +853,41 @@ describe('Plugin Configuration', () => {
 
 			await expect(setSyncFromCodexMultiAuthEnabled(true)).rejects.toThrow();
 			expect(mockRenameSync).not.toHaveBeenCalled();
+		});
+
+		it('cleans up temp config files when the initial rename fails', async () => {
+			mockExistsSync.mockReturnValue(false);
+			mockRenameSync.mockImplementation(() => {
+				throw Object.assign(new Error('rename failed'), { code: 'EACCES' });
+			});
+
+			await expect(setSyncFromCodexMultiAuthEnabled(true)).rejects.toThrow('rename failed');
+			expect(mockUnlinkSync).toHaveBeenCalledWith(expect.stringContaining('.tmp'));
+		});
+
+		it('cleans up temp config files when the Windows fallback retry fails', async () => {
+			const originalPlatform = process.platform;
+			Object.defineProperty(process, 'platform', { value: 'win32' });
+			mockExistsSync.mockImplementation((filePath) =>
+				String(filePath).endsWith('openai-codex-auth-config.json'),
+			);
+			let renameCalls = 0;
+			mockRenameSync.mockImplementation((source, destination) => {
+				if (String(source).includes('.tmp') && String(destination).endsWith('openai-codex-auth-config.json')) {
+					renameCalls += 1;
+					if (renameCalls <= 2) {
+						throw Object.assign(new Error('rename failed'), { code: 'EPERM' });
+					}
+				}
+				return undefined;
+			});
+
+			try {
+				await expect(setSyncFromCodexMultiAuthEnabled(true)).rejects.toThrow('rename failed');
+				expect(mockUnlinkSync).toHaveBeenCalledWith(expect.stringContaining('.tmp'));
+			} finally {
+				Object.defineProperty(process, 'platform', { value: originalPlatform });
+			}
 		});
 
 		it('recovers stale config lock files before mutating config', async () => {
