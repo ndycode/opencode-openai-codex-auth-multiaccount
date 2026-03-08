@@ -23,6 +23,7 @@ import {
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedReadFileSync = vi.mocked(readFileSync);
 const mockedStatSync = vi.mocked(statSync);
+const originalPlatform = process.platform;
 
 describe("Storage Paths Module", () => {
 	beforeEach(() => {
@@ -30,6 +31,7 @@ describe("Storage Paths Module", () => {
 	});
 
 	afterEach(() => {
+		Object.defineProperty(process, "platform", { value: originalPlatform });
 		vi.resetAllMocks();
 	});
 
@@ -64,8 +66,9 @@ describe("Storage Paths Module", () => {
 		});
 
 		it("preserves the legacy lowercase key prefix on Windows paths", () => {
+			Object.defineProperty(process, "platform", { value: "win32" });
 			const projectPath = "C:\\Users\\Test\\MyProject";
-			expect(getProjectStorageKey(projectPath)).toMatch(/^[Mm]y[Pp]roject-[a-f0-9]{12}$/);
+			expect(getProjectStorageKey(projectPath)).toMatch(/^myproject-[a-f0-9]{12}$/);
 		});
 
 		it("uses the canonical git identity for same-repo worktrees", () => {
