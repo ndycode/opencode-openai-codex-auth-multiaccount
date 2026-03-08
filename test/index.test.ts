@@ -215,9 +215,16 @@ const mockStorage = {
 	activeIndexByFamily: {} as Record<string, number>,
 };
 
+const cloneAccount = (account: (typeof mockStorage.accounts)[number]) => ({
+	...account,
+	rateLimitResetTimes: account.rateLimitResetTimes
+		? { ...account.rateLimitResetTimes }
+		: undefined,
+});
+
 const cloneMockStorage = () => ({
 	...mockStorage,
-	accounts: mockStorage.accounts.map((account) => ({ ...account })),
+	accounts: mockStorage.accounts.map(cloneAccount),
 	activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
 });
 
@@ -226,7 +233,7 @@ vi.mock("../lib/storage.js", () => ({
 	loadAccounts: vi.fn(async () => cloneMockStorage()),
 	saveAccounts: vi.fn(async (nextStorage: typeof mockStorage) => {
 		mockStorage.version = nextStorage.version;
-		mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+		mockStorage.accounts = nextStorage.accounts.map(cloneAccount);
 		mockStorage.activeIndex = nextStorage.activeIndex;
 		mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
 	}),
@@ -240,7 +247,7 @@ vi.mock("../lib/storage.js", () => ({
 			const loadedStorage = cloneMockStorage();
 			const persist = async (nextStorage: typeof mockStorage) => {
 				mockStorage.version = nextStorage.version;
-				mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+				mockStorage.accounts = nextStorage.accounts.map(cloneAccount);
 				mockStorage.activeIndex = nextStorage.activeIndex;
 				mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
 			};
