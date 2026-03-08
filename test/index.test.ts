@@ -1234,6 +1234,41 @@ describe("OpenAIOAuthPlugin", () => {
 			}
 		});
 
+		it("surfaces usage fetch timeouts before response headers arrive", async () => {
+			vi.useFakeTimers();
+			mockStorage.accounts = [
+				{
+					refreshToken: "r1",
+					accountId: "acc-1",
+					email: "user@example.com",
+					accessToken: "access-1",
+					expiresAt: Date.now() + 3600_000,
+				},
+			];
+			try {
+				globalThis.fetch = vi.fn().mockImplementation(async (_input, init) =>
+					await new Promise<Response>((_resolve, reject) => {
+						const signal = init?.signal as AbortSignal | undefined;
+						signal?.addEventListener(
+							"abort",
+							() => reject(new DOMException("The operation was aborted.", "AbortError")),
+							{ once: true },
+						);
+					}),
+				);
+
+				const resultPromise = plugin.tool["codex-limits"].execute();
+				await vi.runAllTimersAsync();
+				const result = await resultPromise;
+
+				expect(result).toContain("Error: Usage request timed out");
+				expect(result).not.toContain("AbortError");
+				expect(result).not.toContain("DOMException");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it("surfaces usage fetch timeouts during successful response body reads", async () => {
 			vi.useFakeTimers();
 			mockStorage.accounts = [

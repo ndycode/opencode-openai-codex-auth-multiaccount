@@ -4505,7 +4505,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								if (!previousRefreshToken) {
 									throw new Error("Cannot refresh: account has no refresh token");
 								}
-								const refreshResult = await queuedRefresh(account.refreshToken);
+								const refreshResult = await queuedRefresh(previousRefreshToken);
 								if (refreshResult.type !== "success") {
 									throw new Error(refreshResult.message ?? refreshResult.reason);
 								}
@@ -4513,7 +4513,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								let refreshedCount = 0;
 								for (const storedAccount of storage.accounts) {
 									if (!storedAccount) continue;
-									if (previousRefreshToken && storedAccount.refreshToken === previousRefreshToken) {
+									if (storedAccount.refreshToken === previousRefreshToken) {
 										applyRefreshedCredentials(storedAccount, refreshResult);
 										refreshedCount += 1;
 									}
