@@ -4380,7 +4380,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									(normalizedEmail
 										? latestStorage.accounts.find(
 												(storedAccount) =>
-													storedAccount.email?.trim().toLowerCase() === normalizedEmail,
+													storedAccount.email?.trim().toLowerCase() === normalizedEmail &&
+													(!params.accountId ||
+														!storedAccount.accountId ||
+														storedAccount.accountId === params.accountId),
 											)
 										: undefined);
 
