@@ -85,7 +85,7 @@ export const AUTH_LABELS = {
 
 /** Multi-account configuration */
 export const ACCOUNT_LIMITS = {
-	/** Maximum number of OAuth accounts that can be registered */
+	/** Maximum number of OAuth accounts that can be registered. Infinity means unlimited by default. */
 	MAX_ACCOUNTS: Number.POSITIVE_INFINITY,
 	/** Cooldown period (ms) after auth failure before retrying account */
 	AUTH_FAILURE_COOLDOWN_MS: 30_000,

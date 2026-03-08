@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, promises as fs } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
@@ -12,6 +12,7 @@ import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
 const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
+const STALE_CONFIG_LOCK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
@@ -253,6 +254,32 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
+async function cleanupStalePluginConfigLockArtifacts(): Promise<void> {
+	const lockDir = dirname(CONFIG_LOCK_PATH);
+	const staleLockPrefix = `${basename(CONFIG_LOCK_PATH)}.`;
+	try {
+		const entries = await fs.readdir(lockDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.startsWith(staleLockPrefix) || !entry.name.endsWith(".stale")) {
+				continue;
+			}
+			const stalePath = join(lockDir, entry.name);
+			try {
+				const stats = await fs.stat(stalePath);
+				if (Date.now() - stats.mtimeMs < STALE_CONFIG_LOCK_MAX_AGE_MS) {
+					continue;
+				}
+				await fs.unlink(stalePath);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				logWarn(`Failed to remove stale plugin config lock artifact ${stalePath}: ${message}`);
+			}
+		}
+	} catch {
+		// best effort stale-lock cleanup only
+	}
+}
+
 async function tryRecoverStalePluginConfigLock(rawLockContents: string): Promise<boolean> {
 	const lockOwnerPid = Number.parseInt(rawLockContents.trim(), 10);
 	if (
@@ -295,14 +322,16 @@ async function tryRecoverStalePluginConfigLock(rawLockContents: string): Promise
 
 	try {
 		await fs.unlink(staleLockPath);
-	} catch {
-		// best effort stale-lock cleanup
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		logWarn(`Failed to remove stale plugin config lock artifact ${staleLockPath}: ${message}`);
 	}
 	return true;
 }
 
 async function withPluginConfigLock<T>(fn: () => T | Promise<T>): Promise<T> {
 	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+	await cleanupStalePluginConfigLockArtifacts();
 	const deadline = Date.now() + 2_000;
 	while (true) {
 		try {

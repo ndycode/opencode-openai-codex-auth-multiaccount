@@ -109,6 +109,11 @@ type NormalizedImportFileOptions = {
 	onPostSuccessCleanupFailure?: (details: { tempDir: string; tempPath: string; message: string }) => void;
 };
 
+interface PreparedCodexMultiAuthPreviewStorage {
+	resolved: CodexMultiAuthResolvedSource & { storage: AccountStorageV3 };
+	existing: AccountStorageV3;
+}
+
 const TEMP_CLEANUP_RETRY_DELAYS_MS = [100, 250, 500] as const;
 
 function sleepAsync(ms: number): Promise<void> {
@@ -823,7 +828,7 @@ function createEmptyAccountStorage(): AccountStorageV3 {
 
 async function prepareCodexMultiAuthPreviewStorage(
 	resolved: CodexMultiAuthResolvedSource & { storage: AccountStorageV3 },
-): Promise<CodexMultiAuthResolvedSource & { storage: AccountStorageV3 }> {
+): Promise<PreparedCodexMultiAuthPreviewStorage> {
 	const current = await loadAccounts();
 	const existing = current ?? createEmptyAccountStorage();
 	const preparedStorage = filterSourceAccountsAgainstExistingEmails(
@@ -831,6 +836,7 @@ async function prepareCodexMultiAuthPreviewStorage(
 		existing.accounts,
 	);
 	const maxAccounts = getSyncCapacityLimit();
+	// Infinity is the sentinel for the default unlimited-account mode.
 	if (Number.isFinite(maxAccounts)) {
 		const details = computeSyncCapacityDetails(resolved, preparedStorage, existing, maxAccounts);
 		if (details) {
@@ -838,8 +844,11 @@ async function prepareCodexMultiAuthPreviewStorage(
 		}
 	}
 	return {
-		...resolved,
-		storage: preparedStorage,
+		resolved: {
+			...resolved,
+			storage: preparedStorage,
+		},
+		existing,
 	};
 }
 
@@ -847,11 +856,10 @@ export async function previewSyncFromCodexMultiAuth(
 	projectPath = process.cwd(),
 ): Promise<CodexMultiAuthSyncPreview> {
 	const loadedSource = await loadCodexMultiAuthSourceStorage(projectPath);
-	const resolved = await prepareCodexMultiAuthPreviewStorage(loadedSource);
-	const current = await loadAccounts();
+	const { resolved, existing } = await prepareCodexMultiAuthPreviewStorage(loadedSource);
 	const preview = await withNormalizedImportFile(
 		resolved.storage,
-		(filePath) => previewImportAccountsWithExistingStorage(filePath, current),
+		(filePath) => previewImportAccountsWithExistingStorage(filePath, existing),
 	);
 	return {
 		rootDir: resolved.rootDir,
@@ -880,6 +888,7 @@ export async function syncFromCodexMultiAuth(
 						normalizedStorage,
 						existing?.accounts ?? [],
 					);
+					// Infinity is the sentinel for the default unlimited-account mode.
 					if (Number.isFinite(maxAccounts)) {
 						const details = computeSyncCapacityDetails(
 							resolved,
