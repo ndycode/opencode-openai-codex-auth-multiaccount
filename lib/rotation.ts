@@ -121,6 +121,20 @@ export class HealthScoreTracker {
     this.entries.delete(key);
   }
 
+  reindexAfterRemoval(removedIndex: number): void {
+    const nextEntries = new Map<string, HealthEntry>();
+    for (const [key, entry] of this.entries) {
+      const [indexText, ...quotaParts] = key.split(":");
+      const index = Number.parseInt(indexText ?? "", 10);
+      if (!Number.isFinite(index)) continue;
+      if (index === removedIndex) continue;
+      const nextIndex = index > removedIndex ? index - 1 : index;
+      const nextKey = quotaParts.length > 0 ? `${nextIndex}:${quotaParts.join(":")}` : `${nextIndex}`;
+      nextEntries.set(nextKey, entry);
+    }
+    this.entries = nextEntries;
+  }
+
   clear(): void {
     this.entries.clear();
   }
@@ -265,6 +279,20 @@ export class TokenBucketTracker {
   reset(accountIndex: number, quotaKey?: string): void {
     const key = this.getKey(accountIndex, quotaKey);
     this.buckets.delete(key);
+  }
+
+  reindexAfterRemoval(removedIndex: number): void {
+    const nextBuckets = new Map<string, TokenBucketEntry>();
+    for (const [key, entry] of this.buckets) {
+      const [indexText, ...quotaParts] = key.split(":");
+      const index = Number.parseInt(indexText ?? "", 10);
+      if (!Number.isFinite(index)) continue;
+      if (index === removedIndex) continue;
+      const nextIndex = index > removedIndex ? index - 1 : index;
+      const nextKey = quotaParts.length > 0 ? `${nextIndex}:${quotaParts.join(":")}` : `${nextIndex}`;
+      nextBuckets.set(nextKey, entry);
+    }
+    this.buckets = nextBuckets;
   }
 
   clear(): void {
@@ -453,4 +481,9 @@ export function getTokenTracker(config?: Partial<TokenBucketConfig>): TokenBucke
 export function resetTrackers(): void {
   healthTrackerInstance?.clear();
   tokenTrackerInstance?.clear();
+}
+
+export function reindexTrackersAfterRemoval(removedIndex: number): void {
+  healthTrackerInstance?.reindexAfterRemoval(removedIndex);
+  tokenTrackerInstance?.reindexAfterRemoval(removedIndex);
 }

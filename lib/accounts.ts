@@ -16,7 +16,7 @@ import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import {
 	getHealthTracker,
 	getTokenTracker,
-	resetTrackers,
+	reindexTrackersAfterRemoval,
 	selectHybridAccount,
 	type AccountWithMetrics,
 	type HybridSelectionOptions,
@@ -974,9 +974,9 @@ export class AccountManager {
 		} else if (this.lastToastAccountIndex > idx) {
 			this.lastToastAccountIndex -= 1;
 		}
-		// Trackers are keyed by account index, so any removal that renumbers accounts
-		// must clear in-memory tracker state to avoid leaking waits/health to new occupants.
-		resetTrackers();
+		// Trackers are keyed by account index, so removals must reindex surviving entries
+		// to keep health and token history attached to the correct remaining account.
+		reindexTrackersAfterRemoval(idx);
 
 		if (this.accounts.length === 0) {
 			for (const family of MODEL_FAMILIES) {
