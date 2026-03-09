@@ -145,6 +145,7 @@ async function removeNormalizedImportTempDir(
 				}
 				continue;
 			}
+			break;
 		}
 	}
 

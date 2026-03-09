@@ -681,15 +681,14 @@ describe("codex-multi-auth sync", () => {
 			}),
 		);
 
-		const mkdtempSpy = vi.spyOn(fs.promises, "mkdtemp").mockRejectedValueOnce(new Error("mkdtemp failed"));
+		const mkdtempSpy = vi.spyOn(fs.promises, "mkdtemp").mockRejectedValue(new Error("mkdtemp failed"));
 		const storageModule = await import("../lib/storage.js");
 
 		try {
 			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
 			await expect(previewSyncFromCodexMultiAuth(process.cwd())).rejects.toThrow("mkdtemp failed");
-			expect(vi.mocked(storageModule.previewImportAccounts)).not.toHaveBeenCalledWith(
-				expect.stringContaining(os.tmpdir()),
-			);
+			expect(mkdtempSpy).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(storageModule.previewImportAccountsWithExistingStorage)).not.toHaveBeenCalled();
 		} finally {
 			mkdtempSpy.mockRestore();
 		}
@@ -719,6 +718,43 @@ describe("codex-multi-auth sync", () => {
 				skipped: 0,
 				total: 4,
 			});
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to remove temporary codex sync directory"),
+			);
+		} finally {
+			rmSpy.mockRestore();
+		}
+	});
+
+	it("fails fast on non-retryable Windows-style temp cleanup errors", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [{ refreshToken: "sync-refresh", addedAt: 1, lastUsed: 1 }],
+			}),
+		);
+
+		const rmSpy = vi
+			.spyOn(fs.promises, "rm")
+			.mockRejectedValue(Object.assign(new Error("permission denied"), { code: "EACCES" }));
+		const loggerModule = await import("../lib/logger.js");
+
+		try {
+			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				accountsPath: globalPath,
+				imported: 2,
+				skipped: 0,
+				total: 4,
+			});
+			expect(rmSpy).toHaveBeenCalledTimes(1);
 			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to remove temporary codex sync directory"),
 			);
