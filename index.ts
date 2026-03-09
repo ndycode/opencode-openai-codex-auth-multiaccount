@@ -3436,7 +3436,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 											continue;
 										}
 
-										try {
 										// If we already have a valid cached access token, don't force-refresh.
 										// This avoids flagging accounts where the refresh token has been burned
 										// but the access token is still valid (same behavior as Codex CLI).
@@ -3634,11 +3633,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 											errors += 1;
 											const message = error instanceof Error ? error.message : String(error);
 											emit(i, `error: ${message.slice(0, 160)}`, "danger");
-										}
-										} catch (error) {
-											errors += 1;
-											const message = error instanceof Error ? error.message : String(error);
-											emit(i, `error: ${message.slice(0, 120)}`, "danger");
 										}
 									}
 
@@ -4191,7 +4185,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 										console.log(`\nFailed to restore pruned accounts during ${context}: ${message}\n`);
 									}
 								};
-								while (true) {
+								const syncPruneMaxAttempts = 5;
+								let syncPruneAttempts = 0;
+								while (syncPruneAttempts < syncPruneMaxAttempts) {
+									syncPruneAttempts += 1;
 									try {
 										const loadedSource = await loadCodexMultiAuthSourceStorage(process.cwd());
 										const preview = await previewSyncFromCodexMultiAuth(process.cwd(), loadedSource);
@@ -4250,8 +4247,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 										console.log("");
 										return;
 									} catch (error) {
-									if (error instanceof CodexMultiAuthSyncCapacityError) {
-										const { details } = error;
+										if (error instanceof CodexMultiAuthSyncCapacityError) {
+											const { details } = error;
 										console.log("");
 										console.log("Sync blocked by account limit.");
 										console.log(`Source: ${details.accountsPath}`);
@@ -4320,18 +4317,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 											console.log("Sync cancelled.\n");
 											return;
 										}
-										if (!pruneBackup) {
-											pruneBackup = await createSyncPruneBackup();
+											if (!pruneBackup) {
+												pruneBackup = await createSyncPruneBackup();
+											}
+											await removeAccountsForSync(removalPlan.targets);
+											continue;
 										}
-										await removeAccountsForSync(removalPlan.targets);
-										continue;
-									}
-									const message = error instanceof Error ? error.message : String(error);
-									await safeRestorePruneBackup("sync failure");
-									console.log(`\nSync failed: ${message}\n`);
+										const message = error instanceof Error ? error.message : String(error);
+										await safeRestorePruneBackup("sync failure");
+										console.log(`\nSync failed: ${message}\n`);
 										return;
 									}
 								}
+								console.log(
+									"\nSync hit max retry limit - raise CODEX_AUTH_SYNC_MAX_ACCOUNTS or remove accounts manually.\n",
+								);
+								return;
 							};
 
 							const runCodexMultiAuthOverlapCleanup = async (): Promise<void> => {
