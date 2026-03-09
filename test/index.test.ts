@@ -2745,7 +2745,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const authResult = await autoMethod.authorize();
 		expect(authResult.instructions).toBe("Authentication cancelled");
 
-		expect(vi.mocked(refreshQueueModule.queuedRefresh)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(refreshQueueModule.queuedRefresh)).toHaveBeenCalledTimes(2);
 		expect(mockStorage.accounts).toHaveLength(2);
 		expect(new Set(mockStorage.accounts.map((account) => account.organizationId))).toEqual(
 			new Set(["org-cache", "org-refresh"]),

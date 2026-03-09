@@ -1239,7 +1239,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
 		const ANSI_STYLE_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
-		const SCREEN_CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]", "g");
+		const SCREEN_CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 		const sanitizeScreenText = (value: string): string =>
 			value.replace(ANSI_STYLE_REGEX, "").replace(SCREEN_CONTROL_CHAR_REGEX, "").trim();
 		type OperationTone = "normal" | "muted" | "success" | "warning" | "danger" | "accent";
@@ -1617,11 +1617,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			account: { email?: string; accountId?: string },
 			tokenAccountId: string | undefined,
 		): boolean => {
+			const normalizedAccountId = account.accountId?.trim();
+			if (normalizedAccountId) {
+				return tokenAccountId === normalizedAccountId;
+			}
 			const normalizedEmail = sanitizeEmail(account.email);
 			if (normalizedEmail && (emailCounts.get(normalizedEmail) ?? 0) <= 1) {
 				return true;
 			}
-			return Boolean(tokenAccountId && account.accountId && tokenAccountId === account.accountId);
+			return false;
 		};
 
 		type SyncRemovalTarget = {
@@ -3682,6 +3686,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 										console.log(line.line);
 									}
 									console.log("");
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									if (screen) {
+										screen.push(`Health check failed: ${message}`, "danger");
+										await screen.finish(undefined, { failed: true });
+										screenFinished = true;
+									} else {
+										console.log(`\nHealth check failed: ${message}\n`);
+									}
 								} finally {
 									if (screen && !screenFinished) {
 										screen.abort();
@@ -4198,13 +4211,27 @@ while (attempted.size < Math.max(1, accountCount)) {
 									| {
 											backupPath: string;
 											restore: () => Promise<void>;
+											restoreFailureMessage?: string;
 									  }
 									| null = null;
 								const restorePruneBackup = async (): Promise<void> => {
 									const currentBackup = pruneBackup;
 									if (!currentBackup) return;
-									pruneBackup = null;
-									await currentBackup.restore();
+									if (currentBackup.restoreFailureMessage) {
+										throw new Error(
+											`${currentBackup.restoreFailureMessage}. Backup remains at ${currentBackup.backupPath}.`,
+										);
+									}
+									try {
+										await currentBackup.restore();
+										pruneBackup = null;
+									} catch (restoreError) {
+										const message =
+											restoreError instanceof Error ? restoreError.message : String(restoreError);
+										currentBackup.restoreFailureMessage = message;
+										pruneBackup = currentBackup;
+										throw new Error(`${message}. Backup remains at ${currentBackup.backupPath}.`);
+									}
 								};
 								const safeRestorePruneBackup = async (context: string): Promise<void> => {
 									try {
