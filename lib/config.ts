@@ -195,6 +195,7 @@ export async function savePluginConfigMutation(
 						} catch {
 							// best effort backup cleanup
 						}
+						backupMoved = false;
 						return;
 					} catch (retryError) {
 						if (backupMoved) {
@@ -364,7 +365,7 @@ async function withPluginConfigLock<T>(fn: () => T | Promise<T>): Promise<T> {
 					// best effort stale-lock recovery
 				}
 			}
-			await sleepAsync(25);
+			await sleepAsync(25 + Math.floor(Math.random() * 25));
 		}
 	}
 

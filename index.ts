@@ -1238,7 +1238,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
-		const ANSI_STYLE_REGEX = new RegExp("\\x1b\\[[0-9;]*m", "g");
+		const ANSI_STYLE_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
 		const SCREEN_CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 		const sanitizeScreenText = (value: string): string =>
 			value.replace(ANSI_STYLE_REGEX, "").replace(SCREEN_CONTROL_CHAR_REGEX, "").trim();
