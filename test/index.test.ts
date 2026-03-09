@@ -3093,6 +3093,144 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		}
 	});
 
+	it("does not overwrite concurrent account changes when prune-backup rollback cannot safely apply", async () => {
+		const cliModule = await import("../lib/cli.js");
+		const storageModule = await import("../lib/storage.js");
+		const syncModule = await import("../lib/codex-multi-auth-sync.js");
+		const configModule = await import("../lib/config.js");
+		const confirmModule = await import("../lib/ui/confirm.js");
+
+		const tempDir = await fs.mkdtemp(join(tmpdir(), "oc-sync-prune-concurrent-"));
+		try {
+			mockStorage.accounts = [
+				{
+					accountId: "org-keep",
+					organizationId: "org-keep",
+					accountIdSource: "org",
+					email: "keep@example.com",
+					refreshToken: "refresh-keep",
+				},
+				{
+					accountId: "org-prune",
+					organizationId: "org-prune",
+					accountIdSource: "org",
+					email: "prune@example.com",
+					refreshToken: "refresh-prune",
+				},
+			];
+			mockStorage.activeIndex = 0;
+			mockStorage.activeIndexByFamily = {};
+
+			vi.mocked(cliModule.promptLoginMode)
+				.mockResolvedValueOnce({ mode: "experimental-sync-now" })
+				.mockResolvedValueOnce({ mode: "cancel" });
+			vi.mocked(cliModule.promptCodexMultiAuthSyncPrune).mockResolvedValueOnce([1]);
+			vi.mocked(configModule.getSyncFromCodexMultiAuthEnabled).mockReturnValue(true);
+			vi.mocked(confirmModule.confirm).mockResolvedValueOnce(true);
+
+			vi.mocked(storageModule.createTimestampedBackupPath).mockImplementation((prefix?: string) =>
+				join(tempDir, `${prefix ?? "codex-backup"}.json`),
+			);
+			vi.mocked(storageModule.exportAccounts).mockImplementation(async (filePath: string) => {
+				await fs.writeFile(
+					filePath,
+					JSON.stringify({
+						version: mockStorage.version,
+						activeIndex: mockStorage.activeIndex,
+						activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+						accounts: mockStorage.accounts.map((account) => ({ ...account })),
+					}),
+					"utf8",
+				);
+			});
+			vi.mocked(storageModule.loadAccounts).mockImplementation(async () => ({
+				...mockStorage,
+				accounts: mockStorage.accounts.map((account) => ({ ...account })),
+				activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+			}));
+			vi.mocked(storageModule.withAccountStorageTransaction).mockImplementation(
+				async (callback) => {
+					const loadedStorage = {
+						...mockStorage,
+						accounts: mockStorage.accounts.map((account) => ({ ...account })),
+						activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+					};
+					const persist = async (nextStorage: typeof mockStorage) => {
+						mockStorage.version = nextStorage.version;
+						mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+						mockStorage.activeIndex = nextStorage.activeIndex;
+						mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
+					};
+					await callback(loadedStorage, persist);
+				},
+			);
+			vi.mocked(storageModule.saveFlaggedAccounts)
+				.mockResolvedValueOnce(undefined)
+				.mockImplementationOnce(async () => {
+					mockStorage.accounts = [
+						{
+							accountId: "org-concurrent",
+							organizationId: "org-concurrent",
+							accountIdSource: "org",
+							email: "concurrent@example.com",
+							refreshToken: "refresh-concurrent",
+						},
+					];
+					mockStorage.activeIndex = 0;
+					mockStorage.activeIndexByFamily = {};
+					throw new Error("flagged write failed");
+				});
+
+			const capacityError = new syncModule.CodexMultiAuthSyncCapacityError({
+				rootDir: tempDir,
+				accountsPath: join(tempDir, "openai-codex-accounts.json"),
+				scope: "global",
+				currentCount: 2,
+				sourceCount: 2,
+				sourceDedupedTotal: 3,
+				dedupedTotal: 3,
+				maxAccounts: 2,
+				needToRemove: 1,
+				importableNewAccounts: 1,
+				skippedOverlaps: 1,
+				suggestedRemovals: [
+					{
+						index: 1,
+						email: "prune@example.com",
+						accountLabel: "Workspace prune",
+						isCurrentAccount: false,
+						score: 180,
+						reason: "disabled",
+					},
+				],
+			});
+
+			vi.mocked(syncModule.previewSyncFromCodexMultiAuth)
+				.mockRejectedValueOnce(capacityError)
+				.mockResolvedValueOnce({
+					rootDir: tempDir,
+					accountsPath: join(tempDir, "openai-codex-accounts.json"),
+					scope: "global",
+					imported: 0,
+					skipped: 1,
+					total: 1,
+				});
+
+			const mockClient = createMockClient();
+			const { OpenAIOAuthPlugin } = await import("../index.js");
+			const plugin = (await OpenAIOAuthPlugin({ client: mockClient } as never)) as unknown as PluginType;
+			const autoMethod = plugin.auth.methods[0] as unknown as {
+				authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+			};
+
+			const authResult = await autoMethod.authorize();
+			expect(authResult.instructions).toBe("Authentication cancelled");
+			expect(mockStorage.accounts.map((account) => account.accountId)).toEqual(["org-concurrent"]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("aborts sync prune when a selected account disappears before confirmation", async () => {
 		const cliModule = await import("../lib/cli.js");
 		const storageModule = await import("../lib/storage.js");

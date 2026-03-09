@@ -1589,6 +1589,29 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return counts;
 		};
 
+		const updateEmailCountMap = (
+			emailCounts: Map<string, number>,
+			previousEmail: string | undefined,
+			nextEmail: string | undefined,
+		): void => {
+			const previousNormalized = sanitizeEmail(previousEmail);
+			const nextNormalized = sanitizeEmail(nextEmail);
+			if (previousNormalized === nextNormalized) {
+				return;
+			}
+			if (previousNormalized) {
+				const nextCount = (emailCounts.get(previousNormalized) ?? 0) - 1;
+				if (nextCount > 0) {
+					emailCounts.set(previousNormalized, nextCount);
+				} else {
+					emailCounts.delete(previousNormalized);
+				}
+			}
+			if (nextNormalized) {
+				emailCounts.set(nextNormalized, (emailCounts.get(nextNormalized) ?? 0) + 1);
+			}
+		};
+
 		const canHydrateCachedTokenForAccount = (
 			emailCounts: Map<string, number>,
 			account: { email?: string; accountId?: string },
@@ -3402,6 +3425,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									let ok = 0;
 									let disabled = 0;
 									let errors = 0;
+									const workingEmailCounts = buildEmailCountMap(workingStorage.accounts);
 
 									for (let i = 0; i < total; i += 1) {
 										const account = workingStorage.accounts[i];
@@ -3447,11 +3471,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 										if (!accessToken) {
 											const cached = await lookupCodexCliTokensByEmail(account.email);
 											const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
-											const emailCounts = buildEmailCountMap(workingStorage.accounts);
 											if (
 											cached &&
 											canHydrateCachedTokenForAccount(
-												emailCounts,
+												workingEmailCounts,
 												account,
 												cachedTokenAccountId,
 											) &&
@@ -3479,6 +3502,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 													extractAccountEmail(cached.accessToken),
 												);
 												if (hydratedEmail && hydratedEmail !== account.email) {
+													updateEmailCountMap(workingEmailCounts, account.email, hydratedEmail);
 													account.email = hydratedEmail;
 													storageChanged = true;
 												}
@@ -3555,6 +3579,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 												extractAccountEmail(refreshResult.access, refreshResult.idToken),
 											);
 											if (hydratedEmail && hydratedEmail !== account.email) {
+												updateEmailCountMap(workingEmailCounts, account.email, hydratedEmail);
 												account.email = hydratedEmail;
 												storageChanged = true;
 											}
@@ -3907,20 +3932,25 @@ while (attempted.size < Math.max(1, accountCount)) {
 											) {
 												throw new Error("Prune backup flagged snapshot failed validation.");
 											}
-											const liveAccountsBeforeRestore =
-												(await loadAccounts()) ??
-												({
-													version: 3,
-													accounts: [],
-													activeIndex: 0,
-													activeIndexByFamily: {},
-												} satisfies AccountStorageV3);
-											try {
-												await saveAccounts(normalizedAccounts);
-											} catch (error) {
-												const message = error instanceof Error ? error.message : String(error);
-												throw new Error(`Failed to restore account storage from prune backup: ${message}`);
-											}
+											const emptyAccountsStorage = {
+												version: 3,
+												accounts: [],
+												activeIndex: 0,
+												activeIndexByFamily: {},
+											} satisfies AccountStorageV3;
+											const restoredAccountsSnapshot = JSON.stringify(normalizedAccounts);
+											const liveAccountsBeforeRestore = await withAccountStorageTransaction(
+												async (current, persist) => {
+													const snapshot = current ?? emptyAccountsStorage;
+													try {
+														await persist(normalizedAccounts);
+													} catch (error) {
+														const message = error instanceof Error ? error.message : String(error);
+														throw new Error(`Failed to restore account storage from prune backup: ${message}`);
+													}
+													return snapshot;
+												},
+											);
 											try {
 												await saveFlaggedAccounts(
 													flaggedSnapshot as { version: 1; accounts: FlaggedAccountMetadataV1[] },
@@ -3928,7 +3958,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 											} catch (error) {
 												const message = error instanceof Error ? error.message : String(error);
 												try {
-													await saveAccounts(liveAccountsBeforeRestore);
+													let rolledBack = false;
+													await withAccountStorageTransaction(async (current, persist) => {
+														const currentStorage = current ?? emptyAccountsStorage;
+														if (JSON.stringify(currentStorage) !== restoredAccountsSnapshot) {
+															return;
+														}
+														await persist(liveAccountsBeforeRestore);
+														rolledBack = true;
+													});
+													if (!rolledBack) {
+														throw new Error("Account storage changed concurrently before rollback could be applied.");
+													}
 												} catch (rollbackError) {
 													const rollbackMessage =
 														rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
@@ -4138,8 +4179,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const restorePruneBackup = async (): Promise<void> => {
 									const currentBackup = pruneBackup;
 									if (!currentBackup) return;
-									await currentBackup.restore();
 									pruneBackup = null;
+									await currentBackup.restore();
 								};
 								const safeRestorePruneBackup = async (context: string): Promise<void> => {
 									try {
