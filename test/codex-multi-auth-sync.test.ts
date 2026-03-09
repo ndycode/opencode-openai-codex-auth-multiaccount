@@ -963,6 +963,64 @@ describe("codex-multi-auth sync", () => {
 		}
 	});
 
+	it("retries stale temp sweep once on transient Windows lock errors", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		const fakeHome = await fs.promises.mkdtemp(join(os.tmpdir(), "codex-sync-home-"));
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		process.env.HOME = fakeHome;
+		process.env.USERPROFILE = fakeHome;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		const tempRoot = join(fakeHome, ".opencode", "tmp");
+		const staleDir = join(tempRoot, "oc-chatgpt-multi-auth-sync-stale-retry-test");
+		const staleFile = join(staleDir, "accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [{ accountId: "org-source", organizationId: "org-source", refreshToken: "rt-source", addedAt: 1, lastUsed: 1 }],
+			}),
+		);
+
+		const originalRm = fs.promises.rm.bind(fs.promises);
+		let staleSweepBlocked = false;
+		const rmSpy = vi.spyOn(fs.promises, "rm").mockImplementation(async (path, options) => {
+			if (!staleSweepBlocked && String(path) === staleDir) {
+				staleSweepBlocked = true;
+				throw Object.assign(new Error("busy"), { code: "EBUSY" });
+			}
+			return originalRm(path, options as never);
+		});
+		const loggerModule = await import("../lib/logger.js");
+
+		try {
+			await fs.promises.mkdir(staleDir, { recursive: true });
+			await fs.promises.writeFile(staleFile, "sensitive", "utf8");
+			const oldTime = new Date(Date.now() - (15 * 60 * 1000));
+			await fs.promises.utimes(staleDir, oldTime, oldTime);
+			await fs.promises.utimes(staleFile, oldTime, oldTime);
+
+			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				rootDir,
+				accountsPath: globalPath,
+				scope: "global",
+			});
+
+			expect(staleSweepBlocked).toBe(true);
+			expect(rmSpy.mock.calls.filter(([path]) => String(path) === staleDir)).toHaveLength(2);
+			expect(vi.mocked(loggerModule.logWarn)).not.toHaveBeenCalledWith(
+				expect.stringContaining("Failed to sweep stale codex sync temp directory"),
+			);
+			await expect(fs.promises.stat(staleDir)).rejects.toThrow();
+		} finally {
+			rmSpy.mockRestore();
+			await fs.promises.rm(fakeHome, { recursive: true, force: true });
+		}
+	});
+
 	it("skips source accounts whose emails already exist locally during sync", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;

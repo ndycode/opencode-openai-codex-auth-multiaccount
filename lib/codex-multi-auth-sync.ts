@@ -119,6 +119,7 @@ interface PreparedCodexMultiAuthPreviewStorage {
 }
 
 const TEMP_CLEANUP_RETRY_DELAYS_MS = [100, 250, 500] as const;
+const STALE_TEMP_CLEANUP_RETRY_DELAY_MS = 150;
 
 function sleepAsync(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -225,11 +226,24 @@ async function cleanupStaleNormalizedImportTempDirs(
 				}
 				await fs.rm(candidateDir, { recursive: true, force: true });
 			} catch (error) {
-				const code = (error as NodeJS.ErrnoException).code;
+				let code = (error as NodeJS.ErrnoException).code;
 				if (code === "ENOENT") {
 					continue;
 				}
-				const message = error instanceof Error ? error.message : String(error);
+				let message = error instanceof Error ? error.message : String(error);
+				if (code === "EBUSY" || code === "EACCES" || code === "EPERM") {
+					await sleepAsync(STALE_TEMP_CLEANUP_RETRY_DELAY_MS);
+					try {
+						await fs.rm(candidateDir, { recursive: true, force: true });
+						continue;
+					} catch (retryError) {
+						code = (retryError as NodeJS.ErrnoException).code;
+						if (code === "ENOENT") {
+							continue;
+						}
+						message = retryError instanceof Error ? retryError.message : String(retryError);
+					}
+				}
 				logWarn(`Failed to sweep stale codex sync temp directory ${candidateDir}: ${message}`);
 			}
 		}
