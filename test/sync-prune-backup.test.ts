@@ -79,7 +79,7 @@ describe("sync prune backup payload", () => {
 		const payload = createSyncPruneBackupPayload(storage, flagged);
 
 		storage.accounts[0]!.accountTags?.push("mutated");
-		storage.accounts[0]!.lastSelectedModelByFamily = { codex: "gpt-5.5" };
+		storage.accounts[0]!.lastSelectedModelByFamily!.codex = "gpt-5.5";
 		flagged.accounts[0]!.metadata.source = "mutated";
 
 		expect(payload.accounts.accounts[0]?.accountTags).toEqual(["work"]);

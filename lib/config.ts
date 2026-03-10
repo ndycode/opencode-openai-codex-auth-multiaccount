@@ -17,6 +17,9 @@ const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
 const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
+const CONFIG_LOCK_RETRY_ATTEMPTS = 5;
+const CONFIG_LOCK_RETRY_BASE_DELAY_MS = 10;
+const CONFIG_LOCK_RETRY_MAX_DELAY_MS = 200;
 let configMutationMutex: Promise<void> = Promise.resolve();
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
@@ -130,7 +133,9 @@ function withConfigMutationLock<T>(fn: () => Promise<T>): Promise<T> {
 async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
 	let lastError: NodeJS.ErrnoException | null = null;
 
-	for (let attempt = 0; attempt < 20; attempt += 1) {
+	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+
+	for (let attempt = 0; attempt < CONFIG_LOCK_RETRY_ATTEMPTS; attempt += 1) {
 		try {
 			const handle = await fs.open(CONFIG_LOCK_PATH, "wx", 0o600);
 			try {
@@ -143,7 +148,12 @@ async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code === "EEXIST") {
 				lastError = error as NodeJS.ErrnoException;
-				await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+				await new Promise((resolve) =>
+					setTimeout(
+						resolve,
+						Math.min(CONFIG_LOCK_RETRY_BASE_DELAY_MS * 2 ** attempt, CONFIG_LOCK_RETRY_MAX_DELAY_MS),
+					),
+				);
 				continue;
 			}
 			throw error;
