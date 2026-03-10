@@ -1298,7 +1298,11 @@ export async function importAccounts(
     backupError,
   } =
     await withAccountStorageTransaction(async (existing, persist) => {
-      const preparedNormalized = prepare ? prepare(normalized, existing) : normalized;
+      const prepared = prepare ? prepare(normalized, existing) : normalized;
+      const preparedNormalized = normalizeAccountStorage(prepared);
+      if (!preparedNormalized) {
+        throw new Error("prepare() returned invalid account storage");
+      }
       const skippedByPrepare = Math.max(0, normalized.accounts.length - preparedNormalized.accounts.length);
       const existingStorage: AccountStorageV3 =
         existing ??

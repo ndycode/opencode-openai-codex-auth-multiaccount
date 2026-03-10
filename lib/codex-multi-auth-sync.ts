@@ -6,7 +6,6 @@ import { logWarn } from "./logger.js";
 import {
 	deduplicateAccounts,
 	deduplicateAccountsByEmail,
-	getStoragePath,
 	importAccounts,
 	loadAccounts,
 	normalizeAccountStorage,
@@ -15,7 +14,6 @@ import {
 	type AccountStorageV3,
 	type ImportAccountsResult,
 } from "./storage.js";
-import { migrateV1ToV3, type AccountStorageV1 } from "./storage/migrations.js";
 import { findProjectRoot, getProjectStorageKey } from "./storage/paths.js";
 
 const EXTERNAL_ROOT_SUFFIX = "multi-auth";
@@ -1150,88 +1148,6 @@ function buildCodexMultiAuthOverlapCleanupPlan(existing: AccountStorageV3): {
 	};
 }
 
-function normalizeOverlapCleanupSourceStorage(data: unknown): AccountStorageV3 | null {
-	if (
-		!data ||
-		typeof data !== "object" ||
-		!("version" in data) ||
-		!((data as { version?: unknown }).version === 1 || (data as { version?: unknown }).version === 3) ||
-		!("accounts" in data) ||
-		!Array.isArray((data as { accounts?: unknown }).accounts)
-	) {
-		return null;
-	}
-
-	const baseRecord =
-		(data as { version?: unknown }).version === 1
-			? migrateV1ToV3(data as AccountStorageV1)
-			: (data as AccountStorageV3);
-	const originalToFilteredIndex = new Map<number, number>();
-	const accounts = baseRecord.accounts.flatMap((account, index) => {
-		if (typeof account.refreshToken !== "string" || account.refreshToken.trim().length === 0) {
-			return [];
-		}
-		originalToFilteredIndex.set(index, originalToFilteredIndex.size);
-		return [account];
-	});
-	const activeIndexValue =
-		typeof baseRecord.activeIndex === "number" && Number.isFinite(baseRecord.activeIndex)
-			? baseRecord.activeIndex
-			: 0;
-	const remappedActiveIndex = originalToFilteredIndex.get(activeIndexValue);
-	const activeIndex = Math.max(
-		0,
-		Math.min(accounts.length - 1, remappedActiveIndex ?? activeIndexValue),
-	);
-	const rawActiveIndexByFamily =
-		baseRecord.activeIndexByFamily && typeof baseRecord.activeIndexByFamily === "object"
-			? baseRecord.activeIndexByFamily
-			: {};
-	const activeIndexByFamily = Object.fromEntries(
-		Object.entries(rawActiveIndexByFamily).flatMap(([family, value]) => {
-			if (typeof value !== "number" || !Number.isFinite(value)) {
-				return [];
-			}
-			const remappedValue = originalToFilteredIndex.get(value) ?? value;
-			return [[family, Math.max(0, Math.min(accounts.length - 1, remappedValue))]];
-		}),
-	) as AccountStorageV3["activeIndexByFamily"];
-
-	return {
-		version: 3,
-		accounts,
-		activeIndex: accounts.length === 0 ? 0 : activeIndex,
-		activeIndexByFamily,
-	};
-}
-
-async function loadRawCodexMultiAuthOverlapCleanupStorage(
-	fallback: AccountStorageV3,
-): Promise<AccountStorageV3> {
-	try {
-		const raw = await fs.readFile(getStoragePath(), "utf-8");
-		const parsed = JSON.parse(raw) as unknown;
-		const normalized = normalizeOverlapCleanupSourceStorage(parsed);
-		if (normalized) {
-			return normalized;
-		}
-		throw new Error("Invalid raw storage snapshot for synced overlap cleanup.");
-	} catch (error) {
-		const code = (error as NodeJS.ErrnoException).code;
-		if (code === "ENOENT") {
-			return fallback;
-		}
-		if (code === "EBUSY" || code === "EACCES" || code === "EPERM") {
-			logWarn(
-				`Failed reading raw storage snapshot for synced overlap cleanup (${code}); using transaction snapshot fallback.`,
-			);
-			return fallback;
-		}
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Failed to read raw storage snapshot for synced overlap cleanup: ${message}`);
-	}
-}
-
 function sourceExceedsCapacityWithoutLocalRelief(details: CodexMultiAuthSyncCapacityDetails): boolean {
 	return (
 		details.sourceDedupedTotal > details.maxAccounts &&
@@ -1273,15 +1189,14 @@ export class CodexMultiAuthSyncCapacityError extends Error {
 }
 
 export async function previewCodexMultiAuthSyncedOverlapCleanup(): Promise<CodexMultiAuthCleanupResult> {
-	return withAccountStorageTransaction(async (current) => {
+	return withAccountStorageTransaction((current) => {
 		const fallback = current ?? {
 			version: 3 as const,
 			accounts: [],
 			activeIndex: 0,
 			activeIndexByFamily: {},
 		};
-		const existing = await loadRawCodexMultiAuthOverlapCleanupStorage(fallback);
-		return buildCodexMultiAuthOverlapCleanupPlan(existing).result;
+		return Promise.resolve(buildCodexMultiAuthOverlapCleanupPlan(fallback).result);
 	});
 }
 
@@ -1293,8 +1208,7 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(): Promise<CodexMultiA
 			activeIndex: 0,
 			activeIndexByFamily: {},
 		};
-		const existing = await loadRawCodexMultiAuthOverlapCleanupStorage(fallback);
-		const plan = buildCodexMultiAuthOverlapCleanupPlan(existing);
+		const plan = buildCodexMultiAuthOverlapCleanupPlan(fallback);
 		if (plan.nextStorage) {
 			await persist(plan.nextStorage);
 		}

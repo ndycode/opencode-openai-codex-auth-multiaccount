@@ -542,13 +542,18 @@ async function savePluginConfigMutation(
 		await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
 		const current = existsSync(CONFIG_PATH)
 			? await (async () => {
+				const raw = stripUtf8Bom(await fs.readFile(CONFIG_PATH, "utf-8"));
+				let parsed: unknown;
 				try {
-					const raw = stripUtf8Bom(await fs.readFile(CONFIG_PATH, "utf-8"));
-					const parsed = JSON.parse(raw) as unknown;
-					return isRecord(parsed) ? { ...parsed } : {};
-				} catch {
-					return {};
+					parsed = JSON.parse(raw) as unknown;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					throw new Error(`Invalid JSON in config file ${CONFIG_PATH}: ${message}`);
 				}
+				if (!isRecord(parsed)) {
+					throw new Error(`Config file must contain a JSON object: ${CONFIG_PATH}`);
+				}
+				return { ...parsed };
 			})()
 			: {};
 		const next = mutate(current);
