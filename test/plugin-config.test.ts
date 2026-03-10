@@ -20,6 +20,8 @@ import {
 	getRequestTransformMode,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
+	getSyncFromCodexMultiAuthEnabled,
+	setSyncFromCodexMultiAuthEnabled,
 } from '../lib/config.js';
 import type { PluginConfig } from '../lib/types.js';
 import * as fs from 'node:fs';
@@ -737,6 +739,55 @@ describe('Plugin Configuration', () => {
 			process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS = '30000';
 			expect(getStreamStallTimeoutMs({})).toBe(30000);
 			delete process.env.CODEX_AUTH_STREAM_STALL_TIMEOUT_MS;
+		});
+	});
+
+	describe('sync config mutation', () => {
+		it('persists the sync toggle via temp file rename', async () => {
+			mockExistsSync.mockReturnValue(true);
+			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue(
+				JSON.stringify({ experimental: { syncFromCodexMultiAuth: { enabled: false } } }) as never
+			);
+			const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined);
+			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
+			const unlinkSpy = vi.spyOn(fs.promises, 'unlink').mockResolvedValue(undefined);
+
+			try {
+				await setSyncFromCodexMultiAuthEnabled(true);
+				expect(readSpy).toHaveBeenCalled();
+				expect(writeSpy).toHaveBeenCalled();
+				expect(renameSpy).toHaveBeenCalled();
+				expect(unlinkSpy).not.toHaveBeenCalled();
+			} finally {
+				readSpy.mockRestore();
+				mkdirSpy.mockRestore();
+				writeSpy.mockRestore();
+				renameSpy.mockRestore();
+				unlinkSpy.mockRestore();
+			}
+		});
+
+		it('surfaces malformed config files instead of replacing them', async () => {
+			mockExistsSync.mockReturnValue(true);
+			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue('{ invalid json' as never);
+			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
+
+			try {
+				await expect(setSyncFromCodexMultiAuthEnabled(true)).rejects.toThrow(/Invalid JSON in config file/);
+				expect(writeSpy).not.toHaveBeenCalled();
+				expect(renameSpy).not.toHaveBeenCalled();
+			} finally {
+				readSpy.mockRestore();
+				writeSpy.mockRestore();
+				renameSpy.mockRestore();
+			}
+		});
+
+		it('reads the persisted sync toggle flag', () => {
+			expect(getSyncFromCodexMultiAuthEnabled({ experimental: { syncFromCodexMultiAuth: { enabled: true } } })).toBe(true);
+			expect(getSyncFromCodexMultiAuthEnabled({})).toBe(false);
 		});
 	});
 });

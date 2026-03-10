@@ -19,8 +19,12 @@ import {
   exportAccounts,
   importAccounts,
   previewImportAccounts,
+  previewImportAccountsWithExistingStorage,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  withFlaggedAccountsTransaction,
+  loadAccountAndFlaggedStorageSnapshot,
+  backupRawAccountsFile,
 } from "../lib/storage.js";
 
 // Mocking the behavior we're about to implement for TDD
@@ -1510,6 +1514,89 @@ describe("storage", () => {
       const loaded = await loadFlaggedAccounts();
       expect(loaded.accounts).toHaveLength(1);
       expect(loaded.accounts[0]?.refreshToken).toBe("flagged-ebusy");
+    });
+
+    it("updates flagged storage inside withFlaggedAccountsTransaction", async () => {
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "flagged-keep",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "flagged-drop",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      await withFlaggedAccountsTransaction(async (current, persist) => {
+        await persist({
+          version: 1,
+          accounts: current.accounts.filter((account) => account.refreshToken !== "flagged-drop"),
+        });
+      });
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts.map((account) => account.refreshToken)).toEqual(["flagged-keep"]);
+    });
+
+    it("loads account and flagged storage from one snapshot helper", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      const snapshot = await loadAccountAndFlaggedStorageSnapshot();
+      expect(snapshot.accounts?.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+      expect(snapshot.flagged.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+    });
+
+    it("copies the raw accounts file for backup", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "backup-refresh",
+            accountId: "backup-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      const backupPath = join(testWorkDir, "backup.json");
+      await backupRawAccountsFile(backupPath);
+
+      const raw = JSON.parse(await fs.readFile(backupPath, "utf-8")) as { accounts: Array<{ refreshToken: string }> };
+      expect(raw.accounts[0]?.refreshToken).toBe("backup-refresh");
     });
   });
 
