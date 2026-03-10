@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { ANSI, isTTY } from "./ansi.js";
+import { ANSI, ANSI_CSI_REGEX, CONTROL_CHAR_REGEX, isTTY } from "./ansi.js";
 import { confirm } from "./confirm.js";
 import { getUiRuntimeOptions } from "./runtime.js";
 import { select, type MenuItem } from "./select.js";
@@ -63,9 +63,6 @@ export type SettingsAction =
 
 type SettingsHubAction = "sync" | "maintenance" | "back" | "cancel";
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
-const ANSI_CSI_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
-const CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 export interface SyncPruneCandidate {
 	index: number;
 	email?: string;

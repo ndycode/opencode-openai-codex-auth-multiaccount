@@ -162,7 +162,7 @@ import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-
 import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
 import { confirm } from "./lib/ui/confirm.js";
-import { ANSI } from "./lib/ui/ansi.js";
+import { ANSI, ANSI_CSI_REGEX, CONTROL_CHAR_REGEX } from "./lib/ui/ansi.js";
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
@@ -1237,11 +1237,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return applyUiRuntimeFromConfig(loadPluginConfig());
 		};
 
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
-		const ANSI_STYLE_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
-		const SCREEN_CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 		const sanitizeScreenText = (value: string): string =>
-			value.replace(ANSI_STYLE_REGEX, "").replace(SCREEN_CONTROL_CHAR_REGEX, "").trim();
+			value.replace(ANSI_CSI_REGEX, "").replace(CONTROL_CHAR_REGEX, "").trim();
 		type OperationTone = "normal" | "muted" | "success" | "warning" | "danger" | "accent";
 
 		const styleOperationText = (
@@ -4024,7 +4021,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const removeAccountsForSync = async (
 								targets: SyncRemovalTarget[],
 							): Promise<void> => {
-								const currentFlaggedStorage = await loadFlaggedAccounts();
 								const targetKeySet = new Set(
 									targets
 										.filter((target) => typeof target.refreshToken === "string" && target.refreshToken.length > 0)
@@ -4139,6 +4135,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										}),
 									),
 								);
+								const currentFlaggedStorage = await loadFlaggedAccounts();
 								await saveFlaggedAccounts({
 									version: 1,
 									accounts: currentFlaggedStorage.accounts.filter(
@@ -4363,6 +4360,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 										for (const line of removalPlan.previewLines) {
 											console.log(`  ${line}`);
 										}
+										console.log(
+											"Accounts removed in this step cannot be recovered if the process is interrupted - ensure sync completes before closing.",
+										);
 										console.log("");
 										const confirmed = await confirm(
 											`Remove ${indexesToRemove.length} selected account(s) and retry sync?`,
@@ -4856,19 +4856,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 											break;
 										}
 										if (typeof menuResult.switchAccountIndex === "number") {
+											const targetIndex = menuResult.switchAccountIndex;
 											let targetLabel: string | null = null;
 											await withAccountStorageTransaction(async (loadedStorage, persist) => {
 												const txStorage = loadedStorage;
 												if (!txStorage) return;
-												const target = txStorage.accounts[menuResult.switchAccountIndex];
+												const target = txStorage.accounts[targetIndex];
 												if (!target) return;
-												txStorage.activeIndex = menuResult.switchAccountIndex;
+												txStorage.activeIndex = targetIndex;
 												txStorage.activeIndexByFamily = txStorage.activeIndexByFamily ?? {};
 												for (const family of MODEL_FAMILIES) {
-													txStorage.activeIndexByFamily[family] = menuResult.switchAccountIndex;
+													txStorage.activeIndexByFamily[family] = targetIndex;
 												}
 												await persist(txStorage);
-												targetLabel = target.email ?? `Account ${menuResult.switchAccountIndex + 1}`;
+												targetLabel = target.email ?? `Account ${targetIndex + 1}`;
 											});
 											if (targetLabel) {
 												invalidateAccountManagerCache();

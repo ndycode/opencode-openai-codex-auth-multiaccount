@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { AccountIdSource } from "./types.js";
+import { ANSI_CSI_REGEX, CONTROL_CHAR_REGEX } from "./ui/ansi.js";
 import {
 	showAuthMenu,
 	showAccountDetails,
@@ -10,9 +11,6 @@ import {
 	type AccountStatus,
 } from "./ui/auth-menu.js";
 import { UI_COPY } from "./ui/copy.js";
-
-const ANSI_CSI_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
-const CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 
 export function isNonInteractiveMode(): boolean {
 	if (process.env.FORCE_INTERACTIVE_MODE === "1") return false;

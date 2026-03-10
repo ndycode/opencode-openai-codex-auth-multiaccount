@@ -3214,6 +3214,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const confirmModule = await import("../lib/ui/confirm.js");
 
 		const tempDir = await fs.mkdtemp(join(tmpdir(), "oc-sync-prune-"));
+		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 		try {
 			mockStorage.accounts = [
 				{
@@ -3329,12 +3330,18 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 			const authResult = await autoMethod.authorize();
 			expect(authResult.instructions).toBe("Authentication cancelled");
+			expect(
+				consoleSpy.mock.calls.some(([value]) =>
+					String(value).includes("cannot be recovered if the process is interrupted"),
+				),
+			).toBe(true);
 			expect(mockStorage.accounts).toHaveLength(2);
 			expect(mockStorage.accounts.map((account) => account.accountId)).toEqual([
 				"org-keep",
 				"org-prune",
 			]);
 		} finally {
+			consoleSpy.mockRestore();
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
@@ -4086,29 +4093,59 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			vi.mocked(storageModule.loadFlaggedAccounts).mockReset();
 			vi.mocked(storageModule.saveFlaggedAccounts).mockReset();
 			vi.mocked(storageModule.saveFlaggedAccounts).mockResolvedValue(undefined);
-			vi.mocked(storageModule.loadFlaggedAccounts).mockResolvedValue({
-				version: 1,
-				accounts: [
-					{
-						refreshToken: "refresh-shared",
-						organizationId: "org-other",
-						accountId: "org-other",
-						flaggedAt: 1,
-					},
-					{
-						refreshToken: "refresh-shared",
-						organizationId: "org-prune",
-						accountId: "org-prune",
-						flaggedAt: 2,
-					},
-					{
-						refreshToken: "refresh-keep",
-						organizationId: "org-keep",
-						accountId: "org-keep",
-						flaggedAt: 3,
-					},
-				],
-			});
+			vi.mocked(storageModule.loadFlaggedAccounts)
+				.mockResolvedValueOnce({
+					version: 1,
+					accounts: [
+						{
+							refreshToken: "refresh-shared",
+							organizationId: "org-other",
+							accountId: "org-other",
+							flaggedAt: 1,
+						},
+						{
+							refreshToken: "refresh-shared",
+							organizationId: "org-prune",
+							accountId: "org-prune",
+							flaggedAt: 2,
+						},
+						{
+							refreshToken: "refresh-keep",
+							organizationId: "org-keep",
+							accountId: "org-keep",
+							flaggedAt: 3,
+						},
+					],
+				})
+				.mockResolvedValue({
+					version: 1,
+					accounts: [
+						{
+							refreshToken: "refresh-shared",
+							organizationId: "org-other",
+							accountId: "org-other",
+							flaggedAt: 1,
+						},
+						{
+							refreshToken: "refresh-shared",
+							organizationId: "org-prune",
+							accountId: "org-prune",
+							flaggedAt: 2,
+						},
+						{
+							refreshToken: "refresh-keep",
+							organizationId: "org-keep",
+							accountId: "org-keep",
+							flaggedAt: 3,
+						},
+						{
+							refreshToken: "refresh-concurrent-flagged",
+							organizationId: "org-concurrent-flagged",
+							accountId: "org-concurrent-flagged",
+							flaggedAt: 4,
+						},
+					],
+				});
 
 			vi.mocked(storageModule.createTimestampedBackupPath).mockImplementation((prefix?: string) =>
 				join(tempDir, `${prefix ?? "codex-backup"}.json`),
@@ -4202,6 +4239,12 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 						organizationId: "org-keep",
 						accountId: "org-keep",
 						flaggedAt: 3,
+					},
+					{
+						refreshToken: "refresh-concurrent-flagged",
+						organizationId: "org-concurrent-flagged",
+						accountId: "org-concurrent-flagged",
+						flaggedAt: 4,
 					},
 				],
 			});

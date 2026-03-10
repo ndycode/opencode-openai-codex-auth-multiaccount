@@ -31,6 +31,10 @@ export const ANSI = {
 	reset: "\x1b[0m",
 } as const;
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape codes
+export const ANSI_CSI_REGEX = new RegExp("\\x1b\\[[0-?]*[ -/]*[@-~]", "g");
+export const CONTROL_CHAR_REGEX = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
+
 export type KeyAction =
 	| "up"
 	| "down"
