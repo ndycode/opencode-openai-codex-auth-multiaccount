@@ -170,6 +170,35 @@ function stableSerialize(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+function createCleanupRedactedStorage(storage: AccountStorageV3): AccountStorageV3 {
+	return {
+		...storage,
+		accounts: storage.accounts.map((account) => ({
+			...account,
+			refreshToken: "__redacted__",
+			accessToken: undefined,
+			idToken: undefined,
+		})),
+	};
+}
+
+async function redactNormalizedImportTempFile(tempPath: string, storage: AccountStorageV3): Promise<void> {
+	try {
+		const redactedStorage = createCleanupRedactedStorage(storage);
+		await fs.writeFile(tempPath, `${JSON.stringify(redactedStorage, null, 2)}\n`, {
+			encoding: "utf-8",
+			mode: 0o600,
+			flag: "w",
+		});
+	} catch (error) {
+		logWarn(
+			`Failed to redact temporary codex sync file ${tempPath} before cleanup: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		);
+	}
+}
+
 async function withNormalizedImportFile<T>(
 	storage: AccountStorageV3,
 	handler: (filePath: string) => Promise<T>,
@@ -185,9 +214,11 @@ async function withNormalizedImportFile<T>(
 				flag: "wx",
 			});
 			const result = await handler(tempPath);
+			await redactNormalizedImportTempFile(tempPath, storage);
 			await removeNormalizedImportTempDir(tempDir, tempPath, options);
 			return result;
 		} catch (error) {
+			await redactNormalizedImportTempFile(tempPath, storage);
 			try {
 				await removeNormalizedImportTempDir(tempDir, tempPath, { postSuccessCleanupFailureMode: "warn" });
 			} catch (cleanupError) {

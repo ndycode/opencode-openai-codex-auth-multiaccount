@@ -21,6 +21,8 @@ import {
   previewImportAccounts,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  withFlaggedAccountsTransaction,
+  loadAccountAndFlaggedStorageSnapshot,
   previewDuplicateEmailCleanup,
   cleanupDuplicateEmailAccounts,
 } from "../lib/storage.js";
@@ -1766,6 +1768,70 @@ describe("storage", () => {
       const loaded = await loadFlaggedAccounts();
       expect(loaded.accounts).toHaveLength(1);
       expect(loaded.accounts[0]?.refreshToken).toBe("flagged-ebusy");
+    });
+
+    it("updates flagged storage atomically inside withFlaggedAccountsTransaction", async () => {
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "flagged-keep",
+            accountId: "flagged-keep",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "flagged-drop",
+            accountId: "flagged-drop",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      await withFlaggedAccountsTransaction(async (current, persist) => {
+        await persist({
+          version: 1,
+          accounts: current.accounts.filter((account) => account.refreshToken !== "flagged-drop"),
+        });
+      });
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts.map((account) => account.refreshToken)).toEqual(["flagged-keep"]);
+    });
+
+    it("reads accounts and flagged storage from one snapshot helper", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "flagged-refresh",
+            accountId: "flagged-id",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      const snapshot = await loadAccountAndFlaggedStorageSnapshot();
+      expect(snapshot.accounts?.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+      expect(snapshot.flagged.accounts.map((account) => account.refreshToken)).toEqual(["flagged-refresh"]);
     });
   });
 

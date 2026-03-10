@@ -300,6 +300,16 @@ const mockStorage = {
 	activeIndexByFamily: {} as Record<string, number>,
 };
 
+const mockFlaggedStorage = {
+	version: 1 as const,
+	accounts: [] as Array<{
+		refreshToken: string;
+		organizationId?: string;
+		accountId?: string;
+		flaggedAt: number;
+	}>,
+};
+
 vi.mock("../lib/storage.js", () => ({
 	getStoragePath: () => "/mock/path/accounts.json",
 	loadAccounts: vi.fn(async () => mockStorage),
@@ -321,6 +331,36 @@ vi.mock("../lib/storage.js", () => ({
 				mockStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
 				mockStorage.activeIndex = nextStorage.activeIndex;
 				mockStorage.activeIndexByFamily = { ...nextStorage.activeIndexByFamily };
+			};
+			await callback(loadedStorage, persist);
+		},
+	),
+	loadAccountAndFlaggedStorageSnapshot: vi.fn(async () => ({
+		accounts: {
+			...mockStorage,
+			accounts: mockStorage.accounts.map((account) => ({ ...account })),
+			activeIndexByFamily: { ...mockStorage.activeIndexByFamily },
+		},
+		flagged: {
+			version: 1,
+			accounts: mockFlaggedStorage.accounts.map((account) => ({ ...account })),
+		},
+	})),
+	withFlaggedAccountsTransaction: vi.fn(
+		async (
+			callback: (
+				current: typeof mockFlaggedStorage,
+				persist: (nextStorage: typeof mockFlaggedStorage) => Promise<void>,
+			) => Promise<void>,
+		) => {
+			const loadedStorage = {
+				version: 1 as const,
+				accounts: mockFlaggedStorage.accounts.map((account) => ({ ...account })),
+			};
+			const persist = async (nextStorage: typeof mockFlaggedStorage) => {
+				mockFlaggedStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+				const storageModule = await import("../lib/storage.js");
+				await vi.mocked(storageModule.saveFlaggedAccounts)(nextStorage);
 			};
 			await callback(loadedStorage, persist);
 		},
@@ -348,8 +388,13 @@ vi.mock("../lib/storage.js", () => ({
 	})),
 	previewImportAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
 	createTimestampedBackupPath: vi.fn((prefix?: string) => `/tmp/${prefix ?? "codex-backup"}-20260101-000000.json`),
-	loadFlaggedAccounts: vi.fn(async () => ({ version: 1, accounts: [] })),
-	saveFlaggedAccounts: vi.fn(async () => {}),
+	loadFlaggedAccounts: vi.fn(async () => ({
+		version: 1,
+		accounts: mockFlaggedStorage.accounts.map((account) => ({ ...account })),
+	})),
+	saveFlaggedAccounts: vi.fn(async (storage: typeof mockFlaggedStorage) => {
+		mockFlaggedStorage.accounts = storage.accounts.map((account) => ({ ...account }));
+	}),
 	clearFlaggedAccounts: vi.fn(async () => {}),
 	normalizeAccountStorage: vi.fn((value: unknown) => value),
 	StorageError: class StorageError extends Error {
@@ -574,6 +619,7 @@ describe("OpenAIOAuthPlugin", () => {
 		mockStorage.accounts = [];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		mockFlaggedStorage.accounts = [];
 
 		const { OpenAIOAuthPlugin } = await import("../index.js");
 		plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
@@ -4093,62 +4139,50 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			vi.mocked(configModule.getSyncFromCodexMultiAuthEnabled).mockReturnValue(true);
 			vi.mocked(confirmModule.confirm).mockReset();
 			vi.mocked(confirmModule.confirm).mockResolvedValue(true);
-			vi.mocked(storageModule.loadFlaggedAccounts).mockReset();
+			vi.mocked(storageModule.withFlaggedAccountsTransaction).mockReset();
 			vi.mocked(storageModule.saveFlaggedAccounts).mockReset();
 			vi.mocked(storageModule.saveFlaggedAccounts).mockResolvedValue(undefined);
-			vi.mocked(storageModule.loadFlaggedAccounts)
-				.mockResolvedValueOnce({
-					version: 1,
-					accounts: [
+			mockFlaggedStorage.accounts = [
+				{
+					refreshToken: "refresh-shared",
+					organizationId: "org-other",
+					accountId: "org-other",
+					flaggedAt: 1,
+				},
+				{
+					refreshToken: "refresh-shared",
+					organizationId: "org-prune",
+					accountId: "org-prune",
+					flaggedAt: 2,
+				},
+				{
+					refreshToken: "refresh-keep",
+					organizationId: "org-keep",
+					accountId: "org-keep",
+					flaggedAt: 3,
+				},
+				{
+					refreshToken: "refresh-concurrent-flagged",
+					organizationId: "org-concurrent-flagged",
+					accountId: "org-concurrent-flagged",
+					flaggedAt: 4,
+				},
+			];
+			vi.mocked(storageModule.withFlaggedAccountsTransaction).mockImplementation(
+				async (callback) => {
+					const persist = async (nextStorage) => {
+						mockFlaggedStorage.accounts = nextStorage.accounts.map((account) => ({ ...account }));
+						await vi.mocked(storageModule.saveFlaggedAccounts)(nextStorage);
+					};
+					await callback(
 						{
-							refreshToken: "refresh-shared",
-							organizationId: "org-other",
-							accountId: "org-other",
-							flaggedAt: 1,
+							version: 1,
+							accounts: mockFlaggedStorage.accounts.map((account) => ({ ...account })),
 						},
-						{
-							refreshToken: "refresh-shared",
-							organizationId: "org-prune",
-							accountId: "org-prune",
-							flaggedAt: 2,
-						},
-						{
-							refreshToken: "refresh-keep",
-							organizationId: "org-keep",
-							accountId: "org-keep",
-							flaggedAt: 3,
-						},
-					],
-				})
-				.mockResolvedValue({
-					version: 1,
-					accounts: [
-						{
-							refreshToken: "refresh-shared",
-							organizationId: "org-other",
-							accountId: "org-other",
-							flaggedAt: 1,
-						},
-						{
-							refreshToken: "refresh-shared",
-							organizationId: "org-prune",
-							accountId: "org-prune",
-							flaggedAt: 2,
-						},
-						{
-							refreshToken: "refresh-keep",
-							organizationId: "org-keep",
-							accountId: "org-keep",
-							flaggedAt: 3,
-						},
-						{
-							refreshToken: "refresh-concurrent-flagged",
-							organizationId: "org-concurrent-flagged",
-							accountId: "org-concurrent-flagged",
-							flaggedAt: 4,
-						},
-					],
-				});
+						persist,
+					);
+				},
+			);
 
 			vi.mocked(storageModule.createTimestampedBackupPath).mockImplementation((prefix?: string) =>
 				join(tempDir, `${prefix ?? "codex-backup"}.json`),

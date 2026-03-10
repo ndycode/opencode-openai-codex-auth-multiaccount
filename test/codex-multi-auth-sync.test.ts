@@ -844,6 +844,71 @@ describe("codex-multi-auth sync", () => {
 		}
 	});
 
+	it.each(["EACCES", "EPERM", "EBUSY"] as const)(
+		"redacts temp tokens before warning when Windows-style %s cleanup exhausts retries",
+		async (code) => {
+			const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+			const fakeHome = await fs.promises.mkdtemp(join(os.tmpdir(), "codex-sync-home-"));
+			process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+			process.env.HOME = fakeHome;
+			process.env.USERPROFILE = fakeHome;
+			const globalPath = join(rootDir, "openai-codex-accounts.json");
+			const tempRoot = join(fakeHome, ".opencode", "tmp");
+			mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+			mockSourceStorageFile(
+				globalPath,
+				JSON.stringify({
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							refreshToken: "sync-refresh-secret",
+							accessToken: "sync-access-secret",
+							idToken: "sync-id-secret",
+							addedAt: 1,
+							lastUsed: 1,
+						},
+					],
+				}),
+			);
+
+			const rmSpy = vi
+				.spyOn(fs.promises, "rm")
+				.mockRejectedValue(Object.assign(new Error("cleanup still locked"), { code }));
+			const loggerModule = await import("../lib/logger.js");
+
+			try {
+				const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+				await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+					accountsPath: globalPath,
+					imported: 2,
+					skipped: 0,
+					total: 4,
+				});
+				expect(rmSpy).toHaveBeenCalledTimes(4);
+				expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+					expect.stringContaining("Failed to remove temporary codex sync directory"),
+				);
+
+				const tempEntries = await fs.promises.readdir(tempRoot, { withFileTypes: true });
+				const syncDir = tempEntries.find(
+					(entry) => entry.isDirectory() && entry.name.startsWith("oc-chatgpt-multi-auth-sync-"),
+				);
+				expect(syncDir).toBeDefined();
+				const leakedTempPath = join(tempRoot, syncDir!.name, "accounts.json");
+				const leakedContent = await fs.promises.readFile(leakedTempPath, "utf8");
+				expect(leakedContent).not.toContain("sync-refresh-secret");
+				expect(leakedContent).not.toContain("sync-access-secret");
+				expect(leakedContent).not.toContain("sync-id-secret");
+				expect(leakedContent).toContain("__redacted__");
+			} finally {
+				rmSpy.mockRestore();
+				await fs.promises.rm(fakeHome, { recursive: true, force: true });
+			}
+		},
+	);
+
 	it("finds the project-scoped codex-multi-auth source across same-repo worktrees", async () => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;

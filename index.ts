@@ -124,11 +124,13 @@ import {
 	previewImportAccounts,
 	createTimestampedBackupPath,
 	loadFlaggedAccounts,
+	loadAccountAndFlaggedStorageSnapshot,
 	saveFlaggedAccounts,
 	clearFlaggedAccounts,
 	StorageError,
 	formatStorageErrorHint,
 	normalizeAccountStorage,
+	withFlaggedAccountsTransaction,
 	type AccountStorageV3,
 	type FlaggedAccountMetadataV1,
 } from "./lib/storage.js";
@@ -3926,15 +3928,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 									throw new Error("readPruneBackupFile: unexpected retry exit");
 								};
+								const { accounts: loadedAccountsStorage, flagged: currentFlaggedStorage } =
+									await loadAccountAndFlaggedStorageSnapshot();
 								const currentAccountsStorage =
-									(await loadAccounts()) ??
+									loadedAccountsStorage ??
 									({
-											version: 3,
-											accounts: [],
-											activeIndex: 0,
-											activeIndexByFamily: {},
-										} satisfies AccountStorageV3);
-									const currentFlaggedStorage = await loadFlaggedAccounts();
+										version: 3,
+										accounts: [],
+										activeIndex: 0,
+										activeIndexByFamily: {},
+									} satisfies AccountStorageV3);
 									const backupPath = createTimestampedBackupPath("codex-sync-prune-backup");
 									await fsPromises.mkdir(dirname(backupPath), { recursive: true });
 									const backupPayload = createSyncPruneBackupPayload(currentAccountsStorage, currentFlaggedStorage);
@@ -4135,19 +4138,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 										}),
 									),
 								);
-								const currentFlaggedStorage = await loadFlaggedAccounts();
-								await saveFlaggedAccounts({
-									version: 1,
-									accounts: currentFlaggedStorage.accounts.filter(
-										(flagged) =>
-											!removedFlaggedKeys.has(
-												getSyncRemovalTargetKey({
-													refreshToken: flagged.refreshToken,
-													organizationId: flagged.organizationId,
-													accountId: flagged.accountId,
-												}),
-											),
-									),
+								await withFlaggedAccountsTransaction(async (currentFlaggedStorage, persist) => {
+									await persist({
+										version: 1,
+										accounts: currentFlaggedStorage.accounts.filter(
+											(flagged) =>
+												!removedFlaggedKeys.has(
+													getSyncRemovalTargetKey({
+														refreshToken: flagged.refreshToken,
+														organizationId: flagged.organizationId,
+														accountId: flagged.accountId,
+													}),
+												),
+										),
+									});
 								});
 								invalidateAccountManagerCache();
 								const removedLabels = removedTargets

@@ -1129,6 +1129,16 @@ export async function withAccountStorageTransaction<T>(
   });
 }
 
+export async function loadAccountAndFlaggedStorageSnapshot(): Promise<{
+  accounts: AccountStorageV3 | null;
+  flagged: FlaggedAccountStorageV1;
+}> {
+  return withStorageLock(async () => ({
+    accounts: await loadAccountsInternal(saveAccountsUnlocked),
+    flagged: await loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked),
+  }));
+}
+
 /**
  * Persists account storage to disk using atomic write (temp file + rename).
  * Creates the .opencode directory if it doesn't exist.
@@ -1271,7 +1281,9 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 	};
 }
 
-export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+async function loadFlaggedAccountsUnlocked(
+	persistMigration: ((storage: FlaggedAccountStorageV1) => Promise<void>) | null,
+): Promise<FlaggedAccountStorageV1> {
 	const path = getFlaggedAccountsPath();
 	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
 
@@ -1296,8 +1308,8 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 		const legacyContent = await fs.readFile(legacyPath, "utf-8");
 		const legacyData = JSON.parse(legacyContent) as unknown;
 		const migrated = normalizeFlaggedStorage(legacyData);
-		if (migrated.accounts.length > 0) {
-			await saveFlaggedAccounts(migrated);
+		if (migrated.accounts.length > 0 && persistMigration) {
+			await persistMigration(migrated);
 		}
 		try {
 			await fs.unlink(legacyPath);
@@ -1320,26 +1332,46 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 	}
 }
 
+async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Promise<void> {
+	const path = getFlaggedAccountsPath();
+	const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+	const tempPath = `${path}.${uniqueSuffix}.tmp`;
+
+	try {
+		await fs.mkdir(dirname(path), { recursive: true });
+		const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
+		await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+		await renameWithWindowsRetry(tempPath, path);
+	} catch (error) {
+		try {
+			await fs.unlink(tempPath);
+		} catch {
+			// Ignore cleanup failures.
+		}
+		log.error("Failed to save flagged account storage", { path, error: String(error) });
+		throw error;
+	}
+}
+
+export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+	return withStorageLock(async () => loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked));
+}
+
+export async function withFlaggedAccountsTransaction<T>(
+	handler: (
+		current: FlaggedAccountStorageV1,
+		persist: (storage: FlaggedAccountStorageV1) => Promise<void>,
+	) => Promise<T>,
+): Promise<T> {
+	return withStorageLock(async () => {
+		const current = await loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked);
+		return handler(current, saveFlaggedAccountsUnlocked);
+	});
+}
+
 export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
 	return withStorageLock(async () => {
-		const path = getFlaggedAccountsPath();
-		const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-		const tempPath = `${path}.${uniqueSuffix}.tmp`;
-
-		try {
-			await fs.mkdir(dirname(path), { recursive: true });
-			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
-			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-			await renameWithWindowsRetry(tempPath, path);
-		} catch (error) {
-			try {
-				await fs.unlink(tempPath);
-			} catch {
-				// Ignore cleanup failures.
-			}
-			log.error("Failed to save flagged account storage", { path, error: String(error) });
-			throw error;
-		}
+		await saveFlaggedAccountsUnlocked(storage);
 	});
 }
 
