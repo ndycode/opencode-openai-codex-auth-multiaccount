@@ -95,11 +95,12 @@ describe("codex-multi-auth sync", () => {
 	const originalReadFile = fs.promises.readFile.bind(fs.promises);
 	const mockReadFile = vi.spyOn(fs.promises, "readFile");
 	const originalEnv = {
-		CODEX_MULTI_AUTH_DIR: process.env.CODEX_MULTI_AUTH_DIR,
-		CODEX_HOME: process.env.CODEX_HOME,
-		USERPROFILE: process.env.USERPROFILE,
-		HOME: process.env.HOME,
+			CODEX_MULTI_AUTH_DIR: process.env.CODEX_MULTI_AUTH_DIR,
+			CODEX_HOME: process.env.CODEX_HOME,
+			USERPROFILE: process.env.USERPROFILE,
+			HOME: process.env.HOME,
 	};
+	const originalPlatform = process.platform;
 	const mockSourceStorageFile = (expectedPath: string, content: string) => {
 		mockReadFile.mockImplementation(async (filePath, options) => {
 			if (String(filePath) === expectedPath) {
@@ -183,15 +184,16 @@ describe("codex-multi-auth sync", () => {
 	});
 
 	afterEach(() => {
-		if (originalEnv.CODEX_MULTI_AUTH_DIR === undefined) delete process.env.CODEX_MULTI_AUTH_DIR;
-		else process.env.CODEX_MULTI_AUTH_DIR = originalEnv.CODEX_MULTI_AUTH_DIR;
-		if (originalEnv.CODEX_HOME === undefined) delete process.env.CODEX_HOME;
-		else process.env.CODEX_HOME = originalEnv.CODEX_HOME;
-		if (originalEnv.USERPROFILE === undefined) delete process.env.USERPROFILE;
-		else process.env.USERPROFILE = originalEnv.USERPROFILE;
-		if (originalEnv.HOME === undefined) delete process.env.HOME;
-		else process.env.HOME = originalEnv.HOME;
-		delete process.env.CODEX_AUTH_SYNC_MAX_ACCOUNTS;
+			if (originalEnv.CODEX_MULTI_AUTH_DIR === undefined) delete process.env.CODEX_MULTI_AUTH_DIR;
+			else process.env.CODEX_MULTI_AUTH_DIR = originalEnv.CODEX_MULTI_AUTH_DIR;
+			if (originalEnv.CODEX_HOME === undefined) delete process.env.CODEX_HOME;
+			else process.env.CODEX_HOME = originalEnv.CODEX_HOME;
+			if (originalEnv.USERPROFILE === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = originalEnv.USERPROFILE;
+			if (originalEnv.HOME === undefined) delete process.env.HOME;
+			else process.env.HOME = originalEnv.HOME;
+			delete process.env.CODEX_AUTH_SYNC_MAX_ACCOUNTS;
+			Object.defineProperty(process, "platform", { value: originalPlatform });
 	});
 
 	it("prefers a project-scoped codex-multi-auth accounts file when present", async () => {
@@ -356,17 +358,19 @@ describe("codex-multi-auth sync", () => {
 	});
 
 	it("rejects CODEX_MULTI_AUTH_DIR values that are not local absolute paths on Windows", async () => {
-		process.env.CODEX_MULTI_AUTH_DIR = "\\\\server\\share\\multi-auth";
-		process.env.USERPROFILE = "C:\\Users\\tester";
-		process.env.HOME = "C:\\Users\\tester";
+			Object.defineProperty(process, "platform", { value: "win32" });
+			process.env.CODEX_MULTI_AUTH_DIR = "\\\\server\\share\\multi-auth";
+			process.env.USERPROFILE = "C:\\Users\\tester";
+			process.env.HOME = "C:\\Users\\tester";
 
 		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
 		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/local absolute path/i);
 	});
 
 	it("accepts extended-length local Windows paths for CODEX_MULTI_AUTH_DIR", async () => {
-		process.env.USERPROFILE = "C:\\Users\\tester";
-		process.env.HOME = "C:\\Users\\tester";
+			Object.defineProperty(process, "platform", { value: "win32" });
+			process.env.USERPROFILE = "C:\\Users\\tester";
+			process.env.HOME = "C:\\Users\\tester";
 
 		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
 
@@ -378,9 +382,10 @@ describe("codex-multi-auth sync", () => {
 	});
 
 	it("rejects extended UNC Windows paths for CODEX_MULTI_AUTH_DIR", async () => {
-		process.env.CODEX_MULTI_AUTH_DIR = "\\\\?\\UNC\\server\\share\\multi-auth";
-		process.env.USERPROFILE = "C:\\Users\\tester";
-		process.env.HOME = "C:\\Users\\tester";
+			Object.defineProperty(process, "platform", { value: "win32" });
+			process.env.CODEX_MULTI_AUTH_DIR = "\\\\?\\UNC\\server\\share\\multi-auth";
+			process.env.USERPROFILE = "C:\\Users\\tester";
+			process.env.HOME = "C:\\Users\\tester";
 
 		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
 		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/UNC network share/i);
@@ -1558,8 +1563,8 @@ describe("codex-multi-auth sync", () => {
 	});
 
 	it("does not count synced overlap records as updated when only key order differs", async () => {
-		const storageModule = await import("../lib/storage.js");
-		const persist = vi.fn(async () => {});
+			const storageModule = await import("../lib/storage.js");
+			const persist = vi.fn(async () => {});
 		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
 			handler(
 				{
@@ -1607,13 +1612,40 @@ describe("codex-multi-auth sync", () => {
 			after: 1,
 			removed: 0,
 			updated: 0,
-		});
-		expect(persist).not.toHaveBeenCalled();
+			});
+			expect(persist).not.toHaveBeenCalled();
+	});
+
+	it("writes overlap cleanup backups via a temp file before rename", async () => {
+			const storageModule = await import("../lib/storage.js");
+			vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+					handler(defaultTransactionalStorage(), vi.fn(async () => {})),
+			);
+			const mkdirSpy = vi.spyOn(fs.promises, "mkdir").mockResolvedValue(undefined);
+			const writeSpy = vi.spyOn(fs.promises, "writeFile").mockResolvedValue(undefined);
+			const renameSpy = vi.spyOn(fs.promises, "rename").mockResolvedValue(undefined);
+			const unlinkSpy = vi.spyOn(fs.promises, "unlink").mockResolvedValue(undefined);
+
+			try {
+					const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
+					await cleanupCodexMultiAuthSyncedOverlaps("/tmp/overlap-cleanup-backup.json");
+
+					expect(mkdirSpy).toHaveBeenCalledWith("/tmp", { recursive: true });
+					const tempBackupPath = writeSpy.mock.calls[0]?.[0];
+					expect(String(tempBackupPath)).toMatch(/^\/tmp\/overlap-cleanup-backup\.json\.\d+\.[a-z0-9]+\.tmp$/);
+					expect(renameSpy).toHaveBeenCalledWith(tempBackupPath, "/tmp/overlap-cleanup-backup.json");
+					expect(unlinkSpy).not.toHaveBeenCalled();
+			} finally {
+					mkdirSpy.mockRestore();
+					writeSpy.mockRestore();
+					renameSpy.mockRestore();
+					unlinkSpy.mockRestore();
+			}
 	});
 
 
 	it("limits overlap cleanup to accounts tagged from codex-multi-auth sync", async () => {
-		const storageModule = await import("../lib/storage.js");
+			const storageModule = await import("../lib/storage.js");
 		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
 			handler(
 				{

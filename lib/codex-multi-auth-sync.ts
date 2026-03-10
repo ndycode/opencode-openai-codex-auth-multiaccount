@@ -1221,11 +1221,21 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 		};
 		if (backupPath) {
 			await fs.mkdir(dirname(backupPath), { recursive: true });
-			await fs.writeFile(backupPath, `${JSON.stringify(fallback, null, 2)}\n`, {
-				encoding: "utf-8",
-				mode: 0o600,
-				flag: "wx",
-			});
+			const tempBackupPath = `${backupPath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+			try {
+				await fs.writeFile(tempBackupPath, `${JSON.stringify(fallback, null, 2)}\n`, {
+					encoding: "utf-8",
+					mode: 0o600,
+				});
+				await fs.rename(tempBackupPath, backupPath);
+			} catch (error) {
+				try {
+					await fs.unlink(tempBackupPath);
+				} catch {
+					// Best effort temp-backup cleanup.
+				}
+				throw error;
+			}
 		}
 		const plan = buildCodexMultiAuthOverlapCleanupPlan(fallback);
 		if (plan.nextStorage) {
