@@ -1262,7 +1262,12 @@ export async function backupRawAccountsFile(filePath: string, force = true): Pro
 
 		await fs.mkdir(dirname(resolvedPath), { recursive: true });
 		await fs.copyFile(storagePath, resolvedPath);
-		await fs.chmod(resolvedPath, 0o600).catch(() => undefined);
+		await fs.chmod(resolvedPath, 0o600).catch((chmodErr) => {
+			log.warn("Failed to restrict backup file permissions", {
+				path: resolvedPath,
+				error: String(chmodErr),
+			});
+		});
 		log.info("Backed up raw accounts storage", { path: resolvedPath, source: storagePath });
 	});
 }

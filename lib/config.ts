@@ -134,7 +134,7 @@ async function renameConfigWithWindowsRetry(sourcePath: string, destinationPath:
 			return;
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
-			if (process.platform === "win32" && (code === "EPERM" || code === "EBUSY")) {
+			if (code === "EPERM" || code === "EBUSY") {
 				lastError = error as NodeJS.ErrnoException;
 				await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
 				continue;
