@@ -77,6 +77,7 @@ vi.mock("../lib/auth/server.js", () => ({
 vi.mock("../lib/cli.js", () => ({
 	promptLoginMode: vi.fn(async () => ({ mode: "add" })),
 	promptAddAnotherAccount: vi.fn(async () => false),
+	promptCodexMultiAuthSyncPrune: vi.fn(async () => null),
 }));
 
 vi.mock("../lib/config.js", () => ({
@@ -109,6 +110,8 @@ vi.mock("../lib/config.js", () => ({
 	getCodexTuiColorProfile: () => "ansi16",
 	getCodexTuiGlyphMode: () => "ascii",
 	getBeginnerSafeMode: () => false,
+	getSyncFromCodexMultiAuthEnabled: () => false,
+	setSyncFromCodexMultiAuthEnabled: vi.fn(async () => {}),
 	loadPluginConfig: () => ({}),
 }));
 

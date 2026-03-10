@@ -51,6 +51,11 @@ export interface ImportAccountsOptions {
 	backupMode?: ImportBackupMode;
 }
 
+type PrepareImportStorage = (
+	normalized: AccountStorageV3,
+	existing: AccountStorageV3 | null,
+) => AccountStorageV3;
+
 export type ImportBackupStatus = "created" | "skipped" | "failed";
 
 export interface ImportAccountsResult {
@@ -1009,7 +1014,19 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 	};
 }
 
-export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Promise<void> {
+	const path = getFlaggedAccountsPath();
+	try {
+		await fs.mkdir(dirname(path), { recursive: true });
+		const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
+		await fs.writeFile(path, content, { encoding: "utf-8", mode: 0o600 });
+	} catch (error) {
+		log.error("Failed to save flagged account storage", { path, error: String(error) });
+		throw error;
+	}
+}
+
+async function loadFlaggedAccountsUnlocked(): Promise<FlaggedAccountStorageV1> {
 	const path = getFlaggedAccountsPath();
 	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
 
@@ -1035,7 +1052,7 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 		const legacyData = JSON.parse(legacyContent) as unknown;
 		const migrated = normalizeFlaggedStorage(legacyData);
 		if (migrated.accounts.length > 0) {
-			await saveFlaggedAccounts(migrated);
+			await saveFlaggedAccountsUnlocked(migrated);
 		}
 		try {
 			await fs.unlink(legacyPath);
@@ -1058,26 +1075,35 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 	}
 }
 
+export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+	return withStorageLock(async () => loadFlaggedAccountsUnlocked());
+}
+
+export async function withFlaggedAccountsTransaction<T>(
+	handler: (
+		current: FlaggedAccountStorageV1,
+		persist: (storage: FlaggedAccountStorageV1) => Promise<void>,
+	) => Promise<T>,
+): Promise<T> {
+	return withStorageLock(async () => {
+		const current = await loadFlaggedAccountsUnlocked();
+		return handler(current, saveFlaggedAccountsUnlocked);
+	});
+}
+
+export async function loadAccountAndFlaggedStorageSnapshot(): Promise<{
+	accounts: AccountStorageV3 | null;
+	flagged: FlaggedAccountStorageV1;
+}> {
+	return withStorageLock(async () => ({
+		accounts: await loadAccountsInternal(saveAccountsUnlocked),
+		flagged: await loadFlaggedAccountsUnlocked(),
+	}));
+}
+
 export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
 	return withStorageLock(async () => {
-		const path = getFlaggedAccountsPath();
-		const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-		const tempPath = `${path}.${uniqueSuffix}.tmp`;
-
-		try {
-			await fs.mkdir(dirname(path), { recursive: true });
-			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
-			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-			await renameWithWindowsRetry(tempPath, path);
-		} catch (error) {
-			try {
-				await fs.unlink(tempPath);
-			} catch {
-				// Ignore cleanup failures.
-			}
-			log.error("Failed to save flagged account storage", { path, error: String(error) });
-			throw error;
-		}
+		await saveFlaggedAccountsUnlocked(storage);
 	});
 }
 
@@ -1155,26 +1181,62 @@ export async function previewImportAccounts(
 	const { normalized } = await readAndNormalizeImportFile(filePath);
 
 	return withAccountStorageTransaction((existing) => {
-		const existingAccounts = existing?.accounts ?? [];
-		const merged = [...existingAccounts, ...normalized.accounts];
+		return Promise.resolve(previewImportAccountsAgainstExistingNormalized(normalized, existing));
+	});
+}
 
-		if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-			const deduped = deduplicateAccountsForStorage(merged);
-			if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-				throw new Error(
-					`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
-				);
-			}
+export async function previewImportAccountsWithExistingStorage(
+	filePath: string,
+	existing: AccountStorageV3 | null | undefined,
+): Promise<{ imported: number; total: number; skipped: number }> {
+	const { normalized } = await readAndNormalizeImportFile(filePath);
+	return previewImportAccountsAgainstExistingNormalized(normalized, existing);
+}
+
+function previewImportAccountsAgainstExistingNormalized(
+	normalized: AccountStorageV3,
+	existing: AccountStorageV3 | null | undefined,
+): { imported: number; total: number; skipped: number } {
+	const existingAccounts = existing?.accounts ?? [];
+	const merged = [...existingAccounts, ...normalized.accounts];
+
+	if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+		const deduped = deduplicateAccountsForStorage(merged);
+		if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+			throw new Error(
+				`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
+			);
+		}
+	}
+
+	const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
+	const imported = Math.max(0, deduplicatedAccounts.length - existingAccounts.length);
+	const skipped = normalized.accounts.length - imported;
+	return {
+		imported,
+		total: deduplicatedAccounts.length,
+		skipped,
+	};
+}
+
+export async function backupRawAccountsFile(filePath: string, force = true): Promise<void> {
+	await withStorageLock(async () => {
+		const resolvedPath = resolvePath(filePath);
+
+		if (!force && existsSync(resolvedPath)) {
+			throw new Error(`File already exists: ${resolvedPath}`);
 		}
 
-		const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
-		const imported = deduplicatedAccounts.length - existingAccounts.length;
-		const skipped = normalized.accounts.length - imported;
-		return Promise.resolve({
-			imported,
-			total: deduplicatedAccounts.length,
-			skipped,
-		});
+		await migrateLegacyProjectStorageIfNeeded(saveAccountsUnlocked);
+		const storagePath = getStoragePath();
+		if (!existsSync(storagePath)) {
+			throw new Error("No accounts to back up");
+		}
+
+		await fs.mkdir(dirname(resolvedPath), { recursive: true });
+		await fs.copyFile(storagePath, resolvedPath);
+		await fs.chmod(resolvedPath, 0o600).catch(() => undefined);
+		log.info("Backed up raw accounts storage", { path: resolvedPath, source: storagePath });
 	});
 }
 
@@ -1213,6 +1275,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 export async function importAccounts(
 	filePath: string,
 	options: ImportAccountsOptions = {},
+	prepare?: PrepareImportStorage,
 ): Promise<ImportAccountsResult> {
   const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
   const backupMode = options.backupMode ?? "none";
@@ -1227,6 +1290,8 @@ export async function importAccounts(
     backupError,
   } =
     await withAccountStorageTransaction(async (existing, persist) => {
+      const preparedNormalized = prepare ? prepare(normalized, existing) : normalized;
+      const skippedByPrepare = Math.max(0, normalized.accounts.length - preparedNormalized.accounts.length);
       const existingStorage: AccountStorageV3 =
         existing ??
         ({
@@ -1262,7 +1327,7 @@ export async function importAccounts(
         }
       }
 
-      const merged = [...existingAccounts, ...normalized.accounts];
+      const merged = [...existingAccounts, ...preparedNormalized.accounts];
 
       if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
         const deduped = deduplicateAccountsForStorage(merged);
@@ -1309,8 +1374,8 @@ export async function importAccounts(
 
       await persist(newStorage);
 
-      const imported = deduplicatedAccounts.length - existingAccounts.length;
-      const skipped = normalized.accounts.length - imported;
+      const imported = Math.max(0, deduplicatedAccounts.length - existingAccounts.length);
+      const skipped = skippedByPrepare + Math.max(0, preparedNormalized.accounts.length - imported);
       return {
         imported,
         total: deduplicatedAccounts.length,

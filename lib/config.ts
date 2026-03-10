@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { promises as fs, readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
@@ -111,8 +111,10 @@ function stripUtf8Bom(content: string): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object";
+	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+
+type RawPluginConfig = Record<string, unknown>;
 
 /**
  * Get the effective CODEX_MODE setting
@@ -500,4 +502,45 @@ export function getStreamStallTimeoutMs(pluginConfig: PluginConfig): number {
 		45_000,
 		{ min: 1_000 },
 	);
+}
+
+async function savePluginConfigMutation(
+	mutate: (current: RawPluginConfig) => RawPluginConfig,
+): Promise<void> {
+	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+	const current = existsSync(CONFIG_PATH)
+		? (() => {
+			try {
+				const raw = stripUtf8Bom(readFileSync(CONFIG_PATH, "utf-8"));
+				const parsed = JSON.parse(raw) as unknown;
+				return isRecord(parsed) ? { ...parsed } : {};
+			} catch {
+				return {};
+			}
+		})()
+		: {};
+	const next = mutate(current);
+	await fs.writeFile(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, {
+		encoding: "utf-8",
+		mode: 0o600,
+	});
+}
+
+export function getSyncFromCodexMultiAuthEnabled(pluginConfig: PluginConfig): boolean {
+	return pluginConfig.experimental?.syncFromCodexMultiAuth?.enabled === true;
+}
+
+export async function setSyncFromCodexMultiAuthEnabled(enabled: boolean): Promise<void> {
+	await savePluginConfigMutation((current) => {
+		const experimental = isRecord(current.experimental) ? { ...current.experimental } : {};
+		const syncSettings = isRecord(experimental.syncFromCodexMultiAuth)
+			? { ...experimental.syncFromCodexMultiAuth }
+			: {};
+		syncSettings.enabled = enabled;
+		experimental.syncFromCodexMultiAuth = syncSettings;
+		return {
+			...current,
+			experimental,
+		};
+	});
 }
