@@ -3335,6 +3335,9 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 					String(value).includes("cannot be recovered if the process is interrupted"),
 				),
 			).toBe(true);
+			expect(vi.mocked(confirmModule.confirm)).toHaveBeenCalledWith(
+				expect.stringContaining("cannot be recovered if the process is interrupted"),
+			);
 			expect(mockStorage.accounts).toHaveLength(2);
 			expect(mockStorage.accounts.map((account) => account.accountId)).toEqual([
 				"org-keep",

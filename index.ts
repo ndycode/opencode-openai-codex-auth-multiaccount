@@ -4365,7 +4365,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 										);
 										console.log("");
 										const confirmed = await confirm(
-											`Remove ${indexesToRemove.length} selected account(s) and retry sync?`,
+											`Remove ${indexesToRemove.length} selected account(s) and retry sync? ` +
+												`Accounts cannot be recovered if the process is interrupted before sync completes.`,
 										);
 										if (!confirmed) {
 											await safeRestorePruneBackup("sync cancellation");
