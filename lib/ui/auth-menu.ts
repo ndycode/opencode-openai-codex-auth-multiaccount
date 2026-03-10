@@ -28,6 +28,7 @@ export interface AccountInfo {
 
 export interface AuthMenuOptions {
 	flaggedCount?: number;
+	syncFromCodexMultiAuthEnabled?: boolean;
 }
 
 export type AuthMenuAction =
@@ -36,9 +37,12 @@ export type AuthMenuAction =
 	| { type: "check" }
 	| { type: "deep-check" }
 	| { type: "verify-flagged" }
+	| { type: "sync-tools" }
 	| { type: "select-account"; account: AccountInfo }
 	| { type: "delete-all" }
 	| { type: "cancel" };
+
+export type SyncToolsAction = "toggle-sync" | "sync-now" | "cleanup-overlaps" | "back" | "cancel";
 
 export type AccountAction = "back" | "delete" | "refresh" | "toggle" | "cancel";
 
@@ -132,10 +136,12 @@ export async function showAuthMenu(
 ): Promise<AuthMenuAction> {
 	const ui = getUiRuntimeOptions();
 	const flaggedCount = options.flaggedCount ?? 0;
+	const syncEnabled = options.syncFromCodexMultiAuthEnabled === true;
 	const verifyLabel =
 		flaggedCount > 0
 			? `Verify flagged accounts (${flaggedCount})`
 			: "Verify flagged accounts";
+	const syncLabel = syncEnabled ? "Sync tools [enabled]" : "Sync tools [disabled]";
 
 	const items: MenuItem<AuthMenuAction>[] = [
 		{ label: "Actions", value: { type: "cancel" }, kind: "heading" },
@@ -143,6 +149,7 @@ export async function showAuthMenu(
 		{ label: "Check quotas", value: { type: "check" }, color: "cyan" },
 		{ label: "Deep check accounts", value: { type: "deep-check" }, color: "cyan" },
 		{ label: verifyLabel, value: { type: "verify-flagged" }, color: "cyan" },
+		{ label: syncLabel, value: { type: "sync-tools" }, color: syncEnabled ? "green" : "yellow" },
 		{ label: "Start fresh", value: { type: "fresh" }, color: "yellow" },
 		{ label: "", value: { type: "cancel" }, separator: true },
 		{ label: "Accounts", value: { type: "cancel" }, kind: "heading" },
@@ -184,6 +191,31 @@ export async function showAuthMenu(
 		}
 		return result;
 	}
+}
+
+export async function showSyncToolsMenu(syncEnabled: boolean): Promise<SyncToolsAction> {
+	const ui = getUiRuntimeOptions();
+	const action = await select<SyncToolsAction>(
+		[
+			{
+				label: syncEnabled ? "Disable sync from codex-multi-auth" : "Enable sync from codex-multi-auth",
+				value: "toggle-sync",
+				color: syncEnabled ? "yellow" : "green",
+			},
+			{ label: "Sync now", value: "sync-now", color: "cyan" },
+			{ label: "Cleanup synced overlaps", value: "cleanup-overlaps", color: "cyan" },
+			{ label: "Back", value: "back" },
+		],
+		{
+			message: "Sync tools",
+			subtitle: syncEnabled ? "codex-multi-auth sync enabled" : "codex-multi-auth sync disabled",
+			clearScreen: true,
+			variant: ui.v2Enabled ? "codex" : "legacy",
+			theme: ui.theme,
+		},
+	);
+
+	return action ?? "cancel";
 }
 
 export async function showAccountDetails(account: AccountInfo): Promise<AccountAction> {
