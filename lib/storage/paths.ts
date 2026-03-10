@@ -3,7 +3,7 @@
  * Extracted from storage.ts to reduce module size.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -34,14 +34,81 @@ function sanitizeProjectName(projectPath: string): string {
 	return sanitized || "project";
 }
 
-export function getProjectStorageKey(projectPath: string): string {
-	const normalizedPath = normalizeProjectPath(projectPath);
+function buildProjectStorageKey(projectPath: string, identityPath: string): string {
 	const hash = createHash("sha256")
-		.update(normalizedPath)
+		.update(identityPath)
 		.digest("hex")
 		.slice(0, PROJECT_KEY_HASH_LENGTH);
-	const projectName = sanitizeProjectName(normalizedPath).slice(0, 40);
+	const projectName = sanitizeProjectName(projectPath).slice(0, 40);
 	return `${projectName}-${hash}`;
+}
+
+function getCanonicalProjectStorageIdentity(projectPath: string): {
+	identityPath: string;
+	projectNamePath: string;
+} {
+	const resolvedProjectPath = resolve(projectPath);
+	const gitPath = join(resolvedProjectPath, ".git");
+	if (!existsSync(gitPath)) {
+		return {
+			identityPath: normalizeProjectPath(resolvedProjectPath),
+			projectNamePath: resolvedProjectPath,
+		};
+	}
+
+	try {
+		if (statSync(gitPath).isDirectory()) {
+			return {
+				identityPath: normalizeProjectPath(gitPath),
+				projectNamePath: resolvedProjectPath,
+			};
+		}
+		const gitMetadata = readFileSync(gitPath, "utf-8").trim();
+		const gitDirMatch = /^gitdir:\s*(.+)$/im.exec(gitMetadata);
+		const gitDirValue = gitDirMatch?.[1];
+		if (!gitDirValue) {
+			return {
+				identityPath: normalizeProjectPath(resolvedProjectPath),
+				projectNamePath: resolvedProjectPath,
+			};
+		}
+		const gitDir = resolve(resolvedProjectPath, gitDirValue.trim());
+		const gitDirParent = dirname(gitDir);
+		if (basename(gitDirParent).toLowerCase() === "worktrees") {
+			const commonGitDir = dirname(gitDirParent);
+			return {
+				identityPath: normalizeProjectPath(commonGitDir),
+				projectNamePath: dirname(commonGitDir),
+			};
+		}
+		return {
+			identityPath: normalizeProjectPath(gitDir),
+			projectNamePath: resolvedProjectPath,
+		};
+	} catch {
+		return {
+			identityPath: normalizeProjectPath(resolvedProjectPath),
+			projectNamePath: resolvedProjectPath,
+		};
+	}
+}
+
+export function getProjectStorageKeyCandidates(projectPath: string): string[] {
+	const normalizedProjectPath = normalizeProjectPath(projectPath);
+	const canonicalIdentity = getCanonicalProjectStorageIdentity(projectPath);
+	const candidates = [
+		buildProjectStorageKey(normalizeProjectPath(canonicalIdentity.projectNamePath), canonicalIdentity.identityPath),
+		buildProjectStorageKey(normalizedProjectPath, normalizedProjectPath),
+	];
+	return Array.from(new Set(candidates));
+}
+
+export function getProjectStorageKey(projectPath: string): string {
+	const canonicalIdentity = getCanonicalProjectStorageIdentity(projectPath);
+	return buildProjectStorageKey(
+		normalizeProjectPath(canonicalIdentity.projectNamePath),
+		canonicalIdentity.identityPath,
+	);
 }
 
 /**
@@ -58,7 +125,6 @@ export function isProjectDirectory(dir: string): boolean {
 
 export function findProjectRoot(startDir: string): string | null {
 	let current = startDir;
-	const root = dirname(current) === current ? current : null;
 	
 	while (current) {
 		if (isProjectDirectory(current)) {
@@ -72,7 +138,7 @@ export function findProjectRoot(startDir: string): string | null {
 		current = parent;
 	}
 	
-	return root && isProjectDirectory(root) ? root : null;
+	return null;
 }
 
 function normalizePathForComparison(filePath: string): string {

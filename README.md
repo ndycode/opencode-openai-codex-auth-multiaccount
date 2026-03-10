@@ -11,7 +11,7 @@ OAuth plugin for OpenCode that lets you use ChatGPT Plus/Pro rate limits with mo
 ## What You Get
 
 - **GPT-5.4, GPT-5 Codex, GPT-5.1 Codex Max** and all GPT-5.x variants via ChatGPT OAuth
-- **Multi-account support** — Add up to 20 ChatGPT accounts, health-aware rotation with automatic failover
+- **Multi-account support** — Add as many ChatGPT accounts as you need, health-aware rotation with automatic failover
 - **Per-project accounts** — Each project gets its own account storage (new in v4.10.0)
 - **Workspace-aware identity persistence** — Keeps workspace/org identity stable across token refresh and verify-flagged restore flows
 - **Click-to-switch** — Switch accounts directly from the OpenCode TUI
@@ -67,6 +67,8 @@ npx -y oc-chatgpt-multi-auth@latest
 ```
 
 This writes the config to `~/.config/opencode/opencode.json`, backs up existing config, and clears the plugin cache.
+
+After install, run `codex-doctor` once to confirm your local auth and account health are ready.
 
 > Want legacy config (OpenCode v1.0.209 and below)? Add `--legacy` flag.
 
@@ -275,7 +277,7 @@ For legacy OpenCode (v1.0.209 and below), use `config/opencode-legacy.json` whic
 
 ## Multi-Account Setup
 
-Add multiple ChatGPT accounts for higher combined quotas. The plugin uses **health-aware rotation** with automatic failover and supports up to 20 accounts.
+Add multiple ChatGPT accounts for higher combined quotas. The plugin uses **health-aware rotation** with automatic failover and supports unlimited accounts.
 
 ```bash
 opencode auth login  # Run again to add more accounts
@@ -835,6 +837,30 @@ Create `~/.opencode/openai-codex-auth-config.json` for optional settings:
 | `perProjectAccounts` | `true` | Each project gets its own account storage namespace under `~/.opencode/projects/` |
 | `toastDurationMs` | `5000` | How long toast notifications stay visible (ms) |
 | `beginnerSafeMode` | `false` | Beginner-safe retry profile: conservative retry budget, disables all-accounts wait/retry, and caps all-accounts retries |
+
+### Experimental Settings
+
+The auth dashboard now includes `Experimental settings` with a manual sync option for `codex-multi-auth`.
+
+Persist the toggle in `~/.opencode/openai-codex-auth-config.json`:
+
+```json
+{
+  "experimental": {
+    "syncFromCodexMultiAuth": {
+      "enabled": true
+    }
+  }
+}
+```
+
+When enabled, `Sync now` will auto-discover a `codex-multi-auth` account store from:
+- `CODEX_MULTI_AUTH_DIR`
+- `CODEX_HOME/multi-auth`
+- `~/DevTools/config/codex/multi-auth`
+- `~/.codex/multi-auth`
+
+It previews import impact first and skips duplicate overlaps using the existing dedupe-aware import flow.
 
 ### Retry Behavior
 

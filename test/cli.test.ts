@@ -124,8 +124,10 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "add" });
     });
 
-    it("returns 'fresh' for 'f' input", async () => {
-      mockRl.question.mockResolvedValueOnce("f");
+    it("returns 'fresh' for 'f' input after typed confirmation", async () => {
+      mockRl.question
+        .mockResolvedValueOnce("f")
+        .mockResolvedValueOnce("DELETE");
       
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
@@ -133,13 +135,40 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "fresh", deleteAll: true });
     });
 
-    it("returns 'fresh' for 'fresh' input", async () => {
-      mockRl.question.mockResolvedValueOnce("fresh");
+    it("returns 'fresh' for 'fresh' input after typed confirmation", async () => {
+      mockRl.question
+        .mockResolvedValueOnce("fresh")
+        .mockResolvedValueOnce("DELETE");
       
       const { promptLoginMode } = await import("../lib/cli.js");
       const result = await promptLoginMode([{ index: 0 }]);
       
       expect(result).toEqual({ mode: "fresh", deleteAll: true });
+    });
+
+    it("cancels fallback delete-all when typed confirmation is missing", async () => {
+      mockRl.question
+        .mockResolvedValueOnce("fresh")
+        .mockResolvedValueOnce("nope")
+        .mockResolvedValueOnce("q");
+
+      const { promptLoginMode } = await import("../lib/cli.js");
+      const result = await promptLoginMode([{ index: 0 }]);
+
+      expect(result).toEqual({ mode: "cancel" });
+    });
+
+    it("routes fallback settings input to experimental sync actions", async () => {
+      mockRl.question
+        .mockResolvedValueOnce("s")
+        .mockResolvedValueOnce("i");
+
+      const { promptLoginMode } = await import("../lib/cli.js");
+      const result = await promptLoginMode([{ index: 0 }], {
+        syncFromCodexMultiAuthEnabled: true,
+      });
+
+      expect(result).toEqual({ mode: "experimental-sync-now" });
     });
 
     it("is case insensitive", async () => {
@@ -151,10 +180,19 @@ describe("CLI Module", () => {
       expect(result).toEqual({ mode: "add" });
     });
 
+		it("accepts 'best' for the forecast action", async () => {
+			mockRl.question.mockResolvedValueOnce("best");
+
+			const { promptLoginMode } = await import("../lib/cli.js");
+			const result = await promptLoginMode([{ index: 0 }]);
+
+			expect(result).toEqual({ mode: "forecast" });
+		});
+
     it("re-prompts on invalid input then accepts valid", async () => {
       mockRl.question
         .mockResolvedValueOnce("invalid")
-        .mockResolvedValueOnce("x")
+        .mockResolvedValueOnce("invalid-again")
         .mockResolvedValueOnce("a");
       
       const { promptLoginMode } = await import("../lib/cli.js");
@@ -178,7 +216,7 @@ describe("CLI Module", () => {
     });
 
     it("displays account with accountId suffix when no email", async () => {
-      mockRl.question.mockResolvedValueOnce("f");
+      mockRl.question.mockResolvedValueOnce("a");
       const consoleSpy = vi.spyOn(console, "log");
       
       const { promptLoginMode } = await import("../lib/cli.js");
@@ -190,7 +228,7 @@ describe("CLI Module", () => {
     });
 
 		it("displays plain Account N when no email or accountId", async () => {
-			mockRl.question.mockResolvedValueOnce("f");
+			mockRl.question.mockResolvedValueOnce("a");
 			const consoleSpy = vi.spyOn(console, "log");
 			
 			const { promptLoginMode } = await import("../lib/cli.js");
@@ -219,6 +257,63 @@ describe("CLI Module", () => {
 			await promptLoginMode([{ index: 0, accountLabel: "Personal" }]);
 			
 			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("1. workspace:Personal"));
+		});
+	});
+
+	describe("promptCodexMultiAuthSyncPrune", () => {
+		it("uses suggested removals on empty input", async () => {
+			mockRl.question.mockResolvedValueOnce("");
+
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(1, [
+				{ index: 2, email: "old@example.com", reason: "least recently used" },
+				{ index: 3, email: "disabled@example.com", reason: "disabled", isCurrentAccount: false },
+			]);
+
+			expect(result).toEqual([2]);
+		});
+
+		it("parses comma-separated account numbers", async () => {
+			mockRl.question.mockResolvedValueOnce("2, 4");
+
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(2, [
+				{ index: 1, email: "one@example.com", reason: "least recently used" },
+				{ index: 3, email: "two@example.com", reason: "disabled" },
+			]);
+
+			expect(result).toEqual([1, 3]);
+		});
+
+		it("returns null when pruning is cancelled", async () => {
+			mockRl.question.mockResolvedValueOnce("q");
+
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(1, [
+				{ index: 0, email: "one@example.com", reason: "least recently used" },
+			]);
+
+			expect(result).toBeNull();
+		});
+
+		it("uses the readline fallback when menus are unavailable but interaction is still allowed", async () => {
+			const { stdin, stdout } = await import("node:process");
+			const origInputTTY = stdin.isTTY;
+			const origOutputTTY = stdout.isTTY;
+			Object.defineProperty(stdin, "isTTY", { value: false, writable: true, configurable: true });
+			Object.defineProperty(stdout, "isTTY", { value: false, writable: true, configurable: true });
+			mockRl.question.mockResolvedValueOnce("1");
+
+			try {
+				const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+				const result = await promptCodexMultiAuthSyncPrune(1, [
+					{ index: 0, email: "one@example.com", reason: "least recently used" },
+				]);
+				expect(result).toEqual([0]);
+			} finally {
+				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
+				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
+			}
 		});
 	});
 
@@ -437,6 +532,86 @@ describe("CLI Module", () => {
 			];
 			const result = await promptAccountSelection(candidates, { defaultIndex: 1 });
 			expect(result).toEqual(candidates[1]);
+		});
+
+		it("promptCodexMultiAuthSyncPrune returns null in non-interactive mode", async () => {
+			const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+			const result = await promptCodexMultiAuthSyncPrune(1, [
+				{ index: 0, email: "one@example.com", reason: "least recently used" },
+			]);
+			expect(result).toBeNull();
+		});
+
+		it("promptLoginMode returns add immediately when TTY is unavailable without env overrides", async () => {
+			const originalEnv = {
+				OPENCODE_TUI: process.env.OPENCODE_TUI,
+				OPENCODE_DESKTOP: process.env.OPENCODE_DESKTOP,
+				TERM_PROGRAM: process.env.TERM_PROGRAM,
+				ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
+			};
+			delete process.env.OPENCODE_TUI;
+			delete process.env.OPENCODE_DESKTOP;
+			delete process.env.TERM_PROGRAM;
+			delete process.env.ELECTRON_RUN_AS_NODE;
+			const { stdin, stdout } = await import("node:process");
+			const origInputTTY = stdin.isTTY;
+			const origOutputTTY = stdout.isTTY;
+			Object.defineProperty(stdin, "isTTY", { value: false, writable: true, configurable: true });
+			Object.defineProperty(stdout, "isTTY", { value: false, writable: true, configurable: true });
+
+			try {
+				const { promptLoginMode } = await import("../lib/cli.js");
+				const result = await promptLoginMode([{ index: 0 }]);
+				expect(result).toEqual({ mode: "add" });
+				expect(mockRl.question).not.toHaveBeenCalled();
+			} finally {
+				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
+				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
+				for (const [key, value] of Object.entries(originalEnv)) {
+					if (value === undefined) {
+						delete process.env[key];
+					} else {
+						process.env[key] = value;
+					}
+				}
+			}
+		});
+
+		it("promptCodexMultiAuthSyncPrune returns null when TTY is unavailable without env overrides", async () => {
+			const originalEnv = {
+				OPENCODE_TUI: process.env.OPENCODE_TUI,
+				OPENCODE_DESKTOP: process.env.OPENCODE_DESKTOP,
+				TERM_PROGRAM: process.env.TERM_PROGRAM,
+				ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
+			};
+			delete process.env.OPENCODE_TUI;
+			delete process.env.OPENCODE_DESKTOP;
+			delete process.env.TERM_PROGRAM;
+			delete process.env.ELECTRON_RUN_AS_NODE;
+			const { stdin, stdout } = await import("node:process");
+			const origInputTTY = stdin.isTTY;
+			const origOutputTTY = stdout.isTTY;
+			Object.defineProperty(stdin, "isTTY", { value: false, writable: true, configurable: true });
+			Object.defineProperty(stdout, "isTTY", { value: false, writable: true, configurable: true });
+
+			try {
+				const { promptCodexMultiAuthSyncPrune } = await import("../lib/cli.js");
+				const result = await promptCodexMultiAuthSyncPrune(1, [
+					{ index: 0, email: "one@example.com", reason: "least recently used" },
+				]);
+				expect(result).toBeNull();
+				expect(mockRl.question).not.toHaveBeenCalled();
+			} finally {
+				Object.defineProperty(stdin, "isTTY", { value: origInputTTY, writable: true, configurable: true });
+				Object.defineProperty(stdout, "isTTY", { value: origOutputTTY, writable: true, configurable: true });
+				for (const [key, value] of Object.entries(originalEnv)) {
+					if (value === undefined) {
+						delete process.env[key];
+					} else {
+						process.env[key] = value;
+					}
+				}
+			}
 		});
 	});
 });

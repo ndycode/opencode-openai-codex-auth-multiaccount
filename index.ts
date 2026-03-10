@@ -24,6 +24,9 @@
  */
 
 import { tool } from "@opencode-ai/plugin/tool";
+import { promises as fsPromises } from "node:fs";
+import { createInterface } from "node:readline/promises";
+import { dirname } from "node:path";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
 import {
@@ -35,7 +38,7 @@ import {
 import { queuedRefresh, getRefreshQueueMetrics } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
+import { promptAddAnotherAccount, promptCodexMultiAuthSyncPrune, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getRequestTransformMode,
@@ -65,7 +68,9 @@ import {
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
 	getBeginnerSafeMode,
+	getSyncFromCodexMultiAuthEnabled,
 	loadPluginConfig,
+	setSyncFromCodexMultiAuthEnabled,
 } from "./lib/config.js";
 import {
         AUTH_LABELS,
@@ -109,17 +114,23 @@ import {
 	loadAccounts,
 	saveAccounts,
 	withAccountStorageTransaction,
+	cleanupDuplicateEmailAccounts,
+	previewDuplicateEmailCleanup,
 	clearAccounts,
 	setStoragePath,
+	backupRawAccountsFile,
 	exportAccounts,
 	importAccounts,
 	previewImportAccounts,
 	createTimestampedBackupPath,
 	loadFlaggedAccounts,
+	loadAccountAndFlaggedStorageSnapshot,
 	saveFlaggedAccounts,
 	clearFlaggedAccounts,
 	StorageError,
 	formatStorageErrorHint,
+	normalizeAccountStorage,
+	withFlaggedAccountsTransaction,
 	type AccountStorageV3,
 	type FlaggedAccountMetadataV1,
 } from "./lib/storage.js";
@@ -152,6 +163,8 @@ import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
 import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
+import { confirm } from "./lib/ui/confirm.js";
+import { ANSI, ANSI_CSI_REGEX, CONTROL_CHAR_REGEX } from "./lib/ui/ansi.js";
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
@@ -182,6 +195,16 @@ import {
 	detectErrorType,
 	getRecoveryToastContent,
 } from "./lib/recovery.js";
+import {
+	CodexMultiAuthSyncCapacityError,
+	cleanupCodexMultiAuthSyncedOverlaps,
+	isCodexMultiAuthSourceTooLargeForCapacity,
+	loadCodexMultiAuthSourceStorage,
+	previewCodexMultiAuthSyncedOverlapCleanup,
+	previewSyncFromCodexMultiAuth,
+	syncFromCodexMultiAuth,
+} from "./lib/codex-multi-auth-sync.js";
+import { createSyncPruneBackupPayload } from "./lib/sync-prune-backup.js";
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -1216,6 +1239,288 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			return applyUiRuntimeFromConfig(loadPluginConfig());
 		};
 
+		const sanitizeScreenText = (value: string): string =>
+			value.replace(ANSI_CSI_REGEX, "").replace(CONTROL_CHAR_REGEX, "").trim();
+		type OperationTone = "normal" | "muted" | "success" | "warning" | "danger" | "accent";
+
+		const styleOperationText = (
+			ui: UiRuntimeOptions,
+			text: string,
+			tone: OperationTone,
+		): string => {
+			if (ui.v2Enabled) {
+				return paintUiText(ui, text, tone);
+			}
+			const ansiCode =
+				tone === "accent"
+					? ANSI.cyan
+					: tone === "success"
+						? ANSI.green
+						: tone === "warning"
+							? ANSI.yellow
+							: tone === "danger"
+								? ANSI.red
+								: tone === "muted"
+									? ANSI.dim
+									: "";
+			return ansiCode ? `${ansiCode}${text}${ANSI.reset}` : text;
+		};
+
+		const isAbortError = (error: unknown): boolean => {
+			if (!(error instanceof Error)) return false;
+			const maybe = error as Error & { code?: string };
+			return maybe.name === "AbortError" || maybe.code === "ABORT_ERR";
+		};
+
+		const waitForMenuReturn = async (
+			ui: UiRuntimeOptions,
+			options: {
+				promptText?: string;
+				autoReturnMs?: number;
+				pauseOnAnyKey?: boolean;
+			} = {},
+		): Promise<void> => {
+			if (!process.stdin.isTTY || !process.stdout.isTTY) {
+				return;
+			}
+
+			const promptText = options.promptText ?? "Press Enter to return to the dashboard.";
+			const autoReturnMs = options.autoReturnMs ?? 0;
+			const pauseOnAnyKey = options.pauseOnAnyKey ?? true;
+
+			try {
+				let chunk: Buffer | string | null;
+				do {
+					chunk = process.stdin.read();
+				} while (chunk !== null);
+			} catch {
+				// best effort drain
+			}
+
+			const writeInlineStatus = (message: string) => {
+				process.stdout.write(`\r${ANSI.clearLine}${styleOperationText(ui, message, "muted")}`);
+			};
+			const clearInlineStatus = () => {
+				process.stdout.write(`\r${ANSI.clearLine}`);
+			};
+
+			if (autoReturnMs > 0) {
+				if (!pauseOnAnyKey) {
+					await new Promise((resolve) => setTimeout(resolve, autoReturnMs));
+					return;
+				}
+
+				const wasRaw = process.stdin.isRaw ?? false;
+				const endAt = Date.now() + autoReturnMs;
+				let lastShownSeconds: number | null = null;
+				const renderCountdown = () => {
+					const remainingMs = Math.max(0, endAt - Date.now());
+					const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+					if (lastShownSeconds === remainingSeconds) return;
+					lastShownSeconds = remainingSeconds;
+					writeInlineStatus(`Returning to dashboard in ${remainingSeconds}s. Press any key to pause.`);
+				};
+
+				renderCountdown();
+				const pinned = await new Promise<boolean>((resolve) => {
+					let done = false;
+					const interval = setInterval(renderCountdown, 80);
+					let timeout: NodeJS.Timeout | null = setTimeout(() => {
+						timeout = null;
+						if (!done) {
+							done = true;
+							cleanup();
+							resolve(false);
+						}
+					}, autoReturnMs);
+					const onData = () => {
+						if (done) return;
+						done = true;
+						cleanup();
+						resolve(true);
+					};
+					const cleanup = () => {
+						clearInterval(interval);
+						if (timeout) {
+							clearTimeout(timeout);
+							timeout = null;
+						}
+						process.stdin.removeListener("data", onData);
+						try {
+							process.stdin.setRawMode(wasRaw);
+						} catch {
+							// best effort restore
+						}
+					};
+
+					try {
+						process.stdin.setRawMode(true);
+					} catch {
+						// best effort
+					}
+					process.stdin.on("data", onData);
+					process.stdin.resume();
+				});
+
+				clearInlineStatus();
+				if (!pinned) {
+					return;
+				}
+
+				writeInlineStatus("Paused. Press any key to return.");
+				await new Promise<void>((resolve) => {
+					const onData = () => {
+						cleanup();
+						resolve();
+					};
+					const cleanup = () => {
+						process.stdin.removeListener("data", onData);
+						try {
+							process.stdin.setRawMode(wasRaw);
+						} catch {
+							// best effort restore
+						}
+					};
+
+					try {
+						process.stdin.setRawMode(true);
+					} catch {
+						// best effort fallback
+					}
+					process.stdin.on("data", onData);
+					process.stdin.resume();
+				});
+				clearInlineStatus();
+				return;
+			}
+
+			const rl = createInterface({
+				input: process.stdin,
+				output: process.stdout,
+			});
+			try {
+				process.stdout.write(`\r${ANSI.clearLine}`);
+				await rl.question(`${styleOperationText(ui, promptText, "muted")} `);
+			} catch (error) {
+				if (!isAbortError(error)) {
+					throw error;
+				}
+			} finally {
+				rl.close();
+				clearInlineStatus();
+			}
+		};
+
+		const createOperationScreen = (
+			ui: UiRuntimeOptions,
+			title: string,
+			subtitle?: string,
+		): {
+			push: (line: string, tone?: OperationTone) => void;
+			finish: (
+				summaryLines?: Array<{ line: string; tone?: OperationTone }>,
+				options?: { failed?: boolean },
+			) => Promise<void>;
+			abort: () => void;
+		} | null => {
+			if (!supportsInteractiveMenus()) {
+				return null;
+			}
+
+			const entries: Array<{ line: string; tone: OperationTone }> = [];
+			const spinnerFrames = ["-", "\\", "|", "/"];
+			let frame = 0;
+			let running = true;
+			let failed = false;
+			let initialized = false;
+			let timer: NodeJS.Timeout | null = null;
+			let closed = false;
+
+			const dispose = () => {
+				if (closed) return;
+				closed = true;
+				running = false;
+				if (timer) {
+					clearInterval(timer);
+					timer = null;
+				}
+				process.stdout.write(ANSI.altScreenOff + ANSI.show + ANSI.clearScreen + ANSI.moveTo(1, 1));
+			};
+
+			const render = () => {
+				const lines: string[] = [];
+				const maxVisibleLines = Math.max(8, (process.stdout.rows ?? 24) - 8);
+				const visibleEntries = entries.slice(-maxVisibleLines);
+				const spinner = running
+					? `${spinnerFrames[frame % spinnerFrames.length] ?? "-"} `
+					: failed
+						? "x "
+						: "+ ";
+				const stageTone: OperationTone = failed ? "danger" : running ? "accent" : "success";
+				const stageText = running
+					? `${spinner}${sanitizeScreenText(subtitle ?? "Working")}`
+					: failed
+						? "Action failed"
+						: "Done";
+
+				lines.push(styleOperationText(ui, sanitizeScreenText(title), "accent"));
+				lines.push(styleOperationText(ui, stageText, stageTone));
+				lines.push("");
+				for (const entry of visibleEntries) {
+					lines.push(styleOperationText(ui, sanitizeScreenText(entry.line), entry.tone));
+				}
+				for (let i = visibleEntries.length; i < maxVisibleLines; i += 1) {
+					lines.push("");
+				}
+				lines.push("");
+				if (running) lines.push(styleOperationText(ui, "Working...", "muted"));
+				process.stdout.write(ANSI.clearScreen + ANSI.moveTo(1, 1) + lines.join("\n"));
+				frame += 1;
+			};
+
+			const ensureScreen = () => {
+				if (initialized) return;
+				process.stdout.write(ANSI.altScreenOn + ANSI.hide + ANSI.clearScreen + ANSI.moveTo(1, 1));
+				render();
+				timer = setInterval(() => {
+					if (!running) return;
+					render();
+				}, 120);
+				initialized = true;
+			};
+
+			ensureScreen();
+			return {
+				push: (line: string, tone = "normal") => {
+					ensureScreen();
+					entries.push({ line: sanitizeScreenText(line), tone });
+					render();
+				},
+				finish: async (summaryLines, options) => {
+					ensureScreen();
+					if (summaryLines && summaryLines.length > 0) {
+						entries.push({ line: "", tone: "normal" });
+						for (const entry of summaryLines) {
+							entries.push({ line: sanitizeScreenText(entry.line), tone: entry.tone ?? "normal" });
+						}
+					}
+					failed = options?.failed === true;
+					running = false;
+					if (timer) {
+						clearInterval(timer);
+						timer = null;
+					}
+					render();
+					await waitForMenuReturn(ui, failed
+						? { promptText: "Press Enter to return to the dashboard." }
+						: { autoReturnMs: 2_000, pauseOnAnyKey: true });
+					dispose();
+				},
+				abort: dispose,
+			};
+		};
+		type DashboardOperationScreen = NonNullable<ReturnType<typeof createOperationScreen>>;
+
 		const getStatusMarker = (
 			ui: UiRuntimeOptions,
 			status: "ok" | "warning" | "error",
@@ -1268,6 +1573,82 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 
 			return `Account ${index + 1} (${details.join(", ")})`;
+		};
+
+		const buildEmailCountMap = (
+			accounts: Array<{ email?: string }>,
+		): Map<string, number> => {
+			const counts = new Map<string, number>();
+			for (const account of accounts) {
+				const normalizedEmail = sanitizeEmail(account.email);
+				if (!normalizedEmail) continue;
+				counts.set(normalizedEmail, (counts.get(normalizedEmail) ?? 0) + 1);
+			}
+			return counts;
+		};
+
+		const updateEmailCountMap = (
+			emailCounts: Map<string, number>,
+			previousEmail: string | undefined,
+			nextEmail: string | undefined,
+		): void => {
+			const previousNormalized = sanitizeEmail(previousEmail);
+			const nextNormalized = sanitizeEmail(nextEmail);
+			if (previousNormalized === nextNormalized) {
+				return;
+			}
+			if (previousNormalized) {
+				const nextCount = (emailCounts.get(previousNormalized) ?? 0) - 1;
+				if (nextCount > 0) {
+					emailCounts.set(previousNormalized, nextCount);
+				} else {
+					emailCounts.delete(previousNormalized);
+				}
+			}
+			if (nextNormalized) {
+				emailCounts.set(nextNormalized, (emailCounts.get(nextNormalized) ?? 0) + 1);
+			}
+		};
+
+		const canHydrateCachedTokenForAccount = (
+			emailCounts: Map<string, number>,
+			account: { email?: string; accountId?: string },
+			tokenAccountId: string | undefined,
+		): boolean => {
+			const normalizedAccountId = account.accountId?.trim();
+			if (normalizedAccountId) {
+				return tokenAccountId === normalizedAccountId;
+			}
+			const normalizedEmail = sanitizeEmail(account.email);
+			if (normalizedEmail && (emailCounts.get(normalizedEmail) ?? 0) <= 1) {
+				return true;
+			}
+			return false;
+		};
+
+		type SyncRemovalTarget = {
+			refreshToken: string;
+			organizationId?: string;
+			accountId?: string;
+		};
+
+		const getSyncRemovalTargetKey = (target: SyncRemovalTarget): string => {
+			return `${target.organizationId ?? ""}|${target.accountId ?? ""}|${target.refreshToken}`;
+		};
+
+		const findAccountIndexByExactIdentity = (
+			accounts: AccountStorageV3["accounts"],
+			target: SyncRemovalTarget | null | undefined,
+		): number => {
+			if (!target || !target.refreshToken) return -1;
+			const targetKey = getSyncRemovalTargetKey(target);
+			return accounts.findIndex((account) =>
+				getSyncRemovalTargetKey({
+					refreshToken: account.refreshToken,
+					organizationId: account.organizationId,
+					accountId: account.accountId,
+				}) === targetKey,
+			);
 		};
 
 		const normalizeAccountTags = (raw: string): string[] => {
@@ -2857,6 +3238,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 							};
 
 							const formatCodexQuotaLine = (snapshot: CodexQuotaSnapshot): string => {
+								const quotaBar = (usedPercent: number | undefined): string => {
+									if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) {
+										return "▒▒▒▒▒▒▒▒▒▒";
+									}
+									const left = Math.max(0, Math.min(100, Math.round(100 - usedPercent)));
+									const filled = Math.max(0, Math.min(10, Math.round(left / 10)));
+									return `${"█".repeat(filled)}${"▒".repeat(10 - filled)}`;
+								};
 								const summarizeWindow = (label: string, window: CodexQuotaWindow): string => {
 									const used = window.usedPercent;
 									const left =
@@ -2865,7 +3254,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 											: undefined;
 									const reset = formatResetAt(window.resetAtMs);
 									let summary = label;
-									if (left !== undefined) summary = `${summary} ${left}% left`;
+									if (left !== undefined) summary = `${summary} ${quotaBar(used)} ${left}% left`;
 									if (reset) summary = `${summary} (resets ${reset})`;
 									return summary;
 								};
@@ -2977,6 +3366,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							};
 
 							const runAccountCheck = async (deepProbe: boolean): Promise<void> => {
+								const ui = resolveUiRuntime();
 								const loadedStorage = await hydrateEmails(await loadAccounts());
 								const workingStorage = loadedStorage
 									? {
@@ -2987,36 +3377,68 @@ while (attempted.size < Math.max(1, accountCount)) {
 											: {},
 									}
 									: { version: 3 as const, accounts: [], activeIndex: 0, activeIndexByFamily: {} };
-
-								if (workingStorage.accounts.length === 0) {
-									console.log("\nNo accounts to check.\n");
-									return;
-								}
-
-								const flaggedStorage = await loadFlaggedAccounts();
-								let storageChanged = false;
-								let flaggedChanged = false;
-								const removeFromActive = new Set<string>();
-								const total = workingStorage.accounts.length;
-								let ok = 0;
-								let disabled = 0;
-								let errors = 0;
-
-								console.log(
-									`\nChecking ${deepProbe ? "full account health" : "quotas"} for all accounts...\n`,
+								const screen = createOperationScreen(
+									ui,
+									"Health check",
+									deepProbe
+										? `Checking ${workingStorage.accounts.length} account(s) with full refresh + live validation`
+										: `Checking ${workingStorage.accounts.length} account(s) with quota validation`,
 								);
+								let screenFinished = false;
+								const emit = (
+									index: number,
+									detail: string,
+									tone: "normal" | "muted" | "success" | "warning" | "danger" | "accent" = "normal",
+								) => {
+									const account = workingStorage.accounts[index];
+									const label = sanitizeScreenText(formatCommandAccountLabel(account, index));
+									const safeDetail = sanitizeScreenText(detail);
+									const prefix =
+										tone === "danger"
+											? getStatusMarker(ui, "error")
+											: tone === "warning"
+												? getStatusMarker(ui, "warning")
+												: getStatusMarker(ui, "ok");
+									const line = sanitizeScreenText(`${prefix} ${label} | ${safeDetail}`);
+									if (screen) {
+										screen.push(line, tone);
+										return;
+									}
+									console.log(line);
+								};
 
-								for (let i = 0; i < total; i += 1) {
-									const account = workingStorage.accounts[i];
-									if (!account) continue;
-									const label = account.email ?? account.accountLabel ?? `Account ${i + 1}`;
-									if (account.enabled === false) {
-										disabled += 1;
-										console.log(`[${i + 1}/${total}] ${label}: DISABLED`);
-										continue;
+								try {
+									if (workingStorage.accounts.length === 0) {
+										if (screen) {
+											screen.push("No accounts to check.", "warning");
+											await screen.finish();
+											screenFinished = true;
+										} else {
+											console.log("No accounts to check.");
+										}
+										return;
 									}
 
-									try {
+									const flaggedStorage = await loadFlaggedAccounts();
+									let storageChanged = false;
+									let flaggedChanged = false;
+									const removeFromActive = new Set<string>();
+									const total = workingStorage.accounts.length;
+									let ok = 0;
+									let disabled = 0;
+									let errors = 0;
+									const workingEmailCounts = buildEmailCountMap(workingStorage.accounts);
+
+									for (let i = 0; i < total; i += 1) {
+										const account = workingStorage.accounts[i];
+										if (!account) continue;
+										if (account.enabled === false) {
+											disabled += 1;
+											emit(i, "disabled", "warning");
+											continue;
+										}
+
+										try {
 										// If we already have a valid cached access token, don't force-refresh.
 										// This avoids flagging accounts where the refresh token has been burned
 										// but the access token is still valid (same behavior as Codex CLI).
@@ -3050,8 +3472,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 										// instead of forcing a refresh.
 										if (!accessToken) {
 											const cached = await lookupCodexCliTokensByEmail(account.email);
+											const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
 											if (
-												cached &&
+											cached &&
+											canHydrateCachedTokenForAccount(
+												workingEmailCounts,
+												account,
+												cachedTokenAccountId,
+											) &&
 												(typeof cached.expiresAt !== "number" ||
 													!Number.isFinite(cached.expiresAt) ||
 													cached.expiresAt > nowMs)
@@ -3076,11 +3504,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 													extractAccountEmail(cached.accessToken),
 												);
 												if (hydratedEmail && hydratedEmail !== account.email) {
+													updateEmailCountMap(workingEmailCounts, account.email, hydratedEmail);
 													account.email = hydratedEmail;
 													storageChanged = true;
 												}
 
-												tokenAccountId = extractAccountId(cached.accessToken);
+												tokenAccountId = cachedTokenAccountId;
 												if (
 													tokenAccountId &&
 													shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId) &&
@@ -3099,10 +3528,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 												errors += 1;
 												const message =
 													refreshResult.message ?? refreshResult.reason ?? "refresh failed";
-												console.log(`[${i + 1}/${total}] ${label}: ERROR (${message})`);
+												emit(i, `error: ${message}`, "danger");
 												if (deepProbe && isFlaggableFailure(refreshResult)) {
+													const flaggedKey = getSyncRemovalTargetKey({
+														refreshToken: account.refreshToken,
+														organizationId: account.organizationId,
+														accountId: account.accountId,
+													});
 													const existingIndex = flaggedStorage.accounts.findIndex(
-														(flagged) => flagged.refreshToken === account.refreshToken,
+														(flagged) =>
+															getSyncRemovalTargetKey({
+																refreshToken: flagged.refreshToken,
+																organizationId: flagged.organizationId,
+																accountId: flagged.accountId,
+															}) === flaggedKey,
 													);
 													const flaggedRecord: FlaggedAccountMetadataV1 = {
 														...account,
@@ -3115,7 +3554,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 													} else {
 														flaggedStorage.accounts.push(flaggedRecord);
 													}
-													removeFromActive.add(account.refreshToken);
+													removeFromActive.add(flaggedKey);
 													flaggedChanged = true;
 												}
 												continue;
@@ -3142,6 +3581,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 												extractAccountEmail(refreshResult.access, refreshResult.idToken),
 											);
 											if (hydratedEmail && hydratedEmail !== account.email) {
+												updateEmailCountMap(workingEmailCounts, account.email, hydratedEmail);
 												account.email = hydratedEmail;
 												storageChanged = true;
 											}
@@ -3167,7 +3607,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 												tokenAccountId
 													? `${authDetail} (id:${tokenAccountId.slice(-6)})`
 													: authDetail;
-											console.log(`[${i + 1}/${total}] ${label}: ${detail}`);
+											emit(i, detail, "success");
 											continue;
 										}
 
@@ -3191,69 +3631,151 @@ while (attempted.size < Math.max(1, accountCount)) {
 												organizationId: account.organizationId,
 											});
 											ok += 1;
-											console.log(
-												`[${i + 1}/${total}] ${label}: ${formatCodexQuotaLine(snapshot)}`,
-											);
+											emit(i, formatCodexQuotaLine(snapshot), snapshot.status === 429 ? "warning" : "success");
 										} catch (error) {
 											errors += 1;
 											const message = error instanceof Error ? error.message : String(error);
-											console.log(
-												`[${i + 1}/${total}] ${label}: ERROR (${message.slice(0, 160)})`,
-											);
+											emit(i, `error: ${message.slice(0, 160)}`, "danger");
 										}
-									} catch (error) {
-										errors += 1;
-										const message = error instanceof Error ? error.message : String(error);
-										console.log(`[${i + 1}/${total}] ${label}: ERROR (${message.slice(0, 120)})`);
+										} catch (error) {
+											errors += 1;
+											const message = error instanceof Error ? error.message : String(error);
+											emit(i, `error: ${message.slice(0, 120)}`, "danger");
+										}
+									}
+
+									if (removeFromActive.size > 0) {
+										workingStorage.accounts = workingStorage.accounts.filter(
+											(account) =>
+												!removeFromActive.has(
+													getSyncRemovalTargetKey({
+														refreshToken: account.refreshToken,
+														organizationId: account.organizationId,
+														accountId: account.accountId,
+													}),
+												),
+										);
+										clampActiveIndices(workingStorage);
+										storageChanged = true;
+									}
+
+									if (flaggedChanged) {
+										await saveFlaggedAccounts(flaggedStorage);
+									}
+									if (storageChanged) {
+										await saveAccounts(workingStorage);
+										invalidateAccountManagerCache();
+									}
+
+									const summaryLines: Array<{
+										line: string;
+										tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent";
+									}> = [{ line: `Results: ${ok} ok, ${errors} error, ${disabled} disabled`, tone: errors > 0 ? "warning" : "success" }];
+									if (removeFromActive.size > 0) {
+										summaryLines.push({ line: `Moved ${removeFromActive.size} account(s) to flagged pool (invalid refresh token).`, tone: "warning" as const });
+									}
+									if (screen) {
+										await screen.finish(summaryLines);
+										screenFinished = true;
+										return;
+									}
+									console.log("");
+									for (const line of summaryLines) {
+										console.log(line.line);
+									}
+									console.log("");
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									if (screen) {
+										screen.push(`Health check failed: ${message}`, "danger");
+										await screen.finish(undefined, { failed: true });
+										screenFinished = true;
+									} else {
+										console.log(`\nHealth check failed: ${message}\n`);
+									}
+								} finally {
+									if (screen && !screenFinished) {
+										screen.abort();
 									}
 								}
-
-								if (removeFromActive.size > 0) {
-									workingStorage.accounts = workingStorage.accounts.filter(
-										(account) => !removeFromActive.has(account.refreshToken),
-									);
-									clampActiveIndices(workingStorage);
-									storageChanged = true;
-								}
-
-								if (storageChanged) {
-									await saveAccounts(workingStorage);
-									invalidateAccountManagerCache();
-								}
-								if (flaggedChanged) {
-									await saveFlaggedAccounts(flaggedStorage);
-								}
-
-								console.log("");
-								console.log(`Results: ${ok} ok, ${errors} error, ${disabled} disabled`);
-								if (removeFromActive.size > 0) {
-									console.log(
-										`Moved ${removeFromActive.size} account(s) to flagged pool (invalid refresh token).`,
-									);
-								}
-								console.log("");
 							};
 
-							const verifyFlaggedAccounts = async (): Promise<void> => {
-								const flaggedStorage = await loadFlaggedAccounts();
-								if (flaggedStorage.accounts.length === 0) {
-									console.log("\nNo flagged accounts to verify.\n");
-									return;
-								}
+							const verifyFlaggedAccounts = async (
+								screenOverride?: DashboardOperationScreen | null,
+							): Promise<void> => {
+								const ui = resolveUiRuntime();
+								const screen =
+									screenOverride ??
+									createOperationScreen(
+										ui,
+										"Check Problem Accounts",
+										"Checking flagged accounts and attempting restore",
+									);
+								const emit = (
+									line: string,
+									tone: OperationTone = "normal",
+								) => {
+									const safeLine = sanitizeScreenText(line);
+									if (screen) {
+										screen.push(safeLine, tone);
+										return;
+									}
+									console.log(safeLine);
+								};
+								let screenFinished = false;
+								try {
+									const flaggedStorage = await loadFlaggedAccounts();
+									const activeStorage = await loadAccounts();
+									if (flaggedStorage.accounts.length === 0) {
+									emit("No flagged accounts to verify.");
+										if (screen && !screenOverride) {
+											await screen.finish();
+											screenFinished = true;
+										}
+										return;
+									}
 
-								console.log("\nVerifying flagged accounts...\n");
-								const remaining: FlaggedAccountMetadataV1[] = [];
-								const restored: TokenSuccessWithAccount[] = [];
+									emit(`Checking ${flaggedStorage.accounts.length} problem account(s)...`, "muted");
+									const remaining: FlaggedAccountMetadataV1[] = [];
+									const restored: TokenSuccessWithAccount[] = [];
+									const flaggedLabelWidth = Math.min(
+										72,
+										Math.max(
+											18,
+											...flaggedStorage.accounts.map((flagged, index) =>
+												(flagged.email ?? flagged.accountLabel ?? `Flagged ${index + 1}`).length,
+											),
+										),
+									);
+									const padFlaggedLabel = (value: string): string =>
+										value.length >= flaggedLabelWidth ? value : `${value}${" ".repeat(flaggedLabelWidth - value.length)}`;
 
-								for (let i = 0; i < flaggedStorage.accounts.length; i += 1) {
-									const flagged = flaggedStorage.accounts[i];
-									if (!flagged) continue;
-									const label = flagged.email ?? flagged.accountLabel ?? `Flagged ${i + 1}`;
+									for (let i = 0; i < flaggedStorage.accounts.length; i += 1) {
+										const flagged = flaggedStorage.accounts[i];
+										if (!flagged) continue;
+										const label = padFlaggedLabel(flagged.email ?? flagged.accountLabel ?? `Flagged ${i + 1}`);
 									try {
 										const cached = await lookupCodexCliTokensByEmail(flagged.email);
 										const now = Date.now();
+										const cachedTokenAccountId = cached ? extractAccountId(cached.accessToken) : undefined;
+										const restoredIdentityContext = restored.map((entry) => ({
+											email: sanitizeEmail(extractAccountEmail(entry.access, entry.idToken)),
+											accountId: entry.accountIdOverride ?? extractAccountId(entry.access),
+										}));
+										const restoreEmailCounts = buildEmailCountMap([
+											...(activeStorage?.accounts ?? []),
+											...restoredIdentityContext,
+											...remaining,
+											flagged,
+											...flaggedStorage.accounts.slice(i + 1).filter(Boolean),
+										]);
 										if (
 											cached &&
+											canHydrateCachedTokenForAccount(
+												restoreEmailCounts,
+												flagged,
+												cachedTokenAccountId,
+											) &&
 											typeof cached.expiresAt === "number" &&
 											Number.isFinite(cached.expiresAt) &&
 											cached.expiresAt > now
@@ -3281,17 +3803,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 											resolved.primary.accountLabel = flagged.accountLabel;
 										}
 										restored.push(...resolved.variantsForPersistence);
-										console.log(
-												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED (Codex CLI cache)`,
-										);
+										emit(`${getStatusMarker(ui, "ok")} ${label} | restored (cache)`, "success");
 											continue;
 										}
 
 										const refreshResult = await queuedRefresh(flagged.refreshToken);
 										if (refreshResult.type !== "success") {
-											console.log(
-												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: STILL FLAGGED (${refreshResult.message ?? refreshResult.reason ?? "refresh failed"})`,
-											);
+											emit(`${getStatusMarker(ui, "warning")} ${label} | still flagged: ${refreshResult.message ?? refreshResult.reason ?? "refresh failed"}`, "warning");
 											remaining.push(flagged);
 											continue;
 										}
@@ -3309,32 +3827,886 @@ while (attempted.size < Math.max(1, accountCount)) {
 										resolved.primary.accountLabel = flagged.accountLabel;
 									}
 									restored.push(...resolved.variantsForPersistence);
-									console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
-									} catch (error) {
-										const message = error instanceof Error ? error.message : String(error);
-										console.log(
-											`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: ERROR (${message.slice(0, 120)})`,
-										);
-										remaining.push({
-											...flagged,
-											lastError: message,
-										});
+									emit(`${getStatusMarker(ui, "ok")} ${label} | restored`, "success");
+										} catch (error) {
+											const message = error instanceof Error ? error.message : String(error);
+											emit(
+												`${getStatusMarker(ui, "error")} ${label} | error: ${message.slice(0, 120)}`,
+												"danger",
+											);
+											remaining.push({
+												...flagged,
+												lastError: message,
+											});
+										}
+									}
+
+									if (restored.length > 0) {
+										await persistAccountPool(restored, false);
+										invalidateAccountManagerCache();
+									}
+
+									await saveFlaggedAccounts({
+										version: 1,
+										accounts: remaining,
+									});
+
+									const summaryLines: Array<{
+										line: string;
+										tone?: "normal" | "muted" | "success" | "warning" | "danger" | "accent";
+									}> = [{ line: `Results: ${restored.length} restored, ${remaining.length} still flagged`, tone: remaining.length > 0 ? "warning" : "success" }];
+									if (screen && !screenOverride) {
+										await screen.finish(summaryLines);
+										screenFinished = true;
+										return;
+									}
+									console.log("");
+									for (const line of summaryLines) {
+										console.log(line.line);
+									}
+									console.log("");
+								} finally {
+									if (screen && !screenFinished && !screenOverride) {
+										screen.abort();
 									}
 								}
+							};
 
-								if (restored.length > 0) {
-									await persistAccountPool(restored, false);
-									invalidateAccountManagerCache();
+							const toggleCodexMultiAuthSyncSetting = async (): Promise<void> => {
+								try {
+									const currentConfig = loadPluginConfig();
+									const enabled = getSyncFromCodexMultiAuthEnabled(currentConfig);
+									await setSyncFromCodexMultiAuthEnabled(!enabled);
+									const nextLabel = !enabled ? "enabled" : "disabled";
+									console.log(`\nSync from codex-multi-auth ${nextLabel}.\n`);
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									console.log(`\nFailed to update sync setting: ${message}\n`);
+								}
+							};
+
+							const createMaintenanceAccountsBackup = async (
+								prefix: string,
+							): Promise<string> => {
+								const backupPath = createTimestampedBackupPath(prefix);
+								await backupRawAccountsFile(backupPath, true);
+								return backupPath;
+							};
+
+							const runCodexMultiAuthSync = async (): Promise<void> => {
+								const currentConfig = loadPluginConfig();
+								if (!getSyncFromCodexMultiAuthEnabled(currentConfig)) {
+									console.log("\nEnable sync from codex-multi-auth in Experimental settings first.\n");
+									return;
 								}
 
-								await saveFlaggedAccounts({
-									version: 1,
-									accounts: remaining,
-								});
+							const PRUNE_BACKUP_READ_RETRY_DELAYS_MS = [100, 250, 500] as const;
 
-								console.log("");
-								console.log(`Results: ${restored.length} restored, ${remaining.length} still flagged`);
-								console.log("");
+							const createSyncPruneBackup = async (): Promise<{
+								backupPath: string;
+								restore: () => Promise<void>;
+							}> => {
+								const readPruneBackupFile = async (backupPath: string): Promise<string> => {
+									const retryableCodes = new Set(["EBUSY", "EACCES", "EPERM"]);
+									for (
+										let attempt = 0;
+										attempt <= PRUNE_BACKUP_READ_RETRY_DELAYS_MS.length;
+										attempt += 1
+									) {
+										try {
+											return await fsPromises.readFile(backupPath, "utf-8");
+										} catch (error) {
+											const code = (error as NodeJS.ErrnoException).code;
+											if (!code || !retryableCodes.has(code) || attempt >= PRUNE_BACKUP_READ_RETRY_DELAYS_MS.length) {
+												throw error;
+											}
+											const delayMs = PRUNE_BACKUP_READ_RETRY_DELAYS_MS[attempt];
+											if (delayMs !== undefined) {
+												await new Promise((resolve) => setTimeout(resolve, delayMs));
+											}
+										}
+									}
+									throw new Error("readPruneBackupFile: unexpected retry exit");
+								};
+								const { accounts: loadedAccountsStorage, flagged: currentFlaggedStorage } =
+									await loadAccountAndFlaggedStorageSnapshot();
+								const currentAccountsStorage =
+									loadedAccountsStorage ??
+									({
+										version: 3,
+										accounts: [],
+										activeIndex: 0,
+										activeIndexByFamily: {},
+									} satisfies AccountStorageV3);
+									const backupPath = createTimestampedBackupPath("codex-sync-prune-backup");
+									await fsPromises.mkdir(dirname(backupPath), { recursive: true });
+									const backupPayload = createSyncPruneBackupPayload(currentAccountsStorage, currentFlaggedStorage);
+									const restoreAccountsSnapshot = structuredClone(currentAccountsStorage);
+									const restoreFlaggedSnapshot = structuredClone(currentFlaggedStorage);
+									// On Windows, mode bits are ignored and the backup relies on the parent directory ACLs.
+									await fsPromises.writeFile(backupPath, `${JSON.stringify(backupPayload, null, 2)}\n`, {
+										encoding: "utf-8",
+										mode: 0o600,
+										flag: "wx",
+									});
+									return {
+										backupPath,
+										restore: async () => {
+											const backupRaw = await readPruneBackupFile(backupPath);
+											JSON.parse(backupRaw);
+											const normalizedAccounts = normalizeAccountStorage(restoreAccountsSnapshot);
+											if (!normalizedAccounts) {
+												throw new Error("Prune backup account snapshot failed validation.");
+											}
+											const flaggedSnapshot = restoreFlaggedSnapshot;
+											if (
+												!flaggedSnapshot ||
+												typeof flaggedSnapshot !== "object" ||
+												(flaggedSnapshot as { version?: unknown }).version !== 1 ||
+												!Array.isArray((flaggedSnapshot as { accounts?: unknown }).accounts)
+											) {
+												throw new Error("Prune backup flagged snapshot failed validation.");
+											}
+											const emptyAccountsStorage = {
+												version: 3,
+												accounts: [],
+												activeIndex: 0,
+												activeIndexByFamily: {},
+											} satisfies AccountStorageV3;
+											const restoredAccountsSnapshot = JSON.stringify(normalizedAccounts);
+											const liveAccountsBeforeRestore = await withAccountStorageTransaction(
+												async (current, persist) => {
+													const snapshot = current ?? emptyAccountsStorage;
+													try {
+														await persist(normalizedAccounts);
+													} catch (error) {
+														const message = error instanceof Error ? error.message : String(error);
+														throw new Error(`Failed to restore account storage from prune backup: ${message}`);
+													}
+													return snapshot;
+												},
+											);
+											try {
+												await saveFlaggedAccounts(
+													flaggedSnapshot as { version: 1; accounts: FlaggedAccountMetadataV1[] },
+												);
+											} catch (error) {
+												const message = error instanceof Error ? error.message : String(error);
+												try {
+													let rolledBack = false;
+													await withAccountStorageTransaction(async (current, persist) => {
+														const currentStorage = current ?? emptyAccountsStorage;
+														if (JSON.stringify(currentStorage) !== restoredAccountsSnapshot) {
+															return;
+														}
+														await persist(liveAccountsBeforeRestore);
+														rolledBack = true;
+													});
+													if (!rolledBack) {
+														throw new Error("Account storage changed concurrently before rollback could be applied.");
+													}
+												} catch (rollbackError) {
+													const rollbackMessage =
+														rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+													throw new Error(
+														`Failed to restore flagged storage from prune backup: ${message}. Account-store rollback also failed: ${rollbackMessage}`,
+													);
+												}
+												throw new Error(
+													`Failed to restore flagged storage from prune backup: ${message}. Account-store changes were rolled back.`,
+												);
+											}
+											invalidateAccountManagerCache();
+										},
+									};
+								};
+
+							const removeAccountsForSync = async (
+								targets: SyncRemovalTarget[],
+							): Promise<void> => {
+								const targetKeySet = new Set(
+									targets
+										.filter((target) => typeof target.refreshToken === "string" && target.refreshToken.length > 0)
+										.map((target) => getSyncRemovalTargetKey(target)),
+								);
+								let removedTargets: Array<{
+									index: number;
+									account: AccountStorageV3["accounts"][number];
+								}> = [];
+								await withAccountStorageTransaction(async (loadedStorage, persist) => {
+									const currentStorage =
+										loadedStorage ??
+										({
+											version: 3,
+											accounts: [],
+											activeIndex: 0,
+											activeIndexByFamily: {},
+										} satisfies AccountStorageV3);
+									removedTargets = currentStorage.accounts
+										.map((account, index) => ({ index, account }))
+										.filter((entry) =>
+											entry.account &&
+											targetKeySet.has(
+												getSyncRemovalTargetKey({
+													refreshToken: entry.account.refreshToken,
+													organizationId: entry.account.organizationId,
+													accountId: entry.account.accountId,
+												}),
+											),
+										);
+									if (removedTargets.length === 0) {
+										return;
+									}
+									const matchedKeySet = new Set(
+										removedTargets.map((entry) =>
+											getSyncRemovalTargetKey({
+												refreshToken: entry.account.refreshToken,
+												organizationId: entry.account.organizationId,
+												accountId: entry.account.accountId,
+											}),
+										),
+									);
+									if (
+										removedTargets.length !== targetKeySet.size ||
+										matchedKeySet.size !== targetKeySet.size ||
+										[...targetKeySet].some((key) => !matchedKeySet.has(key))
+									) {
+										throw new Error("Selected accounts changed before removal. Re-run sync and confirm again.");
+									}
+									const activeAccountIdentity = {
+										refreshToken:
+											currentStorage.accounts[currentStorage.activeIndex]?.refreshToken ?? "",
+										organizationId:
+											currentStorage.accounts[currentStorage.activeIndex]?.organizationId,
+										accountId: currentStorage.accounts[currentStorage.activeIndex]?.accountId,
+									} satisfies SyncRemovalTarget;
+									const familyActiveIdentities = Object.fromEntries(
+										MODEL_FAMILIES.map((family) => {
+											const familyIndex = currentStorage.activeIndexByFamily?.[family] ?? currentStorage.activeIndex;
+											const familyAccount = currentStorage.accounts[familyIndex];
+											return [
+												family,
+												familyAccount
+													? ({
+															refreshToken: familyAccount.refreshToken,
+															organizationId: familyAccount.organizationId,
+															accountId: familyAccount.accountId,
+														} satisfies SyncRemovalTarget)
+													: null,
+											];
+										}),
+									) as Partial<Record<ModelFamily, SyncRemovalTarget | null>>;
+									currentStorage.accounts = currentStorage.accounts.filter(
+										(account) =>
+											!targetKeySet.has(
+												getSyncRemovalTargetKey({
+													refreshToken: account.refreshToken,
+													organizationId: account.organizationId,
+													accountId: account.accountId,
+												}),
+											),
+									);
+									const remappedActiveIndex = findAccountIndexByExactIdentity(
+										currentStorage.accounts,
+										activeAccountIdentity,
+									);
+									currentStorage.activeIndex =
+										remappedActiveIndex >= 0
+											? remappedActiveIndex
+											: Math.min(currentStorage.activeIndex, Math.max(0, currentStorage.accounts.length - 1));
+									currentStorage.activeIndexByFamily = currentStorage.activeIndexByFamily ?? {};
+									for (const family of MODEL_FAMILIES) {
+										const remappedFamilyIndex = findAccountIndexByExactIdentity(
+											currentStorage.accounts,
+											familyActiveIdentities[family] ?? null,
+										);
+										currentStorage.activeIndexByFamily[family] =
+											remappedFamilyIndex >= 0 ? remappedFamilyIndex : currentStorage.activeIndex;
+									}
+									clampActiveIndices(currentStorage);
+									await persist(currentStorage);
+								});
+								if (removedTargets.length === 0) {
+									return;
+								}
+								const removedFlaggedKeys = new Set(
+									removedTargets.map((entry) =>
+										getSyncRemovalTargetKey({
+											refreshToken: entry.account.refreshToken,
+											organizationId: entry.account.organizationId,
+											accountId: entry.account.accountId,
+										}),
+									),
+								);
+								await withFlaggedAccountsTransaction(async (currentFlaggedStorage, persist) => {
+									await persist({
+										version: 1,
+										accounts: currentFlaggedStorage.accounts.filter(
+											(flagged) =>
+												!removedFlaggedKeys.has(
+													getSyncRemovalTargetKey({
+														refreshToken: flagged.refreshToken,
+														organizationId: flagged.organizationId,
+														accountId: flagged.accountId,
+													}),
+												),
+										),
+									});
+								});
+								invalidateAccountManagerCache();
+								const removedLabels = removedTargets
+									.map((entry) => {
+										const accountId = entry.account?.accountId?.trim();
+										return accountId
+											? `Account ${entry.index + 1} [${accountId.slice(-6)}]`
+											: `Account ${entry.index + 1}`;
+									})
+									.join(", ");
+								console.log(`\nRemoved ${removedTargets.length} account(s): ${removedLabels}\n`);
+							};
+
+								const buildSyncRemovalPlan = async (indexes: number[]): Promise<{
+									previewLines: string[];
+									targets: SyncRemovalTarget[];
+								}> => {
+									const currentStorage =
+										(await loadAccounts()) ??
+										({
+											version: 3,
+											accounts: [],
+											activeIndex: 0,
+											activeIndexByFamily: {},
+										} satisfies AccountStorageV3);
+									const candidates: Array<{
+										previewLine: string;
+										target: SyncRemovalTarget;
+									}> = [...indexes]
+										.sort((left, right) => left - right)
+										.map((index) => {
+											const account = currentStorage.accounts[index];
+											if (!account) {
+												throw new Error(
+													`Selected account ${index + 1} changed before confirmation. Re-run sync and confirm again.`,
+												);
+											}
+											const label = account.email ?? account.accountLabel ?? `Account ${index + 1}`;
+											const currentSuffix = index === currentStorage.activeIndex ? " | current" : "";
+											return {
+												previewLine: `${index + 1}. ${label}${currentSuffix}`,
+												target: {
+													refreshToken: account.refreshToken,
+													organizationId: account.organizationId,
+													accountId: account.accountId,
+												} satisfies SyncRemovalTarget,
+											};
+										});
+									return {
+										previewLines: candidates.map((candidate) => candidate.previewLine),
+										targets: candidates.map((candidate) => candidate.target),
+									};
+								};
+
+								let pruneBackup:
+									| {
+											backupPath: string;
+											restore: () => Promise<void>;
+											restoreFailureMessage?: string;
+									  }
+									| null = null;
+								const restorePruneBackup = async (): Promise<void> => {
+									const currentBackup = pruneBackup;
+									if (!currentBackup) return;
+									if (currentBackup.restoreFailureMessage) {
+										throw new Error(
+											`${currentBackup.restoreFailureMessage}. Backup remains at ${currentBackup.backupPath}.`,
+										);
+									}
+									try {
+										await currentBackup.restore();
+										pruneBackup = null;
+									} catch (restoreError) {
+										const message =
+											restoreError instanceof Error ? restoreError.message : String(restoreError);
+										currentBackup.restoreFailureMessage = message;
+										pruneBackup = currentBackup;
+										throw new Error(`${message}. Backup remains at ${currentBackup.backupPath}.`);
+									}
+								};
+								const safeRestorePruneBackup = async (context: string): Promise<void> => {
+									try {
+										await restorePruneBackup();
+									} catch (restoreError) {
+										const message =
+											restoreError instanceof Error ? restoreError.message : String(restoreError);
+										console.log(`\nFailed to restore pruned accounts during ${context}: ${message}\n`);
+									}
+								};
+								const syncPruneMaxAttempts = 5;
+								let syncPruneAttempts = 0;
+								while (syncPruneAttempts < syncPruneMaxAttempts) {
+									syncPruneAttempts += 1;
+									try {
+										const loadedSource = await loadCodexMultiAuthSourceStorage(process.cwd());
+										const preview = await previewSyncFromCodexMultiAuth(process.cwd(), loadedSource);
+										console.log("");
+										console.log(`codex-multi-auth source: ${preview.accountsPath}`);
+										console.log(`Scope: ${preview.scope}`);
+										console.log(
+											`Preview: +${preview.imported} new, ${preview.skipped} skipped, ${preview.total} total`,
+										);
+
+										if (preview.imported <= 0) {
+											if (pruneBackup) {
+												try {
+													await restorePruneBackup();
+												} catch (restoreError) {
+													const message =
+														restoreError instanceof Error ? restoreError.message : String(restoreError);
+													logWarn(
+														`[${PLUGIN_NAME}] Failed to restore prune backup after zero-import preview: ${message}`,
+													);
+													throw new Error(
+														`Failed to restore previously pruned accounts after zero-import preview: ${message}`,
+													);
+												}
+											}
+											console.log("No new accounts to import.\n");
+											return;
+										}
+
+										const confirmed = await confirm(
+											`Import ${preview.imported} new account(s) from codex-multi-auth?`,
+										);
+										if (!confirmed) {
+											await safeRestorePruneBackup("sync cancellation");
+											console.log("\nSync cancelled.\n");
+											return;
+										}
+
+										const result = await syncFromCodexMultiAuth(process.cwd(), loadedSource);
+										pruneBackup = null;
+										invalidateAccountManagerCache();
+										const backupLabel =
+											result.backupStatus === "created"
+												? result.backupPath ?? "created"
+												: result.backupStatus === "skipped"
+													? "skipped"
+													: result.backupError ?? "failed";
+
+										console.log("");
+										console.log("Sync complete.");
+										console.log(`Source: ${result.accountsPath}`);
+										console.log(`Imported: ${result.imported}`);
+										console.log(`Skipped: ${result.skipped}`);
+										console.log(`Total: ${result.total}`);
+										console.log(`Auto-backup: ${backupLabel}`);
+										console.log("");
+										return;
+									} catch (error) {
+										if (error instanceof CodexMultiAuthSyncCapacityError) {
+											const { details } = error;
+										console.log("");
+										console.log("Sync blocked by account limit.");
+										console.log(`Source: ${details.accountsPath}`);
+										console.log(`Scope: ${details.scope}`);
+										console.log(`Current accounts: ${details.currentCount}`);
+										console.log(`Source accounts: ${details.sourceCount}`);
+										console.log(`Deduped total after merge: ${details.dedupedTotal}`);
+										console.log(`Overlap accounts skipped by dedupe: ${details.skippedOverlaps}`);
+										console.log(`Importable new accounts: ${details.importableNewAccounts}`);
+										console.log(`Maximum allowed: ${details.maxAccounts}`);
+										if (isCodexMultiAuthSourceTooLargeForCapacity(details)) {
+											await safeRestorePruneBackup("capacity handling");
+											console.log(
+												`Source alone exceeds the configured maximum. Reduce the source set or raise CODEX_AUTH_SYNC_MAX_ACCOUNTS before retrying.`,
+											);
+											console.log("");
+											return;
+										}
+										console.log(`Remove at least ${details.needToRemove} account(s) first.`);
+										if (details.suggestedRemovals.length > 0) {
+											console.log("Suggested removals:");
+											for (const suggestion of details.suggestedRemovals) {
+												const label =
+													suggestion.email ??
+													suggestion.accountLabel ??
+													`Account ${suggestion.index + 1}`;
+												const currentSuffix = suggestion.isCurrentAccount ? " | current" : "";
+												console.log(
+													`  ${suggestion.index + 1}. ${label}${currentSuffix} | score ${suggestion.score} | ${suggestion.reason}`,
+												);
+											}
+										}
+										console.log("");
+										const indexesToRemove = await promptCodexMultiAuthSyncPrune(
+											details.needToRemove,
+											details.suggestedRemovals,
+										);
+										if (!indexesToRemove || indexesToRemove.length === 0) {
+											await safeRestorePruneBackup("sync cancellation");
+											console.log("Sync cancelled.\n");
+											return;
+										}
+										let removalPlan: {
+											previewLines: string[];
+											targets: SyncRemovalTarget[];
+										};
+										try {
+											removalPlan = await buildSyncRemovalPlan(indexesToRemove);
+										} catch (planError) {
+											const message =
+												planError instanceof Error ? planError.message : String(planError);
+											await safeRestorePruneBackup("removal planning");
+											console.log(`\nSync failed: ${message}\n`);
+											return;
+										}
+										console.log("Dry run removal:");
+										for (const line of removalPlan.previewLines) {
+											console.log(`  ${line}`);
+										}
+										console.log(
+											"Accounts removed in this step cannot be recovered if the process is interrupted - ensure sync completes before closing.",
+										);
+										console.log("");
+										const confirmed = await confirm(
+											`Remove ${indexesToRemove.length} selected account(s) and retry sync? ` +
+												`Accounts cannot be recovered if the process is interrupted before sync completes.`,
+										);
+										if (!confirmed) {
+											await safeRestorePruneBackup("sync cancellation");
+											console.log("Sync cancelled.\n");
+											return;
+										}
+											if (!pruneBackup) {
+												pruneBackup = await createSyncPruneBackup();
+											}
+											await removeAccountsForSync(removalPlan.targets);
+											continue;
+										}
+										const message = error instanceof Error ? error.message : String(error);
+										await safeRestorePruneBackup("sync failure");
+										console.log(`\nSync failed: ${message}\n`);
+										return;
+									}
+								}
+								console.log(
+									"\nSync hit max retry limit - raise CODEX_AUTH_SYNC_MAX_ACCOUNTS or remove accounts manually.\n",
+								);
+								return;
+							};
+
+							const runCodexMultiAuthOverlapCleanup = async (): Promise<void> => {
+								try {
+									const preview = await previewCodexMultiAuthSyncedOverlapCleanup();
+									if (preview.removed <= 0 && preview.updated <= 0) {
+										console.log("\nNo synced overlaps found.\n");
+										return;
+									}
+									console.log("");
+									console.log("Cleanup preview.");
+									console.log(`Before: ${preview.before}`);
+									console.log(`After: ${preview.after}`);
+									console.log(`Would remove overlaps: ${preview.removed}`);
+									console.log(`Would update synced records: ${preview.updated}`);
+									console.log("A backup will be created before changes are applied.");
+									console.log("");
+									const confirmed = await confirm(
+										`Create a backup and apply synced overlap cleanup?`,
+									);
+									if (!confirmed) {
+										console.log("\nCleanup cancelled.\n");
+										return;
+									}
+									const backupPath = await createMaintenanceAccountsBackup(
+										"codex-maintenance-overlap-backup",
+									);
+									const result = await cleanupCodexMultiAuthSyncedOverlaps();
+									invalidateAccountManagerCache();
+									console.log("");
+									console.log("Cleanup complete.");
+									console.log(`Before: ${result.before}`);
+									console.log(`After: ${result.after}`);
+									console.log(`Removed overlaps: ${result.removed}`);
+									console.log(`Updated synced records: ${result.updated}`);
+									console.log(`Backup: ${backupPath}`);
+									console.log("");
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									console.log(`\nCleanup failed: ${message}\n`);
+								}
+							};
+
+							const runDuplicateEmailCleanup = async (): Promise<void> => {
+								try {
+									const preview = await previewDuplicateEmailCleanup();
+									if (preview.removed <= 0) {
+										console.log("\nNo legacy duplicate emails found.\n");
+										return;
+									}
+									console.log("");
+									console.log("Cleanup preview.");
+									console.log(`Before: ${preview.before}`);
+									console.log(`After: ${preview.after}`);
+									console.log(`Would remove legacy duplicates: ${preview.removed}`);
+									console.log("Only legacy accounts without organization or workspace IDs are eligible.");
+									console.log("A backup will be created before changes are applied.");
+									console.log("");
+									const confirmed = await confirm(
+										`Create a backup and remove ${preview.removed} legacy duplicate-email account(s)?`,
+									);
+									if (!confirmed) {
+										console.log("\nDuplicate email cleanup cancelled.\n");
+										return;
+									}
+									const backupPath = await createMaintenanceAccountsBackup(
+										"codex-maintenance-duplicate-email-backup",
+									);
+									const result = await cleanupDuplicateEmailAccounts();
+									if (result.removed > 0) {
+										invalidateAccountManagerCache();
+										console.log("");
+										console.log("Duplicate email cleanup complete.");
+										console.log(`Before: ${result.before}`);
+										console.log(`After: ${result.after}`);
+										console.log(`Removed duplicates: ${result.removed}`);
+										console.log(`Backup: ${backupPath}`);
+										console.log("");
+										return;
+									}
+
+									console.log("\nNo legacy duplicate emails found.\n");
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									console.log(`\nDuplicate email cleanup failed: ${message}\n`);
+								}
+							};
+
+							const pickBestAccountFromDashboard = async (
+								screenOverride?: DashboardOperationScreen | null,
+							): Promise<void> => {
+								const ui = resolveUiRuntime();
+								const screen =
+									screenOverride ??
+									createOperationScreen(ui, "Best Account", "Comparing accounts");
+								let screenFinished = false;
+								try {
+									const storage = await loadAccounts();
+									if (!storage || storage.accounts.length === 0) {
+										if (screen) {
+											screen.push("No accounts available.", "warning");
+											if (!screenOverride) {
+												await screen.finish();
+											}
+											screenFinished = true;
+										} else {
+											console.log("\nNo accounts available.\n");
+										}
+										return;
+									}
+
+									const now = Date.now();
+									const managerForFix = await AccountManager.loadFromDisk();
+									cachedAccountManager = managerForFix;
+									const explainability = managerForFix.getSelectionExplainability("codex", undefined, now);
+									const eligible = explainability
+										.filter((entry) => entry.eligible)
+										.sort((a, b) => {
+											if (b.healthScore !== a.healthScore) return b.healthScore - a.healthScore;
+											return b.tokensAvailable - a.tokensAvailable;
+										});
+									const best = eligible[0];
+									if (!best) {
+										if (screen) {
+											screen.push(`Compared ${explainability.length} account(s).`, "muted");
+											screen.push("No eligible account available.", "warning");
+											if (!screenOverride) {
+												await screen.finish();
+											}
+											screenFinished = true;
+										} else {
+											console.log("\nNo eligible account available.\n");
+										}
+										return;
+									}
+
+									let selectedAccount: AccountStorageV3["accounts"][number] | undefined;
+									await withAccountStorageTransaction(async (loadedStorage, persist) => {
+										const workingStorage =
+											loadedStorage ??
+											({
+												version: 3,
+												accounts: [],
+												activeIndex: 0,
+												activeIndexByFamily: {},
+											} satisfies AccountStorageV3);
+										if (!workingStorage.accounts[best.index]) {
+											throw new Error(`Best account ${best.index + 1} changed before selection.`);
+										}
+										workingStorage.activeIndex = best.index;
+										workingStorage.activeIndexByFamily = workingStorage.activeIndexByFamily ?? {};
+										for (const family of MODEL_FAMILIES) {
+											workingStorage.activeIndexByFamily[family] = best.index;
+										}
+										await persist(workingStorage);
+										selectedAccount = workingStorage.accounts[best.index];
+									});
+									invalidateAccountManagerCache();
+									const selectedLabel = formatCommandAccountLabel(selectedAccount, best.index);
+
+									if (screen) {
+										screen.push(`Compared ${explainability.length} account(s); ${eligible.length} eligible.`, "muted");
+										screen.push(`${getStatusMarker(ui, "ok")} ${selectedLabel}`, "success");
+										screen.push(
+											`Availability ready | risk low | health ${best.healthScore} | tokens ${best.tokensAvailable}`,
+											"muted",
+										);
+										if (best.reasons.length > 0) {
+											screen.push(`Why: ${best.reasons.slice(0, 3).join("; ")}`, "muted");
+										}
+										if (!screenOverride) {
+											await screen.finish([{ line: "Best account selected.", tone: "success" }]);
+										}
+										screenFinished = true;
+										return;
+									}
+
+									console.log(`\nSelected best account: ${selectedAccount?.email ?? `Account ${best.index + 1}`}\n`);
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									if (screen) {
+										screen.push(`Failed to pick best account: ${message}`, "danger");
+										if (!screenOverride) {
+											await screen.finish(undefined, { failed: true });
+										}
+										screenFinished = true;
+										return;
+									}
+									console.log(`\nFailed to pick best account: ${message}\n`);
+								} finally {
+									if (screen && !screenFinished && !screenOverride) {
+										screen.abort();
+									}
+								}
+							};
+
+							const runAutoRepairFromDashboard = async (): Promise<void> => {
+								const ui = resolveUiRuntime();
+								const screen = createOperationScreen(
+									ui,
+									"Auto-Fix",
+									"Checking and fixing common issues",
+								);
+								let screenFinished = false;
+								const emit = (
+									line: string,
+									tone: OperationTone = "normal",
+								) => {
+									const safeLine = sanitizeScreenText(line);
+									if (screen) {
+										screen.push(safeLine, tone);
+										return;
+									}
+									console.log(safeLine);
+								};
+								try {
+									const initialStorage = await loadAccounts();
+									if (!initialStorage || initialStorage.accounts.length === 0) {
+										emit("No accounts available.", "warning");
+										if (screen) {
+											await screen.finish();
+											screenFinished = true;
+										}
+										return;
+									}
+									const appliedFixes: string[] = [];
+									const fixErrors: string[] = [];
+									const backupPath = await createMaintenanceAccountsBackup("codex-auto-repair-backup");
+									emit(`Backup created: ${backupPath}`, "muted");
+									const cleanupResult = await cleanupCodexMultiAuthSyncedOverlaps();
+									if (cleanupResult.removed > 0) {
+										appliedFixes.push(`Removed ${cleanupResult.removed} synced overlap(s).`);
+										emit(`Removed ${cleanupResult.removed} synced overlap(s).`, "success");
+									}
+									const refreshedStorage = await withAccountStorageTransaction(
+										async (loadedStorage, persist) => {
+											if (!loadedStorage || loadedStorage.accounts.length === 0) {
+												return null;
+											}
+											const workingStorage: AccountStorageV3 = {
+												...loadedStorage,
+												accounts: loadedStorage.accounts.map((account) => ({ ...account })),
+												activeIndexByFamily: { ...(loadedStorage.activeIndexByFamily ?? {}) },
+											};
+
+											let changedByRefresh = false;
+											let refreshedCount = 0;
+											for (const account of workingStorage.accounts) {
+												try {
+													const refreshResult = await queuedRefresh(account.refreshToken);
+													if (refreshResult.type === "success") {
+														account.refreshToken = refreshResult.refresh;
+														account.accessToken = refreshResult.access;
+														account.expiresAt = refreshResult.expires;
+														changedByRefresh = true;
+														refreshedCount += 1;
+													}
+												} catch (error) {
+													fixErrors.push(error instanceof Error ? error.message : String(error));
+												}
+											}
+
+											if (changedByRefresh) {
+												await persist(workingStorage);
+											}
+											return {
+												changedByRefresh,
+												refreshedCount,
+											};
+										},
+									);
+									if (!refreshedStorage) {
+										emit("No accounts available after cleanup.", "warning");
+										if (screen) {
+											await screen.finish();
+											screenFinished = true;
+										}
+										return;
+									}
+
+									if (refreshedStorage.changedByRefresh) {
+										appliedFixes.push(`Refreshed ${refreshedStorage.refreshedCount} account token(s).`);
+										emit(`Refreshed ${refreshedStorage.refreshedCount} account token(s).`, "success");
+									}
+									await verifyFlaggedAccounts(screen);
+									await pickBestAccountFromDashboard(screen);
+									emit("");
+									emit("Auto-repair complete.", "success");
+									for (const entry of appliedFixes) {
+										emit(`- ${entry}`, "muted");
+									}
+									for (const entry of fixErrors) {
+										emit(`- warning: ${entry}`, "warning");
+									}
+									if (screen) {
+										await screen.finish();
+										screenFinished = true;
+									} else {
+										console.log("");
+									}
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									if (screen) {
+										screen.push(`Auto-repair failed: ${message}`, "danger");
+										await screen.finish(undefined, { failed: true });
+										screenFinished = true;
+									} else {
+										console.log(`\nAuto-repair failed: ${message}\n`);
+									}
+								} finally {
+									if (screen && !screenFinished) {
+										screen.abort();
+									}
+								}
 							};
 
 							if (!explicitLoginMode) {
@@ -3378,9 +4750,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 											accountLabel: account.accountLabel,
 											email: account.email,
 											index,
+											sourceIndex: index,
+											quickSwitchNumber: index + 1,
 											addedAt: account.addedAt,
 											lastUsed: account.lastUsed,
 											status,
+											quotaSummary: formatRateLimitEntry(account, now) ?? undefined,
 											isCurrentAccount: index === activeIndex,
 											enabled: account.enabled !== false,
 										};
@@ -3388,6 +4763,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 									const menuResult = await promptLoginMode(existingAccounts, {
 										flaggedCount: flaggedStorage.accounts.length,
+										syncFromCodexMultiAuthEnabled: getSyncFromCodexMultiAuthEnabled(loadPluginConfig()),
+										statusMessage: () => {
+											const snapshot = runtimeMetrics.lastSelectionSnapshot;
+											if (!snapshot) return undefined;
+											return snapshot.model ? `Current lens: ${snapshot.family}:${snapshot.model}` : `Current lens: ${snapshot.family}`;
+										},
 									});
 
 									if (menuResult.mode === "cancel") {
@@ -3412,6 +4793,33 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 									if (menuResult.mode === "verify-flagged") {
 										await verifyFlaggedAccounts();
+										continue;
+									}
+									if (menuResult.mode === "forecast") {
+										await pickBestAccountFromDashboard();
+										continue;
+									}
+									if (menuResult.mode === "fix") {
+										await runAutoRepairFromDashboard();
+										continue;
+									}
+									if (menuResult.mode === "settings") {
+										continue;
+									}
+									if (menuResult.mode === "experimental-toggle-sync") {
+										await toggleCodexMultiAuthSyncSetting();
+										continue;
+									}
+									if (menuResult.mode === "experimental-sync-now") {
+										await runCodexMultiAuthSync();
+										continue;
+									}
+									if (menuResult.mode === "experimental-cleanup-overlaps") {
+										await runCodexMultiAuthOverlapCleanup();
+										continue;
+									}
+									if (menuResult.mode === "maintenance-clean-duplicate-emails") {
+										await runDuplicateEmailCleanup();
 										continue;
 									}
 
@@ -3452,6 +4860,28 @@ while (attempted.size < Math.max(1, accountCount)) {
 											startFresh = false;
 											break;
 										}
+										if (typeof menuResult.switchAccountIndex === "number") {
+											const targetIndex = menuResult.switchAccountIndex;
+											let targetLabel: string | null = null;
+											await withAccountStorageTransaction(async (loadedStorage, persist) => {
+												const txStorage = loadedStorage;
+												if (!txStorage) return;
+												const target = txStorage.accounts[targetIndex];
+												if (!target) return;
+												txStorage.activeIndex = targetIndex;
+												txStorage.activeIndexByFamily = txStorage.activeIndexByFamily ?? {};
+												for (const family of MODEL_FAMILIES) {
+													txStorage.activeIndexByFamily[family] = targetIndex;
+												}
+												await persist(txStorage);
+												targetLabel = target.email ?? `Account ${targetIndex + 1}`;
+											});
+											if (targetLabel) {
+												invalidateAccountManagerCache();
+												console.log(`\nSet current account: ${targetLabel}.\n`);
+											}
+											continue;
+										}
 
 										continue;
 									}
@@ -3481,7 +4911,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 									? 1
 									: startFresh
 										? ACCOUNT_LIMITS.MAX_ACCOUNTS
-										: ACCOUNT_LIMITS.MAX_ACCOUNTS - existingCount;
+										: Number.isFinite(ACCOUNT_LIMITS.MAX_ACCOUNTS)
+											? ACCOUNT_LIMITS.MAX_ACCOUNTS - existingCount
+											: Number.POSITIVE_INFINITY;
 
 							if (availableSlots <= 0) {
 								return {
@@ -3600,7 +5032,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									});
 								}
 
-								if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+								if (
+									Number.isFinite(ACCOUNT_LIMITS.MAX_ACCOUNTS) &&
+									accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS
+								) {
 									break;
 								}
 

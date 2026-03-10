@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { showAuthMenu, showAccountDetails, type AccountInfo } from "../lib/ui/auth-menu.js";
+import {
+	showAuthMenu,
+	showAccountDetails,
+	showSettingsMenu,
+	showSyncPruneMenu,
+	type AccountInfo,
+} from "../lib/ui/auth-menu.js";
 import { setUiRuntimeOptions, resetUiRuntimeOptions } from "../lib/ui/runtime.js";
 import { select } from "../lib/ui/select.js";
 import { confirm } from "../lib/ui/confirm.js";
@@ -46,7 +52,7 @@ describe("auth-menu", () => {
 
 		const firstCall = vi.mocked(select).mock.calls[0];
 		expect(firstCall).toBeDefined();
-		const items = firstCall?.[0] as Array<{ label: string; value?: { type?: string } }>;
+		const items = firstCall?.[0] as Array<{ label: string; kind?: string; value?: { type?: string } }>;
 		const accountRows = items.filter((item) => item.value?.type === "select-account");
 		expect(accountRows).toHaveLength(2);
 		expect(accountRows[0]?.label).toContain("shared@example.com");
@@ -71,5 +77,74 @@ describe("auth-menu", () => {
 		expect(vi.mocked(confirm)).toHaveBeenCalledWith(
 			expect.stringContaining("shared@example.com | workspace:Workspace A | id:org-aaaa...bb2222"),
 		);
+	});
+
+	it("shows settings in the main auth menu", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "cancel" });
+
+		await showAuthMenu([]);
+
+		const firstCall = vi.mocked(select).mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const items = firstCall?.[0] as Array<{ label: string; value?: { type?: string } }>;
+		expect(items.some((item) => item.value?.type === "settings")).toBe(true);
+		expect(items.some((item) => item.label === "Settings" && item.kind === "heading")).toBe(true);
+	});
+
+	it("renders settings hub categories before sync actions", async () => {
+		vi.mocked(select)
+			.mockResolvedValueOnce("sync")
+			.mockResolvedValueOnce("cancel");
+
+		await showSettingsMenu(true);
+
+		const firstCall = vi.mocked(select).mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const hubItems = firstCall?.[0] as Array<{ label: string; value?: string; kind?: string }>;
+		expect(hubItems.some((item) => item.label === "Categories")).toBe(true);
+		expect(hubItems.some((item) => item.value === "sync")).toBe(true);
+		expect(hubItems.some((item) => item.value === "maintenance")).toBe(true);
+
+		const secondCall = vi.mocked(select).mock.calls[1];
+		expect(secondCall).toBeDefined();
+		const items = secondCall?.[0] as Array<{ label: string; value?: string }>;
+		const toggleItem = items.find((item) => item.value === "toggle-sync");
+		expect(toggleItem?.label).toContain("Sync from codex-multi-auth");
+		expect(toggleItem?.label).toContain("[enabled]");
+		expect(items.some((item) => item.label === "Sync")).toBe(true);
+		expect(items.some((item) => item.label === "Navigation")).toBe(true);
+	});
+
+	it("preselects suggested prune candidates and exposes confirm action", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "confirm" });
+
+		const result = await showSyncPruneMenu(1, [
+			{ index: 0, email: "current@example.com", isCurrentAccount: true, score: -1000, reason: "current" },
+			{ index: 2, email: "old@example.com", score: 180, reason: "disabled, not present in codex-multi-auth source" },
+		]);
+
+		expect(result).toEqual([2]);
+		const firstCall = vi.mocked(select).mock.calls[0];
+		expect(firstCall).toBeDefined();
+		const items = firstCall?.[0] as Array<{ label: string; value?: { type?: string } }>;
+		expect(items.some((item) => item.label.includes("Continue With Selected Accounts"))).toBe(true);
+		expect(firstCall?.[0][0]?.hint ?? "").toContain("score");
+	});
+
+	it("sanitizes quota summaries in account hints", async () => {
+		vi.mocked(select).mockResolvedValueOnce({ type: "cancel" });
+
+		await showAuthMenu([
+			{
+				index: 0,
+				email: "safe@example.com",
+				quotaSummary: "5h \u001b[31m100%\u001b[0m",
+			},
+		]);
+
+		const firstCall = vi.mocked(select).mock.calls[0];
+		const items = firstCall?.[0] as Array<{ hint?: string; value?: { type?: string } }>;
+		const accountRow = items.find((item) => item.value?.type === "select-account");
+		expect(accountRow?.hint ?? "").not.toContain("\u001b");
 	});
 });

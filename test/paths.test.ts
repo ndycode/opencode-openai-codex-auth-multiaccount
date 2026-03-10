@@ -4,20 +4,26 @@ import path from "node:path";
 
 vi.mock("node:fs", () => ({
 	existsSync: vi.fn(),
+	readFileSync: vi.fn(),
+	statSync: vi.fn(),
 }));
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import {
 	getConfigDir,
 	getProjectConfigDir,
 	getProjectGlobalConfigDir,
 	getProjectStorageKey,
+	getProjectStorageKeyCandidates,
 	isProjectDirectory,
 	findProjectRoot,
 	resolvePath,
 } from "../lib/storage/paths.js";
 
 const mockedExistsSync = vi.mocked(existsSync);
+const mockedReadFileSync = vi.mocked(readFileSync);
+const mockedStatSync = vi.mocked(statSync);
+const originalPlatform = process.platform;
 
 describe("Storage Paths Module", () => {
 	beforeEach(() => {
@@ -25,6 +31,7 @@ describe("Storage Paths Module", () => {
 	});
 
 	afterEach(() => {
+		Object.defineProperty(process, "platform", { value: originalPlatform });
 		vi.resetAllMocks();
 	});
 
@@ -56,6 +63,72 @@ describe("Storage Paths Module", () => {
 			const second = getProjectStorageKey(projectPath);
 			expect(first).toBe(second);
 			expect(first).toMatch(/^myproject-[a-f0-9]{12}$/);
+		});
+
+		it("preserves the legacy lowercase key prefix on Windows paths", () => {
+			Object.defineProperty(process, "platform", { value: "win32" });
+			const projectPath = "C:\\Users\\Test\\MyProject";
+			expect(getProjectStorageKey(projectPath)).toMatch(/^myproject-[a-f0-9]{12}$/);
+		});
+
+		it("uses the canonical git identity for same-repo worktrees", () => {
+			const mainWorktree = "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth";
+			const branchWorktree = "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-sync-worktree";
+			const mainGitPath = `${mainWorktree}\\.git`.toLowerCase();
+			const branchGitPath = `${branchWorktree}\\.git`.toLowerCase();
+			const sharedGitFile = "gitdir: C:/Users/neil/DevTools/oc-chatgpt-multi-auth/.git/worktrees/feature-sync\n";
+			mockedExistsSync.mockImplementation((candidate) => {
+				const normalized = String(candidate).replace(/\//g, "\\").toLowerCase();
+				return normalized === mainGitPath || normalized === branchGitPath;
+			});
+			mockedStatSync.mockImplementation((candidate) => {
+				const normalized = String(candidate).replace(/\//g, "\\").toLowerCase();
+				return {
+					isDirectory: () => normalized === mainGitPath,
+				} as ReturnType<typeof statSync>;
+			});
+			mockedReadFileSync.mockImplementation((candidate) => {
+				const normalized = String(candidate).replace(/\//g, "\\").toLowerCase();
+				if (normalized === branchGitPath) {
+					return sharedGitFile;
+				}
+				throw new Error(`unexpected read: ${String(candidate)}`);
+			});
+
+			expect(getProjectStorageKey(mainWorktree)).toBe(getProjectStorageKey(branchWorktree));
+		});
+	});
+
+	describe("getProjectStorageKeyCandidates", () => {
+		it("returns a shared canonical key for same-repo worktrees before the legacy fallback", () => {
+			const mainWorktree = "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth";
+			const branchWorktree = "C:\\Users\\neil\\DevTools\\oc-chatgpt-multi-auth-sync-worktree";
+			const mainGitPath = `${mainWorktree}\\.git`.toLowerCase();
+			const branchGitPath = `${branchWorktree}\\.git`.toLowerCase();
+			const sharedGitFile = "gitdir: C:/Users/neil/DevTools/oc-chatgpt-multi-auth/.git/worktrees/feature-sync\n";
+			mockedExistsSync.mockImplementation((candidate) => {
+				const normalized = String(candidate).replace(/\//g, "\\").toLowerCase();
+				return normalized === mainGitPath || normalized === branchGitPath;
+			});
+			mockedStatSync.mockImplementation((candidate) => {
+				const normalized = String(candidate).replace(/\//g, "\\").toLowerCase();
+				return {
+					isDirectory: () => normalized === mainGitPath,
+				} as ReturnType<typeof statSync>;
+			});
+			mockedReadFileSync.mockImplementation((candidate) => {
+				const normalized = String(candidate).replace(/\//g, "\\").toLowerCase();
+				if (normalized === branchGitPath) {
+					return sharedGitFile;
+				}
+				throw new Error(`unexpected read: ${String(candidate)}`);
+			});
+
+			const mainCandidates = getProjectStorageKeyCandidates(mainWorktree);
+			const branchCandidates = getProjectStorageKeyCandidates(branchWorktree);
+
+			expect(mainCandidates[0]).toBe(branchCandidates[0]);
+			expect(mainCandidates[1]).not.toBe(branchCandidates[1]);
 		});
 	});
 
@@ -127,6 +200,15 @@ describe("Storage Paths Module", () => {
 			const callCount = mockedExistsSync.mock.calls.length;
 			findProjectRoot("/a/b/c/d/e");
 			expect(mockedExistsSync.mock.calls.length).toBeGreaterThan(callCount);
+		});
+
+		it("returns the filesystem root when it contains a project marker", () => {
+			const root = path.parse(process.cwd()).root;
+			mockedExistsSync.mockImplementation((p) => {
+				return typeof p === "string" && p === path.join(root, ".git");
+			});
+			const nestedPath = path.join(root, "workspace", "repo", "src");
+			expect(findProjectRoot(nestedPath)).toBe(root);
 		});
 	});
 

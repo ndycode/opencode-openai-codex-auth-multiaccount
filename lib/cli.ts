@@ -1,18 +1,17 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { AccountIdSource } from "./types.js";
+import { ANSI_CSI_REGEX, CONTROL_CHAR_REGEX } from "./ui/ansi.js";
 import {
 	showAuthMenu,
 	showAccountDetails,
+	showSettingsMenu,
+	showSyncPruneMenu,
 	isTTY,
 	type AccountStatus,
 } from "./ui/auth-menu.js";
+import { UI_COPY } from "./ui/copy.js";
 
-/**
- * Detect if running in OpenCode Desktop/TUI mode where readline prompts don't work.
- * In TUI mode, stdin/stdout are controlled by the TUI renderer, so readline breaks.
- * Exported for testing purposes.
- */
 export function isNonInteractiveMode(): boolean {
 	if (process.env.FORCE_INTERACTIVE_MODE === "1") return false;
 	if (!input.isTTY || !output.isTTY) return true;
@@ -30,8 +29,8 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
 
 	const rl = createInterface({ input, output });
 	try {
-		console.log("\nTIP: use private browsing or sign out before adding another account.\n");
-		const answer = await rl.question(`Add another account? (${currentCount} added) (y/n): `);
+		console.log(`\n${UI_COPY.fallback.addAnotherTip}\n`);
+		const answer = await rl.question(UI_COPY.fallback.addAnotherQuestion(currentCount));
 		const normalized = answer.trim().toLowerCase();
 		return normalized === "y" || normalized === "yes";
 	} finally {
@@ -39,8 +38,110 @@ export async function promptAddAnotherAccount(currentCount: number): Promise<boo
 	}
 }
 
+export interface SyncPruneCandidate {
+	index: number;
+	email?: string;
+	accountLabel?: string;
+	isCurrentAccount?: boolean;
+	reason?: string;
+}
+
+function formatPruneCandidate(candidate: SyncPruneCandidate): string {
+	const label = formatAccountLabel(
+		{
+			index: candidate.index,
+			email: candidate.email,
+			accountLabel: candidate.accountLabel,
+			isCurrentAccount: candidate.isCurrentAccount,
+		},
+		candidate.index,
+	);
+	const details: string[] = [];
+	if (candidate.isCurrentAccount) details.push("current");
+	if (candidate.reason) details.push(candidate.reason);
+	return details.length > 0 ? `${label} | ${details.join(" | ")}` : label;
+}
+
+export async function promptCodexMultiAuthSyncPrune(
+	neededCount: number,
+	candidates: SyncPruneCandidate[],
+): Promise<number[] | null> {
+	if (isNonInteractiveMode()) {
+		return null;
+	}
+
+	const suggested = candidates
+		.filter((candidate) => candidate.isCurrentAccount !== true)
+		.slice(0, neededCount)
+		.map((candidate) => candidate.index);
+
+	if (isTTY()) {
+		return showSyncPruneMenu(neededCount, candidates);
+	}
+
+	const rl = createInterface({ input, output });
+	try {
+		console.log("");
+		console.log(`Sync needs ${neededCount} free slot(s).`);
+		console.log("Suggested removals:");
+		for (const candidate of candidates) {
+			console.log(`  ${formatPruneCandidate(candidate)}`);
+		}
+		console.log("");
+		console.log(
+			suggested.length >= neededCount
+				? "Press Enter to remove the suggested accounts, or enter comma-separated numbers."
+				: "Enter comma-separated account numbers to remove, or Q to cancel.",
+		);
+
+		while (true) {
+			const answer = await rl.question(`Remove at least ${neededCount} account(s): `);
+			const normalized = answer.trim();
+			if (!normalized) {
+				if (suggested.length >= neededCount) {
+					return suggested;
+				}
+				console.log("No default suggestion is available. Enter one or more account numbers.");
+				continue;
+			}
+
+			if (normalized.toLowerCase() === "q" || normalized.toLowerCase() === "quit") {
+				return null;
+			}
+
+			const parsed = normalized
+				.split(",")
+				.map((value) => Number.parseInt(value.trim(), 10))
+				.filter((value) => Number.isFinite(value))
+				.map((value) => value - 1);
+			const unique = Array.from(new Set(parsed));
+			if (unique.length < neededCount) {
+				console.log(`Select at least ${neededCount} unique account number(s).`);
+				continue;
+			}
+
+			const invalid = unique.filter((index) => !candidates.some((candidate) => candidate.index === index));
+			if (invalid.length > 0) {
+				console.log("One or more selected account numbers are not valid for removal.");
+				continue;
+			}
+
+			return unique;
+		}
+	} finally {
+		rl.close();
+	}
+}
+
 export type LoginMode =
 	| "add"
+	| "forecast"
+	| "fix"
+	| "settings"
+	| "experimental-toggle-sync"
+	| "experimental-sync-now"
+	| "experimental-cleanup-overlaps"
+	| "maintenance-clean-duplicate-emails"
 	| "fresh"
 	| "manage"
 	| "check"
@@ -53,15 +154,20 @@ export interface ExistingAccountInfo {
 	accountLabel?: string;
 	email?: string;
 	index: number;
+	sourceIndex?: number;
+	quickSwitchNumber?: number;
 	addedAt?: number;
 	lastUsed?: number;
 	status?: AccountStatus;
+	quotaSummary?: string;
 	isCurrentAccount?: boolean;
 	enabled?: boolean;
 }
 
 export interface LoginMenuOptions {
 	flaggedCount?: number;
+	syncFromCodexMultiAuthEnabled?: boolean;
+	statusMessage?: string | (() => string | undefined);
 }
 
 export interface LoginMenuResult {
@@ -69,14 +175,20 @@ export interface LoginMenuResult {
 	deleteAccountIndex?: number;
 	refreshAccountIndex?: number;
 	toggleAccountIndex?: number;
+	switchAccountIndex?: number;
 	deleteAll?: boolean;
 }
 
 function formatAccountLabel(account: ExistingAccountInfo, index: number): string {
-	const num = index + 1;
-	const label = account.accountLabel?.trim();
-	const email = account.email?.trim();
-	const accountId = account.accountId?.trim();
+	const num = account.quickSwitchNumber ?? (index + 1);
+	const sanitizeFallbackLabel = (value: string | undefined): string | undefined => {
+		if (!value) return undefined;
+		const sanitized = value.replace(ANSI_CSI_REGEX, "").replace(CONTROL_CHAR_REGEX, "").trim();
+		return sanitized.length > 0 ? sanitized : undefined;
+	};
+	const label = sanitizeFallbackLabel(account.accountLabel);
+	const email = sanitizeFallbackLabel(account.email);
+	const accountId = sanitizeFallbackLabel(account.accountId);
 	const accountIdDisplay =
 		accountId && accountId.length > 14
 			? `${accountId.slice(0, 8)}...${accountId.slice(-6)}`
@@ -85,23 +197,70 @@ function formatAccountLabel(account: ExistingAccountInfo, index: number): string
 	if (email) details.push(email);
 	if (label) details.push(`workspace:${label}`);
 	if (accountIdDisplay) details.push(`id:${accountIdDisplay}`);
-	if (details.length > 0) {
-		return `${num}. ${details.join(" | ")}`;
-	}
-	return `${num}. Account`;
+	return details.length > 0 ? `${num}. ${details.join(" | ")}` : `${num}. Account`;
 }
 
-async function promptDeleteAllTypedConfirm(): Promise<boolean> {
-	const rl = createInterface({ input, output });
+function resolveAccountSourceIndex(account: ExistingAccountInfo): number {
+	const sourceIndex =
+		typeof account.sourceIndex === "number" && Number.isFinite(account.sourceIndex)
+			? Math.max(0, Math.floor(account.sourceIndex))
+			: undefined;
+	if (typeof sourceIndex === "number") return sourceIndex;
+	if (typeof account.index === "number" && Number.isFinite(account.index)) {
+		return Math.max(0, Math.floor(account.index));
+	}
+	return -1;
+}
+
+async function promptDeleteAllTypedConfirm(
+	rl?: ReturnType<typeof createInterface>,
+): Promise<boolean> {
+	if (rl) {
+		const answer = await rl.question("Type DELETE to remove all saved accounts: ");
+		return answer.trim() === "DELETE";
+	}
+	const localRl = createInterface({ input, output });
 	try {
-		const answer = await rl.question("Type DELETE to confirm removing all accounts: ");
+		const answer = await localRl.question("Type DELETE to remove all saved accounts: ");
 		return answer.trim() === "DELETE";
 	} finally {
-		rl.close();
+		localRl.close();
 	}
 }
 
-async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+async function promptSettingsModeFallback(
+	rl: ReturnType<typeof createInterface>,
+	syncFromCodexMultiAuthEnabled: boolean,
+): Promise<LoginMenuResult | null> {
+	while (true) {
+		const syncState = syncFromCodexMultiAuthEnabled ? "enabled" : "disabled";
+		const answer = await rl.question(
+			`(t) toggle sync [${syncState}], (i) sync now, (c) cleanup overlaps, (d) clean legacy duplicate emails, (b) back [t/i/c/d/b]: `,
+		);
+		const normalized = answer.trim().toLowerCase();
+		if (normalized === "t" || normalized === "toggle") {
+			return { mode: "experimental-toggle-sync" };
+		}
+		if (normalized === "i" || normalized === "import" || normalized === "sync") {
+			return { mode: "experimental-sync-now" };
+		}
+		if (normalized === "c" || normalized === "cleanup") {
+			return { mode: "experimental-cleanup-overlaps" };
+		}
+		if (normalized === "d" || normalized === "dedupe" || normalized === "duplicates") {
+			return { mode: "maintenance-clean-duplicate-emails" };
+		}
+		if (normalized === "b" || normalized === "back") {
+			return null;
+		}
+		console.log("Use one of: t, i, c, d, b.");
+	}
+}
+
+async function promptLoginModeFallback(
+	existingAccounts: ExistingAccountInfo[],
+	options: LoginMenuOptions = {},
+): Promise<LoginMenuResult> {
 	const rl = createInterface({ input, output });
 	try {
 		if (existingAccounts.length > 0) {
@@ -113,15 +272,31 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
 		}
 
 		while (true) {
-			const answer = await rl.question("(a)dd, (f)resh, (c)heck, (d)eep, (v)erify flagged, or (q)uit? [a/f/c/d/v/q]: ");
+			const answer = await rl.question(UI_COPY.fallback.selectModePrompt);
 			const normalized = answer.trim().toLowerCase();
 			if (normalized === "a" || normalized === "add") return { mode: "add" };
-			if (normalized === "f" || normalized === "fresh") return { mode: "fresh", deleteAll: true };
+			if (normalized === "b" || normalized === "best" || normalized === "forecast") return { mode: "forecast" };
+			if (normalized === "x" || normalized === "fix") return { mode: "fix" };
+			if (normalized === "s" || normalized === "settings") {
+				const settingsResult = await promptSettingsModeFallback(
+					rl,
+					options.syncFromCodexMultiAuthEnabled === true,
+				);
+				if (settingsResult) return settingsResult;
+				continue;
+			}
+			if (normalized === "f" || normalized === "fresh") {
+				if (!(await promptDeleteAllTypedConfirm(rl))) {
+					console.log("\nDelete all cancelled.\n");
+					continue;
+				}
+				return { mode: "fresh", deleteAll: true };
+			}
 			if (normalized === "c" || normalized === "check") return { mode: "check" };
 			if (normalized === "d" || normalized === "deep") return { mode: "deep-check" };
-			if (normalized === "v" || normalized === "verify") return { mode: "verify-flagged" };
+			if (normalized === "g" || normalized === "verify" || normalized === "problem") return { mode: "verify-flagged" };
 			if (normalized === "q" || normalized === "quit") return { mode: "cancel" };
-			console.log("Please enter one of: a, f, c, d, v, q.");
+			console.log(UI_COPY.fallback.invalidModePrompt);
 		}
 	} finally {
 		rl.close();
@@ -137,20 +312,33 @@ export async function promptLoginMode(
 	}
 
 	if (!isTTY()) {
-		return promptLoginModeFallback(existingAccounts);
+		return promptLoginModeFallback(existingAccounts, options);
 	}
 
 	while (true) {
 		const action = await showAuthMenu(existingAccounts, {
 			flaggedCount: options.flaggedCount ?? 0,
+			statusMessage: options.statusMessage,
 		});
 
 		switch (action.type) {
 			case "add":
 				return { mode: "add" };
+			case "forecast":
+				return { mode: "forecast" };
+			case "fix":
+				return { mode: "fix" };
+			case "settings": {
+				const settingsAction = await showSettingsMenu(options.syncFromCodexMultiAuthEnabled === true);
+				if (settingsAction === "toggle-sync") return { mode: "experimental-toggle-sync" };
+				if (settingsAction === "sync-now") return { mode: "experimental-sync-now" };
+				if (settingsAction === "cleanup-overlaps") return { mode: "experimental-cleanup-overlaps" };
+				if (settingsAction === "cleanup-duplicate-emails") return { mode: "maintenance-clean-duplicate-emails" };
+				continue;
+			}
 			case "fresh":
 				if (!(await promptDeleteAllTypedConfirm())) {
-					console.log("\nDelete-all cancelled.\n");
+					console.log("\nDelete all cancelled.\n");
 					continue;
 				}
 				return { mode: "fresh", deleteAll: true };
@@ -160,22 +348,45 @@ export async function promptLoginMode(
 				return { mode: "deep-check" };
 			case "verify-flagged":
 				return { mode: "verify-flagged" };
+			case "set-current-account": {
+				const index = resolveAccountSourceIndex(action.account);
+				if (index >= 0) return { mode: "manage", switchAccountIndex: index };
+				console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
+				continue;
+			}
 			case "select-account": {
 				const accountAction = await showAccountDetails(action.account);
 				if (accountAction === "delete") {
-					return { mode: "manage", deleteAccountIndex: action.account.index };
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", deleteAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
+					continue;
+				}
+				if (accountAction === "set-current") {
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", switchAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
+					continue;
 				}
 				if (accountAction === "refresh") {
-					return { mode: "manage", refreshAccountIndex: action.account.index };
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", refreshAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
+					continue;
 				}
 				if (accountAction === "toggle") {
-					return { mode: "manage", toggleAccountIndex: action.account.index };
+					const index = resolveAccountSourceIndex(action.account);
+					if (index >= 0) return { mode: "manage", toggleAccountIndex: index };
+					console.log("\nUnable to resolve the selected account. Refresh the menu and try again.\n");
+					continue;
 				}
 				continue;
 			}
+			case "search":
+				continue;
 			case "delete-all":
 				if (!(await promptDeleteAllTypedConfirm())) {
-					console.log("\nDelete-all cancelled.\n");
+					console.log("\nDelete all cancelled.\n");
 					continue;
 				}
 				return { mode: "fresh", deleteAll: true };

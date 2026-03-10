@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, promises as fs } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
@@ -11,6 +11,8 @@ import { logWarn } from "./logger.js";
 import { PluginConfigSchema, getValidationErrors } from "./schemas.js";
 
 const CONFIG_PATH = join(homedir(), ".opencode", "openai-codex-auth-config.json");
+const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
+const STALE_CONFIG_LOCK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const TUI_COLOR_PROFILES = new Set(["truecolor", "ansi16", "ansi256"]);
 const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
@@ -18,6 +20,8 @@ const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
+
+type RawPluginConfig = Record<string, unknown>;
 
 /**
  * Default plugin configuration
@@ -69,9 +73,7 @@ export function loadPluginConfig(): PluginConfig {
 			return DEFAULT_CONFIG;
 		}
 
-		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
-		const normalizedFileContent = stripUtf8Bom(fileContent);
-		const userConfig = JSON.parse(normalizedFileContent) as unknown;
+		const userConfig = readRawPluginConfig(false) as unknown;
 		const hasFallbackEnvOverride =
 			process.env.CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL !== undefined ||
 			process.env.CODEX_AUTH_FALLBACK_GPT53_TO_GPT52 !== undefined;
@@ -106,12 +108,276 @@ export function loadPluginConfig(): PluginConfig {
 	}
 }
 
+function readRawPluginConfig(recoverInvalid = false): RawPluginConfig {
+	if (!existsSync(CONFIG_PATH)) {
+		return {};
+	}
+
+	try {
+		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
+		const normalizedFileContent = stripUtf8Bom(fileContent);
+		const parsed = JSON.parse(normalizedFileContent) as unknown;
+		if (!isRecord(parsed)) {
+			throw new Error("Plugin config root must be a JSON object");
+		}
+		return { ...parsed };
+	} catch (error) {
+		if (recoverInvalid) {
+			logWarn(`Failed to read raw plugin config from ${CONFIG_PATH}: ${(error as Error).message}`);
+			return {};
+		}
+		throw error;
+	}
+}
+
+async function readRawPluginConfigAsync(recoverInvalid = false): Promise<RawPluginConfig> {
+	try {
+		const fileContent = await fs.readFile(CONFIG_PATH, "utf-8");
+		const normalizedFileContent = stripUtf8Bom(fileContent);
+		const parsed = JSON.parse(normalizedFileContent) as unknown;
+		if (!isRecord(parsed)) {
+			throw new Error("Plugin config root must be a JSON object");
+		}
+		return { ...parsed };
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") {
+			return {};
+		}
+		if (recoverInvalid) {
+			logWarn(`Failed to read raw plugin config from ${CONFIG_PATH}: ${(error as Error).message}`);
+			return {};
+		}
+		throw error;
+	}
+}
+
+export async function savePluginConfigMutation(
+	mutate: (current: RawPluginConfig) => RawPluginConfig,
+	options: { recoverInvalidCurrent?: boolean } = {},
+): Promise<void> {
+	await withPluginConfigLock(async () => {
+		const current = await readRawPluginConfigAsync(options.recoverInvalidCurrent === true);
+		const next = mutate({ ...current });
+
+		if (!isRecord(next)) {
+			throw new Error("Plugin config mutation must return a JSON object");
+		}
+
+		const tempPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
+		let tempFilePresent = false;
+		try {
+			await fs.writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+				encoding: "utf-8",
+				mode: 0o600,
+			});
+			tempFilePresent = true;
+			try {
+				await fs.rename(tempPath, CONFIG_PATH);
+				tempFilePresent = false;
+				return;
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (
+					process.platform === "win32" &&
+					(code === "EEXIST" || code === "EPERM") &&
+					existsSync(CONFIG_PATH)
+				) {
+					const backupPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.bak`;
+					let backupMoved = false;
+					try {
+						await fs.rename(CONFIG_PATH, backupPath);
+						backupMoved = true;
+						await fs.rename(tempPath, CONFIG_PATH);
+						tempFilePresent = false;
+						try {
+							await fs.unlink(backupPath);
+						} catch {
+							// best effort backup cleanup
+						}
+						backupMoved = false;
+						return;
+					} catch (retryError) {
+						if (backupMoved) {
+							try {
+								if (!existsSync(CONFIG_PATH)) {
+									await fs.rename(backupPath, CONFIG_PATH);
+								}
+							} catch {
+								// best effort config restore
+							}
+							backupMoved = false;
+						}
+						throw retryError;
+					} finally {
+						if (backupMoved) {
+							try {
+								await fs.unlink(backupPath);
+							} catch {
+								// best effort backup cleanup
+							}
+						}
+					}
+				}
+				throw error;
+			}
+		} finally {
+			if (tempFilePresent) {
+				try {
+					await fs.unlink(tempPath);
+				} catch {
+					// best effort temp cleanup
+				}
+			}
+		}
+	});
+}
+
 function stripUtf8Bom(content: string): string {
 	return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object";
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function sleepAsync(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return code !== "ESRCH";
+	}
+}
+
+async function cleanupStalePluginConfigLockArtifacts(): Promise<void> {
+	const lockDir = dirname(CONFIG_LOCK_PATH);
+	const staleLockPrefix = `${basename(CONFIG_LOCK_PATH)}.`;
+	try {
+		const entries = await fs.readdir(lockDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.startsWith(staleLockPrefix) || !entry.name.endsWith(".stale")) {
+				continue;
+			}
+			const stalePath = join(lockDir, entry.name);
+			try {
+				const stats = await fs.stat(stalePath);
+				if (Date.now() - stats.mtimeMs < STALE_CONFIG_LOCK_MAX_AGE_MS) {
+					continue;
+				}
+				await fs.unlink(stalePath);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				logWarn(`Failed to remove stale plugin config lock artifact ${stalePath}: ${message}`);
+			}
+		}
+	} catch {
+		// best effort stale-lock cleanup only
+	}
+}
+
+async function tryRecoverStalePluginConfigLock(rawLockContents: string): Promise<boolean> {
+	const lockOwnerPid = Number.parseInt(rawLockContents.trim(), 10);
+	if (
+		!Number.isFinite(lockOwnerPid) ||
+		lockOwnerPid === process.pid ||
+		isProcessAlive(lockOwnerPid)
+	) {
+		return false;
+	}
+
+	const staleLockPath = `${CONFIG_LOCK_PATH}.${lockOwnerPid}.${process.pid}.${Date.now()}.stale`;
+	try {
+		await fs.rename(CONFIG_LOCK_PATH, staleLockPath);
+	} catch {
+		return false;
+	}
+
+	try {
+		const movedLockContents = await fs.readFile(staleLockPath, "utf-8");
+		if (movedLockContents !== rawLockContents) {
+			try {
+				if (!existsSync(CONFIG_LOCK_PATH)) {
+					await fs.rename(staleLockPath, CONFIG_LOCK_PATH);
+				}
+			} catch {
+				// best effort restore when a live lock was moved unexpectedly
+			}
+			return false;
+		}
+	} catch {
+		try {
+			if (!existsSync(CONFIG_LOCK_PATH)) {
+				await fs.rename(staleLockPath, CONFIG_LOCK_PATH);
+			}
+		} catch {
+			// best effort restore when stale-lock verification fails
+		}
+		return false;
+	}
+
+	if (existsSync(CONFIG_LOCK_PATH)) {
+		try {
+			await fs.unlink(staleLockPath);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logWarn(`Failed to remove stale plugin config lock artifact ${staleLockPath}: ${message}`);
+		}
+		return false;
+	}
+
+	try {
+		await fs.unlink(staleLockPath);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		logWarn(`Failed to remove stale plugin config lock artifact ${staleLockPath}: ${message}`);
+	}
+	return true;
+}
+
+async function withPluginConfigLock<T>(fn: () => T | Promise<T>): Promise<T> {
+	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+	await cleanupStalePluginConfigLockArtifacts();
+	const deadline = Date.now() + 5_000;
+	while (true) {
+		try {
+			await fs.writeFile(CONFIG_LOCK_PATH, `${process.pid}`, { encoding: "utf-8", flag: "wx" });
+			break;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			const retryableLockError =
+				code === "EEXIST" || (process.platform === "win32" && (code === "EPERM" || code === "EBUSY"));
+			if (!retryableLockError || Date.now() >= deadline) {
+				throw error;
+			}
+			if (existsSync(CONFIG_LOCK_PATH) && (code === "EEXIST" || (process.platform === "win32" && (code === "EPERM" || code === "EBUSY")))) {
+				try {
+					const rawLockContents = await fs.readFile(CONFIG_LOCK_PATH, "utf-8");
+					if (await tryRecoverStalePluginConfigLock(rawLockContents)) {
+						continue;
+					}
+				} catch {
+					// best effort stale-lock recovery
+				}
+			}
+			await sleepAsync(25 + Math.floor(Math.random() * 25));
+		}
+	}
+
+	try {
+		return await fn();
+	} finally {
+		try {
+			await fs.unlink(CONFIG_LOCK_PATH);
+		} catch {
+			// best effort cleanup
+		}
+	}
 }
 
 /**
@@ -196,6 +462,24 @@ export function getRequestTransformMode(pluginConfig: PluginConfig): "native" | 
 
 export function getCodexTuiV2(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting("CODEX_TUI_V2", pluginConfig.codexTuiV2, true);
+}
+
+export function getSyncFromCodexMultiAuthEnabled(pluginConfig: PluginConfig): boolean {
+	return pluginConfig.experimental?.syncFromCodexMultiAuth?.enabled === true;
+}
+
+export async function setSyncFromCodexMultiAuthEnabled(enabled: boolean): Promise<void> {
+	await savePluginConfigMutation((current) => {
+		const experimental = isRecord(current.experimental) ? { ...current.experimental } : {};
+		const syncSettings = isRecord(experimental.syncFromCodexMultiAuth)
+			? { ...experimental.syncFromCodexMultiAuth }
+			: {};
+
+		syncSettings.enabled = enabled;
+		experimental.syncFromCodexMultiAuth = syncSettings;
+		current.experimental = experimental;
+		return current;
+	});
 }
 
 export function getCodexTuiColorProfile(
