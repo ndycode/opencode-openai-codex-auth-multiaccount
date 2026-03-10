@@ -771,6 +771,7 @@ describe('Plugin Configuration', () => {
 		it('surfaces malformed config files instead of replacing them', async () => {
 			mockExistsSync.mockReturnValue(true);
 			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue('{ invalid json' as never);
+			const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as never);
 			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
 			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
 
@@ -780,6 +781,7 @@ describe('Plugin Configuration', () => {
 				expect(renameSpy).not.toHaveBeenCalled();
 			} finally {
 				readSpy.mockRestore();
+				mkdirSpy.mockRestore();
 				writeSpy.mockRestore();
 				renameSpy.mockRestore();
 			}
