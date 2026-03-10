@@ -159,6 +159,30 @@ async function renameWithWindowsRetry(sourcePath: string, destinationPath: strin
   }
 }
 
+async function copyFileWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
+  let lastError: NodeJS.ErrnoException | null = null;
+
+  for (let attempt = 0; attempt < WINDOWS_RENAME_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await fs.copyFile(sourcePath, destinationPath);
+      return;
+    } catch (error) {
+      if (isWindowsLockError(error)) {
+        lastError = error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, WINDOWS_RENAME_RETRY_BASE_DELAY_MS * 2 ** attempt),
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+}
+
 async function writeFileWithTimeout(filePath: string, content: string, timeoutMs: number): Promise<void> {
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
@@ -1042,7 +1066,10 @@ async function loadFlaggedAccountsUnlocked(
 	const removeOrphanedFlaggedAccounts = async (
 		storage: FlaggedAccountStorageV1,
 	): Promise<FlaggedAccountStorageV1> => {
-		const accounts = accountsSnapshot ?? (await loadAccountsInternal(saveAccountsUnlocked));
+		const accounts =
+			accountsSnapshot === undefined
+				? await loadAccountsInternal(saveAccountsUnlocked)
+				: accountsSnapshot;
 		if (!accounts) {
 			return storage;
 		}
@@ -1271,7 +1298,7 @@ export async function backupRawAccountsFile(filePath: string, force = true): Pro
 		}
 
 		await fs.mkdir(dirname(resolvedPath), { recursive: true });
-		await fs.copyFile(storagePath, resolvedPath);
+		await copyFileWithWindowsRetry(storagePath, resolvedPath);
 		await fs.chmod(resolvedPath, 0o600).catch((chmodErr) => {
 			log.warn("Failed to restrict backup file permissions", {
 				path: resolvedPath,
@@ -1336,6 +1363,9 @@ export async function importAccounts(
       const preparedNormalized = normalizeAccountStorage(prepared);
       if (!preparedNormalized) {
         throw new Error("prepare() returned invalid account storage");
+      }
+      if (preparedNormalized.accounts.length > normalized.accounts.length) {
+        throw new Error("prepare() must return a subset of normalized import accounts");
       }
       const skippedByPrepare = Math.max(0, normalized.accounts.length - preparedNormalized.accounts.length);
       const existingStorage: AccountStorageV3 =
