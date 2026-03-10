@@ -1198,15 +1198,8 @@ export class CodexMultiAuthSyncCapacityError extends Error {
 }
 
 export async function previewCodexMultiAuthSyncedOverlapCleanup(): Promise<CodexMultiAuthCleanupResult> {
-	return withAccountStorageTransaction((current) => {
-		const fallback = current ?? {
-			version: 3 as const,
-			accounts: [],
-			activeIndex: 0,
-			activeIndexByFamily: {},
-		};
-		return Promise.resolve(buildCodexMultiAuthOverlapCleanupPlan(fallback).result);
-	});
+	const current = await loadAccounts();
+	return buildCodexMultiAuthOverlapCleanupPlan(current ?? createEmptyAccountStorage()).result;
 }
 
 export async function cleanupCodexMultiAuthSyncedOverlaps(

@@ -227,8 +227,10 @@ async function promptLoginModeFallback(
 			console.log("");
 		}
 
-			while (true) {
-					const answer = await rl.question("(a)dd, (f)resh, (c)heck, (d)eep, (v)erify flagged, s(y)nc tools, or (q)uit? [a/f/c/d/v/s/y/q]: ");
+		while (true) {
+			const answer = await rl.question(
+				"(a)dd, (f)resh, (c)heck, (d)eep, (v)erify flagged, s(y)nc tools, or (q)uit? [a/f/c/d/v/s/y/q]: ",
+			);
 			const normalized = answer.trim().toLowerCase();
 			if (normalized === "a" || normalized === "add") return { mode: "add" };
 			if (normalized === "f" || normalized === "fresh") return { mode: "fresh", deleteAll: true };
@@ -244,10 +246,10 @@ async function promptLoginModeFallback(
 				continue;
 			}
 			if (normalized === "q" || normalized === "quit") return { mode: "cancel" };
-					console.log("Please enter one of: a, f, c, d, v, s, y, q.");
-			}
+			console.log("Please enter one of: a, f, c, d, v, s, y, q.");
+		}
 	} finally {
-			rl.close();
+		rl.close();
 	}
 }
 
