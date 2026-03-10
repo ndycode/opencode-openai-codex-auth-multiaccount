@@ -16,6 +16,7 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
+let configMutationMutex: Promise<void> = Promise.resolve();
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -115,6 +116,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 type RawPluginConfig = Record<string, unknown>;
+
+function withConfigMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+	const previous = configMutationMutex;
+	let release: () => void;
+	configMutationMutex = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return previous.then(fn).finally(() => release());
+}
+
+async function renameConfigWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
+	let lastError: NodeJS.ErrnoException | null = null;
+	for (let attempt = 0; attempt < 5; attempt += 1) {
+		try {
+			await fs.rename(sourcePath, destinationPath);
+			return;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (process.platform === "win32" && (code === "EPERM" || code === "EBUSY")) {
+				lastError = error as NodeJS.ErrnoException;
+				await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+				continue;
+			}
+			throw error;
+		}
+	}
+	if (lastError) {
+		throw lastError;
+	}
+}
 
 /**
  * Get the effective CODEX_MODE setting
@@ -507,22 +538,35 @@ export function getStreamStallTimeoutMs(pluginConfig: PluginConfig): number {
 async function savePluginConfigMutation(
 	mutate: (current: RawPluginConfig) => RawPluginConfig,
 ): Promise<void> {
-	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
-	const current = existsSync(CONFIG_PATH)
-		? (() => {
+	await withConfigMutationLock(async () => {
+		await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+		const current = existsSync(CONFIG_PATH)
+			? await (async () => {
+				try {
+					const raw = stripUtf8Bom(await fs.readFile(CONFIG_PATH, "utf-8"));
+					const parsed = JSON.parse(raw) as unknown;
+					return isRecord(parsed) ? { ...parsed } : {};
+				} catch {
+					return {};
+				}
+			})()
+			: {};
+		const next = mutate(current);
+		const tempPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
+		try {
+			await fs.writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+				encoding: "utf-8",
+				mode: 0o600,
+			});
+			await renameConfigWithWindowsRetry(tempPath, CONFIG_PATH);
+		} catch (error) {
 			try {
-				const raw = stripUtf8Bom(readFileSync(CONFIG_PATH, "utf-8"));
-				const parsed = JSON.parse(raw) as unknown;
-				return isRecord(parsed) ? { ...parsed } : {};
+				await fs.unlink(tempPath);
 			} catch {
-				return {};
+				// Best effort cleanup only.
 			}
-		})()
-		: {};
-	const next = mutate(current);
-	await fs.writeFile(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`, {
-		encoding: "utf-8",
-		mode: 0o600,
+			throw error;
+		}
 	});
 }
 

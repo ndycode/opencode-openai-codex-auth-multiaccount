@@ -191,12 +191,17 @@ export async function promptCodexMultiAuthSyncPrune(
 				return null;
 			}
 
-			const parsed = normalized
-				.split(",")
-				.map((value) => Number.parseInt(value.trim(), 10))
-				.filter((value) => Number.isFinite(value))
-				.map((value) => value - 1);
-			const unique = Array.from(new Set(parsed));
+			const tokens = normalized.split(",").map((value) => value.trim());
+			if (tokens.length === 0 || tokens.some((value) => !/^\d+$/.test(value))) {
+				console.log("Enter comma-separated account numbers (for example: 1,2).");
+				continue;
+			}
+			const allowedIndexes = new Set(candidates.map((candidate) => candidate.index));
+			const unique = Array.from(new Set(tokens.map((value) => Number.parseInt(value, 10) - 1)));
+			if (unique.some((index) => !allowedIndexes.has(index))) {
+				console.log("Enter only account numbers shown above.");
+				continue;
+			}
 			if (unique.length < neededCount) {
 				console.log(`Select at least ${neededCount} unique account number(s).`);
 				continue;

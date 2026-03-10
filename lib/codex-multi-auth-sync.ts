@@ -906,11 +906,15 @@ function getSyncCapacityLimit(): number {
 	if (override.length === 0) {
 		return ACCOUNT_LIMITS.MAX_ACCOUNTS;
 	}
-	const parsed = Number(override);
-	if (Number.isFinite(parsed) && parsed > 0) {
-		return parsed;
+	if (/^\d+$/.test(override)) {
+		const parsed = Number.parseInt(override, 10);
+		if (parsed > 0) {
+			return Number.isFinite(ACCOUNT_LIMITS.MAX_ACCOUNTS)
+				? Math.min(parsed, ACCOUNT_LIMITS.MAX_ACCOUNTS)
+				: parsed;
+		}
 	}
-	const message = `${SYNC_MAX_ACCOUNTS_OVERRIDE_ENV} override value "${override}" is not a positive finite number; ignoring.`;
+	const message = `${SYNC_MAX_ACCOUNTS_OVERRIDE_ENV} override value "${override}" is not a positive integer; ignoring.`;
 	logWarn(message);
 	try {
 		process.stderr.write(`${message}\n`);

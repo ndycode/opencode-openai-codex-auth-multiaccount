@@ -1016,11 +1016,19 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 
 async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Promise<void> {
 	const path = getFlaggedAccountsPath();
+	const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+	const tempPath = `${path}.${uniqueSuffix}.tmp`;
 	try {
 		await fs.mkdir(dirname(path), { recursive: true });
 		const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
-		await fs.writeFile(path, content, { encoding: "utf-8", mode: 0o600 });
+		await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+		await renameWithWindowsRetry(tempPath, path);
 	} catch (error) {
+		try {
+			await fs.unlink(tempPath);
+		} catch {
+			// Ignore cleanup failures.
+		}
 		log.error("Failed to save flagged account storage", { path, error: String(error) });
 		throw error;
 	}

@@ -1451,7 +1451,7 @@ describe("codex-multi-auth sync", () => {
 			accountsPath: globalPath,
 		});
 		expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
-			expect.stringContaining('CODEX_AUTH_SYNC_MAX_ACCOUNTS override value "0" is not a positive finite number; ignoring.'),
+			expect.stringContaining('CODEX_AUTH_SYNC_MAX_ACCOUNTS override value "0" is not a positive integer; ignoring.'),
 		);
 	});
 

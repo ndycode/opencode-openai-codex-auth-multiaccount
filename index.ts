@@ -3534,27 +3534,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 								});
 
 								if (removedTargets.length > 0) {
-									const removedFlaggedKeys = new Set(
-										removedTargets.map((entry) =>
-											getSyncRemovalTargetKey({
-												refreshToken: entry.account.refreshToken,
-												organizationId: entry.account.organizationId,
-												accountId: entry.account.accountId,
-											}),
-										),
+									const removedRefreshTokens = new Set(
+										removedTargets.map((entry) => entry.account.refreshToken),
 									);
 									await withFlaggedAccountsTransaction(async (currentFlaggedStorage, persist) => {
 										await persist({
 											version: 1,
 											accounts: currentFlaggedStorage.accounts.filter(
-												(flagged) =>
-													!removedFlaggedKeys.has(
-														getSyncRemovalTargetKey({
-															refreshToken: flagged.refreshToken,
-															organizationId: flagged.organizationId,
-															accountId: flagged.accountId,
-														}),
-													),
+												(flagged) => !removedRefreshTokens.has(flagged.refreshToken),
 											),
 										});
 									});
