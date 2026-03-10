@@ -24,6 +24,8 @@
  */
 
 import { tool } from "@opencode-ai/plugin/tool";
+import { promises as fsPromises } from "node:fs";
+import { dirname } from "node:path";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
 import {
@@ -35,7 +37,7 @@ import {
 import { queuedRefresh, getRefreshQueueMetrics } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
-import { promptAddAnotherAccount, promptLoginMode } from "./lib/cli.js";
+import { promptAddAnotherAccount, promptCodexMultiAuthSyncPrune, promptLoginMode } from "./lib/cli.js";
 import {
 	getCodexMode,
 	getRequestTransformMode,
@@ -65,7 +67,9 @@ import {
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
 	getBeginnerSafeMode,
+	getSyncFromCodexMultiAuthEnabled,
 	loadPluginConfig,
+	setSyncFromCodexMultiAuthEnabled,
 } from "./lib/config.js";
 import {
         AUTH_LABELS,
@@ -115,11 +119,14 @@ import {
 	importAccounts,
 	previewImportAccounts,
 	createTimestampedBackupPath,
+	loadAccountAndFlaggedStorageSnapshot,
 	loadFlaggedAccounts,
+	normalizeAccountStorage,
 	saveFlaggedAccounts,
 	clearFlaggedAccounts,
 	StorageError,
 	formatStorageErrorHint,
+	withFlaggedAccountsTransaction,
 	type AccountStorageV3,
 	type FlaggedAccountMetadataV1,
 } from "./lib/storage.js";
@@ -151,6 +158,7 @@ import {
 import { addJitter } from "./lib/rotation.js";
 import { buildTableHeader, buildTableRow, type TableOptions } from "./lib/table-formatter.js";
 import { setUiRuntimeOptions, type UiRuntimeOptions } from "./lib/ui/runtime.js";
+import { confirm } from "./lib/ui/confirm.js";
 import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyValue, formatUiSection } from "./lib/ui/format.js";
 import {
 	buildBeginnerChecklist,
@@ -182,6 +190,16 @@ import {
 	detectErrorType,
 	getRecoveryToastContent,
 } from "./lib/recovery.js";
+import {
+	CodexMultiAuthSyncCapacityError,
+	cleanupCodexMultiAuthSyncedOverlaps,
+	isCodexMultiAuthSourceTooLargeForCapacity,
+	loadCodexMultiAuthSourceStorage,
+	previewCodexMultiAuthSyncedOverlapCleanup,
+	previewSyncFromCodexMultiAuth,
+	syncFromCodexMultiAuth,
+} from "./lib/codex-multi-auth-sync.js";
+import { createSyncPruneBackupPayload } from "./lib/sync-prune-backup.js";
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -3337,6 +3355,410 @@ while (attempted.size < Math.max(1, accountCount)) {
 								console.log("");
 							};
 
+							type SyncRemovalTarget = {
+								refreshToken: string;
+								organizationId?: string;
+								accountId?: string;
+							};
+							type SyncRemovalSuggestion = SyncRemovalTarget & {
+								index: number;
+								email?: string;
+								accountLabel?: string;
+								isCurrentAccount: boolean;
+								score: number;
+								reason: string;
+							};
+
+							const getSyncRemovalTargetKey = (target: SyncRemovalTarget): string => {
+								return `${target.organizationId ?? ""}|${target.accountId ?? ""}|${target.refreshToken}`;
+							};
+
+							const findAccountIndexByExactIdentity = (
+								accounts: AccountStorageV3["accounts"],
+								target: SyncRemovalTarget | null | undefined,
+							): number => {
+								if (!target || !target.refreshToken) return -1;
+								const targetKey = getSyncRemovalTargetKey(target);
+								return accounts.findIndex((account) =>
+									getSyncRemovalTargetKey({
+										refreshToken: account.refreshToken,
+										organizationId: account.organizationId,
+										accountId: account.accountId,
+									}) === targetKey,
+								);
+							};
+
+							const toggleCodexMultiAuthSyncSetting = async (): Promise<void> => {
+								try {
+									const currentConfig = loadPluginConfig();
+									const enabled = getSyncFromCodexMultiAuthEnabled(currentConfig);
+									await setSyncFromCodexMultiAuthEnabled(!enabled);
+									console.log(`\nSync from codex-multi-auth ${!enabled ? "enabled" : "disabled"}.\n`);
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									console.log(`\nFailed to update sync setting: ${message}\n`);
+								}
+							};
+
+							const createSyncPruneBackup = async (): Promise<{
+								backupPath: string;
+								restore: () => Promise<void>;
+							}> => {
+								const { accounts: loadedAccountsStorage, flagged: currentFlaggedStorage } =
+									await loadAccountAndFlaggedStorageSnapshot();
+								const currentAccountsStorage =
+									loadedAccountsStorage ??
+									({
+										version: 3,
+										accounts: [],
+										activeIndex: 0,
+										activeIndexByFamily: {},
+									} satisfies AccountStorageV3);
+								const backupPath = createTimestampedBackupPath("codex-sync-prune-backup");
+								await fsPromises.mkdir(dirname(backupPath), { recursive: true });
+								const backupPayload = createSyncPruneBackupPayload(
+									currentAccountsStorage,
+									currentFlaggedStorage,
+								);
+								const restoreAccountsSnapshot = structuredClone(currentAccountsStorage);
+								const restoreFlaggedSnapshot = structuredClone(currentFlaggedStorage);
+								const tempBackupPath = `${backupPath}.${Date.now()}.tmp`;
+								try {
+									await fsPromises.writeFile(tempBackupPath, `${JSON.stringify(backupPayload, null, 2)}\n`, {
+										encoding: "utf-8",
+										mode: 0o600,
+									});
+									await fsPromises.rename(tempBackupPath, backupPath);
+								} catch (error) {
+									try {
+										await fsPromises.unlink(tempBackupPath);
+									} catch {
+										// best-effort cleanup
+									}
+									throw error;
+								}
+								return {
+									backupPath,
+									restore: async () => {
+										const normalizedAccounts = normalizeAccountStorage(restoreAccountsSnapshot);
+										if (!normalizedAccounts) {
+											throw new Error("Prune backup account snapshot failed validation.");
+										}
+										await withAccountStorageTransaction(async (_current, persist) => {
+											await persist(normalizedAccounts);
+										});
+										await saveFlaggedAccounts(
+											restoreFlaggedSnapshot as { version: 1; accounts: FlaggedAccountMetadataV1[] },
+										);
+										invalidateAccountManagerCache();
+									},
+								};
+							};
+
+							const removeAccountsForSync = async (targets: SyncRemovalTarget[]): Promise<void> => {
+								const targetKeySet = new Set(
+									targets
+										.filter((target) => target.refreshToken.length > 0)
+										.map((target) => getSyncRemovalTargetKey(target)),
+								);
+								let removedTargets: Array<{
+									index: number;
+									account: AccountStorageV3["accounts"][number];
+								}> = [];
+								await withAccountStorageTransaction(async (loadedStorage, persist) => {
+									const currentStorage =
+										loadedStorage ??
+										({
+											version: 3,
+											accounts: [],
+											activeIndex: 0,
+											activeIndexByFamily: {},
+										} satisfies AccountStorageV3);
+									removedTargets = currentStorage.accounts
+										.map((account, index) => ({ index, account }))
+										.filter((entry) =>
+											targetKeySet.has(
+												getSyncRemovalTargetKey({
+													refreshToken: entry.account.refreshToken,
+													organizationId: entry.account.organizationId,
+													accountId: entry.account.accountId,
+												}),
+											),
+										);
+									if (removedTargets.length === 0) {
+										return;
+									}
+
+									const activeAccountIdentity = {
+										refreshToken:
+											currentStorage.accounts[currentStorage.activeIndex]?.refreshToken ?? "",
+										organizationId:
+											currentStorage.accounts[currentStorage.activeIndex]?.organizationId,
+										accountId: currentStorage.accounts[currentStorage.activeIndex]?.accountId,
+									} satisfies SyncRemovalTarget;
+									const familyActiveIdentities = Object.fromEntries(
+										MODEL_FAMILIES.map((family) => {
+											const familyIndex = currentStorage.activeIndexByFamily?.[family] ?? currentStorage.activeIndex;
+											const familyAccount = currentStorage.accounts[familyIndex];
+											return [
+												family,
+												familyAccount
+													? ({
+															refreshToken: familyAccount.refreshToken,
+															organizationId: familyAccount.organizationId,
+															accountId: familyAccount.accountId,
+														} satisfies SyncRemovalTarget)
+													: null,
+											];
+										}),
+									) as Partial<Record<ModelFamily, SyncRemovalTarget | null>>;
+
+									currentStorage.accounts = currentStorage.accounts.filter(
+										(account) =>
+											!targetKeySet.has(
+												getSyncRemovalTargetKey({
+													refreshToken: account.refreshToken,
+													organizationId: account.organizationId,
+													accountId: account.accountId,
+												}),
+											),
+									);
+									const remappedActiveIndex = findAccountIndexByExactIdentity(
+										currentStorage.accounts,
+										activeAccountIdentity,
+									);
+									currentStorage.activeIndex =
+										remappedActiveIndex >= 0
+											? remappedActiveIndex
+											: Math.min(currentStorage.activeIndex, Math.max(0, currentStorage.accounts.length - 1));
+									currentStorage.activeIndexByFamily = currentStorage.activeIndexByFamily ?? {};
+									for (const family of MODEL_FAMILIES) {
+										const remappedFamilyIndex = findAccountIndexByExactIdentity(
+											currentStorage.accounts,
+											familyActiveIdentities[family] ?? null,
+										);
+										currentStorage.activeIndexByFamily[family] =
+											remappedFamilyIndex >= 0 ? remappedFamilyIndex : currentStorage.activeIndex;
+									}
+									clampActiveIndices(currentStorage);
+									await persist(currentStorage);
+								});
+
+								if (removedTargets.length > 0) {
+									const removedFlaggedKeys = new Set(
+										removedTargets.map((entry) =>
+											getSyncRemovalTargetKey({
+												refreshToken: entry.account.refreshToken,
+												organizationId: entry.account.organizationId,
+												accountId: entry.account.accountId,
+											}),
+										),
+									);
+									await withFlaggedAccountsTransaction(async (currentFlaggedStorage, persist) => {
+										await persist({
+											version: 1,
+											accounts: currentFlaggedStorage.accounts.filter(
+												(flagged) =>
+													!removedFlaggedKeys.has(
+														getSyncRemovalTargetKey({
+															refreshToken: flagged.refreshToken,
+															organizationId: flagged.organizationId,
+															accountId: flagged.accountId,
+														}),
+													),
+											),
+										});
+									});
+									invalidateAccountManagerCache();
+								}
+							};
+
+							const buildSyncRemovalPlan = (
+								indexes: number[],
+								suggestions: SyncRemovalSuggestion[],
+							): {
+								previewLines: string[];
+								targets: SyncRemovalTarget[];
+							} => {
+								const byIndex = new Map(suggestions.map((suggestion) => [suggestion.index, suggestion]));
+								const candidates = [...indexes]
+									.sort((left, right) => left - right)
+									.map((index) => {
+										const suggestion = byIndex.get(index);
+										if (!suggestion) {
+											throw new Error(
+												`Selected account ${index + 1} changed before confirmation. Re-run sync and confirm again.`,
+											);
+										}
+										const label = suggestion.email ?? suggestion.accountLabel ?? `Account ${index + 1}`;
+										const currentSuffix = suggestion.isCurrentAccount ? " | current" : "";
+										return {
+											previewLine: `${index + 1}. ${label}${currentSuffix}`,
+											target: {
+												refreshToken: suggestion.refreshToken,
+												organizationId: suggestion.organizationId,
+												accountId: suggestion.accountId,
+											} satisfies SyncRemovalTarget,
+										};
+									});
+								return {
+									previewLines: candidates.map((candidate) => candidate.previewLine),
+									targets: candidates.map((candidate) => candidate.target),
+								};
+							};
+
+							const runCodexMultiAuthSync = async (): Promise<void> => {
+								const currentConfig = loadPluginConfig();
+								if (!getSyncFromCodexMultiAuthEnabled(currentConfig)) {
+									console.log("\nEnable sync from codex-multi-auth in Sync tools first.\n");
+									return;
+								}
+
+								let pruneBackup: { backupPath: string; restore: () => Promise<void> } | null = null;
+								const restorePruneBackup = async (): Promise<void> => {
+									const currentBackup = pruneBackup;
+									if (!currentBackup) return;
+									await currentBackup.restore();
+									pruneBackup = null;
+								};
+
+								while (true) {
+									try {
+										const loadedSource = await loadCodexMultiAuthSourceStorage(process.cwd());
+										const preview = await previewSyncFromCodexMultiAuth(process.cwd(), loadedSource);
+										console.log("");
+										console.log(`codex-multi-auth source: ${preview.accountsPath}`);
+										console.log(`Scope: ${preview.scope}`);
+										console.log(`Preview: +${preview.imported} new, ${preview.skipped} skipped, ${preview.total} total`);
+
+										if (preview.imported <= 0) {
+											await restorePruneBackup();
+											console.log("No new accounts to import.\n");
+											return;
+										}
+
+										if (!(await confirm(`Import ${preview.imported} new account(s) from codex-multi-auth?`))) {
+											await restorePruneBackup();
+											console.log("\nSync cancelled.\n");
+											return;
+										}
+
+										const result = await syncFromCodexMultiAuth(process.cwd(), loadedSource);
+										pruneBackup = null;
+										invalidateAccountManagerCache();
+										const backupLabel =
+											result.backupStatus === "created"
+												? result.backupPath ?? "created"
+												: result.backupStatus === "skipped"
+													? "skipped"
+													: result.backupError ?? "failed";
+										console.log("");
+										console.log("Sync complete.");
+										console.log(`Source: ${result.accountsPath}`);
+										console.log(`Imported: ${result.imported}`);
+										console.log(`Skipped: ${result.skipped}`);
+										console.log(`Total: ${result.total}`);
+										console.log(`Auto-backup: ${backupLabel}`);
+										console.log("");
+										return;
+									} catch (error) {
+										if (error instanceof CodexMultiAuthSyncCapacityError) {
+											const { details } = error;
+											console.log("");
+											console.log("Sync blocked by account limit.");
+											console.log(`Source: ${details.accountsPath}`);
+											console.log(`Scope: ${details.scope}`);
+											console.log(`Current accounts: ${details.currentCount}`);
+											console.log(`Importable new accounts: ${details.importableNewAccounts}`);
+											console.log(`Maximum allowed: ${details.maxAccounts}`);
+											if (isCodexMultiAuthSourceTooLargeForCapacity(details)) {
+												await restorePruneBackup();
+												console.log("Source alone exceeds the configured maximum.\n");
+												return;
+											}
+											console.log(`Remove at least ${details.needToRemove} account(s) first.`);
+											const indexesToRemove = await promptCodexMultiAuthSyncPrune(
+												details.needToRemove,
+												details.suggestedRemovals,
+											);
+											if (!indexesToRemove || indexesToRemove.length === 0) {
+												await restorePruneBackup();
+												console.log("Sync cancelled.\n");
+												return;
+											}
+											const removalPlan = buildSyncRemovalPlan(
+												indexesToRemove,
+												details.suggestedRemovals as SyncRemovalSuggestion[],
+											);
+											console.log("Dry run removal:");
+											for (const line of removalPlan.previewLines) {
+												console.log(`  ${line}`);
+											}
+											if (!(await confirm(`Remove ${indexesToRemove.length} selected account(s) and retry sync?`))) {
+												await restorePruneBackup();
+												console.log("Sync cancelled.\n");
+												return;
+											}
+											if (!pruneBackup) {
+												pruneBackup = await createSyncPruneBackup();
+											}
+											try {
+												await removeAccountsForSync(removalPlan.targets);
+											} catch (removalError) {
+												await restorePruneBackup();
+												throw removalError;
+											}
+											continue;
+										}
+
+										const message = error instanceof Error ? error.message : String(error);
+										await restorePruneBackup().catch((restoreError) => {
+											const restoreMessage =
+												restoreError instanceof Error ? restoreError.message : String(restoreError);
+											logWarn(`[${PLUGIN_NAME}] Failed to restore sync prune backup: ${restoreMessage}`);
+										});
+										console.log(`\nSync failed: ${message}\n`);
+										return;
+									}
+								}
+							};
+
+							const runCodexMultiAuthOverlapCleanup = async (): Promise<void> => {
+								let backupPath: string | undefined;
+								try {
+									const preview = await previewCodexMultiAuthSyncedOverlapCleanup();
+									if (preview.removed <= 0 && preview.updated <= 0) {
+										console.log("\nNo synced overlaps found.\n");
+										return;
+									}
+									console.log("");
+									console.log("Cleanup preview.");
+									console.log(`Before: ${preview.before}`);
+									console.log(`After: ${preview.after}`);
+									console.log(`Would remove overlaps: ${preview.removed}`);
+									console.log(`Would update synced records: ${preview.updated}`);
+									if (!(await confirm("Create a backup and apply synced overlap cleanup?"))) {
+										console.log("\nCleanup cancelled.\n");
+										return;
+									}
+									backupPath = createTimestampedBackupPath("codex-maintenance-overlap-backup");
+									const result = await cleanupCodexMultiAuthSyncedOverlaps(backupPath);
+									invalidateAccountManagerCache();
+									console.log("");
+									console.log("Cleanup complete.");
+									console.log(`Before: ${result.before}`);
+									console.log(`After: ${result.after}`);
+									console.log(`Removed overlaps: ${result.removed}`);
+									console.log(`Updated synced records: ${result.updated}`);
+									console.log(`Backup: ${backupPath}`);
+									console.log("");
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									const backupHint = backupPath ? `\nBackup: ${backupPath}` : "";
+									console.log(`\nCleanup failed: ${message}${backupHint}\n`);
+								}
+							};
+
 							if (!explicitLoginMode) {
 								while (true) {
 									const loadedStorage = await hydrateEmails(await loadAccounts());
@@ -3388,6 +3810,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 									const menuResult = await promptLoginMode(existingAccounts, {
 										flaggedCount: flaggedStorage.accounts.length,
+										syncFromCodexMultiAuthEnabled: getSyncFromCodexMultiAuthEnabled(loadPluginConfig()),
 									});
 
 									if (menuResult.mode === "cancel") {
@@ -3412,6 +3835,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 									}
 									if (menuResult.mode === "verify-flagged") {
 										await verifyFlaggedAccounts();
+										continue;
+									}
+									if (menuResult.mode === "experimental-toggle-sync") {
+										await toggleCodexMultiAuthSyncSetting();
+										continue;
+									}
+									if (menuResult.mode === "experimental-sync-now") {
+										await runCodexMultiAuthSync();
+										continue;
+									}
+									if (menuResult.mode === "experimental-cleanup-overlaps") {
+										await runCodexMultiAuthOverlapCleanup();
 										continue;
 									}
 

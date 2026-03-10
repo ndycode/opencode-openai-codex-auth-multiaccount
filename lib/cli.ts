@@ -4,6 +4,7 @@ import type { AccountIdSource } from "./types.js";
 import {
 	showAuthMenu,
 	showAccountDetails,
+	showSyncToolsMenu,
 	isTTY,
 	type AccountStatus,
 } from "./ui/auth-menu.js";
@@ -46,6 +47,9 @@ export type LoginMode =
 	| "check"
 	| "deep-check"
 	| "verify-flagged"
+	| "experimental-toggle-sync"
+	| "experimental-sync-now"
+	| "experimental-cleanup-overlaps"
 	| "cancel";
 
 export interface ExistingAccountInfo {
@@ -62,6 +66,7 @@ export interface ExistingAccountInfo {
 
 export interface LoginMenuOptions {
 	flaggedCount?: number;
+	syncFromCodexMultiAuthEnabled?: boolean;
 }
 
 export interface LoginMenuResult {
@@ -101,7 +106,117 @@ async function promptDeleteAllTypedConfirm(): Promise<boolean> {
 	}
 }
 
-async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]): Promise<LoginMenuResult> {
+async function promptSyncToolsFallback(
+	rl: ReturnType<typeof createInterface>,
+	syncEnabled: boolean,
+): Promise<LoginMenuResult | null> {
+	while (true) {
+		const syncState = syncEnabled ? "enabled" : "disabled";
+		const answer = await rl.question(
+			`Sync tools: (t)oggle [${syncState}], (i)mport now, (o)verlap cleanup, (b)ack [t/i/o/b]: `,
+		);
+		const normalized = answer.trim().toLowerCase();
+		if (normalized === "t" || normalized === "toggle") return { mode: "experimental-toggle-sync" };
+		if (normalized === "i" || normalized === "import") return { mode: "experimental-sync-now" };
+		if (normalized === "o" || normalized === "overlap") return { mode: "experimental-cleanup-overlaps" };
+		if (normalized === "b" || normalized === "back") return null;
+		console.log("Please enter one of: t, i, o, b.");
+	}
+}
+
+export interface SyncPruneCandidate {
+	index: number;
+	email?: string;
+	accountLabel?: string;
+	isCurrentAccount?: boolean;
+	reason?: string;
+}
+
+function formatPruneCandidate(candidate: SyncPruneCandidate): string {
+	const label = formatAccountLabel(
+		{
+			index: candidate.index,
+			email: candidate.email,
+			accountLabel: candidate.accountLabel,
+			isCurrentAccount: candidate.isCurrentAccount,
+		},
+		candidate.index,
+	);
+	const details: string[] = [];
+	if (candidate.isCurrentAccount) details.push("current");
+	if (candidate.reason) details.push(candidate.reason);
+	return details.length > 0 ? `${label} | ${details.join(" | ")}` : label;
+}
+
+export async function promptCodexMultiAuthSyncPrune(
+	neededCount: number,
+	candidates: SyncPruneCandidate[],
+): Promise<number[] | null> {
+	if (isNonInteractiveMode()) {
+		return null;
+	}
+
+	const suggested = candidates
+		.filter((candidate) => candidate.isCurrentAccount !== true)
+		.slice(0, neededCount)
+		.map((candidate) => candidate.index);
+
+	const rl = createInterface({ input, output });
+	try {
+		console.log("");
+		console.log(`Sync needs ${neededCount} free slot(s).`);
+		console.log("Suggested removals:");
+		for (const candidate of candidates) {
+			console.log(`  ${formatPruneCandidate(candidate)}`);
+		}
+		console.log("");
+		console.log(
+			suggested.length >= neededCount
+				? "Press Enter to remove the suggested accounts, or enter comma-separated numbers."
+				: "Enter comma-separated account numbers to remove, or Q to cancel.",
+		);
+
+		while (true) {
+			const answer = await rl.question(`Remove at least ${neededCount} account(s): `);
+			const normalized = answer.trim();
+			if (!normalized) {
+				if (suggested.length >= neededCount) {
+					return suggested;
+				}
+				console.log("No default suggestion is available. Enter one or more account numbers.");
+				continue;
+			}
+
+			if (normalized.toLowerCase() === "q" || normalized.toLowerCase() === "quit") {
+				return null;
+			}
+
+			const tokens = normalized.split(",").map((value) => value.trim());
+			if (tokens.length === 0 || tokens.some((value) => !/^\d+$/.test(value))) {
+				console.log("Enter comma-separated account numbers (for example: 1,2).");
+				continue;
+			}
+			const allowedIndexes = new Set(candidates.map((candidate) => candidate.index));
+			const unique = Array.from(new Set(tokens.map((value) => Number.parseInt(value, 10) - 1)));
+			if (unique.some((index) => !allowedIndexes.has(index))) {
+				console.log("Enter only account numbers shown above.");
+				continue;
+			}
+			if (unique.length < neededCount) {
+				console.log(`Select at least ${neededCount} unique account number(s).`);
+				continue;
+			}
+			return unique;
+		}
+	} finally {
+		rl.close();
+	}
+}
+
+async function promptLoginModeFallback(
+	existingAccounts: ExistingAccountInfo[],
+	options: LoginMenuOptions,
+): Promise<LoginMenuResult> {
 	const rl = createInterface({ input, output });
 	try {
 		if (existingAccounts.length > 0) {
@@ -113,15 +228,23 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
 		}
 
 		while (true) {
-			const answer = await rl.question("(a)dd, (f)resh, (c)heck, (d)eep, (v)erify flagged, or (q)uit? [a/f/c/d/v/q]: ");
+			const answer = await rl.question("(a)dd, (f)resh, (c)heck, (d)eep, (v)erify flagged, s(y)nc tools, or (q)uit? [a/f/c/d/v/s/q]: ");
 			const normalized = answer.trim().toLowerCase();
 			if (normalized === "a" || normalized === "add") return { mode: "add" };
 			if (normalized === "f" || normalized === "fresh") return { mode: "fresh", deleteAll: true };
 			if (normalized === "c" || normalized === "check") return { mode: "check" };
 			if (normalized === "d" || normalized === "deep") return { mode: "deep-check" };
 			if (normalized === "v" || normalized === "verify") return { mode: "verify-flagged" };
+			if (normalized === "s" || normalized === "sync" || normalized === "y") {
+				const syncAction = await promptSyncToolsFallback(
+					rl,
+					options.syncFromCodexMultiAuthEnabled === true,
+				);
+				if (syncAction) return syncAction;
+				continue;
+			}
 			if (normalized === "q" || normalized === "quit") return { mode: "cancel" };
-			console.log("Please enter one of: a, f, c, d, v, q.");
+			console.log("Please enter one of: a, f, c, d, v, s, q.");
 		}
 	} finally {
 		rl.close();
@@ -137,12 +260,13 @@ export async function promptLoginMode(
 	}
 
 	if (!isTTY()) {
-		return promptLoginModeFallback(existingAccounts);
+		return promptLoginModeFallback(existingAccounts, options);
 	}
 
 	while (true) {
 		const action = await showAuthMenu(existingAccounts, {
 			flaggedCount: options.flaggedCount ?? 0,
+			syncFromCodexMultiAuthEnabled: options.syncFromCodexMultiAuthEnabled === true,
 		});
 
 		switch (action.type) {
@@ -160,6 +284,13 @@ export async function promptLoginMode(
 				return { mode: "deep-check" };
 			case "verify-flagged":
 				return { mode: "verify-flagged" };
+			case "sync-tools": {
+				const syncAction = await showSyncToolsMenu(options.syncFromCodexMultiAuthEnabled === true);
+				if (syncAction === "toggle-sync") return { mode: "experimental-toggle-sync" };
+				if (syncAction === "sync-now") return { mode: "experimental-sync-now" };
+				if (syncAction === "cleanup-overlaps") return { mode: "experimental-cleanup-overlaps" };
+				continue;
+			}
 			case "select-account": {
 				const accountAction = await showAccountDetails(action.account);
 				if (accountAction === "delete") {
