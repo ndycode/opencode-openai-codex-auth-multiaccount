@@ -1151,7 +1151,8 @@ export async function withFlaggedAccountsTransaction<T>(
 	) => Promise<T>,
 ): Promise<T> {
 	return withStorageLock(async () => {
-		const current = await loadFlaggedAccountsUnlocked();
+		const accountsSnapshot = await loadAccountsInternal(saveAccountsUnlocked);
+		const current = await loadFlaggedAccountsUnlocked(accountsSnapshot);
 		return handler(current, saveFlaggedAccountsUnlocked);
 	});
 }

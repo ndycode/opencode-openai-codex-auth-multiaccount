@@ -1784,6 +1784,57 @@ describe("storage", () => {
       }
     });
 
+    it("reuses the loaded accounts snapshot inside withFlaggedAccountsTransaction", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "orphan-refresh",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      const originalReadFile = fs.readFile.bind(fs);
+      const readSpy = vi.spyOn(fs, "readFile");
+      let accountReadCount = 0;
+      readSpy.mockImplementation(async (path, options) => {
+        if (String(path) === testStoragePath) {
+          accountReadCount++;
+        }
+        return originalReadFile(path as Parameters<typeof fs.readFile>[0], options as never);
+      });
+
+      try {
+        const result = await withFlaggedAccountsTransaction(async (current) => current);
+        expect(result.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+        expect(accountReadCount).toBe(1);
+      } finally {
+        readSpy.mockRestore();
+      }
+    });
+
     it("copies the raw accounts file for backup", async () => {
       await saveAccounts({
         version: 3,
