@@ -798,6 +798,69 @@ describe('Plugin Configuration', () => {
 			}
 		});
 
+		it('surfaces non-object config files instead of replacing them', async () => {
+			mockExistsSync.mockReturnValue(true);
+			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue('[]' as never);
+			const openSpy = vi.spyOn(fs.promises, 'open').mockResolvedValue({
+				close: vi.fn(async () => undefined),
+			} as never);
+			const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as never);
+			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
+			const unlinkSpy = vi.spyOn(fs.promises, 'unlink').mockResolvedValue(undefined);
+
+			try {
+				await expect(setSyncFromCodexMultiAuthEnabled(true)).rejects.toThrow(/Config file must contain a JSON object/);
+				expect(writeSpy).not.toHaveBeenCalled();
+				expect(renameSpy).not.toHaveBeenCalled();
+			} finally {
+				readSpy.mockRestore();
+				openSpy.mockRestore();
+				mkdirSpy.mockRestore();
+				writeSpy.mockRestore();
+				renameSpy.mockRestore();
+				unlinkSpy.mockRestore();
+			}
+		});
+
+		it('removes a stale lockfile before retrying config mutation', async () => {
+			mockExistsSync.mockReturnValue(true);
+			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue(
+				JSON.stringify({ experimental: { syncFromCodexMultiAuth: { enabled: false } } }) as never
+			);
+			const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as never);
+			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
+			const unlinkSpy = vi.spyOn(fs.promises, 'unlink').mockResolvedValue(undefined);
+			const closeSpy = vi.fn(async () => undefined);
+			const staleError = Object.assign(new Error('lock exists'), { code: 'EEXIST' });
+			const openSpy = vi.spyOn(fs.promises, 'open')
+				.mockRejectedValueOnce(staleError as never)
+				.mockResolvedValue({
+					close: closeSpy,
+				} as never);
+			const statSpy = vi.spyOn(fs.promises, 'stat').mockResolvedValue({
+				mtimeMs: Date.now() - 31_000,
+			} as never);
+
+			try {
+				await setSyncFromCodexMultiAuthEnabled(true);
+				expect(statSpy).toHaveBeenCalled();
+				expect(openSpy).toHaveBeenCalledTimes(2);
+				expect(unlinkSpy).toHaveBeenCalled();
+				expect(writeSpy).toHaveBeenCalled();
+				expect(renameSpy).toHaveBeenCalled();
+			} finally {
+				readSpy.mockRestore();
+				mkdirSpy.mockRestore();
+				writeSpy.mockRestore();
+				renameSpy.mockRestore();
+				unlinkSpy.mockRestore();
+				openSpy.mockRestore();
+				statSpy.mockRestore();
+			}
+		});
+
 		it('reads the persisted sync toggle flag', () => {
 			expect(getSyncFromCodexMultiAuthEnabled({ experimental: { syncFromCodexMultiAuth: { enabled: true } } })).toBe(true);
 			expect(getSyncFromCodexMultiAuthEnabled({})).toBe(false);
