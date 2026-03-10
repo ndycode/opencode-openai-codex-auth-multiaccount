@@ -183,6 +183,10 @@ async function copyFileWithWindowsRetry(sourcePath: string, destinationPath: str
   }
 }
 
+function getAccountSubsetIdentity(account: AccountMetadataV3): string {
+  return [account.organizationId ?? "", account.accountId ?? "", account.refreshToken, account.email ?? ""].join("\u0000");
+}
+
 async function writeFileWithTimeout(filePath: string, content: string, timeoutMs: number): Promise<void> {
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
@@ -1364,7 +1368,12 @@ export async function importAccounts(
       if (!preparedNormalized) {
         throw new Error("prepare() returned invalid account storage");
       }
-      if (preparedNormalized.accounts.length > normalized.accounts.length) {
+      const normalizedIdentities = new Set(normalized.accounts.map((account) => getAccountSubsetIdentity(account)));
+      const preparedIdentities = preparedNormalized.accounts.map((account) => getAccountSubsetIdentity(account));
+      if (
+        preparedNormalized.accounts.length > normalized.accounts.length ||
+        preparedIdentities.some((identity) => !normalizedIdentities.has(identity))
+      ) {
         throw new Error("prepare() must return a subset of normalized import accounts");
       }
       const skippedByPrepare = Math.max(0, normalized.accounts.length - preparedNormalized.accounts.length);

@@ -748,6 +748,9 @@ describe('Plugin Configuration', () => {
 			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue(
 				JSON.stringify({ experimental: { syncFromCodexMultiAuth: { enabled: false } } }) as never
 			);
+			const openSpy = vi.spyOn(fs.promises, 'open').mockResolvedValue({
+				close: vi.fn(async () => undefined),
+			} as never);
 			const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined);
 			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
 			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
@@ -755,12 +758,14 @@ describe('Plugin Configuration', () => {
 
 			try {
 				await setSyncFromCodexMultiAuthEnabled(true);
+				expect(openSpy).toHaveBeenCalled();
 				expect(readSpy).toHaveBeenCalled();
 				expect(writeSpy).toHaveBeenCalled();
 				expect(renameSpy).toHaveBeenCalled();
-				expect(unlinkSpy).not.toHaveBeenCalled();
+				expect(unlinkSpy).toHaveBeenCalled();
 			} finally {
 				readSpy.mockRestore();
+				openSpy.mockRestore();
 				mkdirSpy.mockRestore();
 				writeSpy.mockRestore();
 				renameSpy.mockRestore();

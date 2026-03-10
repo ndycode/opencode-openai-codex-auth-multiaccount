@@ -16,6 +16,7 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
+const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
 let configMutationMutex: Promise<void> = Promise.resolve();
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
@@ -124,6 +125,32 @@ function withConfigMutationLock<T>(fn: () => Promise<T>): Promise<T> {
 		release = resolve;
 	});
 	return previous.then(fn).finally(() => release());
+}
+
+async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
+	let lastError: NodeJS.ErrnoException | null = null;
+
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		try {
+			const handle = await fs.open(CONFIG_LOCK_PATH, "wx", 0o600);
+			try {
+				return await fn();
+			} finally {
+				await handle.close();
+				await fs.unlink(CONFIG_LOCK_PATH).catch(() => undefined);
+			}
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "EEXIST") {
+				lastError = error as NodeJS.ErrnoException;
+				await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+				continue;
+			}
+			throw error;
+		}
+	}
+
+	throw lastError ?? new Error(`Timed out acquiring config lock ${CONFIG_LOCK_PATH}`);
 }
 
 async function renameConfigWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
@@ -536,12 +563,12 @@ export function getStreamStallTimeoutMs(pluginConfig: PluginConfig): number {
 }
 
 async function savePluginConfigMutation(
-	mutate: (current: RawPluginConfig) => RawPluginConfig,
+        mutate: (current: RawPluginConfig) => RawPluginConfig,
 ): Promise<void> {
-	await withConfigMutationLock(async () => {
-		await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
-		const current = existsSync(CONFIG_PATH)
-			? await (async () => {
+        await withConfigMutationLock(async () => withConfigProcessLock(async () => {
+                await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+                const current = existsSync(CONFIG_PATH)
+                        ? await (async () => {
 				const raw = stripUtf8Bom(await fs.readFile(CONFIG_PATH, "utf-8"));
 				let parsed: unknown;
 				try {
@@ -569,10 +596,10 @@ async function savePluginConfigMutation(
 				await fs.unlink(tempPath);
 			} catch {
 				// Best effort cleanup only.
-			}
-			throw error;
-		}
-	});
+                        }
+                        throw error;
+                }
+        }));
 }
 
 export function getSyncFromCodexMultiAuthEnabled(pluginConfig: PluginConfig): boolean {

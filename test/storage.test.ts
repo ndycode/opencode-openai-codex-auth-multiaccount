@@ -724,6 +724,28 @@ describe("storage", () => {
       ).rejects.toThrow(/prepare\(\) must return a subset/);
     });
 
+    it("rejects prepare() results that rewrite import account identities", async () => {
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          activeIndexByFamily: {},
+          accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+        }),
+      );
+
+      await expect(
+        importAccounts(exportPath, {}, (normalized) => ({
+          ...normalized,
+          accounts: normalized.accounts.map((account) => ({
+            ...account,
+            accountId: "rewritten",
+          })),
+        })),
+      ).rejects.toThrow(/prepare\(\) must return a subset/);
+    });
+
     it("continues import in best-effort mode when pre-import backup write is locked", async () => {
       await saveAccounts({
         version: 3,
