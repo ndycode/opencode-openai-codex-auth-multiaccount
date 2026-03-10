@@ -20,6 +20,7 @@ const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
 const CONFIG_LOCK_RETRY_ATTEMPTS = 5;
 const CONFIG_LOCK_RETRY_BASE_DELAY_MS = 10;
 const CONFIG_LOCK_RETRY_MAX_DELAY_MS = 200;
+const CONFIG_LOCK_STALE_MS = 30_000;
 let configMutationMutex: Promise<void> = Promise.resolve();
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
@@ -147,6 +148,18 @@ async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code === "EEXIST") {
+				try {
+					const stat = await fs.stat(CONFIG_LOCK_PATH);
+					if (Date.now() - stat.mtimeMs > CONFIG_LOCK_STALE_MS) {
+						await fs.unlink(CONFIG_LOCK_PATH).catch(() => undefined);
+						continue;
+					}
+				} catch (statError) {
+					const statCode = (statError as NodeJS.ErrnoException).code;
+					if (statCode === "ENOENT") {
+						continue;
+					}
+				}
 				lastError = error as NodeJS.ErrnoException;
 				await new Promise((resolve) =>
 					setTimeout(
