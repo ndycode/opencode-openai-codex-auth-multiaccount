@@ -1037,11 +1037,30 @@ async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Pr
 async function loadFlaggedAccountsUnlocked(): Promise<FlaggedAccountStorageV1> {
 	const path = getFlaggedAccountsPath();
 	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
+	const removeOrphanedFlaggedAccounts = async (
+		storage: FlaggedAccountStorageV1,
+	): Promise<FlaggedAccountStorageV1> => {
+		const accounts = await loadAccountsInternal(saveAccountsUnlocked);
+		if (!accounts) {
+			return storage;
+		}
+		const activeRefreshTokens = new Set((accounts?.accounts ?? []).map((account) => account.refreshToken));
+		const filteredAccounts = storage.accounts.filter((flagged) => activeRefreshTokens.has(flagged.refreshToken));
+		if (filteredAccounts.length === storage.accounts.length) {
+			return storage;
+		}
+		const cleaned = {
+			version: 1 as const,
+			accounts: filteredAccounts,
+		};
+		await saveFlaggedAccountsUnlocked(cleaned);
+		return cleaned;
+	};
 
 	try {
 		const content = await fs.readFile(path, "utf-8");
 		const data = JSON.parse(content) as unknown;
-		return normalizeFlaggedStorage(data);
+		return await removeOrphanedFlaggedAccounts(normalizeFlaggedStorage(data));
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
 		if (code !== "ENOENT") {
@@ -1072,7 +1091,7 @@ async function loadFlaggedAccountsUnlocked(): Promise<FlaggedAccountStorageV1> {
 			to: path,
 			accounts: migrated.accounts.length,
 		});
-		return migrated;
+		return await removeOrphanedFlaggedAccounts(migrated);
 	} catch (error) {
 		log.error("Failed to migrate legacy flagged account storage", {
 			from: legacyPath,

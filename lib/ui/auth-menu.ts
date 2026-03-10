@@ -207,7 +207,7 @@ export async function showSyncToolsMenu(syncEnabled: boolean): Promise<SyncTools
 			{ label: "Back", value: "back" },
 		],
 		{
-			message: ui.v2Enabled ? "Sync tools" : "Sync tools",
+			message: "Sync tools",
 			subtitle: syncEnabled ? "codex-multi-auth sync enabled" : "codex-multi-auth sync disabled",
 			clearScreen: true,
 			variant: ui.v2Enabled ? "codex" : "legacy",

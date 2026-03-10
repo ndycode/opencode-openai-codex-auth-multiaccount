@@ -15,6 +15,7 @@ describe("sync prune backup payload", () => {
 					accountIdSource: "org",
 					refreshToken: "refresh-token",
 					accessToken: "access-token",
+					idToken: "id-token",
 					addedAt: 1,
 					lastUsed: 1,
 				},
@@ -26,14 +27,17 @@ describe("sync prune backup payload", () => {
 				{
 					refreshToken: "refresh-token",
 					accessToken: "flagged-access-token",
+					idToken: "flagged-id-token",
 				},
 			],
 		});
 
 		expect(payload.accounts.accounts[0]).not.toHaveProperty("accessToken");
 		expect(payload.accounts.accounts[0]).not.toHaveProperty("refreshToken");
+		expect(payload.accounts.accounts[0]).not.toHaveProperty("idToken");
 		expect(payload.flagged.accounts[0]).not.toHaveProperty("accessToken");
 		expect(payload.flagged.accounts[0]).not.toHaveProperty("refreshToken");
+		expect(payload.flagged.accounts[0]).not.toHaveProperty("idToken");
 	});
 
 	it("deep-clones nested metadata so later mutations do not leak into the snapshot", () => {
@@ -48,6 +52,7 @@ describe("sync prune backup payload", () => {
 					accountIdSource: "org",
 					refreshToken: "refresh-token",
 					accessToken: "access-token",
+					idToken: "id-token",
 					accountTags: ["work"],
 					addedAt: 1,
 					lastUsed: 1,
@@ -63,6 +68,7 @@ describe("sync prune backup payload", () => {
 				{
 					refreshToken: "refresh-token",
 					accessToken: "flagged-access-token",
+					idToken: "flagged-id-token",
 					metadata: {
 						source: "flagged",
 					},
@@ -78,11 +84,13 @@ describe("sync prune backup payload", () => {
 
 		expect(payload.accounts.accounts[0]?.accountTags).toEqual(["work"]);
 		expect(payload.accounts.accounts[0]?.lastSelectedModelByFamily).toEqual({ codex: "gpt-5.4" });
+		expect(payload.accounts.accounts[0]).not.toHaveProperty("idToken");
 		expect(payload.flagged.accounts[0]).toMatchObject({
 			metadata: {
 				source: "flagged",
 			},
 		});
 		expect(payload.flagged.accounts[0]).not.toHaveProperty("refreshToken");
+		expect(payload.flagged.accounts[0]).not.toHaveProperty("idToken");
 	});
 });
