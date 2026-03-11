@@ -19,8 +19,12 @@ import {
   exportAccounts,
   importAccounts,
   previewImportAccounts,
+  previewImportAccountsWithExistingStorage,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  withFlaggedAccountsTransaction,
+  loadAccountAndFlaggedStorageSnapshot,
+  backupRawAccountsFile,
 } from "../lib/storage.js";
 
 // Mocking the behavior we're about to implement for TDD
@@ -187,6 +191,33 @@ describe("storage", () => {
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(1);
       expect(loaded?.accounts[0]?.accountId).toBe("existing");
+    });
+
+    it("should preview import results against a provided existing snapshot", async () => {
+      const existing = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }],
+      };
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          activeIndexByFamily: {},
+          accounts: [
+            { accountId: "existing", refreshToken: "ref1", addedAt: 3, lastUsed: 4 },
+            { accountId: "preview", refreshToken: "ref2", addedAt: 5, lastUsed: 6 },
+          ],
+        }),
+      );
+
+      const preview = await previewImportAccountsWithExistingStorage(exportPath, existing);
+      expect(preview.imported).toBe(1);
+      expect(preview.skipped).toBe(1);
+      expect(preview.total).toBe(2);
     });
 
     it("creates timestamped backup paths in storage backups directory", () => {
@@ -637,6 +668,84 @@ describe("storage", () => {
       await expect(importAccounts(exportPath)).rejects.toThrow(/Invalid account storage format/);
     });
 
+    it("filters import accounts through prepare()", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          activeIndexByFamily: {},
+          accounts: [
+            { accountId: "drop-me", refreshToken: "ref-drop", addedAt: 2, lastUsed: 2 },
+            { accountId: "keep-me", refreshToken: "ref-keep", addedAt: 3, lastUsed: 3 },
+          ],
+        }),
+      );
+
+      const result = await importAccounts(exportPath, {}, (normalized) => ({
+        ...normalized,
+        accounts: normalized.accounts.filter((account) => account.accountId === "keep-me"),
+      }));
+
+      expect(result.imported).toBe(1);
+      expect(result.skipped).toBe(1);
+      expect(result.total).toBe(2);
+
+      const loaded = await loadAccounts();
+      expect(loaded?.accounts.map((account) => account.accountId)).toEqual(["existing", "keep-me"]);
+    });
+
+    it("rejects prepare() results that expand the import account set", async () => {
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          activeIndexByFamily: {},
+          accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+        }),
+      );
+
+      await expect(
+        importAccounts(exportPath, {}, (normalized) => ({
+          ...normalized,
+          accounts: [
+            ...normalized.accounts,
+            { accountId: "extra", refreshToken: "ref-extra", addedAt: 2, lastUsed: 2 },
+          ],
+        })),
+      ).rejects.toThrow(/prepare\(\) must return a subset/);
+    });
+
+    it("rejects prepare() results that rewrite import account identities", async () => {
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          activeIndexByFamily: {},
+          accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+        }),
+      );
+
+      await expect(
+        importAccounts(exportPath, {}, (normalized) => ({
+          ...normalized,
+          accounts: normalized.accounts.map((account) => ({
+            ...account,
+            accountId: "rewritten",
+          })),
+        })),
+      ).rejects.toThrow(/prepare\(\) must return a subset/);
+    });
+
     it("continues import in best-effort mode when pre-import backup write is locked", async () => {
       await saveAccounts({
         version: 3,
@@ -731,6 +840,56 @@ describe("storage", () => {
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(1);
       expect(loaded?.accounts[0]?.accountId).toBe("existing");
+    });
+
+    it("throws when backing up raw accounts without force and the destination exists", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+      });
+
+      const backupPath = join(testWorkDir, "raw-backup.json");
+      await fs.writeFile(backupPath, "exists");
+
+      await expect(backupRawAccountsFile(backupPath, false)).rejects.toThrow(/File already exists/);
+    });
+
+    it("retries raw backup copy on EBUSY and succeeds", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+      });
+
+      const backupPath = join(testWorkDir, "raw-backup-retry.json");
+      const originalCopyFile = fs.copyFile.bind(fs);
+      let attemptCount = 0;
+      const copySpy = vi.spyOn(fs, "copyFile").mockImplementation(async (source, destination, mode) => {
+        attemptCount += 1;
+        if (attemptCount < 3) {
+          const err = new Error("copy locked") as NodeJS.ErrnoException;
+          err.code = "EBUSY";
+          throw err;
+        }
+        return originalCopyFile(
+          source as Parameters<typeof fs.copyFile>[0],
+          destination as Parameters<typeof fs.copyFile>[1],
+          mode as Parameters<typeof fs.copyFile>[2],
+        );
+      });
+
+      try {
+        await backupRawAccountsFile(backupPath);
+      } finally {
+        copySpy.mockRestore();
+      }
+
+      expect(attemptCount).toBe(3);
+      const raw = JSON.parse(await fs.readFile(backupPath, "utf-8")) as { accounts: Array<{ accountId?: string }> };
+      expect(raw.accounts[0]?.accountId).toBe("existing");
     });
   });
 
@@ -1510,6 +1669,192 @@ describe("storage", () => {
       const loaded = await loadFlaggedAccounts();
       expect(loaded.accounts).toHaveLength(1);
       expect(loaded.accounts[0]?.refreshToken).toBe("flagged-ebusy");
+    });
+
+    it("updates flagged storage inside withFlaggedAccountsTransaction", async () => {
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "flagged-keep",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "flagged-drop",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      await withFlaggedAccountsTransaction(async (current, persist) => {
+        await persist({
+          version: 1,
+          accounts: current.accounts.filter((account) => account.refreshToken !== "flagged-drop"),
+        });
+      });
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts.map((account) => account.refreshToken)).toEqual(["flagged-keep"]);
+    });
+
+    it("loads account and flagged storage from one snapshot helper", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      const snapshot = await loadAccountAndFlaggedStorageSnapshot();
+      expect(snapshot.accounts?.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+      expect(snapshot.flagged.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+    });
+
+    it("reuses the loaded accounts snapshot when pruning orphaned flagged entries", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "orphan-refresh",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      const originalReadFile = fs.readFile.bind(fs);
+      const readSpy = vi.spyOn(fs, "readFile");
+      let accountReadCount = 0;
+      readSpy.mockImplementation(async (path, options) => {
+        if (String(path) === testStoragePath) {
+          accountReadCount++;
+        }
+        return originalReadFile(path as Parameters<typeof fs.readFile>[0], options as never);
+      });
+
+      try {
+        const snapshot = await loadAccountAndFlaggedStorageSnapshot();
+        expect(snapshot.accounts?.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+        expect(snapshot.flagged.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+        expect(accountReadCount).toBe(1);
+      } finally {
+        readSpy.mockRestore();
+      }
+    });
+
+    it("reuses the loaded accounts snapshot inside withFlaggedAccountsTransaction", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "orphan-refresh",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      const originalReadFile = fs.readFile.bind(fs);
+      const readSpy = vi.spyOn(fs, "readFile");
+      let accountReadCount = 0;
+      readSpy.mockImplementation(async (path, options) => {
+        if (String(path) === testStoragePath) {
+          accountReadCount++;
+        }
+        return originalReadFile(path as Parameters<typeof fs.readFile>[0], options as never);
+      });
+
+      try {
+        const result = await withFlaggedAccountsTransaction(async (current) => current);
+        expect(result.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+        expect(accountReadCount).toBe(1);
+      } finally {
+        readSpy.mockRestore();
+      }
+    });
+
+    it("copies the raw accounts file for backup", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "backup-refresh",
+            accountId: "backup-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      const backupPath = join(testWorkDir, "backup.json");
+      await backupRawAccountsFile(backupPath);
+
+      const raw = JSON.parse(await fs.readFile(backupPath, "utf-8")) as { accounts: Array<{ refreshToken: string }> };
+      expect(raw.accounts[0]?.refreshToken).toBe("backup-refresh");
     });
   });
 

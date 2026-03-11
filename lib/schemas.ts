@@ -52,6 +52,11 @@ export const PluginConfigSchema = z.object({
 	pidOffsetEnabled: z.boolean().optional(),
 	fetchTimeoutMs: z.number().min(1_000).optional(),
 	streamStallTimeoutMs: z.number().min(1_000).optional(),
+	experimental: z.object({
+		syncFromCodexMultiAuth: z.object({
+			enabled: z.boolean().optional(),
+		}).optional(),
+	}).optional(),
 });
 
 export type PluginConfigFromSchema = z.infer<typeof PluginConfigSchema>;

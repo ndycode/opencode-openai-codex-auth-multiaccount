@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { promises as fs, readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
@@ -16,6 +16,12 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
+const CONFIG_LOCK_PATH = `${CONFIG_PATH}.lock`;
+const CONFIG_LOCK_RETRY_ATTEMPTS = 5;
+const CONFIG_LOCK_RETRY_BASE_DELAY_MS = 10;
+const CONFIG_LOCK_RETRY_MAX_DELAY_MS = 200;
+const CONFIG_LOCK_STALE_MS = 30_000;
+let configMutationMutex: Promise<void> = Promise.resolve();
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -111,7 +117,84 @@ function stripUtf8Bom(content: string): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object";
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+type RawPluginConfig = Record<string, unknown>;
+
+function withConfigMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+	const previous = configMutationMutex;
+	let release: () => void;
+	configMutationMutex = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return previous.then(fn).finally(() => release());
+}
+
+async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
+	let lastError: NodeJS.ErrnoException | null = null;
+
+	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+
+	for (let attempt = 0; attempt < CONFIG_LOCK_RETRY_ATTEMPTS; attempt += 1) {
+		try {
+			const handle = await fs.open(CONFIG_LOCK_PATH, "wx", 0o600);
+			try {
+				return await fn();
+			} finally {
+				await handle.close();
+				await fs.unlink(CONFIG_LOCK_PATH).catch(() => undefined);
+			}
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "EEXIST") {
+				try {
+					const stat = await fs.stat(CONFIG_LOCK_PATH);
+					if (Date.now() - stat.mtimeMs > CONFIG_LOCK_STALE_MS) {
+						await fs.unlink(CONFIG_LOCK_PATH).catch(() => undefined);
+						continue;
+					}
+				} catch (statError) {
+					const statCode = (statError as NodeJS.ErrnoException).code;
+					if (statCode === "ENOENT") {
+						continue;
+					}
+				}
+				lastError = error as NodeJS.ErrnoException;
+				await new Promise((resolve) =>
+					setTimeout(
+						resolve,
+						Math.min(CONFIG_LOCK_RETRY_BASE_DELAY_MS * 2 ** attempt, CONFIG_LOCK_RETRY_MAX_DELAY_MS),
+					),
+				);
+				continue;
+			}
+			throw error;
+		}
+	}
+
+	throw lastError ?? new Error(`Timed out acquiring config lock ${CONFIG_LOCK_PATH}`);
+}
+
+async function renameConfigWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
+	let lastError: NodeJS.ErrnoException | null = null;
+	for (let attempt = 0; attempt < 5; attempt += 1) {
+		try {
+			await fs.rename(sourcePath, destinationPath);
+			return;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "EPERM" || code === "EBUSY") {
+				lastError = error as NodeJS.ErrnoException;
+				await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+				continue;
+			}
+			throw error;
+		}
+	}
+	if (lastError) {
+		throw lastError;
+	}
 }
 
 /**
@@ -500,4 +583,63 @@ export function getStreamStallTimeoutMs(pluginConfig: PluginConfig): number {
 		45_000,
 		{ min: 1_000 },
 	);
+}
+
+async function savePluginConfigMutation(
+        mutate: (current: RawPluginConfig) => RawPluginConfig,
+): Promise<void> {
+        await withConfigMutationLock(async () => withConfigProcessLock(async () => {
+                await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
+                const current = existsSync(CONFIG_PATH)
+                        ? await (async () => {
+				const raw = stripUtf8Bom(await fs.readFile(CONFIG_PATH, "utf-8"));
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(raw) as unknown;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					throw new Error(`Invalid JSON in config file ${CONFIG_PATH}: ${message}`);
+				}
+				if (!isRecord(parsed)) {
+					throw new Error(`Config file must contain a JSON object: ${CONFIG_PATH}`);
+				}
+				return { ...parsed };
+			})()
+			: {};
+		const next = mutate(current);
+		const tempPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
+		try {
+			await fs.writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+				encoding: "utf-8",
+				mode: 0o600,
+			});
+			await renameConfigWithWindowsRetry(tempPath, CONFIG_PATH);
+		} catch (error) {
+			try {
+				await fs.unlink(tempPath);
+			} catch {
+				// Best effort cleanup only.
+                        }
+                        throw error;
+                }
+        }));
+}
+
+export function getSyncFromCodexMultiAuthEnabled(pluginConfig: PluginConfig): boolean {
+	return pluginConfig.experimental?.syncFromCodexMultiAuth?.enabled === true;
+}
+
+export async function setSyncFromCodexMultiAuthEnabled(enabled: boolean): Promise<void> {
+	await savePluginConfigMutation((current) => {
+		const experimental = isRecord(current.experimental) ? { ...current.experimental } : {};
+		const syncSettings = isRecord(experimental.syncFromCodexMultiAuth)
+			? { ...experimental.syncFromCodexMultiAuth }
+			: {};
+		syncSettings.enabled = enabled;
+		experimental.syncFromCodexMultiAuth = syncSettings;
+		return {
+			...current,
+			experimental,
+		};
+	});
 }
