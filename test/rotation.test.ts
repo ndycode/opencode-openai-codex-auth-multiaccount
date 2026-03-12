@@ -183,6 +183,26 @@ describe("TokenBucketTracker", () => {
 		});
 	});
 
+	describe("getWaitTimeUntilTokenAvailable", () => {
+		it("returns 0 for an untouched bucket", () => {
+			expect(tracker.getWaitTimeUntilTokenAvailable(0)).toBe(0);
+		});
+
+		it("returns Infinity when refill is disabled and the bucket is empty", () => {
+			tracker = new TokenBucketTracker({
+				...DEFAULT_TOKEN_BUCKET_CONFIG,
+				tokensPerMinute: 0,
+			});
+			tracker.drain(0, undefined, DEFAULT_TOKEN_BUCKET_CONFIG.maxTokens);
+			expect(tracker.getWaitTimeUntilTokenAvailable(0)).toBe(Number.POSITIVE_INFINITY);
+		});
+
+		it("returns a finite wait after the bucket is partially drained", () => {
+			tracker.drain(0, undefined, DEFAULT_TOKEN_BUCKET_CONFIG.maxTokens);
+			expect(tracker.getWaitTimeUntilTokenAvailable(0)).toBeGreaterThan(0);
+		});
+	});
+
 	describe("tryConsume", () => {
 		it("consumes one token and returns true", () => {
 			const result = tracker.tryConsume(0);

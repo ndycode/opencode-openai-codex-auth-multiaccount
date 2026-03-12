@@ -1,6 +1,7 @@
 import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Auth } from "@opencode-ai/sdk";
 import { createLogger } from "./logger.js";
 import {
@@ -15,9 +16,11 @@ import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import {
 	getHealthTracker,
 	getTokenTracker,
+	reindexTrackersAfterRemoval,
 	selectHybridAccount,
 	type AccountWithMetrics,
 	type HybridSelectionOptions,
+	type RequestHybridSelectionOptions,
 } from "./rotation.js";
 import { isRecord, nowMs } from "./utils.js";
 import { decodeJWT } from "./auth/auth.js";
@@ -172,6 +175,7 @@ function initFamilyState(defaultValue: number): Record<ModelFamily, number> {
 
 export interface ManagedAccount {
 	index: number;
+	immutableId: string;
 	accountId?: string;
 	organizationId?: string;
 	accountIdSource?: AccountIdSource;
@@ -204,6 +208,21 @@ export interface AccountSelectionExplainability {
 	coolingDownUntil?: number;
 	cooldownReason?: CooldownReason;
 	lastUsed: number;
+}
+
+type AccountAvailabilitySnapshot = {
+	enabled: boolean;
+	rateLimited: boolean;
+	coolingDown: boolean;
+	tokensAvailable: number;
+	eligible: boolean;
+};
+
+function getRequestAttemptKey(account: Pick<ManagedAccount, "immutableId" | "organizationId">): string {
+	return [
+		account.immutableId,
+		account.organizationId ?? "",
+	].join("::");
 }
 
 export class AccountManager {
@@ -298,6 +317,7 @@ export class AccountManager {
  
 					return {
 						index,
+						immutableId: randomUUID(),
 						accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
 						organizationId: account.organizationId,
 						accountIdSource: account.accountIdSource,
@@ -334,6 +354,7 @@ export class AccountManager {
 				const now = nowMs();
 				this.accounts.push({
 					index: this.accounts.length,
+					immutableId: randomUUID(),
 					accountId: fallbackAccountId,
 					organizationId: undefined,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
@@ -367,6 +388,7 @@ export class AccountManager {
 			this.accounts = [
 				{
 					index: 0,
+					immutableId: randomUUID(),
 					accountId: fallbackAccountId,
 					organizationId: undefined,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
@@ -411,6 +433,32 @@ export class AccountManager {
 		}));
 	}
 
+	getRequestAttemptKey(account: ManagedAccount): string {
+		return getRequestAttemptKey(account);
+	}
+
+	private getAccountAvailabilitySnapshot(
+		account: ManagedAccount,
+		family: ModelFamily,
+		model?: string | null,
+		tokenTracker = getTokenTracker(),
+	): AccountAvailabilitySnapshot {
+		clearExpiredRateLimits(account);
+		const enabled = account.enabled !== false;
+		const rateLimited = isRateLimitedForFamily(account, family, model);
+		const coolingDown = this.isAccountCoolingDown(account);
+		const quotaKey = model ? `${family}:${model}` : family;
+		const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
+		const eligible = enabled && !rateLimited && !coolingDown && tokensAvailable >= 1;
+		return {
+			enabled,
+			rateLimited,
+			coolingDown,
+			tokensAvailable,
+			eligible,
+		};
+	}
+
 	getSelectionExplainability(
 		family: ModelFamily,
 		model?: string | null,
@@ -424,8 +472,12 @@ export class AccountManager {
 		const tokenTracker = getTokenTracker();
 
 		return this.accounts.map((account) => {
-			clearExpiredRateLimits(account);
-			const enabled = account.enabled !== false;
+			const availability = this.getAccountAvailabilitySnapshot(
+				account,
+				family,
+				model,
+				tokenTracker,
+			);
 			const reasons: string[] = [];
 			let rateLimitedUntil: number | undefined;
 			const baseRateLimit = account.rateLimitResetTimes[baseQuotaKey];
@@ -446,7 +498,7 @@ export class AccountManager {
 					? account.coolingDownUntil
 					: undefined;
 
-			if (!enabled) reasons.push("disabled");
+			if (!availability.enabled) reasons.push("disabled");
 			if (rateLimitedUntil !== undefined) reasons.push("rate-limited");
 			if (coolingDownUntil !== undefined) {
 				reasons.push(
@@ -454,24 +506,17 @@ export class AccountManager {
 				);
 			}
 
-			const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
-			if (tokensAvailable < 1) reasons.push("token-bucket-empty");
-
-			const eligible =
-				enabled &&
-				rateLimitedUntil === undefined &&
-				coolingDownUntil === undefined &&
-				tokensAvailable >= 1;
+			if (availability.tokensAvailable < 1) reasons.push("token-bucket-empty");
 			if (reasons.length === 0) reasons.push("eligible");
 
 			return {
 				index: account.index,
-				enabled,
+				enabled: availability.enabled,
 				isCurrentForFamily: currentIndex === account.index,
-				eligible,
+				eligible: availability.eligible,
 				reasons,
 				healthScore: healthTracker.getScore(account.index, quotaKey),
-				tokensAvailable,
+				tokensAvailable: availability.tokensAvailable,
 				rateLimitedUntil,
 				coolingDownUntil,
 				cooldownReason: coolingDownUntil !== undefined ? account.cooldownReason : undefined,
@@ -611,6 +656,81 @@ export class AccountManager {
 			.filter((a): a is AccountWithMetrics => a !== null);
 
 		const selected = selectHybridAccount(accountsWithMetrics, healthTracker, tokenTracker, quotaKey, {}, options);
+		if (!selected) return null;
+
+		const account = this.accounts[selected.index];
+		if (!account) return null;
+
+		this.currentAccountIndexByFamily[family] = account.index;
+		this.cursorByFamily[family] = (account.index + 1) % count;
+		account.lastUsed = nowMs();
+		return account;
+	}
+
+	getNextRequestEligibleForFamilyHybrid(
+		family: ModelFamily,
+		model?: string | null,
+		options: RequestHybridSelectionOptions = {},
+	): ManagedAccount | null {
+		const count = this.accounts.length;
+		if (count === 0) return null;
+
+		const attemptedAccountKeys = options.attemptedAccountKeys ?? new Set<string>();
+		const quotaKey = model ? `${family}:${model}` : family;
+		const healthTracker = getHealthTracker();
+		const tokenTracker = getTokenTracker();
+		const currentIndex = this.currentAccountIndexByFamily[family];
+		let alreadyCheckedCurrentIndex = -1;
+
+		const currentAccount =
+			currentIndex >= 0 && currentIndex < count ? this.accounts[currentIndex] : undefined;
+		if (
+			currentAccount &&
+			!attemptedAccountKeys.has(getRequestAttemptKey(currentAccount))
+		) {
+			const availability = this.getAccountAvailabilitySnapshot(
+				currentAccount,
+				family,
+				model,
+				tokenTracker,
+			);
+			if (availability.eligible) {
+				currentAccount.lastUsed = nowMs();
+				return currentAccount;
+			}
+			alreadyCheckedCurrentIndex = currentIndex;
+		}
+
+		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
+			.map((account): AccountWithMetrics | null => {
+				if (!account) return null;
+				if (account.index === alreadyCheckedCurrentIndex) return null;
+				if (attemptedAccountKeys.has(getRequestAttemptKey(account))) return null;
+				const availability = this.getAccountAvailabilitySnapshot(
+					account,
+					family,
+					model,
+					tokenTracker,
+				);
+				if (!availability.eligible) return null;
+				return {
+					index: account.index,
+					isAvailable: true,
+					lastUsed: account.lastUsed,
+				};
+			})
+			.filter((account): account is AccountWithMetrics => account !== null);
+
+		// Every entry passed here is already request-eligible, so hybrid scoring only
+		// ranks eligible candidates and does not rely on the LRU unavailable fallback.
+		const selected = selectHybridAccount(
+			accountsWithMetrics,
+			healthTracker,
+			tokenTracker,
+			quotaKey,
+			{},
+			{ pidOffsetEnabled: options.pidOffsetEnabled },
+		);
 		if (!selected) return null;
 
 		const account = this.accounts[selected.index];
@@ -791,10 +911,11 @@ export class AccountManager {
 
 	getMinWaitTimeForFamily(family: ModelFamily, model?: string | null): number {
 		const now = nowMs();
+		const quotaKey = model ? `${family}:${model}` : family;
+		const tokenTracker = getTokenTracker();
 		const enabledAccounts = this.accounts.filter((account) => account.enabled !== false);
 		const available = enabledAccounts.filter((account) => {
-			clearExpiredRateLimits(account);
-			return !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
+			return this.getAccountAvailabilitySnapshot(account, family, model, tokenTracker).eligible;
 		});
 		if (available.length > 0) return 0;
 		if (enabledAccounts.length === 0) return 0;
@@ -804,24 +925,38 @@ export class AccountManager {
 		const modelKey = model ? getQuotaKey(family, model) : null;
 
 		for (const account of enabledAccounts) {
+			const accountWaits: number[] = [];
+			// `available` above clears stale blocker windows first, so any waits collected
+			// here reflect only blockers that are still preventing this account from serving.
 			const baseResetAt = account.rateLimitResetTimes[baseKey];
 			if (typeof baseResetAt === "number") {
-				waitTimes.push(Math.max(0, baseResetAt - now));
+				accountWaits.push(Math.max(0, baseResetAt - now));
 			}
 
 			if (modelKey) {
 				const modelResetAt = account.rateLimitResetTimes[modelKey];
 				if (typeof modelResetAt === "number") {
-					waitTimes.push(Math.max(0, modelResetAt - now));
+					accountWaits.push(Math.max(0, modelResetAt - now));
 				}
 			}
 
 			if (typeof account.coolingDownUntil === "number") {
-				waitTimes.push(Math.max(0, account.coolingDownUntil - now));
+				accountWaits.push(Math.max(0, account.coolingDownUntil - now));
+			}
+
+			const tokenWaitMs = tokenTracker.getWaitTimeUntilTokenAvailable(account.index, quotaKey);
+			if (tokenWaitMs > 0) {
+				accountWaits.push(tokenWaitMs);
+			}
+
+			if (accountWaits.length > 0) {
+				waitTimes.push(Math.max(...accountWaits));
 			}
 		}
 
-		return waitTimes.length > 0 ? Math.min(...waitTimes) : 0;
+		if (waitTimes.length === 0) return 0;
+		const minWait = Math.min(...waitTimes);
+		return Number.isFinite(minWait) ? minWait : Number.MAX_SAFE_INTEGER;
 	}
 
 	removeAccount(account: ManagedAccount): boolean {
@@ -834,6 +969,14 @@ export class AccountManager {
 		this.accounts.forEach((acc, index) => {
 			acc.index = index;
 		});
+		if (this.lastToastAccountIndex === idx) {
+			this.lastToastAccountIndex = -1;
+		} else if (this.lastToastAccountIndex > idx) {
+			this.lastToastAccountIndex -= 1;
+		}
+		// Trackers are keyed by account index, so removals must reindex surviving entries
+		// to keep health and token history attached to the correct remaining account.
+		reindexTrackersAfterRemoval(idx);
 
 		if (this.accounts.length === 0) {
 			for (const family of MODEL_FAMILIES) {

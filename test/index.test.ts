@@ -301,6 +301,22 @@ vi.mock("../lib/accounts.js", () => {
 			return this.accounts[0] ?? null;
 		}
 
+		getNextRequestEligibleForFamilyHybrid(
+			_family?: unknown,
+			_model?: unknown,
+			options?: { attemptedAccountKeys?: ReadonlySet<string> },
+		) {
+			const account = this.accounts[0];
+			if (!account || options?.attemptedAccountKeys?.has(`mock::${account.index}`)) {
+				return null;
+			}
+			return account;
+		}
+
+		getRequestAttemptKey(account: { index: number }) {
+			return `mock::${account.index}`;
+		}
+
 		getSelectionExplainability() {
 			return this.accounts.map((account, index) => ({
 				index,
@@ -2011,6 +2027,83 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		return { plugin, sdk, mockClient };
 	};
 
+	const createRequestAwareManager = (
+		accounts: Array<{
+			index: number;
+			accountId?: string;
+			email?: string;
+			refreshToken: string;
+		}>,
+		overrides?: {
+			select?: (
+				attemptedAccountKeys: ReadonlySet<string>,
+				model?: string | null,
+			) => (typeof accounts)[number] | null;
+			consumeToken?: (
+				account: (typeof accounts)[number],
+				family: string,
+				model?: string | null,
+			) => boolean;
+			getMinWaitTimeForFamily?: (family: string, model?: string | null) => number;
+		},
+	) => ({
+		getAccountCount: () => accounts.length,
+		getCurrentOrNextForFamilyHybrid: () => accounts[0] ?? null,
+		getNextRequestEligibleForFamilyHybrid: (
+			_family: string,
+			model?: string | null,
+			options?: { attemptedAccountKeys?: ReadonlySet<string> },
+		) => {
+			if (overrides?.select) {
+				return overrides.select(options?.attemptedAccountKeys ?? new Set<string>(), model);
+			}
+			return (
+				accounts.find((account) => !(options?.attemptedAccountKeys?.has(`mock::${account.index}`) ?? false)) ?? null
+			);
+		},
+		getRequestAttemptKey: (account: { index: number }) => `mock::${account.index}`,
+		getSelectionExplainability: () =>
+			accounts.map((account, index) => ({
+				index,
+				enabled: true,
+				isCurrentForFamily: index === 0,
+				eligible: true,
+				reasons: ["eligible"],
+				healthScore: 100,
+				tokensAvailable: 50,
+				lastUsed: Date.now(),
+			})),
+		toAuthDetails: (account: { accountId?: string }) => ({
+			type: "oauth" as const,
+			access: `access-${account.accountId ?? "unknown"}`,
+			refresh: `refresh-${account.accountId ?? "unknown"}`,
+			expires: Date.now() + 60_000,
+		}),
+		hasRefreshToken: () => true,
+		saveToDiskDebounced: () => {},
+		updateFromAuth: () => {},
+		clearAuthFailures: () => {},
+		incrementAuthFailures: () => 1,
+		markAccountCoolingDown: () => {},
+		markAccountsWithRefreshTokenCoolingDown: () => 1,
+		markRateLimitedWithReason: () => {},
+		recordRateLimit: () => {},
+		consumeToken: (account: (typeof accounts)[number], family: string, model?: string | null) =>
+			overrides?.consumeToken?.(account, family, model) ?? true,
+		refundToken: () => {},
+		markSwitched: () => {},
+		removeAccount: () => {},
+		removeAccountsWithSameRefreshToken: () => 1,
+		recordFailure: () => {},
+		recordSuccess: () => {},
+		getMinWaitTimeForFamily: (family: string, model?: string | null) =>
+			overrides?.getMinWaitTimeForFamily?.(family, model) ?? 0,
+		shouldShowAccountToast: () => false,
+		markToastShown: () => {},
+		setActiveIndex: (index: number) => accounts[index] ?? null,
+		getAccountsSnapshot: () => accounts,
+	});
+
 	it("returns success response for successful fetch", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify({ content: "test" }), { status: 200 }),
@@ -2026,7 +2119,22 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("handles network errors and rotates to next account", async () => {
-		globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
+		const { AccountManager } = await import("../lib/accounts.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const accounts = [
+			{ index: 0, accountId: "acc-1", email: "user1@example.com", refreshToken: "refresh-1" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const customManager = createRequestAwareManager(accounts);
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+			(_init, _accountId, accessToken) =>
+				new Headers({ authorization: `Bearer ${String(accessToken)}` }),
+		);
+		globalThis.fetch = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("Network timeout"))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
 
 		const { sdk } = await setupPlugin();
 		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
@@ -2034,8 +2142,15 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			body: JSON.stringify({ model: "gpt-5.1" }),
 		});
 
-		expect(response.status).toBe(503);
-		expect(await response.text()).toContain("server errors or auth issues");
+		expect(response.status).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		const accessTokens = vi.mocked(globalThis.fetch).mock.calls.map((call) =>
+			new Headers((call[1] as RequestInit | undefined)?.headers).get("authorization"),
+		);
+		expect(accessTokens).toEqual([
+			"Bearer access-acc-1",
+			"Bearer access-acc-2",
+		]);
 	});
 
 	it("cools down the account when grouped auth removal removes zero entries", async () => {
@@ -2079,11 +2194,25 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 	});
 
-	it("skips fetch when local token bucket is depleted", async () => {
+	it("uses the next eligible account when consumeToken loses the race after selection", async () => {
 		const { AccountManager } = await import("../lib/accounts.js");
-		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const accounts = [
+			{ index: 0, accountId: "acc-1", email: "user1@example.com", refreshToken: "refresh-1" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const customManager = createRequestAwareManager(accounts, {
+			consumeToken: (account) => account.index !== 0,
+		});
+		const recordRateLimitSpy = vi.fn();
+		customManager.recordRateLimit = recordRateLimitSpy;
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+			(_init, _accountId, accessToken) =>
+				new Headers({ authorization: `Bearer ${String(accessToken)}` }),
+		);
 		globalThis.fetch = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
+			new Response(JSON.stringify({ content: "used-second-account" }), { status: 200 }),
 		);
 
 		const { sdk } = await setupPlugin();
@@ -2092,10 +2221,111 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			body: JSON.stringify({ model: "gpt-5.1" }),
 		});
 
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(response.status).toBe(200);
+		const authorization = new Headers(
+			(vi.mocked(globalThis.fetch).mock.calls[0]?.[1] as RequestInit | undefined)?.headers,
+		).get("authorization");
+		expect(authorization).toBe("Bearer access-acc-2");
+		expect(recordRateLimitSpy).not.toHaveBeenCalled();
+	});
+
+	it("rotates to the next account after a 5xx response", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const accounts = [
+			{ index: 0, accountId: "acc-1", email: "user1@example.com", refreshToken: "refresh-1" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const customManager = createRequestAwareManager(accounts);
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+			(_init, _accountId, accessToken) =>
+				new Headers({ authorization: `Bearer ${String(accessToken)}` }),
+		);
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("upstream bad", { status: 502 }))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		const accessTokens = vi.mocked(globalThis.fetch).mock.calls.map((call) =>
+			new Headers((call[1] as RequestInit | undefined)?.headers).get("authorization"),
+		);
+		expect(accessTokens).toEqual([
+			"Bearer access-acc-1",
+			"Bearer access-acc-2",
+		]);
+	});
+
+	it("rotates to the next account after an empty response retry", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const accounts = [
+			{ index: 0, accountId: "acc-1", email: "user1@example.com", refreshToken: "refresh-1" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const customManager = createRequestAwareManager(accounts);
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+			(_init, _accountId, accessToken) =>
+				new Headers({ authorization: `Bearer ${String(accessToken)}` }),
+		);
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ id: "resp-empty", object: "response" }), { status: 200 }),
+			)
+			.mockResolvedValueOnce(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+		const accessTokens = vi.mocked(globalThis.fetch).mock.calls.map((call) =>
+			new Headers((call[1] as RequestInit | undefined)?.headers).get("authorization"),
+		);
+		expect(accessTokens).toEqual([
+			"Bearer access-acc-1",
+			"Bearer access-acc-2",
+		]);
+	});
+
+	it("returns a retryable wait when every account is locally token-bucket depleted", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const configModule = await import("../lib/config.js");
+		const accounts = [
+			{ index: 0, accountId: "acc-1", email: "user1@example.com", refreshToken: "refresh-1" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const customManager = createRequestAwareManager(accounts, {
+			consumeToken: () => false,
+			getMinWaitTimeForFamily: () => 12_000,
+		});
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		vi.spyOn(configModule, "getRetryAllAccountsRateLimited").mockReturnValueOnce(false);
+		globalThis.fetch = vi.fn();
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
 		expect(globalThis.fetch).not.toHaveBeenCalled();
-		expect(response.status).toBe(503);
-		expect(await response.text()).toContain("server errors or auth issues");
-		consumeSpy.mockRestore();
+		expect(response.status).toBe(429);
+		expect(await response.text()).toContain("Try again in 12s");
 	});
 
 	it("falls back from gpt-5.4-pro to gpt-5.4 when unsupported fallback is enabled", async () => {
@@ -2312,6 +2542,25 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 					}
 					return null;
 				},
+				getNextRequestEligibleForFamilyHybrid: (
+					family: string,
+					currentModel?: string,
+					options?: { attemptedAccountKeys?: ReadonlySet<string> },
+				) => {
+					const attemptedAccountKeys = options?.attemptedAccountKeys ?? new Set<string>();
+					for (let remaining = 0; remaining < customManager.getAccountCount(); remaining++) {
+						const candidate = customManager.getCurrentOrNextForFamilyHybrid(
+							family,
+							currentModel,
+						);
+						if (!candidate) return null;
+						if (!attemptedAccountKeys.has(`mock::${candidate.index}`)) {
+							return candidate;
+						}
+					}
+					return null;
+				},
+				getRequestAttemptKey: (account: { index: number }) => `mock::${account.index}`,
 				getSelectionExplainability: () => [
 					{
 						index: 0,
