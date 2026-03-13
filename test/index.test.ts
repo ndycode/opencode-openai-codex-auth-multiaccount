@@ -344,6 +344,7 @@ vi.mock("../lib/accounts.js", () => {
 		refundToken() {}
 		markSwitched() {}
 		removeAccount() {}
+		disableAccountsWithSameRefreshToken() { return 1; }
 		removeAccountsWithSameRefreshToken() { return 1; }
 
 		getMinWaitTimeForFamily() {
@@ -2038,7 +2039,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(await response.text()).toContain("server errors or auth issues");
 	});
 
-	it("cools down the account when grouped auth removal removes zero entries", async () => {
+	it("disables grouped accounts when auth failures hit the threshold", async () => {
 		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
 		const { AccountManager } = await import("../lib/accounts.js");
 		const { ACCOUNT_LIMITS } = await import("../lib/constants.js");
@@ -2049,9 +2050,56 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 		const incrementAuthFailuresSpy = vi
 			.spyOn(AccountManager.prototype, "incrementAuthFailures")
-			.mockReturnValue(ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_REMOVAL);
-		const removeGroupedAccountsSpy = vi
-			.spyOn(AccountManager.prototype, "removeAccountsWithSameRefreshToken")
+			.mockReturnValue(ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_DISABLE);
+		const disableGroupedAccountsSpy = vi
+			.spyOn(AccountManager.prototype, "disableAccountsWithSameRefreshToken")
+			.mockReturnValue(2);
+		vi.spyOn(AccountManager.prototype, "getCurrentOrNextForFamilyHybrid")
+			.mockImplementationOnce(() => ({
+				index: 0,
+				email: "user1@example.com",
+				refreshToken: "refresh-1",
+			}) as never)
+			.mockImplementation(() => null);
+
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "should-not-fetch" }), { status: 200 }),
+		);
+
+		const { sdk, mockClient } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(response.status).toBe(503);
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(incrementAuthFailuresSpy).toHaveBeenCalledTimes(1);
+		expect(disableGroupedAccountsSpy).toHaveBeenCalledTimes(1);
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith(
+			expect.objectContaining({
+				body: expect.objectContaining({
+					message: expect.stringContaining("Disabled 2 accounts"),
+					variant: "error",
+				}),
+			}),
+		);
+	});
+
+	it("cools down the account when grouped auth disable updates zero entries", async () => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const { AccountManager } = await import("../lib/accounts.js");
+		const { ACCOUNT_LIMITS } = await import("../lib/constants.js");
+
+		vi.spyOn(fetchHelpers, "shouldRefreshToken").mockReturnValue(true);
+		vi.mocked(fetchHelpers.refreshAndUpdateToken).mockRejectedValue(
+			new Error("Token expired"),
+		);
+		const incrementAuthFailuresSpy = vi
+			.spyOn(AccountManager.prototype, "incrementAuthFailures")
+			.mockReturnValue(ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_DISABLE);
+		const disableGroupedAccountsSpy = vi
+			.spyOn(AccountManager.prototype, "disableAccountsWithSameRefreshToken")
 			.mockReturnValue(0);
 		const markAccountsWithRefreshTokenCoolingDownSpy = vi.spyOn(
 			AccountManager.prototype,
@@ -2071,7 +2119,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(response.status).toBe(503);
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(incrementAuthFailuresSpy).toHaveBeenCalledTimes(1);
-		expect(removeGroupedAccountsSpy).toHaveBeenCalledTimes(1);
+		expect(disableGroupedAccountsSpy).toHaveBeenCalledTimes(1);
 		expect(markAccountsWithRefreshTokenCoolingDownSpy).toHaveBeenCalledWith(
 			"refresh-1",
 			ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
@@ -3124,6 +3172,70 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(mergedOrg?.enabled).toBe(false);
 		expect(mergedOrg?.coolingDownUntil).toBe(12_000);
 		expect(mergedOrg?.cooldownReason).toBe("auth-failure");
+	});
+
+	it("re-enables disabled same-refresh-token variants on explicit login", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const authModule = await import("../lib/auth/auth.js");
+
+		mockStorage.accounts = [
+			{
+				accountId: "org-shared",
+				organizationId: "org-keep",
+				email: "org@example.com",
+				refreshToken: "shared-refresh",
+				enabled: false,
+				coolingDownUntil: 12_000,
+				cooldownReason: "auth-failure",
+				addedAt: 10,
+				lastUsed: 10,
+			},
+			{
+				accountId: "org-sibling",
+				organizationId: "org-sibling",
+				email: "sibling@example.com",
+				refreshToken: "shared-refresh",
+				enabled: false,
+				coolingDownUntil: 15_000,
+				cooldownReason: "auth-failure",
+				addedAt: 11,
+				lastUsed: 11,
+			},
+		];
+
+		vi.mocked(authModule.exchangeAuthorizationCode).mockResolvedValueOnce({
+			type: "success",
+			access: "access-shared-refresh",
+			refresh: "shared-refresh",
+			expires: Date.now() + 300_000,
+			idToken: "id-shared-refresh",
+		});
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValueOnce([]);
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((accessToken) =>
+			accessToken === "access-shared-refresh" ? "org-shared" : "account-1",
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = (await OpenAIOAuthPlugin({
+			client: mockClient,
+		} as never)) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+
+		const revivedEntries = mockStorage.accounts.filter(
+			(account) => account.refreshToken === "shared-refresh",
+		);
+		expect(revivedEntries).toHaveLength(2);
+		expect(revivedEntries.every((account) => account.enabled !== false)).toBe(true);
+		expect(revivedEntries.every((account) => account.coolingDownUntil === undefined)).toBe(true);
+		expect(revivedEntries.every((account) => account.cooldownReason === undefined)).toBe(true);
+		expect(
+			revivedEntries.find((account) => account.accountId === "org-shared")?.accessToken,
+		).toBe("access-shared-refresh");
 	});
 
 	it("preserves same-organization entries when accountId differs", async () => {

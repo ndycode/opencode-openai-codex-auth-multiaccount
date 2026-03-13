@@ -856,6 +856,32 @@ describe("AccountManager", () => {
       expect(manager.getAccountsSnapshot()[0].refreshToken).toBe("token-2");
     });
 
+    it("disables all accounts with the same refreshToken", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-1", organizationId: "org-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-1", organizationId: "org-2", addedAt: now, lastUsed: now },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(4);
+
+      const disabledCount = manager.disableAccountsWithSameRefreshToken(accounts[0]);
+      expect(disabledCount).toBe(3);
+      expect(manager.getAccountCount()).toBe(4);
+
+      const updated = manager.getAccountsSnapshot();
+      expect(updated.slice(0, 3).every((account) => account.enabled === false)).toBe(true);
+      expect(updated[3]?.enabled).not.toBe(false);
+    });
+
     it("clears auth failure counter when removing accounts with same refreshToken", () => {
       const now = Date.now();
       const stored = {
@@ -890,6 +916,37 @@ describe("AccountManager", () => {
       ) as Map<string, number>;
       expect(failuresByRefreshToken.has("token-1")).toBe(false);
       expect(manager.incrementAuthFailures(account1)).toBe(1);
+    });
+
+    it("clears auth failure counter when disabling accounts with same refreshToken", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-1", organizationId: "org-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(2);
+
+      expect(manager.incrementAuthFailures(accounts[0])).toBe(1);
+      expect(manager.incrementAuthFailures(accounts[1])).toBe(2);
+      expect(manager.incrementAuthFailures(accounts[0])).toBe(3);
+
+      const disabledCount = manager.disableAccountsWithSameRefreshToken(accounts[0]);
+      expect(disabledCount).toBe(2);
+      expect(manager.getAccountsSnapshot().every((account) => account.enabled === false)).toBe(true);
+
+      const failuresByRefreshToken = Reflect.get(
+        manager,
+        "authFailuresByRefreshToken",
+      ) as Map<string, number>;
+      expect(failuresByRefreshToken.has("token-1")).toBe(false);
+      expect(manager.incrementAuthFailures(accounts[0])).toBe(1);
     });
   });
 

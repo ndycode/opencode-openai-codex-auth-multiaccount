@@ -873,6 +873,28 @@ export class AccountManager {
 	}
 
 	/**
+	 * Disable all accounts that share the same refreshToken as the given account.
+	 * This keeps org/workspace variants visible in the pool while preventing reuse.
+	 * @returns Number of accounts newly disabled
+	 */
+	disableAccountsWithSameRefreshToken(account: ManagedAccount): number {
+		const refreshToken = account.refreshToken;
+		let disabledCount = 0;
+
+		for (const accountToDisable of this.accounts) {
+			if (accountToDisable.refreshToken !== refreshToken) continue;
+			if (accountToDisable.enabled === false) continue;
+			accountToDisable.enabled = false;
+			disabledCount++;
+		}
+
+		// Clear stale auth failure state for this refresh token once the group is disabled.
+		this.authFailuresByRefreshToken.delete(refreshToken);
+
+		return disabledCount;
+	}
+
+	/**
 	 * Remove all accounts that share the same refreshToken as the given account.
 	 * This is used when auth refresh fails to remove all org variants together.
 	 * @returns Number of accounts removed

@@ -471,15 +471,27 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 );
         };
 
+		type PersistAccountPoolOptions = {
+			reviveMatchingDisabledAccounts?: boolean;
+		};
+
 	        const persistAccountPool = async (
 	                results: TokenSuccessWithAccount[],
 	                replaceAll: boolean = false,
+	                options: PersistAccountPoolOptions = {},
 	        ): Promise<void> => {
 	                if (results.length === 0) return;
 				await withAccountStorageTransaction(async (loadedStorage, persist) => {
 					const now = Date.now();
 					const stored = replaceAll ? null : loadedStorage;
 			let accounts = stored?.accounts ? [...stored.accounts] : [];
+			const refreshTokensToRevive = options.reviveMatchingDisabledAccounts
+				? new Set(
+					results
+						.map((result) => result.refresh.trim())
+						.filter((refreshToken) => refreshToken.length > 0),
+				)
+				: null;
 
 					const pushIndex = (
 						map: Map<string, number[]>,
@@ -1004,6 +1016,22 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 
 			pruneRefreshTokenCollisions();
+
+			if (refreshTokensToRevive && refreshTokensToRevive.size > 0) {
+				accounts = accounts.map((account) => {
+					const refreshToken = account.refreshToken?.trim();
+					if (!refreshToken || !refreshTokensToRevive.has(refreshToken)) {
+						return account;
+					}
+
+					return {
+						...account,
+						enabled: undefined,
+						coolingDownUntil: undefined,
+						cooldownReason: undefined,
+					};
+				});
+			}
 
 			if (accounts.length === 0) return;
 
@@ -2161,11 +2189,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 				const failures = accountManager.incrementAuthFailures(account);
 				const accountLabel = formatAccountLabel(account, account.index);
 				
-				if (failures >= ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_REMOVAL) {
-					const removedCount = accountManager.removeAccountsWithSameRefreshToken(account);
-					if (removedCount <= 0) {
+				if (failures >= ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_DISABLE) {
+					const disabledCount = accountManager.disableAccountsWithSameRefreshToken(account);
+					if (disabledCount <= 0) {
 						logWarn(
-							`[${PLUGIN_NAME}] Expected grouped account removal after auth failures, but removed ${removedCount}.`,
+							`[${PLUGIN_NAME}] Expected grouped account disable after auth failures, but disabled ${disabledCount}.`,
 						);
 						const cooledCount = accountManager.markAccountsWithRefreshTokenCoolingDown(
 							account.refreshToken,
@@ -2181,11 +2209,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 						continue;
 					}
 					accountManager.saveToDiskDebounced();
-					const removalMessage = removedCount > 1
-						? `Removed ${removedCount} accounts (same refresh token) after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`
-						: `Removed ${accountLabel} after ${failures} consecutive auth failures. Run 'opencode auth login' to re-add.`;
+					const disableMessage = disabledCount > 1
+						? `Disabled ${disabledCount} accounts (same refresh token) after ${failures} consecutive auth failures. Run 'opencode auth login' to re-enable.`
+						: `Disabled ${accountLabel} after ${failures} consecutive auth failures. Run 'opencode auth login' to re-enable.`;
 					await showToast(
-						removalMessage,
+						disableMessage,
 						"error",
 						{ duration: toastDurationMs * 2 },
 					);
@@ -3507,7 +3535,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const { pkce, state, url } = await createAuthorizationFlow();
 								return buildManualOAuthFlow(pkce, url, state, async (selection) => {
 									try {
-										await persistAccountPool(selection.variantsForPersistence, startFresh);
+										await persistAccountPool(selection.variantsForPersistence, startFresh, {
+											reviveMatchingDisabledAccounts: true,
+										});
 										invalidateAccountManagerCache();
 									} catch (err) {
 										const storagePath = getStoragePath();
@@ -3582,7 +3612,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 									const isFirstAccount = accounts.length === 1;
 									const entriesToPersist =
 										variantsForPersistence.length > 0 ? variantsForPersistence : [resolved];
-									await persistAccountPool(entriesToPersist, isFirstAccount && startFresh);
+									await persistAccountPool(entriesToPersist, isFirstAccount && startFresh, {
+										reviveMatchingDisabledAccounts: true,
+									});
 									invalidateAccountManagerCache();
 								} catch (err) {
 									const storagePath = getStoragePath();
@@ -3667,7 +3699,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 												const { pkce, state, url } = await createAuthorizationFlow();
 												return buildManualOAuthFlow(pkce, url, state, async (selection) => {
 														try {
-																await persistAccountPool(selection.variantsForPersistence, false);
+																await persistAccountPool(selection.variantsForPersistence, false, {
+																	reviveMatchingDisabledAccounts: true,
+																});
 														} catch (err) {
                                                                         const storagePath = getStoragePath();
                                                                         const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
