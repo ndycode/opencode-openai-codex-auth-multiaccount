@@ -85,12 +85,14 @@ vi.mock("../lib/config.js", () => ({
 	getFastSession: () => false,
 	getFastSessionStrategy: () => "hybrid",
 	getFastSessionMaxInputItems: () => 30,
+	getPersistAccountFooter: vi.fn(() => false),
+	getPersistAccountFooterStyle: vi.fn(() => "label-masked-email"),
 	getRetryProfile: () => "balanced",
 	getRetryBudgetOverrides: () => ({}),
 	getRateLimitToastDebounceMs: () => 5000,
-	getRetryAllAccountsMaxRetries: () => 3,
-	getRetryAllAccountsMaxWaitMs: () => 30000,
-	getRetryAllAccountsRateLimited: () => true,
+	getRetryAllAccountsMaxRetries: vi.fn(() => 3),
+	getRetryAllAccountsMaxWaitMs: vi.fn(() => 30000),
+	getRetryAllAccountsRateLimited: vi.fn(() => true),
 	getUnsupportedCodexPolicy: vi.fn(() => "fallback"),
 	getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
 	getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
@@ -109,7 +111,7 @@ vi.mock("../lib/config.js", () => ({
 	getCodexTuiColorProfile: () => "ansi16",
 	getCodexTuiGlyphMode: () => "ascii",
 	getBeginnerSafeMode: () => false,
-	loadPluginConfig: () => ({}),
+	loadPluginConfig: vi.fn(() => ({})),
 }));
 
 vi.mock("../lib/request/request-transformer.js", () => ({
@@ -123,6 +125,16 @@ vi.mock("../lib/logger.js", () => ({
 	logInfo: vi.fn(),
 	logWarn: vi.fn(),
 	logError: vi.fn(),
+	maskEmail: (email: string) => {
+		const atIndex = email.indexOf("@");
+		if (atIndex < 0) return "***@***";
+		const local = email.slice(0, atIndex);
+		const domain = email.slice(atIndex + 1);
+		const parts = domain.split(".");
+		const tld = parts.pop() || "";
+		const prefix = local.slice(0, Math.min(2, local.length));
+		return `${prefix}***@***.${tld}`;
+	},
 	setCorrelationId: vi.fn(() => "test-correlation-id"),
 	clearCorrelationId: vi.fn(),
 	createLogger: vi.fn(() => ({
@@ -390,6 +402,28 @@ type ToolExecute<T = void> = { execute: (args: T) => Promise<string> };
 type OptionalToolExecute<T> = { execute: (args?: T) => Promise<string> };
 type PluginType = {
 	event: (input: { event: { type: string; properties?: unknown } }) => Promise<void>;
+	"chat.message": (
+		input: {
+			sessionID: string;
+			model?: { providerID: string; modelID: string };
+		},
+		output: { message: unknown; parts: unknown[] },
+	) => Promise<void>;
+	"experimental.chat.messages.transform": (
+		input: Record<string, never>,
+		output: {
+			messages: Array<{
+				info: {
+					role: string;
+					sessionID?: string;
+					model?: { providerID: string; modelID: string };
+					variant?: string;
+					thinking?: string;
+				};
+				parts: unknown[];
+			}>;
+		},
+	) => Promise<void>;
 	auth: {
 		provider: string;
 		methods: Array<{ label: string; type: string }>;
@@ -1974,9 +2008,22 @@ describe("OpenAIOAuthPlugin edge cases", () => {
 
 describe("OpenAIOAuthPlugin fetch handler", () => {
 	let originalFetch: typeof globalThis.fetch;
+	let originalThreadId: string | undefined;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
+			"label-masked-email",
+		);
+		vi.mocked(configModule.getRetryAllAccountsMaxRetries).mockReturnValue(3);
+		vi.mocked(configModule.getRetryAllAccountsMaxWaitMs).mockReturnValue(30000);
+		vi.mocked(configModule.getRetryAllAccountsRateLimited).mockReturnValue(true);
+		vi.mocked(configModule.getUnsupportedCodexPolicy).mockReturnValue("fallback");
+		vi.mocked(configModule.getFallbackOnUnsupportedCodexModel).mockReturnValue(true);
+		vi.mocked(configModule.getFallbackToGpt52OnUnsupportedGpt53).mockReturnValue(false);
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue({});
 		mockStorage.accounts = [
 			{
 				accountId: "acc-1",
@@ -1986,11 +2033,18 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		originalThreadId = process.env.CODEX_THREAD_ID;
+		delete process.env.CODEX_THREAD_ID;
 		originalFetch = globalThis.fetch;
 	});
 
 	afterEach(() => {
 		globalThis.fetch = originalFetch;
+		if (originalThreadId === undefined) {
+			delete process.env.CODEX_THREAD_ID;
+		} else {
+			process.env.CODEX_THREAD_ID = originalThreadId;
+		}
 		vi.restoreAllMocks();
 	});
 
@@ -2011,6 +2065,89 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		return { plugin, sdk, mockClient };
 	};
 
+	const createPersistedAccountRequestBody = (
+		promptCacheKey?: string,
+		model = "gpt-5.1",
+	) =>
+		promptCacheKey
+			? { model, prompt_cache_key: promptCacheKey }
+			: { model };
+
+	const enablePersistedFooter = async (
+		style: "label-masked-email" | "full-email" | "label-only",
+	) => {
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(style);
+	};
+
+	const disablePersistedFooter = async () => {
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
+	};
+
+	const setRetryAllAccountsRateLimited = async (enabled: boolean) => {
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getRetryAllAccountsRateLimited).mockReturnValue(enabled);
+	};
+
+	const sendPersistedAccountRequest = async (
+		sdk: Awaited<ReturnType<typeof setupPlugin>>["sdk"],
+		promptCacheKey?: string,
+		model = "gpt-5.1",
+	) => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const requestBody = createPersistedAccountRequestBody(promptCacheKey, model);
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+			updatedInit: {
+				method: "POST",
+				body: JSON.stringify(requestBody),
+			},
+			body: requestBody,
+		});
+
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "ok" }), { status: 200 }),
+		);
+
+		return await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify(requestBody),
+		});
+	};
+
+	const expectedMaskedIndicator = "us***@***.com [1/1]";
+	const expectedFullIndicator = "user@example.com [1/1]";
+	const expectedLabelOnlyIndicator = "Account 1 [id:ount-1] [1/1]";
+
+	const buildMessageTransformOutput = (sessionID: string, modelID = "gpt-5.1") => ({
+		messages: [
+			{
+				info: {
+					role: "user",
+					sessionID,
+					model: { providerID: "openai", modelID },
+				},
+				parts: [],
+			},
+		],
+	});
+
+	const readPersistedAccountIndicator = async (
+		plugin: PluginType,
+		sessionID: string,
+		modelID = "gpt-5.1",
+	) => {
+		const output = buildMessageTransformOutput(sessionID, modelID);
+		await plugin["experimental.chat.messages.transform"]({}, output);
+		return {
+			variant:
+				output.messages[0]?.info.model?.variant ??
+				output.messages[0]?.info.variant,
+			thinking: output.messages[0]?.info.thinking,
+		};
+	};
+
 	it("returns success response for successful fetch", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify({ content: "test" }), { status: 200 }),
@@ -2023,6 +2160,359 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		});
 
 		expect(response.status).toBe(200);
+	});
+
+	it("decorates the last user message with a masked-email indicator after the first successful response", async () => {
+		await enablePersistedFooter("label-masked-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-masked");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-masked")).variant).toBe(
+			expectedMaskedIndicator,
+		);
+	});
+
+	it("decorates the last user message with a full-email indicator when configured", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-full");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-full")).variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("does not reload account storage on the successful footer hot path", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const storageModule = await import("../lib/storage.js");
+		const { sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-warmup");
+		vi.mocked(storageModule.loadAccounts).mockClear();
+
+		await sendPersistedAccountRequest(sdk, "session-no-read");
+
+		expect(storageModule.loadAccounts).not.toHaveBeenCalled();
+	});
+
+	it("does not add storage reads during loader init when footer counts are enabled", async () => {
+		const storageModule = await import("../lib/storage.js");
+		const getAuth = async () => ({
+			type: "oauth" as const,
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			multiAccount: true,
+		});
+		const runLoaderAndCountStorageReads = async (): Promise<number> => {
+			const mockClient = createMockClient();
+			const { OpenAIOAuthPlugin } = await import("../index.js");
+			const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+			vi.mocked(storageModule.loadAccounts).mockClear();
+			await plugin.auth.loader(getAuth, { options: {}, models: {} });
+			return vi.mocked(storageModule.loadAccounts).mock.calls.length;
+		};
+
+		await disablePersistedFooter();
+		const baselineReadCount = await runLoaderAndCountStorageReads();
+
+		await enablePersistedFooter("full-email");
+		const footerReadCount = await runLoaderAndCountStorageReads();
+
+		expect(footerReadCount).toBe(baselineReadCount);
+	});
+
+	it("uses the live account count when the cached footer hint is stale", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-live-count");
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+		];
+
+		await sendPersistedAccountRequest(sdk, "session-live-count");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-live-count")).variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("decorates the last user message with a label-only indicator when configured", async () => {
+		await enablePersistedFooter("label-only");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-label");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-label")).variant).toBe(
+			expectedLabelOnlyIndicator,
+		);
+	});
+
+	it("skips persisted indicators when the request has no session key", async () => {
+		await enablePersistedFooter("label-masked-email");
+		const { plugin, sdk } = await setupPlugin();
+		await plugin["chat.message"](
+			{
+				sessionID: "session-no-key",
+				model: { providerID: "openai", modelID: "gpt-5.1" },
+			},
+			{ message: {}, parts: [] },
+		);
+
+		await sendPersistedAccountRequest(sdk);
+
+		expect((await readPersistedAccountIndicator(plugin, "session-no-key")).variant).toBeUndefined();
+	});
+
+	it("decorates chat.message output with the visible account indicator variant without leaking to thinking", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-chat-message", "gpt-5.4");
+
+		const output = {
+			message: {
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "session-chat-message",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			output,
+		);
+
+		expect((output.message as { variant?: string }).variant).toBe(expectedFullIndicator);
+		expect((output.message as { thinking?: string }).thinking).toBeUndefined();
+		expect((output.message as { model?: { modelID?: string } }).model?.modelID).toBe("gpt-5.4");
+		expect((output.message as { model?: { variant?: string } }).model?.variant).toBe(
+			expectedFullIndicator,
+		);
+		expect((await readPersistedAccountIndicator(plugin, "session-chat-message")).thinking).toBeUndefined();
+	});
+
+	it("prefers the explicit request session key over CODEX_THREAD_ID", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-session";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-explicit");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-explicit")).variant).toBe(
+			expectedFullIndicator,
+		);
+		expect((await readPersistedAccountIndicator(plugin, "env-session")).variant).toBeUndefined();
+	});
+
+	it("falls back to CODEX_THREAD_ID in the transform hook when the message session is missing", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-fallback";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk);
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+						model: { providerID: "openai", modelID: "gpt-5.1" },
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(
+			output.messages[0]?.info.model?.variant ?? output.messages[0]?.info.variant,
+		).toBe(expectedFullIndicator);
+	});
+
+	it("suppresses account-switch info toasts when the footer is enabled and refreshes the visible indicator", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const configModule = await import("../lib/config.js");
+
+		const { plugin, sdk, mockClient } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-switch");
+		const configReadCountBeforeSwitch =
+			vi.mocked(configModule.loadPluginConfig).mock.calls.length;
+		mockClient.tui.showToast.mockClear();
+
+		expect((await readPersistedAccountIndicator(plugin, "session-switch")).variant).toBe(
+			"user@example.com [1/2]",
+		);
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+		expect(vi.mocked(configModule.loadPluginConfig)).toHaveBeenCalledTimes(
+			configReadCountBeforeSwitch,
+		);
+		expect((await readPersistedAccountIndicator(plugin, "session-switch")).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+	});
+
+	it("shows the account-switch info toast when the footer is disabled", async () => {
+		await disablePersistedFooter();
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { plugin, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+	});
+
+	it("keeps the newer account indicator when an in-flight response completes after a manual switch", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { plugin, sdk, mockClient } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-stale");
+		mockClient.tui.showToast.mockClear();
+
+		let resolveFetch: ((response: Response) => void) | undefined;
+		globalThis.fetch = vi.fn().mockImplementation(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolveFetch = resolve;
+				}),
+		);
+
+		const pendingResponse = sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1", prompt_cache_key: "session-stale" }),
+		});
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		resolveFetch?.(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+		await pendingResponse;
+
+		expect((await readPersistedAccountIndicator(plugin, "session-stale")).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+	});
+
+	it("evicts the oldest persisted indicator after a full refresh when a new session overflows the cap", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const maxPersistedIndicators = 200;
+		const sessionIDs = Array.from(
+			{ length: maxPersistedIndicators },
+			(_, index) => `session-overflow-${index}`,
+		);
+
+		const { plugin, sdk } = await setupPlugin();
+		for (const sessionID of sessionIDs) {
+			await sendPersistedAccountRequest(sdk, sessionID);
+		}
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		await sendPersistedAccountRequest(sdk, "session-overflow-new");
+
+		expect((await readPersistedAccountIndicator(plugin, sessionIDs[0]!)).variant).toBeUndefined();
+		expect((await readPersistedAccountIndicator(plugin, sessionIDs[1]!)).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+		expect((await readPersistedAccountIndicator(plugin, "session-overflow-new")).variant).toBeDefined();
+	});
+
+	it("suppresses the account-use info toast when the footer is enabled", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+
+		await sendPersistedAccountRequest(sdk, "session-using-hidden");
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Using user@example.com (1/2)",
+				variant: "info",
+			},
+		});
 	});
 
 	it("handles network errors and rotates to next account", async () => {
@@ -2086,7 +2576,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
 		);
 
-		const { sdk } = await setupPlugin();
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
 		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
 			method: "POST",
 			body: JSON.stringify({ model: "gpt-5.1" }),
@@ -2095,6 +2586,45 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(response.status).toBe(503);
 		expect(await response.text()).toContain("server errors or auth issues");
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "All 1 account(s) failed (server errors or auth issues). Check account health with `codex-health`.",
+				variant: "error",
+				duration: 5000,
+			},
+		});
+		consumeSpy.mockRestore();
+	});
+
+	it("uses a warning toast for all-accounts rate-limit terminal responses", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		await setRetryAllAccountsRateLimited(false);
+		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);
+		const waitSpy = vi
+			.spyOn(AccountManager.prototype, "getMinWaitTimeForFamily")
+			.mockReturnValue(60_000);
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
+		);
+
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(response.status).toBe(429);
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "All 1 account(s) are rate-limited. Try again in 60s or add another account with `opencode auth login`.",
+				variant: "warning",
+				duration: 5000,
+			},
+		});
+
+		waitSpy.mockRestore();
 		consumeSpy.mockRestore();
 	});
 

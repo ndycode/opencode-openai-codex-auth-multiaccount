@@ -16,6 +16,11 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
+const PERSIST_ACCOUNT_FOOTER_STYLES = new Set([
+	"label-masked-email",
+	"full-email",
+	"label-only",
+]);
 
 export type UnsupportedCodexPolicy = "strict" | "fallback";
 
@@ -45,6 +50,8 @@ const DEFAULT_CONFIG: PluginConfig = {
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
 	toastDurationMs: 5_000,
+	persistAccountFooter: false,
+	persistAccountFooterStyle: "label-masked-email",
 	perProjectAccounts: true,
 	sessionRecovery: true,
 	autoResume: true,
@@ -430,6 +437,25 @@ export function getToastDurationMs(pluginConfig: PluginConfig): number {
 		pluginConfig.toastDurationMs,
 		5_000,
 		{ min: 1_000 },
+	);
+}
+
+export function getPersistAccountFooter(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_PERSIST_ACCOUNT_FOOTER",
+		pluginConfig.persistAccountFooter,
+		false,
+	);
+}
+
+export function getPersistAccountFooterStyle(
+	pluginConfig: PluginConfig,
+): "label-masked-email" | "full-email" | "label-only" {
+	return resolveStringSetting(
+		"CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE",
+		pluginConfig.persistAccountFooterStyle,
+		"label-masked-email",
+		PERSIST_ACCOUNT_FOOTER_STYLES,
 	);
 }
 

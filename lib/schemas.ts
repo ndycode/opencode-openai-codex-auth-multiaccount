@@ -42,6 +42,10 @@ export const PluginConfigSchema = z.object({
 	tokenRefreshSkewMs: z.number().min(0).optional(),
 	rateLimitToastDebounceMs: z.number().min(0).optional(),
 	toastDurationMs: z.number().min(1000).optional(),
+	persistAccountFooter: z.boolean().optional(),
+	persistAccountFooterStyle: z
+		.enum(["label-masked-email", "full-email", "label-only"])
+		.optional(),
 	perProjectAccounts: z.boolean().optional(),
 	sessionRecovery: z.boolean().optional(),
 	autoResume: z.boolean().optional(),

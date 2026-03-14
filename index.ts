@@ -55,6 +55,8 @@ import {
 	getSessionRecovery,
 	getAutoResume,
 	getToastDurationMs,
+	getPersistAccountFooter,
+	getPersistAccountFooterStyle,
 	getPerProjectAccounts,
 	getEmptyResponseMaxRetries,
 	getEmptyResponseRetryDelayMs,
@@ -83,6 +85,7 @@ import {
 	logInfo,
 	logWarn,
 	logError,
+	maskEmail,
 	setCorrelationId,
 	clearCorrelationId,
 } from "./lib/logger.js";
@@ -209,6 +212,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let startupPreflightShown = false;
 	let beginnerSafeModeEnabled = false;
 	const MIN_BACKOFF_MS = 100;
+	const MAX_PERSISTED_ACCOUNT_INDICATORS = 200;
+
+	type PersistedAccountDetails = {
+		accountId?: string;
+		accountLabel?: string;
+		email?: string;
+	};
+
+	type SessionModelRef = {
+		providerID: string;
+		modelID: string;
+	};
+
+	type PersistAccountFooterStyle =
+		| "label-masked-email"
+		| "full-email"
+		| "label-only";
+
+	type PersistedAccountIndicatorEntry = {
+		label: string;
+		revision: number;
+	};
 
 	type SelectionSnapshot = {
 		timestamp: number;
@@ -371,13 +396,50 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						);
 				}
 
-				return {
-						primary,
-						variantsForPersistence,
-				};
+		return {
+				primary,
+				variantsForPersistence,
 		};
+	};
 
-		const buildManualOAuthFlow = (
+	const getPersistedAccountLabel = (
+		account: PersistedAccountDetails,
+		index: number,
+	): string => {
+		const accountLabel = account.accountLabel?.trim();
+		const accountId = account.accountId?.trim();
+		const idSuffix = accountId
+			? accountId.length > 6
+				? accountId.slice(-6)
+				: accountId
+			: null;
+		return accountLabel ||
+			(idSuffix ? `Account ${index + 1} [id:${idSuffix}]` : `Account ${index + 1}`);
+	};
+
+	const getPersistedAccountValue = (
+		account: PersistedAccountDetails,
+		index: number,
+		style: PersistAccountFooterStyle,
+	): string => {
+		const sanitizedEmail = sanitizeEmail(account.email);
+		if (style === "label-only" || !sanitizedEmail) {
+			return getPersistedAccountLabel(account, index);
+		}
+		return style === "full-email" ? sanitizedEmail : maskEmail(sanitizedEmail);
+	};
+
+	const formatPersistedAccountIndicator = (
+		account: PersistedAccountDetails,
+		index: number,
+		accountCount: number,
+		style: PersistAccountFooterStyle,
+	): string => {
+		const accountPosition = `[${index + 1}/${Math.max(1, accountCount)}]`;
+		return `${getPersistedAccountValue(account, index, style)} ${accountPosition}`;
+	};
+
+	const buildManualOAuthFlow = (
 				pkce: { verifier: string },
 				url: string,
 				expectedState: string,
@@ -1084,6 +1146,137 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 }
         };
 
+		const persistedAccountIndicators = new Map<string, PersistedAccountIndicatorEntry>();
+		let persistedAccountIndicatorRevision = 0;
+		let persistedAccountCountHint = 0;
+		let runtimePersistAccountFooter = false;
+		let runtimePersistAccountFooterStyle: PersistAccountFooterStyle =
+			"label-masked-email";
+
+		const nextPersistedAccountIndicatorRevision = (): number => {
+			persistedAccountIndicatorRevision += 1;
+			return persistedAccountIndicatorRevision;
+		};
+
+		const updatePersistedAccountCountHint = (
+			count: number | null | undefined,
+		): void => {
+			if (typeof count !== "number" || !Number.isFinite(count)) {
+				return;
+			}
+			persistedAccountCountHint = Math.max(0, Math.trunc(count));
+		};
+
+		const resolvePersistedAccountSessionID = (
+			...candidates: Array<string | null | undefined>
+		): string | undefined => {
+			for (const candidate of [...candidates, process.env.CODEX_THREAD_ID]) {
+				const sessionID = candidate?.toString().trim();
+				if (sessionID) {
+					return sessionID;
+				}
+			}
+			return undefined;
+		};
+
+		const trimPersistedAccountIndicators = (): void => {
+			while (persistedAccountIndicators.size > MAX_PERSISTED_ACCOUNT_INDICATORS) {
+				const oldestKey = persistedAccountIndicators.keys().next().value;
+				if (!oldestKey) break;
+				persistedAccountIndicators.delete(oldestKey);
+			}
+		};
+
+		const setPersistedAccountIndicator = (
+			sessionID: string | null | undefined,
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+			revision: number = nextPersistedAccountIndicatorRevision(),
+			options?: { preserveOrder?: boolean },
+		): boolean => {
+			if (!sessionID) return false;
+			const existing = persistedAccountIndicators.get(sessionID);
+			if (existing && existing.revision > revision) {
+				return false;
+			}
+			const nextEntry = {
+				label: formatPersistedAccountIndicator(account, index, accountCount, style),
+				revision,
+			};
+			if (existing && options?.preserveOrder) {
+				persistedAccountIndicators.set(sessionID, nextEntry);
+				return true;
+			}
+			if (existing) {
+				persistedAccountIndicators.delete(sessionID);
+			}
+			persistedAccountIndicators.set(sessionID, nextEntry);
+			trimPersistedAccountIndicators();
+			return true;
+		};
+
+		const refreshVisiblePersistedAccountIndicators = (
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+		): boolean => {
+			const sessionIDs = Array.from(persistedAccountIndicators.keys());
+			if (sessionIDs.length === 0) return false;
+			const revision = nextPersistedAccountIndicatorRevision();
+			for (const sessionID of sessionIDs) {
+				setPersistedAccountIndicator(
+					sessionID,
+					account,
+					index,
+					accountCount,
+					style,
+					revision,
+					{ preserveOrder: true },
+				);
+			}
+			return true;
+		};
+
+		const getPersistedAccountIndicatorLabel = (
+			sessionID: string | null | undefined,
+		): string | undefined => {
+			if (!sessionID) return undefined;
+			return persistedAccountIndicators.get(sessionID)?.label;
+		};
+
+		const applyPersistedAccountIndicator = (
+			messageInfo: Record<string, unknown>,
+			indicatorLabel: string,
+			fallbackModel?: SessionModelRef,
+		): void => {
+			messageInfo.variant = indicatorLabel;
+
+			const existingModel =
+				typeof messageInfo.model === "object" && messageInfo.model !== null
+					? (messageInfo.model as Record<string, unknown>)
+					: {};
+			const providerID =
+				typeof existingModel.providerID === "string"
+					? existingModel.providerID
+					: fallbackModel?.providerID;
+			const modelID =
+				typeof existingModel.modelID === "string"
+					? existingModel.modelID
+					: fallbackModel?.modelID;
+			if (!providerID || !modelID) {
+				return;
+			}
+			messageInfo.model = {
+				...existingModel,
+				providerID,
+				modelID,
+				variant: indicatorLabel,
+			};
+		};
+
 		const resolveActiveIndex = (
 				storage: {
 						activeIndex: number;
@@ -1212,8 +1405,17 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			});
 		};
 
+		const syncRuntimePluginConfig = (
+			pluginConfig: ReturnType<typeof loadPluginConfig>,
+		): UiRuntimeOptions => {
+			runtimePersistAccountFooter = getPersistAccountFooter(pluginConfig);
+			runtimePersistAccountFooterStyle =
+				getPersistAccountFooterStyle(pluginConfig);
+			return applyUiRuntimeFromConfig(pluginConfig);
+		};
+
 		const resolveUiRuntime = (): UiRuntimeOptions => {
-			return applyUiRuntimeFromConfig(loadPluginConfig());
+			return syncRuntimePluginConfig(loadPluginConfig());
 		};
 
 		const getStatusMarker = (
@@ -1655,12 +1857,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         return;
                                 }
 
-                                const now = Date.now();
-                                const account = storage.accounts[index];
-                                if (account) {
-                                        account.lastUsed = now;
-                                        account.lastSwitchReason = "rotation";
-                                }
+								const account = storage.accounts[index];
+								if (!account) {
+									return;
+								}
+
+								const now = Date.now();
+								account.lastUsed = now;
+								account.lastSwitchReason = "rotation";
                                 storage.activeIndex = index;
                                 storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
                                 for (const family of MODEL_FAMILIES) {
@@ -1668,6 +1872,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 }
 
                                 await saveAccounts(storage);
+								updatePersistedAccountCountHint(storage.accounts.length);
 
                                 // Reload manager from disk so we don't overwrite newer rotated
                                 // refresh tokens with stale in-memory state.
@@ -1677,7 +1882,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         accountManagerPromise = Promise.resolve(reloadedManager);
                                 }
 
-                                await showToast(`Switched to account ${index + 1}`, "info");
+								if (runtimePersistAccountFooter) {
+									refreshVisiblePersistedAccountIndicators(
+										account,
+										index,
+										storage.accounts.length,
+										runtimePersistAccountFooterStyle,
+									);
+								} else {
+									await showToast(`Switched to account ${index + 1}`, "info");
+								}
                         }
                 }
           } catch (error) {
@@ -1690,6 +1904,60 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
         return {
                 event: eventHandler,
+		"chat.message": (
+			input: {
+				sessionID: string;
+				model?: SessionModelRef;
+			},
+			output: { message: unknown; parts: unknown[] },
+		): Promise<void> => {
+			const indicator = getPersistedAccountIndicatorLabel(input.sessionID);
+			if (indicator) {
+				const message =
+					typeof output.message === "object" && output.message !== null
+						? (output.message as Record<string, unknown>)
+						: null;
+				if (message) {
+					applyPersistedAccountIndicator(message, indicator, input.model);
+				}
+			}
+			return Promise.resolve();
+		},
+		"experimental.chat.messages.transform": (
+			_input: Record<string, never>,
+			output: {
+				messages: Array<{
+					info: Record<string, unknown>;
+					parts: unknown[];
+				}>;
+			},
+		): Promise<void> => {
+			let lastUserMessage:
+				| {
+					info: Record<string, unknown>;
+					parts: unknown[];
+				}
+				| undefined;
+			for (let i = output.messages.length - 1; i >= 0; i -= 1) {
+				const message = output.messages[i];
+				if (message?.info.role === "user") {
+					lastUserMessage = message;
+					break;
+				}
+			}
+			if (!lastUserMessage) return Promise.resolve();
+
+			const sessionID = resolvePersistedAccountSessionID(
+				typeof lastUserMessage.info.sessionID === "string"
+					? lastUserMessage.info.sessionID
+					: undefined,
+			);
+			const indicator = getPersistedAccountIndicatorLabel(sessionID);
+			if (!indicator) return Promise.resolve();
+
+			applyPersistedAccountIndicator(lastUserMessage.info, indicator);
+			return Promise.resolve();
+		},
                 auth: {
 			provider: PROVIDER_ID,
 			/**
@@ -1709,7 +1977,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			async loader(getAuth: () => Promise<Auth>, provider: unknown) {
 				const auth = await getAuth();
 				const pluginConfig = loadPluginConfig();
-				applyUiRuntimeFromConfig(pluginConfig);
+				syncRuntimePluginConfig(pluginConfig);
 				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
 				setStoragePath(perProjectAccounts ? process.cwd() : null);
 				const authFallback = auth.type === "oauth" ? (auth as OAuthAuthDetails) : undefined;
@@ -1745,6 +2013,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 					let accountManager = await accountManagerPromise;
 					cachedAccountManager = accountManager;
+					updatePersistedAccountCountHint(accountManager.getAccountCount());
 					const refreshToken = authFallback?.refresh ?? "";
 					const needsPersist =
 						refreshToken &&
@@ -1806,6 +2075,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const unsupportedCodexFallbackChain =
 					getUnsupportedCodexFallbackChain(pluginConfig);
 				const toastDurationMs = getToastDurationMs(pluginConfig);
+				const persistAccountFooter = getPersistAccountFooter(pluginConfig);
+				const persistAccountFooterStyle =
+					getPersistAccountFooterStyle(pluginConfig);
 				const fetchTimeoutMs = getFetchTimeoutMs(pluginConfig);
 				const streamStallTimeoutMs = getStreamStallTimeoutMs(pluginConfig);
 
@@ -1854,6 +2126,23 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							{ sessionRecovery: true, autoResume: autoResumeEnabled }
 						)
 					: null;
+
+			const showTerminalToastResponse = async (
+				message: string,
+				status: 429 | 503,
+			): Promise<Response> => {
+				await showToast(
+					message,
+					status === 429 ? "warning" : "error",
+					{ duration: toastDurationMs },
+				);
+				return new Response(JSON.stringify({ error: { message } }), {
+					status,
+					headers: {
+						"content-type": "application/json; charset=utf-8",
+					},
+				});
+			};
 
 			checkAndNotify(async (message, variant) => {
 				await showToast(message, variant);
@@ -1989,9 +2278,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let modelFamily = model ? getModelFamily(model) : "gpt-5.4";
 										let quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
 						const threadIdCandidate =
-							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")
-								.toString()
-								.trim() || undefined;
+							resolvePersistedAccountSessionID(promptCacheKey);
+						const indicatorRevision = nextPersistedAccountIndicatorRevision();
 							const requestCorrelationId = setCorrelationId(
 								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
 							);
@@ -2138,19 +2426,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Auth refresh failed for account ${account.index + 1}`,
 					)
 				) {
-					return new Response(
-						JSON.stringify({
-							error: {
-								message:
-									"Auth refresh retry budget exhausted for this request. Try again or switch accounts.",
-							},
-						}),
-						{
-							status: 503,
-							headers: {
-								"content-type": "application/json; charset=utf-8",
-							},
-						},
+					return showTerminalToastResponse(
+						"Auth refresh retry budget exhausted for this request. Try again or switch accounts.",
+						503,
 					);
 				}
 				runtimeMetrics.authRefreshFailures++;
@@ -2227,12 +2505,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 											account.email =
 												extractAccountEmail(accountAuth.access) ?? account.email;
 
-											if (
-												accountCount > 1 &&
-												accountManager.shouldShowAccountToast(
-													account.index,
-													rateLimitToastDebounceMs,
-												)
+								if (
+									!persistAccountFooter &&
+									accountCount > 1 &&
+									accountManager.shouldShowAccountToast(
+										account.index,
+										rateLimitToastDebounceMs,
+									)
 											) {
 												const accountLabel = formatAccountLabel(account, account.index);
 												await showToast(
@@ -2307,19 +2586,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 									)
 								) {
 									accountManager.refundToken(account, modelFamily, model);
-									return new Response(
-										JSON.stringify({
-											error: {
-												message:
-													"Network retry budget exhausted for this request. Try again in a moment.",
-											},
-										}),
-										{
-											status: 503,
-											headers: {
-												"content-type": "application/json; charset=utf-8",
-											},
-										},
+									return showTerminalToastResponse(
+										"Network retry budget exhausted for this request. Try again in a moment.",
+										503,
 									);
 								}
 								runtimeMetrics.failedRequests++;
@@ -2617,6 +2886,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					accountManager.recordSuccess(account, modelFamily, model);
+					if (persistAccountFooter) {
+						const liveAccountCount = accountManager.getAccountCount();
+						const persistedAccountCount =
+							liveAccountCount > 0
+								? liveAccountCount
+								: persistedAccountCountHint > 0
+									? persistedAccountCountHint
+									: 1;
+						setPersistedAccountIndicator(
+							threadIdCandidate,
+							account,
+							account.index,
+							persistedAccountCount,
+							persistAccountFooterStyle,
+							indicatorRevision,
+						);
+					}
 					runtimeMetrics.successfulRequests++;
 					runtimeMetrics.lastError = null;
 					runtimeMetrics.lastErrorCategory = null;
@@ -2662,12 +2948,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.lastError = message;
 								runtimeMetrics.lastErrorCategory = waitMs > 0 ? "rate-limit" : "account-failure";
-								return new Response(JSON.stringify({ error: { message } }), {
-									status: waitMs > 0 ? 429 : 503,
-											headers: {
-												"content-type": "application/json; charset=utf-8",
-											},
-										});
+								return showTerminalToastResponse(
+									message,
+									waitMs > 0 ? 429 : 503,
+								);
 									}
 						} finally {
 							clearCorrelationId();
@@ -2685,7 +2969,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						type: "oauth" as const,
 						authorize: async (inputs?: Record<string, string>) => {
 							const authPluginConfig = loadPluginConfig();
-							applyUiRuntimeFromConfig(authPluginConfig);
+							syncRuntimePluginConfig(authPluginConfig);
 							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
 							setStoragePath(authPerProjectAccounts ? process.cwd() : null);
 
@@ -3660,7 +3944,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         // Initialize storage path for manual OAuth flow
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
                                                         const manualPluginConfig = loadPluginConfig();
-							applyUiRuntimeFromConfig(manualPluginConfig);
+							syncRuntimePluginConfig(manualPluginConfig);
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 

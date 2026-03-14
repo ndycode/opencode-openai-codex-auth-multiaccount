@@ -9,6 +9,8 @@ import {
 	getFastSession,
 	getFastSessionStrategy,
 	getFastSessionMaxInputItems,
+	getPersistAccountFooter,
+	getPersistAccountFooterStyle,
 	getRetryProfile,
 	getRetryBudgetOverrides,
 	getUnsupportedCodexPolicy,
@@ -58,6 +60,8 @@ describe('Plugin Configuration', () => {
 		'CODEX_AUTH_BEGINNER_SAFE_MODE',
 		'CODEX_AUTH_FAST_SESSION_STRATEGY',
 		'CODEX_AUTH_FAST_SESSION_MAX_INPUT_ITEMS',
+		'CODEX_AUTH_PERSIST_ACCOUNT_FOOTER',
+		'CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE',
 		'CODEX_AUTH_RETRY_PROFILE',
 		'CODEX_AUTH_REQUEST_TRANSFORM_MODE',
 		'CODEX_AUTH_UNSUPPORTED_MODEL_POLICY',
@@ -112,6 +116,8 @@ describe('Plugin Configuration', () => {
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
+				persistAccountFooter: false,
+				persistAccountFooterStyle: 'label-masked-email',
 				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
@@ -156,6 +162,8 @@ describe('Plugin Configuration', () => {
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
+				persistAccountFooter: false,
+				persistAccountFooterStyle: 'label-masked-email',
 				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
@@ -197,6 +205,8 @@ describe('Plugin Configuration', () => {
 				tokenRefreshSkewMs: 60_000,
 				rateLimitToastDebounceMs: 60_000,
 				toastDurationMs: 5_000,
+				persistAccountFooter: false,
+				persistAccountFooterStyle: 'label-masked-email',
 				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
@@ -249,6 +259,8 @@ describe('Plugin Configuration', () => {
 		tokenRefreshSkewMs: 60_000,
 		rateLimitToastDebounceMs: 60_000,
 		toastDurationMs: 5_000,
+		persistAccountFooter: false,
+		persistAccountFooterStyle: 'label-masked-email',
 		perProjectAccounts: true,
 		sessionRecovery: true,
 		autoResume: true,
@@ -295,6 +307,8 @@ describe('Plugin Configuration', () => {
 			tokenRefreshSkewMs: 60_000,
 			rateLimitToastDebounceMs: 60_000,
 			toastDurationMs: 5_000,
+			persistAccountFooter: false,
+			persistAccountFooterStyle: 'label-masked-email',
 			perProjectAccounts: true,
 			sessionRecovery: true,
 			autoResume: true,
@@ -674,6 +688,58 @@ describe('Plugin Configuration', () => {
 			expect(getRequestTransformMode({ requestTransformMode: 'native' })).toBe('legacy');
 			process.env.CODEX_AUTH_REQUEST_TRANSFORM_MODE = 'native';
 			expect(getRequestTransformMode({ requestTransformMode: 'legacy' })).toBe('native');
+		});
+	});
+
+	describe('getPersistAccountFooter', () => {
+		it('should default to false', () => {
+			delete process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER;
+			expect(getPersistAccountFooter({})).toBe(false);
+		});
+
+		it('should use config value when env var is not set', () => {
+			delete process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER;
+			expect(getPersistAccountFooter({ persistAccountFooter: true })).toBe(true);
+		});
+
+		it('should prioritize env var over config', () => {
+			process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER = '0';
+			expect(getPersistAccountFooter({ persistAccountFooter: true })).toBe(false);
+			process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER = '1';
+			expect(getPersistAccountFooter({ persistAccountFooter: false })).toBe(true);
+		});
+	});
+
+	describe('getPersistAccountFooterStyle', () => {
+		it('should default to label-masked-email', () => {
+			delete process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE;
+			expect(getPersistAccountFooterStyle({})).toBe('label-masked-email');
+		});
+
+		it('should use config value when env var is not set', () => {
+			delete process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE;
+			expect(
+				getPersistAccountFooterStyle({ persistAccountFooterStyle: 'full-email' }),
+			).toBe('full-email');
+		});
+
+		it('should prioritize valid env values over config', () => {
+			process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE = 'label-only';
+			expect(
+				getPersistAccountFooterStyle({
+					persistAccountFooterStyle: 'full-email',
+				}),
+			).toBe('label-only');
+		});
+
+		it('should ignore invalid env values and fall back to config/default', () => {
+			process.env.CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE = 'masked-only';
+			expect(
+				getPersistAccountFooterStyle({
+					persistAccountFooterStyle: 'full-email',
+				}),
+			).toBe('full-email');
+			expect(getPersistAccountFooterStyle({})).toBe('label-masked-email');
 		});
 	});
 
