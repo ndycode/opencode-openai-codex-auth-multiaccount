@@ -27,6 +27,7 @@ jobs:
     # here - doing so would let a fork PR execute arbitrary code with write access.
     name: pr-governance
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Validate PR template and live verification markers
         uses: actions/github-script@v8

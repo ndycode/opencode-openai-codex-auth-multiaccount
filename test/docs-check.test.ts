@@ -1,6 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 const tempRoots: string[] = [];
@@ -17,6 +16,8 @@ afterEach(async () => {
 });
 
 async function createDocsFixture(markdown = "# Guide\n") {
+	// docs-check resolves local links against process.cwd(), so fixtures must live
+	// under the repo root for relative-link validation to exercise real behavior.
 	const repoTempDir = path.join(process.cwd(), "tmp");
 	await mkdir(repoTempDir, { recursive: true });
 
