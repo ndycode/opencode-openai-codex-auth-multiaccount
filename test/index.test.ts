@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runCleanup } from "../lib/shutdown.js";
+import { getCleanupCount, runCleanup } from "../lib/shutdown.js";
 
 beforeEach(async () => {
 	await runCleanup();
@@ -3731,6 +3731,18 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		);
 	});
 
+	it("replaces the account-save shutdown cleanup on plugin re-initialization", async () => {
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+
+		expect(getCleanupCount()).toBe(0);
+
+		await OpenAIOAuthPlugin({ client: createMockClient() } as never);
+		expect(getCleanupCount()).toBe(1);
+
+		await OpenAIOAuthPlugin({ client: createMockClient() } as never);
+		expect(getCleanupCount()).toBe(1);
+	});
+
 	it("writes user disable metadata from the auth manage menu and clears it on manual re-enable", async () => {
 		const cliModule = await import("../lib/cli.js");
 		const storageModule = await import("../lib/storage.js");
@@ -3786,47 +3798,51 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const storageModule = await import("../lib/storage.js");
 		const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
 
-		mockStorage.accounts = [
-			{
+		try {
+			mockStorage.accounts = [
+				{
+					accountId: "workspace-auth-failure",
+					email: "blocked@example.com",
+					refreshToken: "refresh-blocked",
+					enabled: false,
+					disabledReason: "auth-failure",
+					coolingDownUntil: 30_000,
+					cooldownReason: "auth-failure",
+					addedAt: 10,
+					lastUsed: 10,
+				},
+			];
+
+			vi.mocked(cliModule.promptLoginMode)
+				.mockResolvedValueOnce({ mode: "manage", toggleAccountIndex: 0 })
+				.mockResolvedValueOnce({ mode: "cancel" });
+
+			const mockClient = createMockClient();
+			const { OpenAIOAuthPlugin } = await import("../index.js");
+			const plugin = (await OpenAIOAuthPlugin({
+				client: mockClient,
+			} as never)) as unknown as PluginType;
+			const autoMethod = plugin.auth.methods[0] as unknown as {
+				authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+			};
+
+			const authResult = await autoMethod.authorize();
+			expect(authResult.instructions).toBe("Authentication cancelled");
+
+			expect(vi.mocked(storageModule.saveAccounts)).not.toHaveBeenCalled();
+			expect(mockStorage.accounts[0]).toMatchObject({
 				accountId: "workspace-auth-failure",
-				email: "blocked@example.com",
-				refreshToken: "refresh-blocked",
 				enabled: false,
 				disabledReason: "auth-failure",
 				coolingDownUntil: 30_000,
 				cooldownReason: "auth-failure",
-				addedAt: 10,
-				lastUsed: 10,
-			},
-		];
-
-		vi.mocked(cliModule.promptLoginMode)
-			.mockResolvedValueOnce({ mode: "manage", toggleAccountIndex: 0 })
-			.mockResolvedValueOnce({ mode: "cancel" });
-
-		const mockClient = createMockClient();
-		const { OpenAIOAuthPlugin } = await import("../index.js");
-		const plugin = (await OpenAIOAuthPlugin({
-			client: mockClient,
-		} as never)) as unknown as PluginType;
-		const autoMethod = plugin.auth.methods[0] as unknown as {
-			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
-		};
-
-		const authResult = await autoMethod.authorize();
-		expect(authResult.instructions).toBe("Authentication cancelled");
-
-		expect(vi.mocked(storageModule.saveAccounts)).not.toHaveBeenCalled();
-		expect(mockStorage.accounts[0]).toMatchObject({
-			accountId: "workspace-auth-failure",
-			enabled: false,
-			disabledReason: "auth-failure",
-			coolingDownUntil: 30_000,
-			cooldownReason: "auth-failure",
-		});
-		expect(consoleLog).toHaveBeenCalledWith(
-			expect.stringContaining("Run 'opencode auth login' to re-enable with fresh credentials."),
-		);
+			});
+			expect(consoleLog).toHaveBeenCalledWith(
+				expect.stringContaining("Run 'opencode auth login' to re-enable with fresh credentials."),
+			);
+		} finally {
+			consoleLog.mockRestore();
+		}
 	});
 });
 

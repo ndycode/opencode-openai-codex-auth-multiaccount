@@ -152,21 +152,24 @@ describe("Graceful shutdown", () => {
 				await cleanupPromise;
 			});
 
-			const sigtermHandler = capturedHandlers.get("SIGTERM");
-			expect(sigtermHandler).toBeDefined();
+			try {
+				const sigtermHandler = capturedHandlers.get("SIGTERM");
+				expect(sigtermHandler).toBeDefined();
 
-			sigtermHandler!();
-			await Promise.resolve();
-			expect(processOffSpy).not.toHaveBeenCalled();
+				sigtermHandler!();
+				await Promise.resolve();
+				expect(processOffSpy).not.toHaveBeenCalled();
 
-			resolveCleanup();
-			await new Promise((r) => setTimeout(r, 10));
-			expect(processOffSpy).toHaveBeenCalledTimes(3);
-			expect(processExitSpy).toHaveBeenCalledWith(0);
-
-			processOnceSpy.mockRestore();
-			processOffSpy.mockRestore();
-			processExitSpy.mockRestore();
+				resolveCleanup();
+				await vi.waitFor(() => {
+					expect(processOffSpy).toHaveBeenCalledTimes(3);
+					expect(processExitSpy).toHaveBeenCalledWith(0);
+				});
+			} finally {
+				processOnceSpy.mockRestore();
+				processOffSpy.mockRestore();
+				processExitSpy.mockRestore();
+			}
 		});
 
 		it("beforeExit handler runs cleanup without calling exit", async () => {
@@ -188,14 +191,16 @@ describe("Graceful shutdown", () => {
 			const beforeExitHandler = capturedHandlers.get("beforeExit");
 			expect(beforeExitHandler).toBeDefined();
 
-			beforeExitHandler!();
-			await new Promise((r) => setTimeout(r, 10));
-
-			expect(cleanupFn).toHaveBeenCalled();
-			expect(processExitSpy).not.toHaveBeenCalled();
-
-			processOnceSpy.mockRestore();
-			processExitSpy.mockRestore();
+			try {
+				beforeExitHandler!();
+				await vi.waitFor(() => {
+					expect(cleanupFn).toHaveBeenCalled();
+				});
+				expect(processExitSpy).not.toHaveBeenCalled();
+			} finally {
+				processOnceSpy.mockRestore();
+				processExitSpy.mockRestore();
+			}
 		});
 
 		it("signal handlers are only registered once", async () => {

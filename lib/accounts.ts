@@ -396,7 +396,13 @@ export class AccountManager {
 	}
 
 	getEnabledAccountCount(): number {
-		return this.accounts.filter((account) => account.enabled !== false).length;
+		let enabledCount = 0;
+		for (const account of this.accounts) {
+			if (account.enabled !== false) {
+				enabledCount += 1;
+			}
+		}
+		return enabledCount;
 	}
 
 	getActiveIndex(): number {

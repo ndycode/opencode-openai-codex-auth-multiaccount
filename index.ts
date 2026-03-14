@@ -88,7 +88,7 @@ import {
 } from "./lib/logger.js";
 import { checkAndNotify } from "./lib/auto-update-checker.js";
 import { handleContextOverflow } from "./lib/context-overflow.js";
-import { registerCleanup } from "./lib/shutdown.js";
+import { registerCleanup, unregisterCleanup } from "./lib/shutdown.js";
 import {
 	AccountManager,
 	type AccountSelectionExplainability,
@@ -201,6 +201,8 @@ import {
  * }
  * ```
  */
+let accountManagerCleanupHook: (() => Promise<void>) | null = null;
+
 // eslint-disable-next-line @typescript-eslint/require-await
 export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	initLogger(client);
@@ -1683,8 +1685,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			accountManagerPromise = null;
 		};
 
-		// Plugin init can run more than once per process; runCleanup drains this module-level list.
-		registerCleanup(async () => {
+		if (accountManagerCleanupHook) {
+			unregisterCleanup(accountManagerCleanupHook);
+		}
+		accountManagerCleanupHook = async () => {
 			try {
 				await cachedAccountManager?.flushPendingSave();
 			} catch (error) {
@@ -1692,7 +1696,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					error: error instanceof Error ? error.message : String(error),
 				});
 			}
-		});
+		};
+		registerCleanup(accountManagerCleanupHook);
 
         // Event handler for session recovery and account selection
         const eventHandler = async (input: { event: { type: string; properties?: unknown } }) => {
