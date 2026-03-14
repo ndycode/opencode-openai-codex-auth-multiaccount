@@ -3798,6 +3798,53 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(flushManagerTwo).toHaveBeenCalledTimes(1);
 	});
 
+	it("flushes tracked account managers from multiple plugin instances during shutdown cleanup", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const managerOne = await accountsModule.AccountManager.loadFromDisk();
+		const managerTwo = await accountsModule.AccountManager.loadFromDisk();
+		const flushManagerOne = vi.fn(async () => {});
+		const flushManagerTwo = vi.fn(async () => {});
+		managerOne.flushPendingSave = flushManagerOne;
+		managerTwo.flushPendingSave = flushManagerTwo;
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk")
+			.mockResolvedValueOnce(managerOne)
+			.mockResolvedValueOnce(managerTwo);
+
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const firstPlugin = (await OpenAIOAuthPlugin({
+			client: createMockClient(),
+		} as never)) as unknown as PluginType;
+		const secondPlugin = (await OpenAIOAuthPlugin({
+			client: createMockClient(),
+		} as never)) as unknown as PluginType;
+
+		await firstPlugin.auth.loader(
+			async () => ({
+				type: "oauth",
+				access: "access-token-1",
+				refresh: "refresh-token-1",
+				expires: Date.now() + 60_000,
+			}) as never,
+			{},
+		);
+		await secondPlugin.auth.loader(
+			async () => ({
+				type: "oauth",
+				access: "access-token-2",
+				refresh: "refresh-token-2",
+				expires: Date.now() + 60_000,
+			}) as never,
+			{},
+		);
+
+		expect(getCleanupCount()).toBe(1);
+
+		await runCleanup();
+
+		expect(flushManagerOne).toHaveBeenCalledTimes(1);
+		expect(flushManagerTwo).toHaveBeenCalledTimes(1);
+	});
+
 	it("replaces the account-save shutdown cleanup on plugin re-initialization", async () => {
 		const { OpenAIOAuthPlugin } = await import("../index.js");
 

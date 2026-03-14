@@ -201,8 +201,10 @@ import {
  * }
  * ```
  */
+// Shared across plugin instances so shutdown cleanup can flush debounced saves
+// even when multiple plugin objects coexist during reloads or tests.
 let accountManagerCleanupHook: (() => Promise<void>) | null = null;
-const staleAccountManagersForCleanup = new Set<AccountManager>();
+const trackedAccountManagersForCleanup = new Set<AccountManager>();
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
@@ -1683,8 +1685,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		const setCachedAccountManager = (manager: AccountManager): AccountManager => {
 			if (cachedAccountManager && cachedAccountManager !== manager) {
-				staleAccountManagersForCleanup.add(cachedAccountManager);
+				trackedAccountManagersForCleanup.add(cachedAccountManager);
 			}
+			trackedAccountManagersForCleanup.add(manager);
 			cachedAccountManager = manager;
 			accountManagerPromise = Promise.resolve(manager);
 			return manager;
@@ -1692,24 +1695,17 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		const invalidateAccountManagerCache = (): void => {
 			if (cachedAccountManager) {
-				staleAccountManagersForCleanup.add(cachedAccountManager);
+				trackedAccountManagersForCleanup.add(cachedAccountManager);
 			}
 			cachedAccountManager = null;
 			accountManagerPromise = null;
 		};
 
-		if (accountManagerCleanupHook) {
-			unregisterCleanup(accountManagerCleanupHook);
-		}
-		accountManagerCleanupHook = async () => {
-			const managersToFlush = new Set<AccountManager>(staleAccountManagersForCleanup);
-			staleAccountManagersForCleanup.clear();
-			if (cachedAccountManager) {
-				managersToFlush.add(cachedAccountManager);
-			}
-			for (const manager of managersToFlush) {
+		accountManagerCleanupHook ??= async () => {
+			for (const manager of [...trackedAccountManagersForCleanup]) {
 				try {
 					await manager.flushPendingSave();
+					trackedAccountManagersForCleanup.delete(manager);
 				} catch (error) {
 					logWarn("[shutdown] flushPendingSave failed; disabled state may not be persisted", {
 						error: error instanceof Error ? error.message : String(error),
@@ -1717,6 +1713,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				}
 			}
 		};
+		unregisterCleanup(accountManagerCleanupHook);
 		registerCleanup(accountManagerCleanupHook);
 
         // Event handler for session recovery and account selection
