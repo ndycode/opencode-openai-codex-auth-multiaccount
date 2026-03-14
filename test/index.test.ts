@@ -2535,6 +2535,37 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		});
 	});
 
+	it("does not let UI-only config refreshes reset the loader-synced footer state", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const configModule = await import("../lib/config.js");
+		const { plugin, sdk, mockClient } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-ui-refresh");
+		mockClient.tui.showToast.mockClear();
+
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
+		await plugin.tool["codex-list"].execute();
+		await enablePersistedFooter("full-email");
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+		expect((await readPersistedAccountIndicator(plugin, "session-ui-refresh")).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+	});
+
 	it("shows the account-switch info toast when the footer is disabled", async () => {
 		await disablePersistedFooter();
 		mockStorage.accounts = [

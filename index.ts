@@ -1439,7 +1439,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		const resolveUiRuntime = (): UiRuntimeOptions => {
-			return syncRuntimePluginConfig(loadPluginConfig()).ui;
+			return applyUiRuntimeFromConfig(loadPluginConfig());
 		};
 
 		const getStatusMarker = (
