@@ -1,0 +1,41 @@
+name: PR Quality
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: write
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
+
+jobs:
+  anti-slop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Screen pull request quality
+        uses: peakoss/anti-slop@v0.2.1
+        with:
+          max-failures: 5
+          require-pr-template: true
+          blocked-terms: |
+            OBSIDIAN1455
+          blocked-paths: |
+            SECURITY.md
+            LICENSE
+            CODE_OF_CONDUCT.md
+            CODEOWNERS
+          exempt-draft-prs: true
+          close-pr: false
+          lock-pr: false
+          failure-pr-message: |
+            Thanks for the contribution. This repository automatically screens pull requests for incomplete, low-signal, or non-compliant submissions before maintainers spend review time.
+
+            Please review CONTRIBUTING.md, complete the PR template with concrete summary and testing details, and update the PR if anything important is missing.
+
+            If this looks like a false positive, a maintainer can override the workflow with the `exempt` label after review.
