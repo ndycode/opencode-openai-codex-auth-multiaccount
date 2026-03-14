@@ -2,12 +2,19 @@
 
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = process.cwd();
 const DEFAULT_FILES = ["README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md"];
 const DEFAULT_DIRS = [".github", "config", "docs", "test"];
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
 const IGNORED_DIRS = new Set([".git", ".github/workflows", ".omx", "dist", "node_modules", "tmp"]);
+const __filename = fileURLToPath(import.meta.url);
+
+function normalizePathForCompare(targetPath) {
+	const resolved = path.resolve(targetPath);
+	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
 
 async function exists(targetPath) {
 	try {
@@ -90,15 +97,73 @@ async function collectMarkdownFiles(inputPaths) {
 	return [...resolved].sort();
 }
 
-function extractMarkdownLinks(markdown) {
+function extractLinkTarget(markdown, startIndex) {
+	let depth = 1;
+	let inAngleTarget = false;
+	let isEscaped = false;
+	let target = "";
+
+	for (let index = startIndex; index < markdown.length; index += 1) {
+		const char = markdown[index];
+
+		if (isEscaped) {
+			target += char;
+			isEscaped = false;
+			continue;
+		}
+
+		if (char === "\\") {
+			target += char;
+			isEscaped = true;
+			continue;
+		}
+
+		if (inAngleTarget) {
+			target += char;
+			if (char === ">") inAngleTarget = false;
+			continue;
+		}
+
+		if (char === "<" && target.trim().length === 0) {
+			target += char;
+			inAngleTarget = true;
+			continue;
+		}
+
+		if (char === "(") {
+			target += char;
+			depth += 1;
+			continue;
+		}
+
+		if (char === ")") {
+			depth -= 1;
+			if (depth === 0) {
+				return target;
+			}
+			target += char;
+			continue;
+		}
+
+		target += char;
+	}
+
+	return null;
+}
+
+export function extractMarkdownLinks(markdown) {
 	const stripped = markdown
 		.replace(/```[\s\S]*?```/g, "\n")
 		.replace(/`[^`\n]+`/g, "`code`");
-	const pattern = /!?\[[^\]]*]\(([^)\n]+)\)/g;
+	const openerPattern = /!?\[[^\]]*]\(/g;
 	const links = [];
 
-	for (const match of stripped.matchAll(pattern)) {
-		const rawTarget = match[1]?.trim();
+	for (const match of stripped.matchAll(openerPattern)) {
+		const linkStart = (match.index ?? 0) + match[0].length;
+		const parsedTarget = extractLinkTarget(stripped, linkStart);
+		if (!parsedTarget) continue;
+
+		const rawTarget = parsedTarget.trim();
 		if (!rawTarget) continue;
 
 		let target = rawTarget;
@@ -140,6 +205,7 @@ async function validateLink(filePath, linkTarget) {
 	}
 
 	if (/^https?:\/\//i.test(linkTarget)) return null;
+	// Site-root links depend on the final docs host; only repo-relative targets are checked here.
 	if (linkTarget.startsWith("/")) return null;
 
 	const [rawPath] = linkTarget.split(/[?#]/, 1);
@@ -183,4 +249,10 @@ async function main() {
 	console.log(`docs-check: verified ${files.length} markdown file(s)`);
 }
 
-await main();
+const isDirectRun = process.argv[1]
+	? normalizePathForCompare(process.argv[1]) === normalizePathForCompare(__filename)
+	: false;
+
+if (isDirectRun) {
+	await main();
+}
