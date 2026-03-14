@@ -88,17 +88,19 @@ describe("Graceful shutdown", () => {
 			const cleanupFn = vi.fn();
 			freshRegister(cleanupFn);
 
-			const sigintHandler = capturedHandlers.get("SIGINT");
-			expect(sigintHandler).toBeDefined();
+			try {
+				const sigintHandler = capturedHandlers.get("SIGINT");
+				expect(sigintHandler).toBeDefined();
 
-			sigintHandler!();
-			await new Promise((r) => setTimeout(r, 10));
-
-			expect(cleanupFn).toHaveBeenCalled();
-			expect(processExitSpy).toHaveBeenCalledWith(0);
-
-			processOnSpy.mockRestore();
-			processExitSpy.mockRestore();
+				sigintHandler!();
+				await vi.waitFor(() => {
+					expect(cleanupFn).toHaveBeenCalled();
+					expect(processExitSpy).toHaveBeenCalledWith(0);
+				});
+			} finally {
+				processOnSpy.mockRestore();
+				processExitSpy.mockRestore();
+			}
 		});
 
 		it("SIGTERM handler runs cleanup and exits with code 0", async () => {
@@ -117,17 +119,19 @@ describe("Graceful shutdown", () => {
 			const cleanupFn = vi.fn();
 			freshRegister(cleanupFn);
 
-			const sigtermHandler = capturedHandlers.get("SIGTERM");
-			expect(sigtermHandler).toBeDefined();
+			try {
+				const sigtermHandler = capturedHandlers.get("SIGTERM");
+				expect(sigtermHandler).toBeDefined();
 
-			sigtermHandler!();
-			await new Promise((r) => setTimeout(r, 10));
-
-			expect(cleanupFn).toHaveBeenCalled();
-			expect(processExitSpy).toHaveBeenCalledWith(0);
-
-			processOnSpy.mockRestore();
-			processExitSpy.mockRestore();
+				sigtermHandler!();
+				await vi.waitFor(() => {
+					expect(cleanupFn).toHaveBeenCalled();
+					expect(processExitSpy).toHaveBeenCalledWith(0);
+				});
+			} finally {
+				processOnSpy.mockRestore();
+				processExitSpy.mockRestore();
+			}
 		});
 
 		it("keeps shutdown handlers installed until async cleanup completes", async () => {
