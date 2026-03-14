@@ -2276,18 +2276,37 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
 		];
 		const accountsModule = await import("../lib/accounts.js");
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((token) => {
+			if (token === "token-2") return "account-2";
+			if (token) return "account-1";
+			return undefined;
+		});
+		type TestManagedAccount = {
+			index: number;
+			accountId: string;
+			email: string;
+			refreshToken: string;
+			accessToken?: string;
+		};
 		const previousManager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
-			accounts: Array<{
-				index: number;
-				accountId: string;
-				email: string;
-				refreshToken: string;
-			}>;
+			accounts: TestManagedAccount[];
 		};
 		const reloadedManager = await accountsModule.AccountManager.loadFromDisk() as typeof previousManager;
 		previousManager.accounts = [
-			{ index: 0, accountId: "account-1", email: "user@example.com", refreshToken: "refresh-token" },
-			{ index: 1, accountId: "account-2", email: "user2@example.com", refreshToken: "refresh-2" },
+			{
+				index: 0,
+				accountId: "account-1",
+				email: "user@example.com",
+				refreshToken: "refresh-token",
+				accessToken: "token-1",
+			},
+			{
+				index: 1,
+				accountId: "account-2",
+				email: "user2@example.com",
+				refreshToken: "refresh-2",
+				accessToken: "token-2",
+			},
 		];
 		reloadedManager.accounts = [
 			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
