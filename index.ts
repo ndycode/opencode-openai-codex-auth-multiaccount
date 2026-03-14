@@ -3527,6 +3527,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 											if (target) {
 												const shouldEnable = target.enabled === false;
 												if (shouldEnable && target.disabledReason === "auth-failure") {
+													logWarn("[account-menu] blocked re-enable for auth-failure disabled account", {
+														accountId: target.accountId ?? null,
+														email: target.email ?? null,
+													});
 													console.log(
 														"\nThis account was disabled after repeated auth failures. Run 'opencode auth login' to re-enable with fresh credentials.\n",
 													);

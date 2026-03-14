@@ -4013,6 +4013,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 	it("keeps auth-failure disables blocked in the auth manage menu until a fresh login", async () => {
 		const cliModule = await import("../lib/cli.js");
+		const loggerModule = await import("../lib/logger.js");
 		const storageModule = await import("../lib/storage.js");
 		const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -4044,6 +4045,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
 			};
 
+			vi.mocked(loggerModule.logWarn).mockClear();
 			const authResult = await autoMethod.authorize();
 			expect(authResult.instructions).toBe("Authentication cancelled");
 
@@ -4057,6 +4059,13 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			});
 			expect(consoleLog).toHaveBeenCalledWith(
 				expect.stringContaining("Run 'opencode auth login' to re-enable with fresh credentials."),
+			);
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				"[account-menu] blocked re-enable for auth-failure disabled account",
+				expect.objectContaining({
+					accountId: "workspace-auth-failure",
+					email: "blocked@example.com",
+				}),
 			);
 		} finally {
 			consoleLog.mockRestore();

@@ -1073,7 +1073,13 @@ describe("AccountManager", () => {
         version: 3 as const,
         activeIndex: 0,
         accounts: [
-          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          {
+            refreshToken: "token-1",
+            coolingDownUntil: now + 60_000,
+            cooldownReason: "network-error" as const,
+            addedAt: now,
+            lastUsed: now,
+          },
         ],
       };
 
@@ -1099,6 +1105,8 @@ describe("AccountManager", () => {
         throw new Error("expected setAccountEnabled to re-enable account");
       }
       expect(reenabled.account.disabledReason).toBeUndefined();
+      expect(reenabled.account.coolingDownUntil).toBeUndefined();
+      expect(reenabled.account.cooldownReason).toBeUndefined();
     });
 
     it("defaults disable reason to user when disabling without an explicit reason", () => {

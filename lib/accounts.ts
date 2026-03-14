@@ -955,6 +955,7 @@ export class AccountManager {
 		account.enabled = enabled;
 		if (enabled) {
 			delete account.disabledReason;
+			this.clearAccountCooldown(account);
 		} else if (reason) {
 			account.disabledReason = reason;
 		} else if (account.disabledReason !== "auth-failure") {
