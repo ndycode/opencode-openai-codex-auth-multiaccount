@@ -578,7 +578,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 					// Unknown disabled reasons are treated as legacy/manual disables.
 					// Explicit login revival is reserved for accounts we know were disabled by auth failure.
-					return undefined;
+					return "user" satisfies AccountDisabledReason;
 				})();
 				const targetCoolingDownUntil =
 					typeof target.coolingDownUntil === "number" && Number.isFinite(target.coolingDownUntil)
@@ -1681,6 +1681,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 		};
 
+		const setCachedAccountManager = (manager: AccountManager): AccountManager => {
+			if (cachedAccountManager && cachedAccountManager !== manager) {
+				staleAccountManagersForCleanup.add(cachedAccountManager);
+			}
+			cachedAccountManager = manager;
+			accountManagerPromise = Promise.resolve(manager);
+			return manager;
+		};
+
 		const invalidateAccountManagerCache = (): void => {
 			if (cachedAccountManager) {
 				staleAccountManagersForCleanup.add(cachedAccountManager);
@@ -1751,8 +1760,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 // refresh tokens with stale in-memory state.
                                 if (cachedAccountManager) {
                                         const reloadedManager = await AccountManager.loadFromDisk();
-                                        cachedAccountManager = reloadedManager;
-                                        accountManagerPromise = Promise.resolve(reloadedManager);
+                                        setCachedAccountManager(reloadedManager);
                                 }
 
                                 await showToast(`Switched to account ${index + 1}`, "info");
@@ -1821,8 +1829,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					if (!accountManagerPromise) {
 						accountManagerPromise = AccountManager.loadFromDisk(authFallback);
 					}
-					let accountManager = await accountManagerPromise;
-					cachedAccountManager = accountManager;
+					let accountManager = setCachedAccountManager(await accountManagerPromise);
 					const refreshToken = authFallback?.refresh ?? "";
 					const needsPersist =
 						refreshToken &&
@@ -4050,10 +4057,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						return `Switched to ${label} but failed to persist. Changes may be lost on restart.`;
 					}
 
-                                        if (cachedAccountManager) {
+					if (cachedAccountManager) {
 						const reloadedManager = await AccountManager.loadFromDisk();
-						cachedAccountManager = reloadedManager;
-						accountManagerPromise = Promise.resolve(reloadedManager);
+						setCachedAccountManager(reloadedManager);
                                         }
 
 					const label = formatCommandAccountLabel(account, targetIndex);
@@ -5110,8 +5116,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 						if (cachedAccountManager) {
 							const reloadedManager = await AccountManager.loadFromDisk();
-							cachedAccountManager = reloadedManager;
-							accountManagerPromise = Promise.resolve(reloadedManager);
+							setCachedAccountManager(reloadedManager);
 						}
 					}
 
@@ -5355,8 +5360,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					if (cachedAccountManager) {
 						const reloadedManager = await AccountManager.loadFromDisk();
-						cachedAccountManager = reloadedManager;
-						accountManagerPromise = Promise.resolve(reloadedManager);
+						setCachedAccountManager(reloadedManager);
 					}
 
 					const accountLabel = formatCommandAccountLabel(account, targetIndex);
@@ -5456,8 +5460,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					if (cachedAccountManager) {
 						const reloadedManager = await AccountManager.loadFromDisk();
-						cachedAccountManager = reloadedManager;
-						accountManagerPromise = Promise.resolve(reloadedManager);
+						setCachedAccountManager(reloadedManager);
 					}
 
 					const accountLabel = formatCommandAccountLabel(account, targetIndex);
@@ -5534,8 +5537,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					if (cachedAccountManager) {
 						const reloadedManager = await AccountManager.loadFromDisk();
-						cachedAccountManager = reloadedManager;
-						accountManagerPromise = Promise.resolve(reloadedManager);
+						setCachedAccountManager(reloadedManager);
 					}
 
 					const accountLabel = formatCommandAccountLabel(account, targetIndex);
@@ -5851,8 +5853,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					if (cachedAccountManager) {
 						const reloadedManager = await AccountManager.loadFromDisk();
-						cachedAccountManager = reloadedManager;
-						accountManagerPromise = Promise.resolve(reloadedManager);
+						setCachedAccountManager(reloadedManager);
 					}
 
 					const remaining = storage.accounts.length;
@@ -5946,8 +5947,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				await saveAccounts(storage);
 				if (cachedAccountManager) {
 					const reloadedManager = await AccountManager.loadFromDisk();
-					cachedAccountManager = reloadedManager;
-					accountManagerPromise = Promise.resolve(reloadedManager);
+					setCachedAccountManager(reloadedManager);
 				}
 				results.push("");
 				results.push(`Summary: ${refreshedCount} refreshed, ${failedCount} failed`);

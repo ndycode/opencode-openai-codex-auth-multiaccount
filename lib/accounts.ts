@@ -271,7 +271,7 @@ export class AccountManager {
 		if (!changed) return;
 
 		try {
-			await this.saveToDisk();
+			await this.enqueueSave(() => this.saveToDisk());
 		} catch (error) {
 			log.debug("Failed to persist Codex CLI cache hydration", { error: String(error) });
 		}
@@ -991,6 +991,22 @@ export class AccountManager {
 		await saveAccounts(storage);
 	}
 
+	private enqueueSave(saveOperation: () => Promise<void>): Promise<void> {
+		const previousSave = this.pendingSave;
+		const nextSave = (async () => {
+			if (previousSave) {
+				await previousSave;
+			}
+			await saveOperation();
+		})().finally(() => {
+			if (this.pendingSave === nextSave) {
+				this.pendingSave = null;
+			}
+		});
+		this.pendingSave = nextSave;
+		return nextSave;
+	}
+
 	saveToDiskDebounced(delayMs = 500): void {
 		if (this.saveDebounceTimer) {
 			clearTimeout(this.saveDebounceTimer);
@@ -999,13 +1015,7 @@ export class AccountManager {
 			this.saveDebounceTimer = null;
 			const doSave = async () => {
 				try {
-					if (this.pendingSave) {
-						await this.pendingSave;
-					}
-					this.pendingSave = this.saveToDisk().finally(() => {
-						this.pendingSave = null;
-					});
-					await this.pendingSave;
+					await this.enqueueSave(() => this.saveToDisk());
 				} catch (error) {
 					log.warn("Debounced save failed", { error: error instanceof Error ? error.message : String(error) });
 				}
@@ -1045,12 +1055,7 @@ export class AccountManager {
 			if (this.saveDebounceTimer !== null || this.pendingSave !== null) {
 				continue;
 			}
-			const flushSave = this.saveToDisk().finally(() => {
-				if (this.pendingSave === flushSave) {
-					this.pendingSave = null;
-				}
-			});
-			this.pendingSave = flushSave;
+			const flushSave = this.enqueueSave(() => this.saveToDisk());
 			await flushSave;
 			// Drain saves that were queued while the flush save was in flight.
 			await Promise.resolve();

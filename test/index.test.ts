@@ -3272,7 +3272,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const mergedOrg = mergedOrgEntries[0];
 		expect(mergedOrg?.accountId).toBe("org-shared");
 		expect(mergedOrg?.enabled).toBe(false);
-		expect(mergedOrg?.disabledReason).toBeUndefined();
+		expect(mergedOrg?.disabledReason).toBe("user");
 		expect(mergedOrg?.coolingDownUntil).toBe(12_000);
 		expect(mergedOrg?.cooldownReason).toBe("auth-failure");
 	});
