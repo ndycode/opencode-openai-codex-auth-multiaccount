@@ -1,0 +1,184 @@
+name: PR Advisory
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advisory-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  HUSKY: 0
+
+jobs:
+  detect-dependency-change:
+    name: detect-dependency-change
+    runs-on: ubuntu-latest
+    outputs:
+      dependency_changed: ${{ steps.detect.outputs.dependency_changed }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect dependency changes
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          dependency_changed=false
+
+          if [[ "${EVENT_NAME}" == "schedule" || "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            dependency_changed=true
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "${BASE_REF}"
+            if git diff --name-only "origin/${BASE_REF}...HEAD" | grep -Eq '^(package\.json|package-lock\.json)$'; then
+              dependency_changed=true
+            fi
+          elif [[ -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            if git diff --name-only "${BEFORE_SHA}...HEAD" | grep -Eq '^(package\.json|package-lock\.json)$'; then
+              dependency_changed=true
+            fi
+          else
+            dependency_changed=true
+          fi
+
+          echo "dependency_changed=${dependency_changed}" >> "${GITHUB_OUTPUT}"
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run coverage
+        id: coverage
+        continue-on-error: true
+        run: npm run test:coverage
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report-${{ github.run_id }}
+          path: coverage
+          if-no-files-found: ignore
+
+      - name: Write coverage summary
+        if: always()
+        shell: bash
+        env:
+          COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
+        run: |
+          {
+            echo "## Coverage"
+            if [[ "${COVERAGE_OUTCOME}" == "success" ]]; then
+              echo ""
+              echo "- \`npm run test:coverage\` passed."
+            else
+              echo ""
+              echo "- \`npm run test:coverage\` is currently advisory."
+              echo "- The command failed during this run. Keep the artifact for inspection and remediate coverage before promoting it to a required gate."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  compat-matrix:
+    name: compat-matrix (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 18
+          - os: ubuntu-latest
+            node: 22
+          - os: windows-latest
+            node: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+  dependency-audit:
+    name: dependency-audit
+    needs: detect-dependency-change
+    if: needs.detect-dependency-change.outputs.dependency_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run dependency audit
+        id: audit
+        continue-on-error: true
+        run: npm run audit:ci
+
+      - name: Write dependency audit summary
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          {
+            echo "## Dependency audit"
+            if [[ "${AUDIT_OUTCOME}" == "success" ]]; then
+              echo ""
+              echo "- \`npm run audit:ci\` passed."
+            else
+              echo ""
+              echo "- \`npm run audit:ci\` is currently advisory."
+              echo "- The audit found issues or baseline failures. Review the job log before promoting this lane to required status."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

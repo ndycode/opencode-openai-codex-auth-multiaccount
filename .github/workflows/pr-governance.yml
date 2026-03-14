@@ -1,0 +1,138 @@
+name: PR Governance
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-governance:
+    name: pr-governance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR template and live verification markers
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.payload.pull_request.number;
+            const body = context.payload.pull_request.body || "";
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: issueNumber,
+              per_page: 100,
+            });
+
+            const changedFiles = files.map((file) => file.filename);
+            const riskyMatchers = [
+              /^index\.ts$/,
+              /^lib\/auth\//,
+              /^lib\/request\//,
+              /^lib\/storage(?:\/|\.ts$)/,
+              /^lib\/recovery\/storage\.ts$/,
+            ];
+
+            const riskyPaths = changedFiles.filter((file) => riskyMatchers.some((matcher) => matcher.test(file)));
+            const liveVerificationRequired = riskyPaths.length > 0;
+
+            const requiredHeadings = [
+              /^## Summary$/m,
+              /^## Testing$/m,
+              /^## Docs Impact$/m,
+              /^## Compliance Confirmation$/m,
+              /^## Notes$/m,
+            ];
+
+            const missingSections = requiredHeadings.filter((pattern) => !pattern.test(body));
+            const complianceChecked = /- \[x\] This change stays within the repository scope and OpenAI Terms of Service expectations\./i.test(body);
+            const noLiveRequiredChecked = /- \[x\] No auth, request-routing, or storage paths changed\./i.test(body);
+            const manualLiveChecked = /- \[x\] I manually tested with a real ChatGPT Plus\/Pro account\./i.test(body);
+            const maintainerLiveChecked = /- \[x\] Maintainer live verification completed\./i.test(body);
+
+            const labelName = "needs-live-verification";
+
+            async function ensureLabel() {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: labelName });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: labelName,
+                  color: "b60205",
+                  description: "Manual ChatGPT Plus/Pro verification required before merge",
+                });
+              }
+            }
+
+            if (liveVerificationRequired) {
+              await ensureLabel();
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                labels: [labelName],
+              });
+            } else {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  name: labelName,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            const failures = [];
+
+            if (missingSections.length > 0) {
+              failures.push("PR description is missing one or more required template sections.");
+            }
+
+            if (!complianceChecked) {
+              failures.push("The compliance checkbox must be checked.");
+            }
+
+            if (liveVerificationRequired) {
+              if (!manualLiveChecked && !maintainerLiveChecked) {
+                failures.push("This PR touches auth/request/storage paths and needs a completed live verification checkbox.");
+              }
+            } else if (!noLiveRequiredChecked && !manualLiveChecked && !maintainerLiveChecked) {
+              failures.push("Choose the matching live-validation state in the PR template.");
+            }
+
+            const summaryLines = [
+              "## PR governance",
+              "",
+              `- Changed files: ${changedFiles.length}`,
+              `- Live verification required: ${liveVerificationRequired ? "yes" : "no"}`,
+            ];
+
+            if (riskyPaths.length > 0) {
+              summaryLines.push(`- Risky paths: ${riskyPaths.join(", ")}`);
+            }
+
+            await core.summary.addRaw(summaryLines.join("\n")).write();
+
+            if (failures.length > 0) {
+              core.setFailed(failures.join("\n"));
+            }

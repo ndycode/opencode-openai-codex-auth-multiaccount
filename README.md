@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml)
 
 Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/Codex model presets, and multi-account failover.
 

@@ -63,9 +63,10 @@ The project does not accept work aimed at:
 3. **Include tests** for new functionality
 4. **Update documentation** (README.md, config examples, etc.)
 5. **Ensure compliance** with guidelines above
-6. **Test thoroughly** with the most appropriate validation for the change
-7. **Complete the pull request template** with summary, testing, and compliance details
-8. **Submit PR** with clear description of changes
+6. **Run local validation**: `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, and `npm run docs:check` when docs or workflow files change
+7. **Test thoroughly** with the most appropriate validation for the change, including real ChatGPT Plus/Pro checks when touching auth, request-routing, or storage behavior
+8. **Complete the pull request template** with summary, testing, docs impact, and compliance details
+9. **Submit PR** with clear description of changes
 
 Pull requests are automatically screened for incomplete or suspicious submissions. Legitimate contributions are still welcome, but low-signal PRs may be flagged for maintainer review before they move forward.
 
