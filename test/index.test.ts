@@ -2025,6 +2025,17 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		return { plugin, sdk, mockClient };
 	};
 
+	const createFooterRequestBody = (promptCacheKey?: string) =>
+		promptCacheKey
+			? { model: "gpt-5.1", prompt_cache_key: promptCacheKey }
+			: { model: "gpt-5.1" };
+
+	const enablePersistedFooter = async (style: "label-masked-email" | "full-email" | "label-only") => {
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(style);
+	};
+
 	const queueFooterForSession = async (
 		plugin: PluginType,
 		sdk: Awaited<ReturnType<typeof setupPlugin>>["sdk"],
@@ -2032,18 +2043,13 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		promptCacheKey = sessionID,
 	) => {
 		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const requestBody = createFooterRequestBody(promptCacheKey || undefined);
 		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
 			updatedInit: {
 				method: "POST",
-				body: JSON.stringify(
-					promptCacheKey
-						? { model: "gpt-5.1", prompt_cache_key: promptCacheKey }
-						: { model: "gpt-5.1" },
-				),
+				body: JSON.stringify(requestBody),
 			},
-			body: promptCacheKey
-				? { model: "gpt-5.1", prompt_cache_key: promptCacheKey }
-				: { model: "gpt-5.1" },
+			body: requestBody,
 		});
 
 		globalThis.fetch = vi.fn().mockResolvedValue(
@@ -2052,11 +2058,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 		await sdk.fetch!("https://api.openai.com/v1/chat", {
 			method: "POST",
-			body: JSON.stringify(
-				promptCacheKey
-					? { model: "gpt-5.1", prompt_cache_key: promptCacheKey }
-					: { model: "gpt-5.1" },
-			),
+			body: JSON.stringify(requestBody),
 		});
 
 		return plugin;
@@ -2094,12 +2096,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("appends a masked-email footer to completed text when enabled", async () => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
-		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
-			"label-masked-email",
-		);
-
+		await enablePersistedFooter("label-masked-email");
 		const { plugin, sdk } = await setupPlugin();
 		await queueFooterForSession(plugin, sdk, "session-masked");
 
@@ -2115,12 +2112,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("appends a full-email footer to completed text when configured", async () => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
-		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
-			"full-email",
-		);
-
+		await enablePersistedFooter("full-email");
 		const { plugin, sdk } = await setupPlugin();
 		await queueFooterForSession(plugin, sdk, "session-full");
 
@@ -2136,12 +2128,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("appends a label-only footer to completed text when configured", async () => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
-		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
-			"label-only",
-		);
-
+		await enablePersistedFooter("label-only");
 		const { plugin, sdk } = await setupPlugin();
 		await queueFooterForSession(plugin, sdk, "session-label");
 
@@ -2157,12 +2144,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("does not append a duplicate footer marker", async () => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
-		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
-			"label-masked-email",
-		);
-
+		await enablePersistedFooter("label-masked-email");
 		const { plugin, sdk } = await setupPlugin();
 		await queueFooterForSession(plugin, sdk, "session-duplicate");
 
@@ -2182,12 +2164,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("keeps queued footers isolated by session id", async () => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
-		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
-			"label-only",
-		);
-
+		await enablePersistedFooter("label-only");
 		const { plugin, sdk } = await setupPlugin();
 		await queueFooterForSession(plugin, sdk, "session-a");
 		await queueFooterForSession(plugin, sdk, "session-b");
@@ -2214,12 +2191,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 	});
 
 	it("does not queue a footer when the request has no prompt_cache_key", async () => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
-		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
-			"label-masked-email",
-		);
-
+		await enablePersistedFooter("label-masked-email");
 		const { plugin, sdk } = await setupPlugin();
 		await queueFooterForSession(plugin, sdk, "session-without-key", "");
 

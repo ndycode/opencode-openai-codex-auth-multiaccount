@@ -215,6 +215,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	const MAX_PENDING_ACCOUNT_FOOTERS_PER_SESSION = 8;
 	const pendingAccountFooters = new Map<string, string[]>();
 
+	type PersistedAccountDetails = {
+		accountId?: string;
+		accountLabel?: string;
+		email?: string;
+	};
+
 	type PersistAccountFooterStyle =
 		| "label-masked-email"
 		| "full-email"
@@ -302,61 +308,43 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		return `${prefix}***@***.${tld}`;
 	};
 
-	const formatPersistedAccountDescriptor = (
-		account: {
-			accountId?: string;
-			accountLabel?: string;
-			email?: string;
-		},
+	const getPersistedAccountLabel = (
+		account: PersistedAccountDetails,
 		index: number,
-		accountCount: number,
-		style: PersistAccountFooterStyle,
 	): string => {
 		const accountLabel = account.accountLabel?.trim();
-		const sanitizedEmail = sanitizeEmail(account.email);
 		const accountId = account.accountId?.trim();
 		const idSuffix = accountId
 			? accountId.length > 6
 				? accountId.slice(-6)
 				: accountId
 			: null;
-		const baseLabel =
-			accountLabel ||
+		return accountLabel ||
 			(idSuffix ? `Account ${index + 1} [id:${idSuffix}]` : `Account ${index + 1}`);
-		const accountPosition = `[${index}/${Math.max(1, accountCount)}]`;
+	};
 
-		if (style === "label-only") {
-			return `${baseLabel} ${accountPosition}`;
+	const getPersistedAccountValue = (
+		account: PersistedAccountDetails,
+		index: number,
+		style: PersistAccountFooterStyle,
+	): string => {
+		const sanitizedEmail = sanitizeEmail(account.email);
+		if (style === "label-only" || !sanitizedEmail) {
+			return getPersistedAccountLabel(account, index);
 		}
-
-		if (!sanitizedEmail) {
-			return `${baseLabel} ${accountPosition}`;
-		}
-
-		const displayEmail =
-			style === "full-email"
-				? sanitizedEmail
-				: (maskPersistedEmail(sanitizedEmail) ?? sanitizedEmail);
-		return `${displayEmail} ${accountPosition}`;
+		return style === "full-email"
+			? sanitizedEmail
+			: (maskPersistedEmail(sanitizedEmail) ?? sanitizedEmail);
 	};
 
 	const formatPersistedAccountFooter = (
-		account: {
-			accountId?: string;
-			accountLabel?: string;
-			email?: string;
-		},
+		account: PersistedAccountDetails,
 		index: number,
 		accountCount: number,
 		style: PersistAccountFooterStyle,
 	): string => {
-		const descriptor = formatPersistedAccountDescriptor(
-			account,
-			index,
-			accountCount,
-			style,
-		);
-		return `${ACCOUNT_FOOTER_MARKER} ${descriptor}_`;
+		const accountPosition = `[${index}/${Math.max(1, accountCount)}]`;
+		return `${ACCOUNT_FOOTER_MARKER} ${getPersistedAccountValue(account, index, style)} ${accountPosition}_`;
 	};
 
 	const queuePersistedAccountFooter = (
@@ -1798,32 +1786,26 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		// Initialize runtime UI settings once on plugin load; auth/tools refresh this dynamically.
 		resolveUiRuntime();
 
-        return {
-                event: eventHandler,
-                "experimental.text.complete": (
+	return {
+		event: eventHandler,
+		"experimental.text.complete": (
 			input: { sessionID: string },
 			output: { text: string },
 		) => {
 			const pluginConfig = loadPluginConfig();
-			if (!getPersistAccountFooter(pluginConfig)) {
-				return Promise.resolve();
-			}
+			if (!getPersistAccountFooter(pluginConfig)) return Promise.resolve();
 
 			const footer = consumePersistedAccountFooter(input.sessionID);
-			if (!footer) {
-				return Promise.resolve();
-			}
+			if (!footer) return Promise.resolve();
 
 			const existingText = output.text ?? "";
-			if (existingText.includes(ACCOUNT_FOOTER_MARKER)) {
-				return Promise.resolve();
-			}
+			if (existingText.includes(ACCOUNT_FOOTER_MARKER)) return Promise.resolve();
 
 			const trimmedText = existingText.trimEnd();
 			output.text = trimmedText ? `${trimmedText}\n\n${footer}` : footer;
 			return Promise.resolve();
 		},
-                auth: {
+		auth: {
 			provider: PROVIDER_ID,
 			/**
 			 * Loader function that configures OAuth authentication and request handling
