@@ -211,9 +211,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let startupPreflightShown = false;
 	let beginnerSafeModeEnabled = false;
 	const MIN_BACKOFF_MS = 100;
-	const ACCOUNT_FOOTER_MARKER = "_Account:";
-	const MAX_PENDING_ACCOUNT_FOOTERS_PER_SESSION = 8;
-	const pendingAccountFooters = new Map<string, string[]>();
+	const PERSISTED_ACCOUNT_TOAST_TITLE = "Current account";
+	const PERSISTED_ACCOUNT_TOAST_DURATION_MS = 86_400_000;
 
 	type PersistedAccountDetails = {
 		accountId?: string;
@@ -337,45 +336,14 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			: (maskPersistedEmail(sanitizedEmail) ?? sanitizedEmail);
 	};
 
-	const formatPersistedAccountFooter = (
+	const formatPersistedAccountToastMessage = (
 		account: PersistedAccountDetails,
 		index: number,
 		accountCount: number,
 		style: PersistAccountFooterStyle,
 	): string => {
 		const accountPosition = `[${index}/${Math.max(1, accountCount)}]`;
-		return `${ACCOUNT_FOOTER_MARKER} ${getPersistedAccountValue(account, index, style)} ${accountPosition}_`;
-	};
-
-	const queuePersistedAccountFooter = (
-		sessionID: string | undefined,
-		footer: string,
-	): void => {
-		const normalizedSessionID = sessionID?.trim();
-		if (!normalizedSessionID) return;
-
-		const queue = pendingAccountFooters.get(normalizedSessionID) ?? [];
-		queue.push(footer);
-		if (queue.length > MAX_PENDING_ACCOUNT_FOOTERS_PER_SESSION) {
-			queue.splice(0, queue.length - MAX_PENDING_ACCOUNT_FOOTERS_PER_SESSION);
-		}
-		pendingAccountFooters.set(normalizedSessionID, queue);
-	};
-
-	const consumePersistedAccountFooter = (
-		sessionID: string | undefined,
-	): string | null => {
-		const normalizedSessionID = sessionID?.trim();
-		if (!normalizedSessionID) return null;
-
-		const queue = pendingAccountFooters.get(normalizedSessionID);
-		if (!queue || queue.length === 0) return null;
-
-		const footer = queue.shift() ?? null;
-		if (queue.length === 0) {
-			pendingAccountFooters.delete(normalizedSessionID);
-		}
-		return footer;
+		return `${getPersistedAccountValue(account, index, style)} ${accountPosition}`;
 	};
 
 		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
@@ -1182,6 +1150,44 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 }
         };
 
+		let persistedAccountToastVisible = false;
+
+		const emitPersistedAccountToast = async (
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+		): Promise<void> => {
+			await showToast(
+				formatPersistedAccountToastMessage(account, index, accountCount, style),
+				"info",
+				{
+					title: PERSISTED_ACCOUNT_TOAST_TITLE,
+					duration: PERSISTED_ACCOUNT_TOAST_DURATION_MS,
+				},
+			);
+		};
+
+		const revealPersistedAccountToast = async (
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+		): Promise<void> => {
+			persistedAccountToastVisible = true;
+			await emitPersistedAccountToast(account, index, accountCount, style);
+		};
+
+		const refreshPersistedAccountToast = async (
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+		): Promise<void> => {
+			if (!persistedAccountToastVisible) return;
+			await emitPersistedAccountToast(account, index, accountCount, style);
+		};
+
 		const resolveActiveIndex = (
 				storage: {
 						activeIndex: number;
@@ -1746,20 +1752,19 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 return;
                         }
 
-                        const index = props.index ?? props.accountIndex;
-                        if (typeof index === "number") {
-                                const storage = await loadAccounts();
-                                if (!storage || index < 0 || index >= storage.accounts.length) {
-                                        return;
-                                }
+						const index = props.index ?? props.accountIndex;
+						if (typeof index === "number") {
+								const storage = await loadAccounts();
+								if (!storage || index < 0 || index >= storage.accounts.length) {
+										return;
+								}
 
-                                const now = Date.now();
-                                const account = storage.accounts[index];
-                                if (account) {
-                                        account.lastUsed = now;
-                                        account.lastSwitchReason = "rotation";
-                                }
-                                storage.activeIndex = index;
+								const now = Date.now();
+								const account = storage.accounts[index];
+								if (!account) return;
+								account.lastUsed = now;
+								account.lastSwitchReason = "rotation";
+								storage.activeIndex = index;
                                 storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
                                 for (const family of MODEL_FAMILIES) {
                                         storage.activeIndexByFamily[family] = index;
@@ -1775,7 +1780,20 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         accountManagerPromise = Promise.resolve(reloadedManager);
                                 }
 
-                                await showToast(`Switched to account ${index + 1}`, "info");
+								const pluginConfig = loadPluginConfig();
+								if (getPersistAccountFooter(pluginConfig)) {
+									await refreshPersistedAccountToast(
+										account,
+										index,
+										storage.accounts.length,
+										getPersistAccountFooterStyle(pluginConfig),
+									);
+									if (!persistedAccountToastVisible) {
+										await showToast(`Switched to account ${index + 1}`, "info");
+									}
+								} else {
+									await showToast(`Switched to account ${index + 1}`, "info");
+								}
                         }
                 }
           } catch (error) {
@@ -1789,22 +1807,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	return {
 		event: eventHandler,
 		"experimental.text.complete": (
-			input: { sessionID: string },
-			output: { text: string },
-		) => {
-			const pluginConfig = loadPluginConfig();
-			if (!getPersistAccountFooter(pluginConfig)) return Promise.resolve();
-
-			const footer = consumePersistedAccountFooter(input.sessionID);
-			if (!footer) return Promise.resolve();
-
-			const existingText = output.text ?? "";
-			if (existingText.includes(ACCOUNT_FOOTER_MARKER)) return Promise.resolve();
-
-			const trimmedText = existingText.trimEnd();
-			output.text = trimmedText ? `${trimmedText}\n\n${footer}` : footer;
-			return Promise.resolve();
-		},
+			_input: { sessionID: string },
+			_output: { text: string },
+		) => Promise.resolve(),
 		auth: {
 			provider: PROVIDER_ID,
 			/**
@@ -2736,14 +2741,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					accountManager.recordSuccess(account, modelFamily, model);
 					if (persistAccountFooter) {
-						queuePersistedAccountFooter(
-							threadIdCandidate,
-							formatPersistedAccountFooter(
-								account,
-								account.index,
-								accountManager.getAccountCount(),
-								persistAccountFooterStyle,
-							),
+						await revealPersistedAccountToast(
+							account,
+							account.index,
+							accountManager.getAccountCount(),
+							persistAccountFooterStyle,
 						);
 					}
 					runtimeMetrics.successfulRequests++;
