@@ -415,7 +415,7 @@ type PluginType = {
 			messages: Array<{
 				info: {
 					role: string;
-					sessionID: string;
+					sessionID?: string;
 					model?: { providerID: string; modelID: string };
 					variant?: string;
 					thinking?: string;
@@ -2184,6 +2184,23 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 	});
 
+	it("does not reload account storage on the successful footer hot path", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const storageModule = await import("../lib/storage.js");
+		const { sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-warmup");
+		vi.mocked(storageModule.loadAccounts).mockClear();
+
+		await sendPersistedAccountRequest(sdk, "session-no-read");
+
+		expect(storageModule.loadAccounts).not.toHaveBeenCalled();
+	});
+
 	it("decorates the last user message with a label-only indicator when configured", async () => {
 		await enablePersistedFooter("label-only");
 		const { plugin, sdk } = await setupPlugin();
@@ -2237,6 +2254,44 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			expectedFullIndicator,
 		);
 		expect((await readPersistedAccountIndicator(plugin, "session-chat-message")).thinking).toBeUndefined();
+	});
+
+	it("prefers the explicit request session key over CODEX_THREAD_ID", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-session";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-explicit");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-explicit")).variant).toBe(
+			expectedFullIndicator,
+		);
+		expect((await readPersistedAccountIndicator(plugin, "env-session")).variant).toBeUndefined();
+	});
+
+	it("falls back to CODEX_THREAD_ID in the transform hook when the message session is missing", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-fallback";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk);
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+						model: { providerID: "openai", modelID: "gpt-5.1" },
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(
+			output.messages[0]?.info.model?.variant ?? output.messages[0]?.info.variant,
+		).toBe(expectedFullIndicator);
 	});
 
 	it("suppresses account-switch info toasts when the footer is enabled and refreshes the visible indicator", async () => {

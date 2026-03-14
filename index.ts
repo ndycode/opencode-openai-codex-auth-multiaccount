@@ -1148,16 +1148,26 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		const persistedAccountIndicators = new Map<string, PersistedAccountIndicatorEntry>();
 		let persistedAccountIndicatorRevision = 0;
+		let persistedAccountCountHint = 0;
 
 		const nextPersistedAccountIndicatorRevision = (): number => {
 			persistedAccountIndicatorRevision += 1;
 			return persistedAccountIndicatorRevision;
 		};
 
+		const updatePersistedAccountCountHint = (
+			count: number | null | undefined,
+		): void => {
+			if (!Number.isFinite(count) || count === undefined || count === null) {
+				return;
+			}
+			persistedAccountCountHint = Math.max(0, Math.trunc(count));
+		};
+
 		const resolvePersistedAccountSessionID = (
 			...candidates: Array<string | null | undefined>
 		): string | undefined => {
-			for (const candidate of [process.env.CODEX_THREAD_ID, ...candidates]) {
+			for (const candidate of [...candidates, process.env.CODEX_THREAD_ID]) {
 				const sessionID = candidate?.toString().trim();
 				if (sessionID) {
 					return sessionID;
@@ -1841,6 +1851,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 }
 
                                 await saveAccounts(storage);
+								updatePersistedAccountCountHint(storage.accounts.length);
 
                                 // Reload manager from disk so we don't overwrite newer rotated
                                 // refresh tokens with stale in-memory state.
@@ -1916,10 +1927,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 			if (!lastUserMessage) return Promise.resolve();
 
-			const sessionID =
+			const sessionID = resolvePersistedAccountSessionID(
 				typeof lastUserMessage.info.sessionID === "string"
 					? lastUserMessage.info.sessionID
-					: undefined;
+					: undefined,
+			);
 			const indicator = getPersistedAccountIndicatorLabel(sessionID);
 			if (!indicator) return Promise.resolve();
 
@@ -1981,6 +1993,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 					let accountManager = await accountManagerPromise;
 					cachedAccountManager = accountManager;
+					updatePersistedAccountCountHint(
+						(await loadAccounts())?.accounts.length ?? accountManager.getAccountCount(),
+					);
 					const refreshToken = authFallback?.refresh ?? "";
 					const needsPersist =
 						refreshToken &&
@@ -2854,9 +2869,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					accountManager.recordSuccess(account, modelFamily, model);
 					if (persistAccountFooter) {
-						const persistedStorage = await loadAccounts();
-						const persistedAccountCount = persistedStorage?.accounts.length ??
-							accountManager.getAccountCount();
+						const persistedAccountCount =
+							persistedAccountCountHint > 0
+								? persistedAccountCountHint
+								: accountManager.getAccountCount();
 						setPersistedAccountIndicator(
 							threadIdCandidate,
 							account,
