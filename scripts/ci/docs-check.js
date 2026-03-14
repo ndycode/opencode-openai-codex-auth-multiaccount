@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 const ROOT = process.cwd();
@@ -15,6 +15,17 @@ async function exists(targetPath) {
 		return true;
 	} catch {
 		return false;
+	}
+}
+
+async function getPathType(targetPath) {
+	try {
+		const metadata = await stat(targetPath);
+		if (metadata.isDirectory()) return "directory";
+		if (metadata.isFile()) return "file";
+		return "other";
+	} catch {
+		return "missing";
 	}
 }
 
@@ -47,11 +58,15 @@ async function collectMarkdownFiles(inputPaths) {
 		for (const inputPath of inputPaths) {
 			const absolutePath = path.resolve(ROOT, inputPath);
 			if (!(await exists(absolutePath))) continue;
+
+			const pathType = await getPathType(absolutePath);
 			const extension = path.extname(absolutePath).toLowerCase();
-			if (MARKDOWN_EXTENSIONS.has(extension)) {
+			if (pathType === "file" && MARKDOWN_EXTENSIONS.has(extension)) {
 				resolved.add(absolutePath);
 				continue;
 			}
+
+			if (pathType !== "directory") continue;
 
 			const nestedFiles = await walkMarkdownFiles(absolutePath);
 			for (const nestedFile of nestedFiles) resolved.add(nestedFile);

@@ -64,22 +64,22 @@ jobs:
 
           for file in "${files[@]}"; do
             [[ -z "${file}" ]] && continue
+            is_docs_markdown=false
 
-            case "${file}" in
-              README.md|CONTRIBUTING.md|CHANGELOG.md|SECURITY.md|config/README.md|docs/**|test/README.md|.github/*.md|.github/ISSUE_TEMPLATE/*.md)
-                docs_changed=true
-                ;;
-            esac
+            if [[ "${file}" =~ ^(README\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md)$ ]] || [[ "${file}" =~ ^(\.github|config|docs|test)/.+\.(md|markdown)$ ]]; then
+              docs_changed=true
+              is_docs_markdown=true
+            fi
 
             case "${file}" in
               .github/workflows/**)
                 workflow_changed=true
                 code_changed=true
                 ;;
-              README.md|CONTRIBUTING.md|CHANGELOG.md|SECURITY.md|config/README.md|docs/**|test/README.md|.github/*.md|.github/ISSUE_TEMPLATE/*.md)
-                ;;
               *)
-                code_changed=true
+                if [[ "${is_docs_markdown}" != "true" ]]; then
+                  code_changed=true
+                fi
                 ;;
             esac
           done
@@ -253,6 +253,7 @@ jobs:
       - name: Evaluate required checks
         shell: bash
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
           WORKFLOW_CHANGED: ${{ needs.changes.outputs.workflow_changed }}
@@ -266,6 +267,11 @@ jobs:
         run: |
           set -euo pipefail
           failures=()
+
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Changes detection job did not succeed (result: ${CHANGES_RESULT}). Failing gate."
+            exit 1
+          fi
 
           if [[ "${CODE_CHANGED}" == "true" && "${LINT_RESULT}" != "success" ]]; then
             failures+=("lint")
