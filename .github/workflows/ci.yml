@@ -72,7 +72,7 @@ jobs:
             fi
 
             case "${file}" in
-              .github/workflows/**)
+              .github/workflows/*)
                 workflow_changed=true
                 code_changed=true
                 ;;

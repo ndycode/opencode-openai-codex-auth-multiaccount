@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       dependency_changed: ${{ steps.detect.outputs.dependency_changed }}
+      code_changed: ${{ steps.detect.outputs.code_changed }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -43,26 +44,52 @@ jobs:
           set -euo pipefail
 
           dependency_changed=false
+          code_changed=false
+          files=()
 
           if [[ "${EVENT_NAME}" == "schedule" || "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             dependency_changed=true
+            code_changed=true
           elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
             git fetch --no-tags --depth=1 origin "${BASE_REF}"
-            if git diff --name-only "origin/${BASE_REF}...HEAD" | grep -Eq '^(package\.json|package-lock\.json)$'; then
-              dependency_changed=true
-            fi
+            while IFS= read -r file; do
+              files+=("${file}")
+            done < <(git diff --name-only "origin/${BASE_REF}...HEAD")
           elif [[ -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
-            if git diff --name-only "${BEFORE_SHA}...HEAD" | grep -Eq '^(package\.json|package-lock\.json)$'; then
-              dependency_changed=true
-            fi
+            while IFS= read -r file; do
+              files+=("${file}")
+            done < <(git diff --name-only "${BEFORE_SHA}...HEAD")
           else
             dependency_changed=true
+            code_changed=true
           fi
 
-          echo "dependency_changed=${dependency_changed}" >> "${GITHUB_OUTPUT}"
+          for file in "${files[@]}"; do
+            [[ -z "${file}" ]] && continue
+            is_docs_markdown=false
+
+            if [[ "${file}" =~ ^(README\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md)$ ]] || [[ "${file}" =~ ^(\.github|config|docs|test)/.+\.(md|markdown)$ ]]; then
+              is_docs_markdown=true
+            fi
+
+            if [[ "${file}" =~ ^(package\.json|package-lock\.json)$ ]]; then
+              dependency_changed=true
+            fi
+
+            if [[ "${is_docs_markdown}" != "true" ]]; then
+              code_changed=true
+            fi
+          done
+
+          {
+            echo "dependency_changed=${dependency_changed}"
+            echo "code_changed=${code_changed}"
+          } >> "${GITHUB_OUTPUT}"
 
   coverage:
     name: coverage
+    needs: detect-dependency-change
+    if: needs.detect-dependency-change.outputs.code_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -111,6 +138,8 @@ jobs:
 
   compat-matrix:
     name: compat-matrix (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: detect-dependency-change
+    if: needs.detect-dependency-change.outputs.code_changed == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:

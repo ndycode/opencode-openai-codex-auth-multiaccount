@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,10 +6,17 @@ import { afterEach, describe, expect, it } from "vitest";
 const tempRoots = [];
 
 afterEach(async () => {
-	await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+	await Promise.all(
+		tempRoots.splice(0).map((root) =>
+			rm(root, { recursive: true, force: true }).catch((error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[docs-check test] failed to clean up ${root}: ${message}`);
+			}),
+		),
+	);
 });
 
-async function createDocsFixture() {
+async function createDocsFixture(markdown = "# Guide\n") {
 	const root = await mkdtemp(path.join(tmpdir(), "docs-check-"));
 	tempRoots.push(root);
 
@@ -18,7 +25,7 @@ async function createDocsFixture() {
 	await mkdir(targetsDir, { recursive: true });
 
 	const docsFile = path.join(docsDir, "guide.md");
-	await writeFile(docsFile, "# Guide\n", "utf8");
+	await writeFile(docsFile, markdown, "utf8");
 
 	const existingTarget = path.join(targetsDir, "exists.md");
 	await writeFile(existingTarget, "# Target\n", "utf8");
@@ -71,5 +78,15 @@ describe("docs-check script", () => {
 		const expected = process.platform === "win32" ? resolved.toLowerCase() : resolved;
 
 		expect(normalizePathForCompare(input)).toBe(expected);
+	});
+
+	it("extracts reference-style definitions so missing targets are still caught", async () => {
+		const { extractMarkdownLinks, validateLink } = await import("../scripts/ci/docs-check.js");
+		const { docsFile } = await createDocsFixture("[Config Guide][config]\n\n[config]: ./targets/missing.md\n");
+		const markdown = await readFile(docsFile, "utf8");
+		const [referenceTarget] = extractMarkdownLinks(markdown);
+
+		expect(referenceTarget).toBe("./targets/missing.md");
+		await expect(validateLink(docsFile, referenceTarget)).resolves.toBe("Missing local target: ./targets/missing.md");
 	});
 });

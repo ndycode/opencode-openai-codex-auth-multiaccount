@@ -16,6 +16,28 @@ export function normalizePathForCompare(targetPath) {
 	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
+function normalizeReferenceLabel(label) {
+	return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeLinkTarget(rawTarget) {
+	if (!rawTarget) return null;
+
+	let target = rawTarget.trim();
+	if (!target) return null;
+
+	if (target.startsWith("<") && target.endsWith(">")) {
+		target = target.slice(1, -1).trim();
+	}
+
+	const spacedTarget = target.match(/^(\S+)\s+["'(].*$/);
+	if (spacedTarget?.[1]) {
+		target = spacedTarget[1];
+	}
+
+	return target || null;
+}
+
 async function exists(targetPath) {
 	try {
 		await access(targetPath);
@@ -156,27 +178,30 @@ export function extractMarkdownLinks(markdown) {
 		.replace(/```[\s\S]*?```/g, "\n")
 		.replace(/`[^`\n]+`/g, "`code`");
 	const openerPattern = /!?\[[^\]]*]\(/g;
+	const referencePattern = /!?\[([^\]]+)]\[([^\]]*)]/g;
+	const referenceDefinitionPattern = /^\s{0,3}\[([^\]]+)]:\s+(.+)$/gm;
 	const links = [];
+	const referenceDefinitions = new Map();
+
+	for (const match of stripped.matchAll(referenceDefinitionPattern)) {
+		const label = normalizeReferenceLabel(match[1] ?? "");
+		const target = normalizeLinkTarget(match[2] ?? "");
+		if (!label || !target) continue;
+		referenceDefinitions.set(label, target);
+	}
 
 	for (const match of stripped.matchAll(openerPattern)) {
 		const linkStart = (match.index ?? 0) + match[0].length;
 		const parsedTarget = extractLinkTarget(stripped, linkStart);
-		if (!parsedTarget) continue;
-
-		const rawTarget = parsedTarget.trim();
-		if (!rawTarget) continue;
-
-		let target = rawTarget;
-		if (target.startsWith("<") && target.endsWith(">")) {
-			target = target.slice(1, -1).trim();
-		}
-
-		const spacedTarget = target.match(/^(\S+)\s+["'(].*$/);
-		if (spacedTarget?.[1]) {
-			target = spacedTarget[1];
-		}
-
+		const target = normalizeLinkTarget(parsedTarget);
+		if (!target) continue;
 		links.push(target);
+	}
+
+	for (const match of stripped.matchAll(referencePattern)) {
+		const label = match[2]?.trim() ? match[2] : match[1];
+		const referenceTarget = referenceDefinitions.get(normalizeReferenceLabel(label ?? ""));
+		if (referenceTarget) links.push(referenceTarget);
 	}
 
 	return links;
