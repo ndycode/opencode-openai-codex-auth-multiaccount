@@ -95,8 +95,52 @@ jobs:
             echo "workflow_changed=${workflow_changed}"
           } >> "${GITHUB_OUTPUT}"
 
-  validate:
-    name: validate
+  lint:
+    name: lint
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  typecheck:
+    name: typecheck
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+  build:
+    name: build
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
     runs-on: ubuntu-latest
@@ -114,14 +158,49 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Type check
-        run: npm run typecheck
-
       - name: Build
         run: npm run build
+
+  unit-linux:
+    name: unit (linux)
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  unit-windows:
+    name: unit (windows)
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run tests
         run: npm test
@@ -161,7 +240,11 @@ jobs:
     name: required-pr
     needs:
       - changes
-      - validate
+      - lint
+      - typecheck
+      - build
+      - unit-linux
+      - unit-windows
       - docs-sanity
       - actionlint
     if: always()
@@ -173,15 +256,35 @@ jobs:
           CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
           WORKFLOW_CHANGED: ${{ needs.changes.outputs.workflow_changed }}
-          VALIDATE_RESULT: ${{ needs.validate.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          UNIT_LINUX_RESULT: ${{ needs.unit-linux.result }}
+          UNIT_WINDOWS_RESULT: ${{ needs.unit-windows.result }}
           DOCS_RESULT: ${{ needs.docs-sanity.result }}
           ACTIONLINT_RESULT: ${{ needs.actionlint.result }}
         run: |
           set -euo pipefail
           failures=()
 
-          if [[ "${CODE_CHANGED}" == "true" && "${VALIDATE_RESULT}" != "success" ]]; then
-            failures+=("validate")
+          if [[ "${CODE_CHANGED}" == "true" && "${LINT_RESULT}" != "success" ]]; then
+            failures+=("lint")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${TYPECHECK_RESULT}" != "success" ]]; then
+            failures+=("typecheck")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${BUILD_RESULT}" != "success" ]]; then
+            failures+=("build")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${UNIT_LINUX_RESULT}" != "success" ]]; then
+            failures+=("unit-linux")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${UNIT_WINDOWS_RESULT}" != "success" ]]; then
+            failures+=("unit-windows")
           fi
 
           if [[ "${DOCS_CHANGED}" == "true" && "${DOCS_RESULT}" != "success" ]]; then

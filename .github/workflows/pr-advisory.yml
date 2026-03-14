@@ -121,7 +121,7 @@ jobs:
             node: 18
           - os: ubuntu-latest
             node: 22
-          - os: windows-latest
+          - os: macos-latest
             node: 20
     steps:
       - name: Check out repository

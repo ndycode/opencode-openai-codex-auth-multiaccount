@@ -72,6 +72,24 @@ Pull requests are automatically screened for incomplete or suspicious submission
 
 If a PR is flagged incorrectly, a maintainer can override the workflow with the `exempt` label after review.
 
+## CI and PR Checks
+
+The repository uses split required and advisory PR lanes:
+
+- Required code validation: `lint`, `typecheck`, `build`, `unit (linux)`, and `unit (windows)`
+- Required conditional validation: `docs-sanity` for Markdown changes and `actionlint` for workflow changes
+- Required policy checks: `required-pr` and `pr-governance`
+- Advisory lanes: `coverage`, `compat-matrix`, and `dependency-audit`
+
+`required-pr` is the aggregate gate that evaluates the required code, docs, and workflow jobs. `pr-governance` separately enforces the PR template and live-verification requirements for auth, request-routing, and storage changes.
+
+For maintainers, GitHub branch protection should require only:
+
+- `required-pr`
+- `pr-governance`
+
+Advisory lanes should remain unrequired until their baselines are clean and stable.
+
 ## Reporting Issues
 
 When reporting issues, please:

@@ -138,7 +138,9 @@ Short answers for the most common questions live in [docs/faq.md](docs/faq.md), 
 
 Contributions are welcome if they keep the project accurate, maintainable, and aligned with its personal-use scope.
 
+- Pull requests run split required checks (`lint`, `typecheck`, `build`, Linux and Windows unit tests, docs/workflow validation) plus advisory coverage, compatibility, and dependency-audit lanes.
 - [Contributing Guide](CONTRIBUTING.md)
+- [Testing & CI Notes](docs/development/TESTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security Policy](SECURITY.md)
 

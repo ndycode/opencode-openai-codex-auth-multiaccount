@@ -37,14 +37,19 @@ npm run docs:check
 
 Current PR automation is split into required and advisory lanes:
 
-- Required `required-pr`: runs docs verification for Markdown changes, full `lint` + `typecheck` + `build` + `test` validation for code changes, and `actionlint` when workflows change.
+- Required `required-pr`: aggregates `lint`, `typecheck`, `build`, `unit (linux)`, and `unit (windows)` for the default Node version, plus `docs-sanity` for Markdown changes and `actionlint` when workflows change.
 - Required `pr-governance`: enforces the pull request template, compliance checkbox, and a completed live-verification marker for auth/request/storage changes.
-- Advisory `PR Advisory`: runs `npm run test:coverage`, a wider compatibility matrix, and `npm run audit:ci`.
+- Advisory `PR Advisory`: runs `npm run test:coverage`, a wider compatibility matrix (Ubuntu Node 18 and 22 plus macOS on the default Node version), and `npm run audit:ci`.
 
 Notes on the advisory lane:
 
 - `npm run test:coverage` is currently informational because the repo baseline is below the configured global coverage thresholds.
 - `npm run audit:ci` is currently informational because the production dependency audit still reports an unresolved `hono` advisory.
+
+Maintainer branch protection should require only:
+
+- `required-pr`
+- `pr-governance`
 
 ## Test Scenarios Matrix
 
