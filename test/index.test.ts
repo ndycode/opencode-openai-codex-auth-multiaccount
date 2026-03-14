@@ -2405,7 +2405,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 	});
 
-	it("syncs account-switch footer behavior after a runtime config refresh enables it", async () => {
+	it("syncs account-switch footer behavior after a fetch reload enables it", async () => {
 		await disablePersistedFooter();
 		mockStorage.accounts = [
 			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
@@ -2415,16 +2415,6 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const { plugin, sdk, mockClient } = await setupPlugin();
 
 		await enablePersistedFooter("full-email");
-		await plugin.auth.loader(
-			async () => ({
-				type: "oauth" as const,
-				access: "access-token",
-				refresh: "refresh-token",
-				expires: Date.now() + 60_000,
-				multiAccount: true,
-			}),
-			{ options: {}, models: {} },
-		);
 		await sendPersistedAccountRequest(sdk, "session-switch-sync");
 		mockClient.tui.showToast.mockClear();
 
