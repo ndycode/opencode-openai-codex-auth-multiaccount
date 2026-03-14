@@ -160,7 +160,7 @@ jobs:
                 failures.push("This PR touches auth/request/storage paths and needs either the manual live-test checkbox or the maintainer-live-verified label.");
               }
             } else if (!noLiveRequiredChecked && !manualLiveChecked && !maintainerLiveVerified) {
-              failures.push("Choose the matching live-validation state or apply the maintainer-live-verified label.");
+              failures.push('Check either "No auth, request-routing, or storage paths changed." or "I manually tested with a real ChatGPT Plus/Pro account.", or have a maintainer apply the maintainer-live-verified label.');
             }
 
             const summaryLines = [

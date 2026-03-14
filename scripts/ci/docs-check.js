@@ -4,13 +4,16 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = process.cwd();
 const DEFAULT_FILES = ["README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md"];
 const DEFAULT_DIRS = [".github", "config", "docs", "test"];
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
 const IGNORED_DIRS = new Set([".git", ".github/workflows", ".omx", "dist", "node_modules", "tmp"]);
 const __filename = fileURLToPath(import.meta.url);
 const REPOSITORY = process.env.GITHUB_REPOSITORY ?? "ndycode/oc-chatgpt-multi-auth";
+
+function getRootDir() {
+	return process.cwd();
+}
 
 export function normalizePathForCompare(targetPath) {
 	const resolved = path.resolve(targetPath);
@@ -64,17 +67,17 @@ async function getPathType(targetPath) {
 	}
 }
 
-async function walkMarkdownFiles(dirPath) {
+async function walkMarkdownFiles(dirPath, rootDir = getRootDir()) {
 	const entries = await readdir(dirPath, { withFileTypes: true });
 	const files = [];
 
 	for (const entry of entries) {
 		const absolutePath = path.join(dirPath, entry.name);
-		const relativePath = path.relative(ROOT, absolutePath).replace(/\\/g, "/");
+		const relativePath = path.relative(rootDir, absolutePath).replace(/\\/g, "/");
 
 		if (entry.isDirectory()) {
 			if (IGNORED_DIRS.has(relativePath) || IGNORED_DIRS.has(entry.name)) continue;
-			files.push(...(await walkMarkdownFiles(absolutePath)));
+			files.push(...(await walkMarkdownFiles(absolutePath, rootDir)));
 			continue;
 		}
 
@@ -86,12 +89,12 @@ async function walkMarkdownFiles(dirPath) {
 	return files;
 }
 
-async function collectMarkdownFiles(inputPaths) {
+async function collectMarkdownFiles(inputPaths, rootDir = getRootDir()) {
 	const resolved = new Set();
 
 	if (inputPaths.length > 0) {
 		for (const inputPath of inputPaths) {
-			const absolutePath = path.resolve(ROOT, inputPath);
+			const absolutePath = path.resolve(rootDir, inputPath);
 			if (!(await exists(absolutePath))) continue;
 
 			const pathType = await getPathType(absolutePath);
@@ -103,7 +106,7 @@ async function collectMarkdownFiles(inputPaths) {
 
 			if (pathType !== "directory") continue;
 
-			const nestedFiles = await walkMarkdownFiles(absolutePath);
+			const nestedFiles = await walkMarkdownFiles(absolutePath, rootDir);
 			for (const nestedFile of nestedFiles) resolved.add(nestedFile);
 		}
 
@@ -111,14 +114,14 @@ async function collectMarkdownFiles(inputPaths) {
 	}
 
 	for (const file of DEFAULT_FILES) {
-		const absolutePath = path.join(ROOT, file);
+		const absolutePath = path.join(rootDir, file);
 		if (await exists(absolutePath)) resolved.add(absolutePath);
 	}
 
 	for (const dir of DEFAULT_DIRS) {
-		const absolutePath = path.join(ROOT, dir);
+		const absolutePath = path.join(rootDir, dir);
 		if (!(await exists(absolutePath))) continue;
-		const nestedFiles = await walkMarkdownFiles(absolutePath);
+		const nestedFiles = await walkMarkdownFiles(absolutePath, rootDir);
 		for (const nestedFile of nestedFiles) resolved.add(nestedFile);
 	}
 
@@ -222,7 +225,7 @@ function getWorkflowPathFromUrl(target) {
 
 		const [, ownerFromUrl, repoFromUrl, workflowFile] = match;
 		const [owner, repo] = REPOSITORY.split("/");
-		if (ownerFromUrl !== owner || repoFromUrl !== repo) return null;
+		if (ownerFromUrl.toLowerCase() !== owner?.toLowerCase() || repoFromUrl.toLowerCase() !== repo?.toLowerCase()) return null;
 
 		return workflowFile;
 	} catch {
@@ -230,13 +233,13 @@ function getWorkflowPathFromUrl(target) {
 	}
 }
 
-export async function validateLink(filePath, linkTarget) {
+export async function validateLink(filePath, linkTarget, rootDir = getRootDir()) {
 	if (!linkTarget || linkTarget.startsWith("#")) return null;
 	if (/^(mailto:|tel:|data:)/i.test(linkTarget)) return null;
 
 	const workflowFile = getWorkflowPathFromUrl(linkTarget);
 	if (workflowFile) {
-		const workflowPath = path.join(ROOT, ".github", "workflows", workflowFile);
+		const workflowPath = path.join(rootDir, ".github", "workflows", workflowFile);
 		if (await exists(workflowPath)) return null;
 		return `Missing workflow referenced by GitHub Actions badge/link: ${workflowFile}`;
 	}
@@ -249,7 +252,7 @@ export async function validateLink(filePath, linkTarget) {
 	if (!rawPath) return null;
 
 	const resolvedPath = path.resolve(path.dirname(filePath), rawPath);
-	const relativeToRoot = path.relative(ROOT, resolvedPath);
+	const relativeToRoot = path.relative(rootDir, resolvedPath);
 	if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
 		return `Local target escapes repository root: ${rawPath}`;
 	}
@@ -259,8 +262,8 @@ export async function validateLink(filePath, linkTarget) {
 	return `Missing local target: ${rawPath}`;
 }
 
-async function main() {
-	const files = await collectMarkdownFiles(process.argv.slice(2));
+async function main(rootDir = getRootDir()) {
+	const files = await collectMarkdownFiles(process.argv.slice(2), rootDir);
 	if (files.length === 0) {
 		console.log("docs-check: no markdown files found");
 		return;
@@ -273,9 +276,9 @@ async function main() {
 		const links = extractMarkdownLinks(contents);
 
 		for (const link of links) {
-			const error = await validateLink(filePath, link);
+			const error = await validateLink(filePath, link, rootDir);
 			if (!error) continue;
-			failures.push(`${path.relative(ROOT, filePath).replace(/\\/g, "/")}: ${error} (${link})`);
+			failures.push(`${path.relative(rootDir, filePath).replace(/\\/g, "/")}: ${error} (${link})`);
 		}
 	}
 

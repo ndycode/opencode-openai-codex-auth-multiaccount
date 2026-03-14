@@ -1,18 +1,31 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 const tempRoots: string[] = [];
+const TEMP_CLEANUP_ATTEMPTS = 3;
+const TEMP_CLEANUP_DELAY_MS = 100;
+
+async function cleanupTempRoot(root: string) {
+	for (let attempt = 1; attempt <= TEMP_CLEANUP_ATTEMPTS; attempt += 1) {
+		try {
+			await rm(root, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			if (attempt === TEMP_CLEANUP_ATTEMPTS) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[docs-check test] failed to clean up ${root} after ${TEMP_CLEANUP_ATTEMPTS} attempts: ${message}`);
+				return;
+			}
+
+			await delay(TEMP_CLEANUP_DELAY_MS);
+		}
+	}
+}
 
 afterEach(async () => {
-	await Promise.all(
-		tempRoots.splice(0).map((root) =>
-			rm(root, { recursive: true, force: true }).catch((error) => {
-				const message = error instanceof Error ? error.message : String(error);
-				console.warn(`[docs-check test] failed to clean up ${root}: ${message}`);
-			}),
-		),
-	);
+	await Promise.all(tempRoots.splice(0).map((root) => cleanupTempRoot(root)));
 });
 
 async function createDocsFixture(markdown = "# Guide\n") {
@@ -34,7 +47,7 @@ async function createDocsFixture(markdown = "# Guide\n") {
 	const existingTarget = path.join(targetsDir, "exists.md");
 	await writeFile(existingTarget, "# Target\n", "utf8");
 
-	return { docsFile };
+	return { docsFile, root };
 }
 
 describe("docs-check script", () => {
@@ -67,6 +80,12 @@ describe("docs-check script", () => {
 		await expect(
 			validateLink(
 				docsFile,
+				"https://github.com/NdyCode/OC-ChatGPT-Multi-Auth/actions/workflows/does-not-exist.yml/badge.svg",
+			),
+		).resolves.toBe("Missing workflow referenced by GitHub Actions badge/link: does-not-exist.yml");
+		await expect(
+			validateLink(
+				docsFile,
 				"https://github.com/octocat/hello-world/actions/workflows/ci.yml/badge.svg",
 			),
 		).resolves.toBeNull();
@@ -74,9 +93,10 @@ describe("docs-check script", () => {
 
 	it("resolves relative local targets from the markdown file directory", async () => {
 		const { validateLink } = await import("../scripts/ci/docs-check.js");
-		const { docsFile } = await createDocsFixture();
+		const { docsFile, root } = await createDocsFixture();
 
 		await expect(validateLink(docsFile, "./targets/exists.md")).resolves.toBeNull();
+		await expect(validateLink(docsFile, "./targets/exists.md", root)).resolves.toBeNull();
 		await expect(validateLink(docsFile, "./targets/missing.md")).resolves.toBe("Missing local target: ./targets/missing.md");
 		await expect(validateLink(docsFile, "../../../../outside.md")).resolves.toBe(
 			"Local target escapes repository root: ../../../../outside.md",
