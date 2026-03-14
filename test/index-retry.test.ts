@@ -1,4 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { runCleanup } from "../lib/shutdown.js";
+
+beforeEach(async () => {
+	await runCleanup();
+});
+
+afterEach(async () => {
+	await runCleanup();
+});
 
 vi.mock("@opencode-ai/plugin/tool", () => {
 	const makeSchema = () => ({
@@ -42,6 +51,10 @@ vi.mock("../lib/accounts.js", () => {
 		}
 
 		getAccountCount() {
+			return 1;
+		}
+
+		getEnabledAccountCount() {
 			return 1;
 		}
 

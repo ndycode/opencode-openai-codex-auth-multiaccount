@@ -173,5 +173,27 @@ describe("Graceful shutdown", () => {
 
 			processOnceSpy.mockRestore();
 		});
+
+		it("re-registers signal handlers after cleanup resets shutdown state", async () => {
+			const processOnceSpy = vi.spyOn(process, "once").mockImplementation(() => process);
+			const processOffSpy = vi.spyOn(process, "off").mockImplementation(() => process);
+
+			vi.resetModules();
+			const {
+				registerCleanup: freshRegister,
+				runCleanup: freshRunCleanup,
+			} = await import("../lib/shutdown.js");
+
+			freshRegister(() => {});
+			expect(processOnceSpy).toHaveBeenCalledTimes(3);
+
+			await freshRunCleanup();
+			expect(processOffSpy).toHaveBeenCalledTimes(3);
+			freshRegister(() => {});
+			expect(processOnceSpy).toHaveBeenCalledTimes(6);
+
+			processOnceSpy.mockRestore();
+			processOffSpy.mockRestore();
+		});
 	});
 });

@@ -2,6 +2,9 @@ type CleanupFn = () => void | Promise<void>;
 
 const cleanupFunctions: CleanupFn[] = [];
 let shutdownRegistered = false;
+let sigintHandler: (() => void) | null = null;
+let sigtermHandler: (() => void) | null = null;
+let beforeExitHandler: (() => void) | null = null;
 
 export function registerCleanup(fn: CleanupFn): void {
 	cleanupFunctions.push(fn);
@@ -18,6 +21,8 @@ export function unregisterCleanup(fn: CleanupFn): void {
 export async function runCleanup(): Promise<void> {
 	const fns = [...cleanupFunctions];
 	cleanupFunctions.length = 0;
+	removeShutdownHandlers();
+	shutdownRegistered = false;
 
 	for (const fn of fns) {
 		try {
@@ -37,12 +42,30 @@ function ensureShutdownHandler(): void {
 			process.exit(0);
 		});
 	};
-
-	process.once("SIGINT", handleSignal);
-	process.once("SIGTERM", handleSignal);
-	process.once("beforeExit", () => {
+	sigintHandler = handleSignal;
+	sigtermHandler = handleSignal;
+	beforeExitHandler = () => {
 		void runCleanup();
-	});
+	};
+
+	process.once("SIGINT", sigintHandler);
+	process.once("SIGTERM", sigtermHandler);
+	process.once("beforeExit", beforeExitHandler);
+}
+
+function removeShutdownHandlers(): void {
+	if (sigintHandler) {
+		process.off("SIGINT", sigintHandler);
+		sigintHandler = null;
+	}
+	if (sigtermHandler) {
+		process.off("SIGTERM", sigtermHandler);
+		sigtermHandler = null;
+	}
+	if (beforeExitHandler) {
+		process.off("beforeExit", beforeExitHandler);
+		beforeExitHandler = null;
+	}
 }
 
 export function getCleanupCount(): number {

@@ -74,6 +74,10 @@ export const CooldownReasonSchema = z.enum(["auth-failure", "network-error"]);
 
 export type CooldownReasonFromSchema = z.infer<typeof CooldownReasonSchema>;
 
+export const DisabledReasonSchema = z.enum(["user", "auth-failure"]);
+
+export type DisabledReasonFromSchema = z.infer<typeof DisabledReasonSchema>;
+
 /**
  * Last switch reason for account rotation tracking.
  */
@@ -117,6 +121,7 @@ export const AccountMetadataV3Schema = z.object({
 	accessToken: z.string().optional(),
 	expiresAt: z.number().optional(),
 	enabled: z.boolean().optional(),
+	disabledReason: DisabledReasonSchema.optional(),
 	addedAt: z.number(),
 	lastUsed: z.number(),
 	lastSwitchReason: SwitchReasonSchema.optional(),
@@ -164,6 +169,7 @@ export const AccountMetadataV1Schema = z.object({
 	accessToken: z.string().optional(),
 	expiresAt: z.number().optional(),
 	enabled: z.boolean().optional(),
+	disabledReason: DisabledReasonSchema.optional(),
 	addedAt: z.number(),
 	lastUsed: z.number(),
 	lastSwitchReason: SwitchReasonSchema.optional(),

@@ -6,6 +6,7 @@ import { createLogger } from "./logger.js";
 import {
 	loadAccounts,
 	saveAccounts,
+	type AccountDisabledReason,
 	type AccountStorageV3,
 	type CooldownReason,
 	type RateLimitStateV3,
@@ -181,6 +182,7 @@ export interface ManagedAccount {
 	email?: string;
 	refreshToken: string;
 	enabled?: boolean;
+	disabledReason?: AccountDisabledReason;
 	access?: string;
 	expires?: number;
 	addedAt: number;
@@ -309,6 +311,7 @@ export class AccountManager {
 							: sanitizeEmail(account.email),
 						refreshToken,
 						enabled: account.enabled !== false,
+						disabledReason: account.enabled === false ? account.disabledReason : undefined,
 						access: matchesFallback && authFallback ? authFallback.access : account.accessToken,
 						expires: matchesFallback && authFallback ? authFallback.expires : account.expiresAt,
 						addedAt: clampNonNegativeInt(account.addedAt, baseNow),
@@ -390,6 +393,10 @@ export class AccountManager {
 
 	getAccountCount(): number {
 		return this.accounts.length;
+	}
+
+	getEnabledAccountCount(): number {
+		return this.accounts.filter((account) => account.enabled !== false).length;
 	}
 
 	getActiveIndex(): number {
@@ -873,6 +880,30 @@ export class AccountManager {
 	}
 
 	/**
+	 * Disable all accounts that share the same refreshToken as the given account.
+	 * This keeps org/workspace variants visible in the pool while preventing reuse.
+	 * @returns Number of accounts newly disabled
+	 */
+	disableAccountsWithSameRefreshToken(account: ManagedAccount): number {
+		const refreshToken = account.refreshToken;
+		let disabledCount = 0;
+
+		for (const accountToDisable of this.accounts) {
+			if (accountToDisable.refreshToken !== refreshToken) continue;
+			if (accountToDisable.enabled === false) continue;
+			this.clearAccountCooldown(accountToDisable);
+			accountToDisable.enabled = false;
+			accountToDisable.disabledReason = "auth-failure";
+			disabledCount++;
+		}
+
+		// Clear stale auth failure state for this refresh token once the group is disabled.
+		this.authFailuresByRefreshToken.delete(refreshToken);
+
+		return disabledCount;
+	}
+
+	/**
 	 * Remove all accounts that share the same refreshToken as the given account.
 	 * This is used when auth refresh fails to remove all org variants together.
 	 * @returns Number of accounts removed
@@ -895,12 +926,21 @@ export class AccountManager {
 		return removedCount;
 	}
 
-	setAccountEnabled(index: number, enabled: boolean): ManagedAccount | null {
+	setAccountEnabled(
+		index: number,
+		enabled: boolean,
+		reason?: AccountDisabledReason,
+	): ManagedAccount | null {
 		if (!Number.isFinite(index)) return null;
 		if (index < 0 || index >= this.accounts.length) return null;
 		const account = this.accounts[index];
 		if (!account) return null;
 		account.enabled = enabled;
+		if (enabled) {
+			delete account.disabledReason;
+		} else if (reason) {
+			account.disabledReason = reason;
+		}
 		return account;
 	}
 
@@ -927,6 +967,7 @@ export class AccountManager {
 				accessToken: account.access,
 				expiresAt: account.expires,
 				enabled: account.enabled === false ? false : undefined,
+				disabledReason: account.enabled === false ? account.disabledReason : undefined,
 				addedAt: account.addedAt,
 				lastUsed: account.lastUsed,
 				lastSwitchReason: account.lastSwitchReason,

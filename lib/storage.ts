@@ -8,6 +8,7 @@ import { AnyAccountStorageSchema, getValidationErrors } from "./schemas.js";
 import { getConfigDir, getProjectConfigDir, getProjectGlobalConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
 import {
   migrateV1ToV3,
+  type AccountDisabledReason,
   type CooldownReason,
   type RateLimitStateV3,
   type AccountMetadataV1,
@@ -16,7 +17,15 @@ import {
   type AccountStorageV3,
 } from "./storage/migrations.js";
 
-export type { CooldownReason, RateLimitStateV3, AccountMetadataV1, AccountStorageV1, AccountMetadataV3, AccountStorageV3 };
+export type {
+	AccountDisabledReason,
+	CooldownReason,
+	RateLimitStateV3,
+	AccountMetadataV1,
+	AccountStorageV1,
+	AccountMetadataV3,
+	AccountStorageV3,
+};
 
 const log = createLogger("storage");
 const ACCOUNTS_FILE_NAME = "openai-codex-accounts.json";
@@ -612,7 +621,7 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       ? migrateV1ToV3(data as unknown as AccountStorageV1)
       : (data as unknown as AccountStorageV3);
 
-  const validAccounts = rawAccounts.filter(
+  const validAccounts = baseStorage.accounts.filter(
     (account): account is AccountMetadataV3 =>
       isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
   );
@@ -941,6 +950,10 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			value: unknown,
 		): value is AccountMetadataV3["cooldownReason"] =>
 			value === "auth-failure" || value === "network-error";
+		const isDisabledReason = (
+			value: unknown,
+		): value is AccountDisabledReason =>
+			value === "user" || value === "auth-failure";
 		const normalizeTags = (value: unknown): string[] | undefined => {
 			if (!Array.isArray(value)) return undefined;
 			const normalized = value
@@ -972,6 +985,9 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		const cooldownReason = isCooldownReason(rawAccount.cooldownReason)
 			? rawAccount.cooldownReason
 			: undefined;
+		const disabledReason = isDisabledReason(rawAccount.disabledReason)
+			? rawAccount.disabledReason
+			: undefined;
 		const accountTags = normalizeTags(rawAccount.accountTags);
 		const accountNote =
 			typeof rawAccount.accountNote === "string" && rawAccount.accountNote.trim()
@@ -991,6 +1007,7 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			accountNote,
 			email: typeof rawAccount.email === "string" ? rawAccount.email : undefined,
 			enabled: typeof rawAccount.enabled === "boolean" ? rawAccount.enabled : undefined,
+			disabledReason,
 			lastSwitchReason,
 			rateLimitResetTimes,
 			coolingDownUntil:

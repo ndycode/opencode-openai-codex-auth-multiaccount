@@ -856,6 +856,79 @@ describe("AccountManager", () => {
       expect(manager.getAccountsSnapshot()[0].refreshToken).toBe("token-2");
     });
 
+    it("disables all accounts with the same refreshToken", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-1", organizationId: "org-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-1", organizationId: "org-2", addedAt: now, lastUsed: now },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(4);
+
+      const disabledCount = manager.disableAccountsWithSameRefreshToken(accounts[0]);
+      expect(disabledCount).toBe(3);
+      expect(manager.getAccountCount()).toBe(4);
+
+      const updated = manager.getAccountsSnapshot();
+      expect(updated.slice(0, 3).every((account) => account.enabled === false)).toBe(true);
+      expect(updated.slice(0, 3).every((account) => account.disabledReason === "auth-failure")).toBe(true);
+      expect(updated[3]?.enabled).not.toBe(false);
+    });
+
+    it("preserves a manual disable reason when auth-failure disabling sibling variants", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", accountId: "workspace-a", addedAt: now, lastUsed: now },
+          {
+            refreshToken: "token-1",
+            accountId: "workspace-user-disabled",
+            enabled: false,
+            disabledReason: "user" as const,
+            coolingDownUntil: now + 60_000,
+            cooldownReason: "rate-limit" as const,
+            addedAt: now,
+            lastUsed: now,
+          },
+          { refreshToken: "token-1", accountId: "workspace-b", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccountsSnapshot();
+      const disabledCount = manager.disableAccountsWithSameRefreshToken(accounts[0]);
+
+      expect(disabledCount).toBe(2);
+      const updated = manager.getAccountsSnapshot();
+      expect(updated[0]).toMatchObject({
+        accountId: "workspace-a",
+        enabled: false,
+        disabledReason: "auth-failure",
+      });
+      expect(updated[1]).toMatchObject({
+        accountId: "workspace-user-disabled",
+        enabled: false,
+        disabledReason: "user",
+        coolingDownUntil: now + 60_000,
+        cooldownReason: "rate-limit",
+      });
+      expect(updated[2]).toMatchObject({
+        accountId: "workspace-b",
+        enabled: false,
+        disabledReason: "auth-failure",
+      });
+    });
+
     it("clears auth failure counter when removing accounts with same refreshToken", () => {
       const now = Date.now();
       const stored = {
@@ -884,12 +957,79 @@ describe("AccountManager", () => {
       const removedCount = manager.removeAccountsWithSameRefreshToken(account1);
       expect(removedCount).toBe(2);
       expect(manager.getAccountCount()).toBe(0);
-      const failuresByRefreshToken = Reflect.get(
-        manager,
-        "authFailuresByRefreshToken",
-      ) as Map<string, number>;
-      expect(failuresByRefreshToken.has("token-1")).toBe(false);
       expect(manager.incrementAuthFailures(account1)).toBe(1);
+    });
+
+    it("clears auth failure counter when disabling accounts with same refreshToken", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "token-1",
+            coolingDownUntil: now + 60_000,
+            cooldownReason: "auth-failure" as const,
+            addedAt: now,
+            lastUsed: now,
+          },
+          {
+            refreshToken: "token-1",
+            organizationId: "org-1",
+            coolingDownUntil: now + 60_000,
+            cooldownReason: "auth-failure" as const,
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+      const accounts = manager.getAccountsSnapshot();
+      expect(accounts).toHaveLength(2);
+
+      expect(manager.incrementAuthFailures(accounts[0])).toBe(1);
+      expect(manager.incrementAuthFailures(accounts[1])).toBe(2);
+      expect(manager.incrementAuthFailures(accounts[0])).toBe(3);
+
+      const disabledCount = manager.disableAccountsWithSameRefreshToken(accounts[0]);
+      expect(disabledCount).toBe(2);
+      expect(manager.getAccountsSnapshot().every((account) => account.enabled === false)).toBe(true);
+      expect(
+        manager.getAccountsSnapshot().every((account) => account.disabledReason === "auth-failure"),
+      ).toBe(true);
+      expect(
+        manager.getAccountsSnapshot().every((account) => account.coolingDownUntil === undefined),
+      ).toBe(true);
+      expect(
+        manager.getAccountsSnapshot().every((account) => account.cooldownReason === undefined),
+      ).toBe(true);
+      expect(manager.incrementAuthFailures(accounts[0])).toBe(1);
+    });
+
+    it("records disable reason when setAccountEnabled disables an account", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      const disabled = manager.setAccountEnabled(0, false, "user");
+      expect(disabled).toMatchObject({
+        enabled: false,
+        disabledReason: "user",
+      });
+
+      const reenabled = manager.setAccountEnabled(0, true);
+      expect(reenabled).toMatchObject({
+        enabled: true,
+      });
+      expect(reenabled?.disabledReason).toBeUndefined();
     });
   });
 
