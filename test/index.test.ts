@@ -2410,6 +2410,33 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		).toBe(expectedFullIndicator);
 	});
 
+	it("falls back to CODEX_THREAD_ID in chat.message when the session id is empty", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-chat-message";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk);
+
+		const output = {
+			message: {
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			output,
+		);
+
+		expect((output.message as { variant?: string }).variant).toBe(expectedFullIndicator);
+		expect((output.message as { model?: { variant?: string } }).model?.variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
 	it("fills model.variant in the transform hook even when the stored message has no model info", async () => {
 		await enablePersistedFooter("full-email");
 		process.env.CODEX_THREAD_ID = "env-model-less";
@@ -2564,6 +2591,47 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect((await readPersistedAccountIndicator(plugin, "session-ui-refresh")).variant).toBe(
 			"user2@example.com [2/2]",
 		);
+	});
+
+	it("does not let authorize flows reset the loader-synced footer state", async () => {
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const configModule = await import("../lib/config.js");
+		const healthyConfig = { source: "healthy-config" };
+		const lockedConfig = { source: "locked-config" };
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(healthyConfig);
+		vi.mocked(configModule.getPersistAccountFooter).mockImplementation(
+			(config) => config === healthyConfig,
+		);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue("full-email");
+		const { plugin, sdk, mockClient } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<{ instructions: string }>;
+		};
+
+		await sendPersistedAccountRequest(sdk, "session-authorize-refresh");
+		mockClient.tui.showToast.mockClear();
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(lockedConfig);
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		await manualMethod.authorize();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
 	});
 
 	it("shows the account-switch info toast when the footer is disabled", async () => {

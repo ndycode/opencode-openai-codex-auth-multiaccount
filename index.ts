@@ -1164,6 +1164,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		let runtimePersistAccountFooter = false;
 		let runtimePersistAccountFooterStyle: PersistAccountFooterStyle =
 			"label-masked-email";
+		let runtimePluginConfigSnapshot: ReturnType<typeof loadPluginConfig> | undefined;
 
 		const nextPersistedAccountIndicatorRevision = (): number => {
 			persistedAccountIndicatorRevision += 1;
@@ -1429,6 +1430,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			const persistAccountFooter = getPersistAccountFooter(pluginConfig);
 			const persistAccountFooterStyle =
 				getPersistAccountFooterStyle(pluginConfig);
+			runtimePluginConfigSnapshot = pluginConfig;
 			runtimePersistAccountFooter = persistAccountFooter;
 			runtimePersistAccountFooterStyle = persistAccountFooterStyle;
 			return {
@@ -1440,6 +1442,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		const resolveUiRuntime = (): UiRuntimeOptions => {
 			return applyUiRuntimeFromConfig(loadPluginConfig());
+		};
+
+		const resolveRuntimePluginConfig = (): ReturnType<typeof loadPluginConfig> => {
+			return runtimePluginConfigSnapshot ?? loadPluginConfig();
 		};
 
 		const getStatusMarker = (
@@ -1939,7 +1945,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			},
 			output: { message: unknown; parts: unknown[] },
 		): Promise<void> => {
-			const indicator = getPersistedAccountIndicatorLabel(input.sessionID);
+			const indicator = getPersistedAccountIndicatorLabel(
+				resolvePersistedAccountSessionID(input.sessionID),
+			);
 			if (indicator) {
 				const message =
 					typeof output.message === "object" && output.message !== null
@@ -3000,7 +3008,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						label: AUTH_LABELS.OAUTH,
 						type: "oauth" as const,
 						authorize: async (inputs?: Record<string, string>) => {
-							const authPluginConfig = loadPluginConfig();
+							const authPluginConfig = resolveRuntimePluginConfig();
 							syncRuntimePluginConfig(authPluginConfig);
 							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
 							setStoragePath(authPerProjectAccounts ? process.cwd() : null);
@@ -3975,7 +3983,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					authorize: async () => {
                                                         // Initialize storage path for manual OAuth flow
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
-                                                        const manualPluginConfig = loadPluginConfig();
+                                                        const manualPluginConfig = resolveRuntimePluginConfig();
 							syncRuntimePluginConfig(manualPluginConfig);
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
