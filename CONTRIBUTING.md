@@ -71,6 +71,8 @@ Pull requests are automatically screened for incomplete or suspicious submission
 
 If a PR is flagged incorrectly, a maintainer can override the workflow with the `exempt` label after review.
 
+Maintainer note: the PR template includes a hidden anti-slop canary token paired with `blocked-terms` in `.github/workflows/pr-quality.yml`. Keep the token values in sync, and do not echo that token in PR bodies, generated summaries, or contributor-facing documentation.
+
 ## Reporting Issues
 
 When reporting issues, please:
