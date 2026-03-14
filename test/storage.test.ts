@@ -1050,6 +1050,30 @@ describe("storage", () => {
       expect(result?.accounts).toHaveLength(1);
     });
 
+    it("defaults migrated legacy disabled accounts to user disabledReason", () => {
+      const data = {
+        version: 1,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "t1",
+            accountId: "A",
+            enabled: false,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.version).toBe(3);
+      expect(result?.accounts[0]).toMatchObject({
+        refreshToken: "t1",
+        enabled: false,
+        disabledReason: "user",
+      });
+    });
+
     it("preserves activeIndexByFamily when valid", () => {
       const data = {
         version: 3,

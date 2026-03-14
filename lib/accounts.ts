@@ -921,7 +921,11 @@ export class AccountManager {
 		return removedCount;
 	}
 
-	setAccountEnabled(index: number, enabled: boolean): ManagedAccount | null {
+	setAccountEnabled(
+		index: number,
+		enabled: boolean,
+		reason?: AccountDisabledReason,
+	): ManagedAccount | null {
 		if (!Number.isFinite(index)) return null;
 		if (index < 0 || index >= this.accounts.length) return null;
 		const account = this.accounts[index];
@@ -929,6 +933,8 @@ export class AccountManager {
 		account.enabled = enabled;
 		if (enabled) {
 			delete account.disabledReason;
+		} else if (reason) {
+			account.disabledReason = reason;
 		}
 		return account;
 	}

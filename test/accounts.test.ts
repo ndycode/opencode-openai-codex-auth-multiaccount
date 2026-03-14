@@ -994,6 +994,31 @@ describe("AccountManager", () => {
       expect(failuresByRefreshToken.has("token-1")).toBe(false);
       expect(manager.incrementAuthFailures(accounts[0])).toBe(1);
     });
+
+    it("records disable reason when setAccountEnabled disables an account", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      const disabled = manager.setAccountEnabled(0, false, "user");
+      expect(disabled).toMatchObject({
+        enabled: false,
+        disabledReason: "user",
+      });
+
+      const reenabled = manager.setAccountEnabled(0, true);
+      expect(reenabled).toMatchObject({
+        enabled: true,
+      });
+      expect(reenabled?.disabledReason).toBeUndefined();
+    });
   });
 
   describe("getMinWaitTimeForFamily", () => {

@@ -621,7 +621,7 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       ? migrateV1ToV3(data as unknown as AccountStorageV1)
       : (data as unknown as AccountStorageV3);
 
-  const validAccounts = rawAccounts.filter(
+  const validAccounts = baseStorage.accounts.filter(
     (account): account is AccountMetadataV3 =>
       isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
   );

@@ -3371,7 +3371,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								if (restored.length > 0) {
-									await persistAccountPool(restored, false);
+									await persistAccountPool(restored, false, {
+										reviveMatchingDisabledAccounts: true,
+									});
 									invalidateAccountManagerCache();
 								}
 

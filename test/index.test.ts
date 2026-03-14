@@ -3248,6 +3248,16 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 
 		mockStorage.accounts = [
 			{
+				accountId: "unrelated-disabled",
+				organizationId: "org-unrelated",
+				email: "unrelated@example.com",
+				refreshToken: "different-refresh",
+				enabled: false,
+				disabledReason: "user",
+				addedAt: 9,
+				lastUsed: 9,
+			},
+			{
 				accountId: "org-shared",
 				organizationId: "org-keep",
 				email: "org@example.com",
@@ -3339,6 +3349,14 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(
 			revivedEntries.find((account) => account.accountId === "org-shared")?.accessToken,
 		).toBe("access-shared-refresh");
+		expect(
+			mockStorage.accounts.find((account) => account.accountId === "unrelated-disabled"),
+		).toMatchObject({
+			accountId: "unrelated-disabled",
+			refreshToken: "different-refresh",
+			enabled: false,
+			disabledReason: "user",
+		});
 	});
 
 	it("preserves same-organization entries when accountId differs", async () => {
@@ -3442,6 +3460,23 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const refreshQueueModule = await import("../lib/refresh-queue.js");
 
+		mockStorage.accounts = [
+			{
+				refreshToken: "refreshed-refresh",
+				organizationId: "org-refresh",
+				accountId: "flagged-live",
+				accountIdSource: "manual",
+				accountLabel: "Refresh Workspace",
+				email: "refresh@example.com",
+				enabled: false,
+				disabledReason: "auth-failure",
+				coolingDownUntil: 60_000,
+				cooldownReason: "auth-failure",
+				addedAt: Date.now() - 1500,
+				lastUsed: Date.now() - 1500,
+			},
+		];
+
 		const flaggedAccounts = [
 			{
 				refreshToken: "flagged-refresh-cache",
@@ -3495,16 +3530,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			}
 			return null;
 		});
-		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValue([
-			{
-				accountId: "token-shared",
-				source: "token",
-				label: "Token Shared [id:shared]",
-			},
-		]);
-		vi.mocked(accountsModule.selectBestAccountCandidate).mockImplementation(
-			(candidates) => candidates[0] ?? null,
-		);
+		vi.mocked(accountsModule.getAccountIdCandidates).mockReturnValue([]);
 
 		const mockClient = createMockClient();
 		const { OpenAIOAuthPlugin } = await import("../index.js");
@@ -3523,6 +3549,17 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(new Set(mockStorage.accounts.map((account) => account.organizationId))).toEqual(
 			new Set(["org-cache", "org-refresh"]),
 		);
+		expect(
+			mockStorage.accounts.find((account) => account.organizationId === "org-refresh"),
+		).toMatchObject({
+			accountId: "flagged-live",
+			refreshToken: "refreshed-refresh",
+			enabled: undefined,
+			disabledReason: undefined,
+			coolingDownUntil: undefined,
+			cooldownReason: undefined,
+			accessToken: "refreshed-access",
+		});
 		expect(vi.mocked(storageModule.saveFlaggedAccounts)).toHaveBeenCalledWith({
 			version: 1,
 			accounts: [],
