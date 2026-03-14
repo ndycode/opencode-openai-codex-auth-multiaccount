@@ -64,7 +64,12 @@ The project does not accept work aimed at:
 4. **Update documentation** (README.md, config examples, etc.)
 5. **Ensure compliance** with guidelines above
 6. **Test thoroughly** with the most appropriate validation for the change
-7. **Submit PR** with clear description of changes
+7. **Complete the pull request template** with summary, testing, and compliance details
+8. **Submit PR** with clear description of changes
+
+Pull requests are automatically screened for incomplete or suspicious submissions. Legitimate contributions are still welcome, but low-signal PRs may be flagged for maintainer review before they move forward.
+
+If a PR is flagged incorrectly, a maintainer can override the workflow with the `exempt` label after review.
 
 ## Reporting Issues
 
