@@ -208,6 +208,12 @@ export interface AccountSelectionExplainability {
 	lastUsed: number;
 }
 
+export type SetAccountEnabledFailureReason = "auth-failure-blocked" | "invalid-index";
+
+export type SetAccountEnabledResult =
+	| { ok: true; account: ManagedAccount }
+	| { ok: false; reason: SetAccountEnabledFailureReason };
+
 export class AccountManager {
 	private accounts: ManagedAccount[] = [];
 	private cursorByFamily: Record<ModelFamily, number> = initFamilyState(0);
@@ -937,25 +943,23 @@ export class AccountManager {
 		index: number,
 		enabled: boolean,
 		reason?: AccountDisabledReason,
-	): ManagedAccount | null {
-		if (!Number.isFinite(index)) return null;
-		if (index < 0 || index >= this.accounts.length) return null;
+	): SetAccountEnabledResult {
+		if (!Number.isFinite(index)) return { ok: false, reason: "invalid-index" };
+		if (index < 0 || index >= this.accounts.length) return { ok: false, reason: "invalid-index" };
 		const account = this.accounts[index];
-		if (!account) return null;
+		if (!account) return { ok: false, reason: "invalid-index" };
 		if (enabled && account.disabledReason === "auth-failure") {
-			return null;
+			return { ok: false, reason: "auth-failure-blocked" };
 		}
 		account.enabled = enabled;
 		if (enabled) {
 			delete account.disabledReason;
 		} else if (reason) {
 			account.disabledReason = reason;
-		} else {
-			if (account.disabledReason !== "auth-failure") {
-				delete account.disabledReason;
-			}
+		} else if (account.disabledReason !== "auth-failure") {
+			account.disabledReason = "user";
 		}
-		return account;
+		return { ok: true, account };
 	}
 
 	async saveToDisk(): Promise<void> {
@@ -1002,7 +1006,13 @@ export class AccountManager {
 		const previousSave = this.pendingSave;
 		const nextSave = (async () => {
 			if (previousSave) {
-				await previousSave;
+				try {
+					await previousSave;
+				} catch (error) {
+					log.warn("Continuing queued save after previous save failure", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
 			}
 			await saveOperation();
 		})().finally(() => {

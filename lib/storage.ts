@@ -134,6 +134,17 @@ const WINDOWS_RENAME_RETRY_ATTEMPTS = 5;
 const WINDOWS_RENAME_RETRY_BASE_DELAY_MS = 10;
 const PRE_IMPORT_BACKUP_WRITE_TIMEOUT_MS = 3_000;
 
+function isDisabledReason(value: unknown): value is AccountDisabledReason {
+  return value === "user" || value === "auth-failure";
+}
+
+function normalizeDisabledReason(
+  enabled: unknown,
+  disabledReason: unknown,
+): AccountDisabledReason | undefined {
+  return enabled === false && isDisabledReason(disabledReason) ? disabledReason : undefined;
+}
+
 function isWindowsLockError(error: unknown): error is NodeJS.ErrnoException {
   const code = (error as NodeJS.ErrnoException)?.code;
   return code === "EPERM" || code === "EBUSY";
@@ -621,10 +632,15 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       ? migrateV1ToV3(data as unknown as AccountStorageV1)
       : (data as unknown as AccountStorageV3);
 
-  const validAccounts = baseStorage.accounts.filter(
-    (account): account is AccountMetadataV3 =>
-      isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
-  );
+  const validAccounts: AccountMetadataV3[] = baseStorage.accounts
+    .filter(
+      (account): account is AccountMetadataV3 =>
+        isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
+    )
+    .map((account) => ({
+      ...account,
+      disabledReason: normalizeDisabledReason(account.enabled, account.disabledReason),
+    }));
 
   const deduplicatedAccounts = deduplicateAccountsForStorage(validAccounts);
 
@@ -950,10 +966,6 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			value: unknown,
 		): value is AccountMetadataV3["cooldownReason"] =>
 			value === "auth-failure" || value === "network-error";
-		const isDisabledReason = (
-			value: unknown,
-		): value is AccountDisabledReason =>
-			value === "user" || value === "auth-failure";
 		const normalizeTags = (value: unknown): string[] | undefined => {
 			if (!Array.isArray(value)) return undefined;
 			const normalized = value
@@ -985,10 +997,7 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		const cooldownReason = isCooldownReason(rawAccount.cooldownReason)
 			? rawAccount.cooldownReason
 			: undefined;
-		const disabledReason =
-			rawAccount.enabled === false && isDisabledReason(rawAccount.disabledReason)
-				? rawAccount.disabledReason
-				: undefined;
+		const disabledReason = normalizeDisabledReason(rawAccount.enabled, rawAccount.disabledReason);
 		const accountTags = normalizeTags(rawAccount.accountTags);
 		const accountNote =
 			typeof rawAccount.accountNote === "string" && rawAccount.accountNote.trim()

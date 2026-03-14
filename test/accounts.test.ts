@@ -1081,15 +1081,46 @@ describe("AccountManager", () => {
 
       const disabled = manager.setAccountEnabled(0, false, "user");
       expect(disabled).toMatchObject({
-        enabled: false,
-        disabledReason: "user",
+        ok: true,
+        account: {
+          enabled: false,
+          disabledReason: "user",
+        },
       });
 
       const reenabled = manager.setAccountEnabled(0, true);
       expect(reenabled).toMatchObject({
-        enabled: true,
+        ok: true,
+        account: {
+          enabled: true,
+        },
       });
-      expect(reenabled?.disabledReason).toBeUndefined();
+      if (!reenabled.ok) {
+        throw new Error("expected setAccountEnabled to re-enable account");
+      }
+      expect(reenabled.account.disabledReason).toBeUndefined();
+    });
+
+    it("defaults disable reason to user when disabling without an explicit reason", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      const disabled = manager.setAccountEnabled(0, false);
+      expect(disabled).toMatchObject({
+        ok: true,
+        account: {
+          enabled: false,
+          disabledReason: "user",
+        },
+      });
     });
 
     it("preserves auth-failure disabledReason when disabling without an explicit reason", () => {
@@ -1112,8 +1143,11 @@ describe("AccountManager", () => {
 
       const disabled = manager.setAccountEnabled(0, false);
       expect(disabled).toMatchObject({
-        enabled: false,
-        disabledReason: "auth-failure",
+        ok: true,
+        account: {
+          enabled: false,
+          disabledReason: "auth-failure",
+        },
       });
     });
 
@@ -1136,7 +1170,10 @@ describe("AccountManager", () => {
       const manager = new AccountManager(undefined, stored);
 
       const reenabled = manager.setAccountEnabled(0, true);
-      expect(reenabled).toBeNull();
+      expect(reenabled).toEqual({
+        ok: false,
+        reason: "auth-failure-blocked",
+      });
       expect(manager.getAccountsSnapshot()[0]).toMatchObject({
         enabled: false,
         disabledReason: "auth-failure",
@@ -1648,6 +1685,80 @@ describe("AccountManager", () => {
       await vi.advanceTimersByTimeAsync(100);
 
       expect(mockSaveAccounts).toHaveBeenCalledTimes(2);
+    });
+
+    it("continues a queued save after the previous save fails", async () => {
+      const { saveAccounts } = await import("../lib/storage.js");
+      const mockSaveAccounts = vi.mocked(saveAccounts);
+      mockSaveAccounts.mockClear();
+
+      const savedSnapshots: Array<
+        Array<{
+          refreshToken?: string;
+          enabled?: false;
+          disabledReason?: string;
+        }>
+      > = [];
+
+      let rejectFirstSave!: (error: Error) => void;
+      mockSaveAccounts.mockImplementationOnce(async (storage) => {
+        savedSnapshots.push(
+          storage.accounts.map((account) => ({
+            refreshToken: account.refreshToken,
+            enabled: account.enabled,
+            disabledReason: account.disabledReason,
+          })),
+        );
+        await new Promise<void>((_, reject) => {
+          rejectFirstSave = reject;
+        });
+      });
+      mockSaveAccounts.mockImplementationOnce(async (storage) => {
+        savedSnapshots.push(
+          storage.accounts.map((account) => ({
+            refreshToken: account.refreshToken,
+            enabled: account.enabled,
+            disabledReason: account.disabledReason,
+          })),
+        );
+      });
+
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      manager.saveToDiskDebounced(50);
+      await vi.advanceTimersByTimeAsync(60);
+      expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+
+      const account = manager.getAccountsSnapshot()[0]!;
+      manager.disableAccountsWithSameRefreshToken(account);
+      manager.saveToDiskDebounced(50);
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+
+      rejectFirstSave(Object.assign(new Error("EBUSY: file in use"), { code: "EBUSY" }));
+      await vi.advanceTimersByTimeAsync(0);
+      for (let turn = 0; turn < 6; turn += 1) {
+        await Promise.resolve();
+      }
+
+      expect(mockSaveAccounts).toHaveBeenCalledTimes(2);
+      expect(savedSnapshots[1]).toEqual([
+        expect.objectContaining({
+          refreshToken: "token-1",
+          enabled: false,
+          disabledReason: "auth-failure",
+        }),
+      ]);
     });
   });
 

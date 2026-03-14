@@ -1074,6 +1074,30 @@ describe("storage", () => {
       });
     });
 
+    it("strips invalid disabledReason values from disabled v3 accounts", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "t1",
+            accountId: "A",
+            enabled: false,
+            disabledReason: "future-reason",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts[0]).toMatchObject({
+        refreshToken: "t1",
+        enabled: false,
+      });
+      expect(result?.accounts[0]?.disabledReason).toBeUndefined();
+    });
+
     it("preserves activeIndexByFamily when valid", () => {
       const data = {
         version: 3,
