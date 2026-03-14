@@ -2082,11 +2082,6 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
 	};
 
-	const setRetryAllAccountsRateLimited = async (enabled: boolean) => {
-		const configModule = await import("../lib/config.js");
-		vi.mocked(configModule.getRetryAllAccountsRateLimited).mockReturnValue(enabled);
-	};
-
 	const sendPersistedAccountRequest = async (
 		sdk: Awaited<ReturnType<typeof setupPlugin>>["sdk"],
 		promptCacheKey?: string,
@@ -2890,7 +2885,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 	it("uses a warning toast for all-accounts rate-limit terminal responses", async () => {
 		const { AccountManager } = await import("../lib/accounts.js");
-		await setRetryAllAccountsRateLimited(false);
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getRetryAllAccountsRateLimited).mockReturnValue(false);
 		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);
 		const waitSpy = vi
 			.spyOn(AccountManager.prototype, "getMinWaitTimeForFamily")

@@ -2319,7 +2319,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
 						const threadIdCandidate =
 							resolvePersistedAccountSessionID(promptCacheKey);
-						const indicatorRevision = nextPersistedAccountIndicatorRevision();
+						const indicatorRevision = persistAccountFooter
+							? nextPersistedAccountIndicatorRevision()
+							: 0;
 							const requestCorrelationId = setCorrelationId(
 								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
 							);
