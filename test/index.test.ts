@@ -2277,7 +2277,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const { plugin, sdk } = await setupPlugin();
 		vi.spyOn(manager, "getAccountCount")
 			.mockImplementationOnce(() => 2)
-			.mockImplementationOnce(() => 0);
+			.mockImplementation(() => 0);
 
 		await sendPersistedAccountRequest(sdk, "session-count-hint");
 
