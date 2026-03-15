@@ -242,6 +242,7 @@ describe("codex-multi-auth sync", () => {
 	it("probes the DevTools fallback root when no env override is set", async () => {
 		process.env.USERPROFILE = "C:\\Users\\tester";
 		process.env.HOME = "C:\\Users\\tester";
+		Object.defineProperty(process, "platform", { value: "win32" });
 		const devToolsGlobalPath = pathWin32.join(
 			"C:\\Users\\tester",
 			"DevTools",
@@ -261,6 +262,7 @@ describe("codex-multi-auth sync", () => {
 	it("prefers the DevTools root over ~/.codex when CODEX_HOME is not set", async () => {
 		process.env.USERPROFILE = "C:\\Users\\tester";
 		process.env.HOME = "C:\\Users\\tester";
+		Object.defineProperty(process, "platform", { value: "win32" });
 		const devToolsGlobalPath = pathWin32.join(
 			"C:\\Users\\tester",
 			"DevTools",
@@ -290,6 +292,7 @@ describe("codex-multi-auth sync", () => {
 		process.env.USERPROFILE = "C:\\Users\\tester";
 		process.env.HOME = "C:\\Users\\tester";
 		process.env.CODEX_HOME = "C:\\Users\\tester\\.codex";
+		Object.defineProperty(process, "platform", { value: "win32" });
 		const walOnlyPath = pathWin32.join(
 			"C:\\Users\\tester",
 			".codex",
