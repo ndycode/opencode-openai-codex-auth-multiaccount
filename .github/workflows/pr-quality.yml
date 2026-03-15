@@ -1,0 +1,55 @@
+name: PR Quality
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: write
+
+on:
+  # Use pull_request_target so the action can comment on fork PRs without
+  # checking out or executing contributor code from the PR branch.
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+jobs:
+  anti-slop:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pr-quality-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Screen pull request quality
+        uses: peakoss/anti-slop@85daca1880e9e1af197fc06ea03349daf08f4202 # v0.2.1
+        with:
+          max-failures: 1
+          require-pr-template: true
+          # Keep this public canary aligned with the hidden template note below.
+          # It is best-effort only, so rotate it if it becomes noisy or stale.
+          blocked-terms: |
+            OBSIDIAN1455
+          # anti-slop documents exact file and folder entries here, so this
+          # list guards the canonical metadata files and PR screening surfaces.
+          blocked-paths: |
+            SECURITY.md
+            LICENSE
+            CODE_OF_CONDUCT.md
+            CODEOWNERS
+            .github/workflows/pr-quality.yml
+            .github/pull_request_template.md
+          exempt-label: exempt
+          exempt-draft-prs: true
+          close-pr: false
+          lock-pr: false
+          failure-pr-message: |
+            Thanks for the contribution. This repository automatically screens pull requests for incomplete, low-signal, or non-compliant submissions before maintainers spend review time.
+
+            Please review CONTRIBUTING.md, complete the PR template with concrete summary and testing details, and update the PR if anything important is missing.
+
+            If this looks like a false positive, a maintainer can override the workflow with the `exempt` label after review.

@@ -17,7 +17,7 @@
  *
  * For production applications, use the OpenAI Platform API: https://platform.openai.com/
  *
- * @license MIT with Usage Disclaimer (see LICENSE file)
+ * @license MIT (see LICENSE file)
  * @author numman-ali
  * @repository https://github.com/ndycode/oc-chatgpt-multi-auth
 

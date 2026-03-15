@@ -1,8 +1,6 @@
 # Test Suite
 
-This directory contains the test suite for the OpenAI Codex OAuth plugin.
-
-**Stats**: 1498 tests across 49 test files with 89% coverage.
+This directory contains the Vitest suites for `oc-chatgpt-multi-auth`.
 
 ## Test Structure
 
@@ -179,14 +177,6 @@ Tests system resilience:
 3. **No External Dependencies**: Tests avoid real network calls
 4. **Type Safety**: All tests are TypeScript with strict type checking
 5. **Property-Based Testing**: Critical paths tested with randomized inputs
-
-## CI/CD Integration
-
-Tests automatically run in GitHub Actions on:
-- Every push to main
-- Every pull request
-
-The CI workflow currently tests against Node.js versions (20.x, 22.x).
 
 ## Adding New Tests
 

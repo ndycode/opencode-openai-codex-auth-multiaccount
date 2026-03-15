@@ -1,6 +1,6 @@
-# Troubleshooting Guide
+# Troubleshooting
 
-Common issues and debugging techniques for the OpenCode OpenAI Codex Auth Plugin.
+Common setup, authentication, model, and request-debugging issues for `oc-chatgpt-multi-auth`.
 
 ---
 
