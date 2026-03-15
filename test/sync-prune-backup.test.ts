@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { createSyncPruneBackupPayload } from "../lib/sync-prune-backup.js";
 import type { AccountStorageV3 } from "../lib/storage.js";
 
@@ -87,6 +87,49 @@ describe("sync prune backup payload", () => {
 			accessToken: "flagged-access-token",
 			idToken: "flagged-id-token",
 		});
+	});
+
+	it("reflects redacted and live-token payload shapes in the type system", () => {
+		const storage: AccountStorageV3 = {
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
+				{
+					accountId: "org-sync",
+					organizationId: "org-sync",
+					accountIdSource: "org",
+					refreshToken: "refresh-token",
+					accessToken: "access-token",
+					idToken: "id-token",
+					addedAt: 1,
+					lastUsed: 1,
+				},
+			],
+		};
+		const flagged = {
+			version: 1 as const,
+			accounts: [
+				{
+					refreshToken: "refresh-token",
+					accessToken: "flagged-access-token",
+					idToken: "flagged-id-token",
+				},
+			],
+		};
+
+		const redactedPayload = createSyncPruneBackupPayload(storage, flagged);
+		const livePayload = createSyncPruneBackupPayload(storage, flagged, { includeLiveTokens: true });
+
+		expectTypeOf(redactedPayload.accounts.accounts[0]!.refreshToken).toEqualTypeOf<"__redacted__">();
+		expectTypeOf(redactedPayload.accounts.accounts[0]!.accessToken).toEqualTypeOf<undefined>();
+		expectTypeOf(redactedPayload.flagged.accounts[0]!.refreshToken).toEqualTypeOf<"__redacted__">();
+		expectTypeOf(redactedPayload.flagged.accounts[0]!.accessToken).toEqualTypeOf<undefined>();
+
+		expectTypeOf(livePayload.accounts.accounts[0]!.refreshToken).toEqualTypeOf<string>();
+		expectTypeOf(livePayload.accounts.accounts[0]!.accessToken).toEqualTypeOf<string | undefined>();
+		expectTypeOf(livePayload.flagged.accounts[0]!.refreshToken).toEqualTypeOf<string>();
+		expectTypeOf(livePayload.flagged.accounts[0]!.accessToken).toEqualTypeOf<string>();
 	});
 
 	it("deep-clones nested metadata so later mutations do not leak into the snapshot", () => {

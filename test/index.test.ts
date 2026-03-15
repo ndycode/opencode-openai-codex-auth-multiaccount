@@ -2167,11 +2167,89 @@ describe("OpenAIOAuthPlugin", () => {
 			}
 		});
 
+		it("prunes stale overlap cleanup backups after a successful cleanup", async () => {
+			const cliModule = await import("../lib/cli.js");
+			const confirmModule = await import("../lib/ui/confirm.js");
+			const syncModule = await import("../lib/codex-multi-auth-sync.js");
+			const { promises: nodeFsPromises } = await import("node:fs");
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+			mockStorage.accounts = [
+				{
+					accountId: "existing-account",
+					email: "existing@example.com",
+					refreshToken: "existing-refresh",
+					addedAt: 1,
+					lastUsed: 1,
+				},
+			];
+
+			vi.mocked(cliModule.promptLoginMode)
+				.mockResolvedValueOnce({ mode: "experimental-cleanup-overlaps" })
+				.mockResolvedValueOnce({ mode: "cancel" })
+				.mockResolvedValue({ mode: "cancel" });
+			vi.mocked(confirmModule.confirm).mockResolvedValueOnce(true);
+			vi.mocked(syncModule.previewCodexMultiAuthSyncedOverlapCleanup).mockResolvedValueOnce({
+				before: 3,
+				after: 2,
+				removed: 1,
+				updated: 0,
+			});
+			vi.mocked(syncModule.cleanupCodexMultiAuthSyncedOverlaps).mockResolvedValueOnce({
+				before: 3,
+				after: 2,
+				removed: 1,
+				updated: 0,
+			});
+
+			const staleBackupPath = "/tmp/codex-maintenance-overlap-backup-20240201-000000.json";
+			const normalizePath = (value: string) => value.replace(/\\/g, "/");
+			const readdirSpy = vi.spyOn(nodeFsPromises, "readdir").mockResolvedValue([
+				{
+					name: "codex-maintenance-overlap-backup-20260101-000000.json",
+					isFile: () => true,
+				},
+				{
+					name: "codex-maintenance-overlap-backup-20240201-000000.json",
+					isFile: () => true,
+				},
+			] as never);
+			const statSpy = vi.spyOn(nodeFsPromises, "stat").mockImplementation(async (path) => {
+				return {
+					mtimeMs:
+						normalizePath(String(path)) === staleBackupPath ? Date.now() - 8 * 24 * 60 * 60 * 1000 : Date.now(),
+				} as never;
+			});
+			const unlinkSpy = vi.spyOn(nodeFsPromises, "unlink").mockResolvedValue(undefined);
+
+			try {
+				const autoMethod = plugin.auth.methods[0] as unknown as {
+					authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+				};
+
+				const result = await autoMethod.authorize();
+				expect(result.instructions).toBe("Authentication cancelled");
+				expect(vi.mocked(syncModule.cleanupCodexMultiAuthSyncedOverlaps)).toHaveBeenCalledWith(
+					"/tmp/codex-maintenance-overlap-backup-20260101-000000.json",
+				);
+				expect(unlinkSpy.mock.calls.map(([path]) => normalizePath(String(path)))).toEqual([staleBackupPath]);
+
+				const output = logSpy.mock.calls.flat().join("\n");
+				expect(output).toContain("Cleanup complete.");
+			} finally {
+				logSpy.mockRestore();
+				readdirSpy.mockRestore();
+				statSpy.mockRestore();
+				unlinkSpy.mockRestore();
+			}
+		});
+
 		it("writes a restorable sync prune backup before removing accounts", async () => {
 			const cliModule = await import("../lib/cli.js");
 			const confirmModule = await import("../lib/ui/confirm.js");
 			const configModule = await import("../lib/config.js");
 			const syncModule = await import("../lib/codex-multi-auth-sync.js");
+			const storageModule = await import("../lib/storage.js");
 			const { promises: nodeFsPromises } = await import("node:fs");
 
 			mockStorage.accounts = [
@@ -2218,6 +2296,9 @@ describe("OpenAIOAuthPlugin", () => {
 				.mockResolvedValue({ mode: "cancel" });
 			vi.mocked(cliModule.promptCodexMultiAuthSyncPrune).mockResolvedValueOnce([0]);
 			vi.mocked(confirmModule.confirm).mockResolvedValue(true);
+			vi.mocked(storageModule.createTimestampedBackupPath).mockImplementation(
+				(prefix?: string) => `\\tmp\\${prefix ?? "codex-backup"}-20260101-000000.json`,
+			);
 			vi.mocked(syncModule.previewSyncFromCodexMultiAuth)
 				.mockRejectedValueOnce(
 					new CodexMultiAuthSyncCapacityError({
@@ -2262,6 +2343,53 @@ describe("OpenAIOAuthPlugin", () => {
 				.spyOn(nodeFsPromises, "rename")
 				.mockRejectedValueOnce(Object.assign(new Error("rename locked"), { code: "EPERM" }))
 				.mockResolvedValueOnce(undefined);
+			const normalizePath = (value: string) => value.replace(/\\/g, "/");
+			const now = Date.now();
+			const statTimes = new Map<string, number>([
+				["/tmp/codex-sync-prune-backup-z.json", now - 3_000],
+				["/tmp/codex-sync-prune-backup-y.json", now - 2_000],
+				["/tmp/codex-sync-prune-backup-a.json", now - 1_000],
+			]);
+			const readdirSpy = vi
+				.spyOn(nodeFsPromises, "readdir")
+				.mockResolvedValueOnce([
+					{
+						name: "codex-sync-prune-backup-20260101-000000.json",
+						isFile: () => true,
+					},
+					{
+						name: "codex-sync-prune-backup-z.json",
+						isFile: () => true,
+					},
+					{
+						name: "codex-sync-prune-backup-y.json",
+						isFile: () => true,
+					},
+					{
+						name: "codex-sync-prune-backup-a.json",
+						isFile: () => true,
+					},
+				] as never)
+				.mockResolvedValueOnce([
+					{
+						name: "codex-sync-prune-backup-z.json",
+						isFile: () => true,
+					},
+					{
+						name: "codex-sync-prune-backup-y.json",
+						isFile: () => true,
+					},
+					{
+						name: "codex-sync-prune-backup-a.json",
+						isFile: () => true,
+					},
+				] as never);
+			const statSpy = vi.spyOn(nodeFsPromises, "stat").mockImplementation(async (path) => {
+				return {
+					mtimeMs: statTimes.get(normalizePath(String(path))) ?? Date.now(),
+				} as never;
+			});
+			const unlinkSpy = vi.spyOn(nodeFsPromises, "unlink").mockResolvedValue(undefined);
 
 			try {
 				const autoMethod = plugin.auth.methods[0] as unknown as {
@@ -2285,10 +2413,18 @@ describe("OpenAIOAuthPlugin", () => {
 				expect(mockFlaggedStorage.accounts).toHaveLength(0);
 				expect(renameSpy).toHaveBeenCalledTimes(2);
 				expect(mkdirSpy).toHaveBeenCalled();
+				const normalizedUnlinks = unlinkSpy.mock.calls.map(([path]) => normalizePath(String(path)));
+				expect(normalizedUnlinks).toContain("/tmp/codex-sync-prune-backup-20260101-000000.json");
+				expect(normalizedUnlinks.filter((path) => path.endsWith("codex-sync-prune-backup-z.json"))).toHaveLength(2);
+				expect(normalizedUnlinks.some((path) => path.endsWith("codex-sync-prune-backup-a.json"))).toBe(false);
+				expect(normalizedUnlinks.some((path) => path.endsWith("codex-sync-prune-backup-y.json"))).toBe(false);
 			} finally {
 				mkdirSpy.mockRestore();
 				writeSpy.mockRestore();
 				renameSpy.mockRestore();
+				readdirSpy.mockRestore();
+				statSpy.mockRestore();
+				unlinkSpy.mockRestore();
 			}
 		});
 

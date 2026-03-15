@@ -1986,6 +1986,10 @@ describe("storage", () => {
         firstTransactionReady = resolve;
       });
       let secondEntered = false;
+      let resolveSecondStarted!: () => void;
+      const secondStarted = new Promise<void>((resolve) => {
+        resolveSecondStarted = resolve;
+      });
 
       const firstTransaction = withAccountAndFlaggedStorageTransaction(async (current, persist) => {
         events.push("first:start");
@@ -2026,9 +2030,17 @@ describe("storage", () => {
       const secondTransaction = withAccountAndFlaggedStorageTransaction(async () => {
         secondEntered = true;
         events.push("second:start");
+        resolveSecondStarted();
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      const secondProgress = await Promise.race([
+        secondStarted.then(() => "started" as const),
+        Promise.resolve()
+          .then(() => Promise.resolve())
+          .then(() => "waiting" as const),
+      ]);
+
+      expect(secondProgress).toBe("waiting");
       expect(secondEntered).toBe(false);
       expect(events).toEqual(["first:start", "first:after-flagged"]);
 

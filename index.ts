@@ -3444,9 +3444,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 							};
 
-							const pruneOldSyncPruneBackups = async (
+							const pruneTimestampedBackups = async (
 								backupDir: string,
-								keepPaths: string[] = [],
+								{
+									prefix,
+									keepPaths = [],
+									logLabel,
+								}: {
+									prefix: string;
+									keepPaths?: string[];
+									logLabel: string;
+								},
 							): Promise<void> => {
 								const entries = await fsPromises.readdir(backupDir, { withFileTypes: true }).catch((error) => {
 									const code = (error as NodeJS.ErrnoException).code;
@@ -3465,7 +3473,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 											.filter(
 												(entry) =>
 													entry.isFile() &&
-													entry.name.startsWith(`${SYNC_PRUNE_BACKUP_PREFIX}-`) &&
+													entry.name.startsWith(`${prefix}-`) &&
 													entry.name.endsWith(".json"),
 											)
 											.map(async (entry) => {
@@ -3491,7 +3499,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 									)
 								)
 									.filter((candidate): candidate is { path: string; mtimeMs: number } => candidate !== null)
-									.sort((left, right) => right.path.localeCompare(left.path));
+									.sort((left, right) => {
+										if (right.mtimeMs !== left.mtimeMs) {
+											return right.mtimeMs - left.mtimeMs;
+										}
+										return left.path.localeCompare(right.path);
+									});
 								const staleBackupPaths = [
 									...backupCandidates
 										.filter((candidate) => now - candidate.mtimeMs > SYNC_PRUNE_BACKUP_MAX_AGE_MS)
@@ -3512,11 +3525,31 @@ while (attempted.size < Math.max(1, accountCount)) {
 										}
 										const message = error instanceof Error ? error.message : String(error);
 										logWarn(
-											`[${PLUGIN_NAME}] Failed to prune stale sync prune backup ${staleBackupPath}: ${message}`,
+											`[${PLUGIN_NAME}] Failed to prune stale ${logLabel} ${staleBackupPath}: ${message}`,
 										);
 									}
 								}
 							};
+
+							const pruneOldSyncPruneBackups = async (
+								backupDir: string,
+								keepPaths: string[] = [],
+							): Promise<void> =>
+								pruneTimestampedBackups(backupDir, {
+									prefix: SYNC_PRUNE_BACKUP_PREFIX,
+									keepPaths,
+									logLabel: "sync prune backup",
+								});
+
+							const pruneOldOverlapCleanupBackups = async (
+								backupDir: string,
+								keepPaths: string[] = [],
+							): Promise<void> =>
+								pruneTimestampedBackups(backupDir, {
+									prefix: "codex-maintenance-overlap-backup",
+									keepPaths,
+									logLabel: "overlap cleanup backup",
+								});
 
 							const createSyncPruneBackup = async (): Promise<{
 								backupPath: string;
@@ -3974,6 +4007,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 									backupPath = createTimestampedBackupPath("codex-maintenance-overlap-backup");
 									const result = await cleanupCodexMultiAuthSyncedOverlaps(backupPath);
 									invalidateAccountManagerCache();
+									if (backupPath) {
+										const backupDir = dirname(backupPath);
+										await pruneOldOverlapCleanupBackups(backupDir, [backupPath]).catch((cleanupError) => {
+											const cleanupMessage =
+												cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+											logWarn(
+												`[${PLUGIN_NAME}] Failed to prune old overlap cleanup backups in ${backupDir}: ${cleanupMessage}`,
+											);
+										});
+									}
 									console.log("");
 									console.log("Cleanup complete.");
 									console.log(`Before: ${result.before}`);
