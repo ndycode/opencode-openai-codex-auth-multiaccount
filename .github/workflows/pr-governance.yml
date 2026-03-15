@@ -17,8 +17,10 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: governance-${{ github.event.pull_request.number }}-${{ github.event.action }}
-  cancel-in-progress: true
+  # Serialize governance per PR so label/state mutations observe live state and
+  # synchronize runs are not canceled before invalidation logic completes.
+  group: governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   pr-governance:
