@@ -3465,6 +3465,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									index: number;
 									account: AccountStorageV3["accounts"][number];
 								}> = [];
+								let rollbackStorage: AccountStorageV3 | null = null;
 								await withAccountStorageTransaction(async (loadedStorage, persist) => {
 									const currentStorage =
 										loadedStorage ??
@@ -3488,6 +3489,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (removedTargets.length === 0) {
 										return;
 									}
+									rollbackStorage = structuredClone(currentStorage);
 
 									const activeAccountIdentity = {
 										refreshToken:
@@ -3554,21 +3556,41 @@ while (attempted.size < Math.max(1, accountCount)) {
 											}),
 										),
 									);
-									await withFlaggedAccountsTransaction(async (currentFlaggedStorage, persist) => {
-										await persist({
-											version: 1,
-											accounts: currentFlaggedStorage.accounts.filter(
-												(flagged) =>
-													!removedFlaggedKeys.has(
-														getSyncRemovalTargetKey({
-															refreshToken: flagged.refreshToken,
-															organizationId: flagged.organizationId,
-															accountId: flagged.accountId,
-														}),
-													),
-											),
+									try {
+										await withFlaggedAccountsTransaction(async (currentFlaggedStorage, persist) => {
+											await persist({
+												version: 1,
+												accounts: currentFlaggedStorage.accounts.filter(
+													(flagged) =>
+														!removedFlaggedKeys.has(
+															getSyncRemovalTargetKey({
+																refreshToken: flagged.refreshToken,
+																organizationId: flagged.organizationId,
+																accountId: flagged.accountId,
+															}),
+														),
+												),
+											});
 										});
-									});
+									} catch (flaggedError) {
+										if (rollbackStorage) {
+											try {
+												await withAccountStorageTransaction(async (_current, persist) => {
+													await persist(rollbackStorage as AccountStorageV3);
+												});
+											} catch (restoreError) {
+												const flaggedMessage =
+													flaggedError instanceof Error ? flaggedError.message : String(flaggedError);
+												const restoreMessage =
+													restoreError instanceof Error ? restoreError.message : String(restoreError);
+												throw new Error(
+													`Failed to remove flagged sync entries after account removal: ${flaggedMessage}; ` +
+														`failed to restore removed accounts: ${restoreMessage}`,
+												);
+											}
+										}
+										throw flaggedError;
+									}
 									invalidateAccountManagerCache();
 								}
 							};
@@ -3754,7 +3776,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 									console.log("");
 								} catch (error) {
 									const message = error instanceof Error ? error.message : String(error);
-									const backupHint = backupPath ? `\nBackup: ${backupPath}` : "";
+									const cleanupBackupPath =
+										error instanceof Error &&
+										typeof (error as Error & { backupPath?: unknown }).backupPath === "string"
+											? ((error as Error & { backupPath: string }).backupPath)
+											: undefined;
+									const backupHint = cleanupBackupPath ? `\nBackup: ${cleanupBackupPath}` : "";
 									console.log(`\nCleanup failed: ${message}${backupHint}\n`);
 								}
 							};
