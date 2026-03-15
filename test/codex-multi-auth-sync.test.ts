@@ -808,7 +808,9 @@ describe("codex-multi-auth sync", () => {
 				skipped: 0,
 				total: 4,
 			});
-			expect(rmSpy).toHaveBeenCalledTimes(3);
+			expect(
+				rmSpy.mock.calls.filter(([path]) => String(path).includes("oc-chatgpt-multi-auth-sync-")),
+			).toHaveLength(3);
 			expect(vi.mocked(loggerModule.logWarn)).not.toHaveBeenCalledWith(
 				expect.stringContaining("Failed to remove temporary codex sync directory"),
 			);
@@ -961,7 +963,9 @@ describe("codex-multi-auth sync", () => {
 		}
 	});
 
-	it("retries stale temp sweep once on transient Windows lock errors", async () => {
+	it.each(["EBUSY", "ENOTEMPTY", "EAGAIN"] as const)(
+		"retries stale temp sweep once on transient Windows %s cleanup errors",
+		async (code) => {
 		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
 		const fakeHome = await fs.promises.mkdtemp(join(os.tmpdir(), "codex-sync-home-"));
 		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
@@ -987,7 +991,7 @@ describe("codex-multi-auth sync", () => {
 		const rmSpy = vi.spyOn(fs.promises, "rm").mockImplementation(async (path, options) => {
 			if (!staleSweepBlocked && String(path) === staleDir) {
 				staleSweepBlocked = true;
-				throw Object.assign(new Error("busy"), { code: "EBUSY" });
+				throw Object.assign(new Error("busy"), { code });
 			}
 			return originalRm(path, options as never);
 		});
@@ -1700,6 +1704,67 @@ describe("codex-multi-auth sync", () => {
 			}
 		},
 	);
+
+	it("annotates overlap cleanup failures with the written backup path", async () => {
+		const storageModule = await import("../lib/storage.js");
+		const persist = vi.fn(async () => {
+			throw new Error("persist failed");
+		});
+		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							accountId: "org-local",
+							organizationId: "org-local",
+							accountIdSource: "org",
+							email: "shared@example.com",
+							refreshToken: "rt-local",
+							addedAt: 5,
+							lastUsed: 5,
+						},
+						{
+							accountTags: ["codex-multi-auth-sync"],
+							email: "shared@example.com",
+							refreshToken: "rt-sync",
+							addedAt: 4,
+							lastUsed: 4,
+						},
+					],
+				},
+				persist,
+			),
+		);
+		const mkdirSpy = vi.spyOn(fs.promises, "mkdir").mockResolvedValue(undefined);
+		const writeSpy = vi.spyOn(fs.promises, "writeFile").mockResolvedValue(undefined);
+		const renameSpy = vi.spyOn(fs.promises, "rename").mockResolvedValue(undefined);
+
+		try {
+			const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
+			let thrown: unknown;
+			try {
+				await cleanupCodexMultiAuthSyncedOverlaps("/tmp/overlap-cleanup-backup.json");
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect(mkdirSpy).toHaveBeenCalledWith("/tmp", { recursive: true });
+			expect(writeSpy).toHaveBeenCalled();
+			expect(renameSpy).toHaveBeenCalled();
+			expect(thrown).toBeInstanceOf(Error);
+			expect(thrown).toMatchObject({
+				message: "persist failed",
+				backupPath: "/tmp/overlap-cleanup-backup.json",
+			});
+		} finally {
+			mkdirSpy.mockRestore();
+			writeSpy.mockRestore();
+			renameSpy.mockRestore();
+		}
+	});
 
 
 	it("limits overlap cleanup to accounts tagged from codex-multi-auth sync", async () => {

@@ -3,7 +3,7 @@ import { createSyncPruneBackupPayload } from "../lib/sync-prune-backup.js";
 import type { AccountStorageV3 } from "../lib/storage.js";
 
 describe("sync prune backup payload", () => {
-	it("omits live tokens from the prune backup payload", () => {
+	it("keeps live tokens in the prune backup payload so crash recovery stays restorable", () => {
 		const storage: AccountStorageV3 = {
 			version: 3,
 			activeIndex: 0,
@@ -32,12 +32,16 @@ describe("sync prune backup payload", () => {
 			],
 		});
 
-		expect(payload.accounts.accounts[0]).not.toHaveProperty("accessToken");
-		expect(payload.accounts.accounts[0]).not.toHaveProperty("refreshToken");
-		expect(payload.accounts.accounts[0]).not.toHaveProperty("idToken");
-		expect(payload.flagged.accounts[0]).not.toHaveProperty("accessToken");
-		expect(payload.flagged.accounts[0]).not.toHaveProperty("refreshToken");
-		expect(payload.flagged.accounts[0]).not.toHaveProperty("idToken");
+		expect(payload.accounts.accounts[0]).toMatchObject({
+			refreshToken: "refresh-token",
+			accessToken: "access-token",
+			idToken: "id-token",
+		});
+		expect(payload.flagged.accounts[0]).toMatchObject({
+			refreshToken: "refresh-token",
+			accessToken: "flagged-access-token",
+			idToken: "flagged-id-token",
+		});
 	});
 
 	it("deep-clones nested metadata so later mutations do not leak into the snapshot", () => {
@@ -84,13 +88,16 @@ describe("sync prune backup payload", () => {
 
 		expect(payload.accounts.accounts[0]?.accountTags).toEqual(["work"]);
 		expect(payload.accounts.accounts[0]?.lastSelectedModelByFamily).toEqual({ codex: "gpt-5.4" });
-		expect(payload.accounts.accounts[0]).not.toHaveProperty("idToken");
+		expect(payload.accounts.accounts[0]?.refreshToken).toBe("refresh-token");
+		expect(payload.accounts.accounts[0]?.accessToken).toBe("access-token");
+		expect(payload.accounts.accounts[0]?.idToken).toBe("id-token");
 		expect(payload.flagged.accounts[0]).toMatchObject({
+			refreshToken: "refresh-token",
+			accessToken: "flagged-access-token",
+			idToken: "flagged-id-token",
 			metadata: {
 				source: "flagged",
 			},
 		});
-		expect(payload.flagged.accounts[0]).not.toHaveProperty("refreshToken");
-		expect(payload.flagged.accounts[0]).not.toHaveProperty("idToken");
 	});
 });

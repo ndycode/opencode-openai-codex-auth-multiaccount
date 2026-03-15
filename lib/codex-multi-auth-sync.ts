@@ -121,6 +121,7 @@ interface PreparedCodexMultiAuthPreviewStorage {
 
 const TEMP_CLEANUP_RETRY_DELAYS_MS = [100, 250, 500] as const;
 const STALE_TEMP_CLEANUP_RETRY_DELAY_MS = 150;
+const STALE_TEMP_SWEEP_RETRYABLE_CODES = new Set(["EBUSY", "EAGAIN", "EACCES", "EPERM", "ENOTEMPTY"]);
 
 function sleepAsync(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -311,7 +312,7 @@ async function cleanupStaleNormalizedImportTempDirs(
 					continue;
 				}
 				let message = error instanceof Error ? error.message : String(error);
-				if (code === "EBUSY" || code === "EACCES" || code === "EPERM") {
+				if (code && STALE_TEMP_SWEEP_RETRYABLE_CODES.has(code)) {
 					await sleepAsync(STALE_TEMP_CLEANUP_RETRY_DELAY_MS);
 					try {
 						await fs.rm(candidateDir, { recursive: true, force: true });
@@ -1212,6 +1213,7 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 			activeIndex: 0,
 			activeIndexByFamily: {},
 		};
+		let writtenBackupPath: string | undefined;
 		if (backupPath) {
 			await fs.mkdir(dirname(backupPath), { recursive: true });
 			const tempBackupPath = `${backupPath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
@@ -1221,6 +1223,7 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 					mode: 0o600,
 				});
 				await fs.rename(tempBackupPath, backupPath);
+				writtenBackupPath = backupPath;
 			} catch (error) {
 				try {
 					await fs.unlink(tempBackupPath);
@@ -1230,10 +1233,17 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 				throw error;
 			}
 		}
-		const plan = buildCodexMultiAuthOverlapCleanupPlan(fallback);
-		if (plan.nextStorage) {
-			await persist(plan.nextStorage);
+		try {
+			const plan = buildCodexMultiAuthOverlapCleanupPlan(fallback);
+			if (plan.nextStorage) {
+				await persist(plan.nextStorage);
+			}
+			return plan.result;
+		} catch (error) {
+			if (writtenBackupPath && error instanceof Error) {
+				(error as Error & { backupPath?: string }).backupPath = writtenBackupPath;
+			}
+			throw error;
 		}
-		return plan.result;
 	});
 }
