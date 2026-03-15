@@ -289,7 +289,14 @@ jobs:
               summaryLines.push(`- Risky paths: ${riskyPaths.join(", ")}`);
             }
 
-            await core.summary.addRaw(summaryLines.join("\n")).write();
+            try {
+              await core.summary.addRaw(summaryLines.join("\n")).write();
+            } catch (summaryError) {
+              const message =
+                summaryError instanceof Error ? summaryError.message : String(summaryError);
+              core.warning(`Failed to write PR governance step summary: ${message}`);
+              console.log(summaryLines.join("\n"));
+            }
 
             if (failures.length > 0) {
               core.setFailed(failures.join("\n"));

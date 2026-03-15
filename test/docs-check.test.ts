@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it } from "vitest";
 const tempRoots: string[] = [];
 const TEMP_CLEANUP_DELAYS_MS = [100, 500, 2000];
 const TEMP_CLEANUP_ATTEMPTS = TEMP_CLEANUP_DELAYS_MS.length + 1;
+const DOCS_CHECK_SUBPROCESS_RETRY_DELAYS_MS = [100, 500, 2000];
+const DOCS_CHECK_SUBPROCESS_ATTEMPTS =
+	DOCS_CHECK_SUBPROCESS_RETRY_DELAYS_MS.length + 1;
 const DOCS_CHECK_SUBPROCESS_TIMEOUT_MS = 15_000;
 const execFileAsync = promisify(execFile);
 
@@ -41,6 +44,49 @@ async function writeFixtureFiles(root: string, files: Record<string, string>) {
 		await mkdir(path.dirname(absolutePath), { recursive: true });
 		await writeFile(absolutePath, contents, "utf8");
 	}
+}
+
+function isTransientDocsCheckSubprocessError(error: unknown) {
+	const details = [error instanceof Error ? error.message : String(error)];
+	if (error && typeof error === "object") {
+		const typedError = error as { stderr?: string; stdout?: string };
+		if (typedError.stderr) details.push(typedError.stderr);
+		if (typedError.stdout) details.push(typedError.stdout);
+	}
+
+	return /\b(EPERM|EBUSY|EACCES)\b/i.test(details.join("\n"));
+}
+
+async function runDocsCheckSubprocess(
+	scriptPath: string,
+	args: string[],
+	options: Parameters<typeof execFileAsync>[2],
+) {
+	for (
+		let attempt = 1;
+		attempt <= DOCS_CHECK_SUBPROCESS_ATTEMPTS;
+		attempt += 1
+	) {
+		try {
+			return await execFileAsync(process.execPath, [scriptPath, ...args], options);
+		} catch (error) {
+			if (
+				process.platform !== "win32" ||
+				attempt === DOCS_CHECK_SUBPROCESS_ATTEMPTS ||
+				!isTransientDocsCheckSubprocessError(error)
+			) {
+				throw error;
+			}
+
+			await delay(
+				DOCS_CHECK_SUBPROCESS_RETRY_DELAYS_MS[attempt - 1] ??
+					DOCS_CHECK_SUBPROCESS_RETRY_DELAYS_MS.at(-1) ??
+					100,
+			);
+		}
+	}
+
+	throw new Error("docs-check subprocess retry loop exhausted unexpectedly");
 }
 
 async function createRepoFixture(files: Record<string, string>) {
@@ -386,7 +432,7 @@ describe("docs-check script", () => {
 		const scriptPath = path.resolve(process.cwd(), "scripts/ci/docs-check.js");
 		const relativeFixtureRoot = path.relative(process.cwd(), root).replace(/\\/g, "/");
 
-		const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, relativeFixtureRoot], {
+		const { stdout, stderr } = await runDocsCheckSubprocess(scriptPath, [relativeFixtureRoot], {
 			cwd: process.cwd(),
 			timeout: DOCS_CHECK_SUBPROCESS_TIMEOUT_MS,
 		});
@@ -400,7 +446,7 @@ describe("docs-check script", () => {
 		const scriptPath = path.resolve(process.cwd(), "scripts/ci/docs-check.js");
 		const relativeFixtureRoot = path.relative(process.cwd(), root).replace(/\\/g, "/");
 
-		const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath, relativeFixtureRoot], {
+		const { stdout, stderr } = await runDocsCheckSubprocess(scriptPath, [relativeFixtureRoot], {
 			cwd: process.cwd(),
 			timeout: DOCS_CHECK_SUBPROCESS_TIMEOUT_MS,
 		});
@@ -417,7 +463,7 @@ describe("docs-check script", () => {
 		});
 		const scriptPath = path.resolve(process.cwd(), "scripts/ci/docs-check.js");
 
-		const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath], {
+		const { stdout, stderr } = await runDocsCheckSubprocess(scriptPath, [], {
 			cwd: root,
 			timeout: DOCS_CHECK_SUBPROCESS_TIMEOUT_MS,
 		});
@@ -435,7 +481,7 @@ describe("docs-check script", () => {
 		let failure: (Error & { code?: number; stderr?: string; stdout?: string }) | null = null;
 
 		try {
-			await execFileAsync(process.execPath, [scriptPath, relativeFixtureRoot], {
+			await runDocsCheckSubprocess(scriptPath, [relativeFixtureRoot], {
 				cwd: process.cwd(),
 				timeout: DOCS_CHECK_SUBPROCESS_TIMEOUT_MS,
 			});
@@ -463,7 +509,7 @@ describe("docs-check script", () => {
 		let failure: (Error & { code?: number; stderr?: string; stdout?: string }) | null = null;
 
 		try {
-			await execFileAsync(process.execPath, [scriptPath, relativeFixtureRoot], {
+			await runDocsCheckSubprocess(scriptPath, [relativeFixtureRoot], {
 				cwd: process.cwd(),
 				timeout: DOCS_CHECK_SUBPROCESS_TIMEOUT_MS,
 			});
