@@ -20,7 +20,11 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
+const FALLBACK_PLUGIN_CONFIG = Symbol("fallbackPluginConfig");
 export type UnsupportedCodexPolicy = "strict" | "fallback";
+type PluginConfigWithFallbackMarker = PluginConfig & {
+	[FALLBACK_PLUGIN_CONFIG]?: true;
+};
 
 /**
  * Default plugin configuration
@@ -62,6 +66,36 @@ export const DEFAULT_CONFIG: PluginConfig = {
 	streamStallTimeoutMs: 45_000,
 };
 
+const markFallbackPluginConfig = <T extends PluginConfig>(config: T): T => {
+	if ((config as PluginConfigWithFallbackMarker)[FALLBACK_PLUGIN_CONFIG]) {
+		return config;
+	}
+	Object.defineProperty(config, FALLBACK_PLUGIN_CONFIG, {
+		value: true,
+		enumerable: false,
+	});
+	return config;
+};
+
+// Keep the exported default config marked so tests and callers can model the
+// loader fallback path without depending on object identity.
+markFallbackPluginConfig(DEFAULT_CONFIG);
+
+function createFallbackPluginConfig(): PluginConfig {
+	// Spread drops the non-enumerable fallback marker, so exact-default config
+	// files stay distinct from loader fallbacks.
+	return markFallbackPluginConfig({ ...DEFAULT_CONFIG });
+}
+
+export function isFallbackPluginConfig(
+	pluginConfig: PluginConfig | undefined,
+): boolean {
+	return !!(
+		pluginConfig &&
+		(pluginConfig as PluginConfigWithFallbackMarker)[FALLBACK_PLUGIN_CONFIG]
+	);
+}
+
 /**
  * Load plugin configuration from ~/.opencode/openai-codex-auth-config.json
  * Falls back to defaults if file doesn't exist or is invalid
@@ -71,7 +105,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
 export function loadPluginConfig(): PluginConfig {
 	try {
 		if (!existsSync(CONFIG_PATH)) {
-			return DEFAULT_CONFIG;
+			return createFallbackPluginConfig();
 		}
 
 		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
@@ -107,7 +141,7 @@ export function loadPluginConfig(): PluginConfig {
 		logWarn(
 			`Failed to load config from ${CONFIG_PATH}: ${(error as Error).message}`,
 		);
-		return DEFAULT_CONFIG;
+		return createFallbackPluginConfig();
 	}
 }
 

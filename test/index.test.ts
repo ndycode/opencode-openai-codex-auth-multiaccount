@@ -80,7 +80,15 @@ vi.mock("../lib/cli.js", () => ({
 }));
 
 vi.mock("../lib/config.js", () => {
-	const DEFAULT_CONFIG = {};
+	const FALLBACK_PLUGIN_CONFIG = Symbol("fallbackPluginConfig");
+	const markFallbackPluginConfig = <T extends Record<string, unknown>>(config: T): T => {
+		Object.defineProperty(config, FALLBACK_PLUGIN_CONFIG, {
+			value: true,
+			enumerable: false,
+		});
+		return config;
+	};
+	const DEFAULT_CONFIG = markFallbackPluginConfig({});
 	return {
 		DEFAULT_CONFIG,
 		getCodexMode: () => true,
@@ -114,6 +122,14 @@ vi.mock("../lib/config.js", () => {
 		getCodexTuiColorProfile: () => "ansi16",
 		getCodexTuiGlyphMode: () => "ascii",
 		getBeginnerSafeMode: () => false,
+		isFallbackPluginConfig: vi.fn(
+			(config) =>
+				!!config &&
+				(config as Record<PropertyKey, unknown>)[FALLBACK_PLUGIN_CONFIG] === true,
+		),
+		// NOTE: loadPluginConfig returns a fresh {} by default (not marked as a
+		// loader fallback). Tests that exercise the fallback marker should return
+		// DEFAULT_CONFIG explicitly.
 		loadPluginConfig: vi.fn(() => ({})),
 	};
 });

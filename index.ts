@@ -68,6 +68,7 @@ import {
 	getCodexTuiGlyphMode,
 	getBeginnerSafeMode,
 	DEFAULT_CONFIG,
+	isFallbackPluginConfig,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -1248,8 +1249,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			style: PersistAccountFooterStyle,
 		): boolean => {
 			// Bulk refreshes are intentionally update-only: they only rewrite
-			// already-tracked sessions, so new entries still have to flow through
-			// setPersistedAccountIndicator() where the LRU cap is enforced.
+			// already-tracked sessions, so they never grow the map. New entries
+			// still have to flow through setPersistedAccountIndicator() where
+			// trimPersistedAccountIndicators() enforces the LRU cap.
 			const sessionIDs = Array.from(persistedAccountIndicators.keys());
 			if (sessionIDs.length === 0) return false;
 			const revision = nextPersistedAccountIndicatorRevision();
@@ -1474,20 +1476,21 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			initialConfig?: ReturnType<typeof loadPluginConfig>,
 		): void => {
 			// Auth writes should honor the latest per-project setting, but a Windows
-			// config-file lock can make loadPluginConfig() fall back to DEFAULT_CONFIG.
+			// config-file lock can make loadPluginConfig() fall back to a marked
+			// default config.
 			// If we already have a runtime snapshot, keep using it instead of silently
 			// routing auth writes to the wrong storage path.
 			let storagePluginConfig =
 				initialConfig ?? runtimePluginConfigSnapshot ?? DEFAULT_CONFIG;
 			const shouldRefreshStorageConfig =
 				!initialConfig ||
-				(initialConfig === DEFAULT_CONFIG &&
-					runtimePluginConfigSnapshot === initialConfig);
+				(isFallbackPluginConfig(initialConfig) &&
+					runtimePluginConfigSnapshot !== undefined);
 			if (shouldRefreshStorageConfig) {
 				try {
 					const refreshedPluginConfig = loadPluginConfig();
 					if (
-						refreshedPluginConfig === DEFAULT_CONFIG &&
+						isFallbackPluginConfig(refreshedPluginConfig) &&
 						runtimePluginConfigSnapshot
 					) {
 						logWarn(
