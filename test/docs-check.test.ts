@@ -371,6 +371,23 @@ describe("docs-check script", () => {
 		expect(stderr).toBe("");
 	});
 
+	it("runs the direct docs-check pipeline in default-scan mode", async () => {
+		const { root } = await createRepoFixture({
+			"README.md": "# Root\n",
+			"docs/guide.md": "[Target](./targets/exists.md)\n",
+			"docs/targets/exists.md": "# Target\n",
+		});
+		const scriptPath = path.resolve(process.cwd(), "scripts/ci/docs-check.js");
+
+		const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath], {
+			cwd: root,
+			timeout: DOCS_CHECK_SUBPROCESS_TIMEOUT_MS,
+		});
+
+		expect(stdout).toContain("docs-check: verified 3 markdown file(s)");
+		expect(stderr).toBe("");
+	});
+
 	it("exits with an error when the direct docs-check pipeline finds broken links", async () => {
 		const { root } = await createRepoFixture({
 			"docs/guide.md": "[Missing](./targets/missing.md)\n",

@@ -188,6 +188,22 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Write compat summary
+        if: always()
+        shell: bash
+        env:
+          COMPAT_OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "## Compat matrix (${{ matrix.os }}, Node ${{ matrix.node }})"
+            echo ""
+            if [[ "${COMPAT_OUTCOME}" == "success" ]]; then
+              echo "- build + tests passed."
+            else
+              echo "- build or tests failed. Review logs before promoting this lane to required."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   dependency-audit:
     name: dependency-audit
     needs: detect-dependency-change
