@@ -63,6 +63,18 @@ export function runCleanup(): Promise<void> {
 	return cleanupInFlight;
 }
 
+function resetSignalStateAfterInterceptedExit(): void {
+	if (!signalExitPending) {
+		return;
+	}
+
+	signalExitPending = false;
+	if (cleanupFunctions.length === 0 && !cleanupInFlight && shutdownRegistered) {
+		removeShutdownHandlers();
+		shutdownRegistered = false;
+	}
+}
+
 function ensureShutdownHandler(): void {
 	if (shutdownRegistered) return;
 	shutdownRegistered = true;
@@ -88,7 +100,13 @@ function ensureShutdownHandler(): void {
 			requestExit();
 		}, SIGNAL_CLEANUP_TIMEOUT_MS);
 		void runCleanup().finally(() => {
-			requestExit();
+			try {
+				requestExit();
+			} finally {
+				// `process.exit()` normally terminates immediately. This only runs when exit
+				// is intercepted (for example in tests), so we need to unlatch signal state.
+				resetSignalStateAfterInterceptedExit();
+			}
 		});
 	};
 	sigintHandler = handleSignal;

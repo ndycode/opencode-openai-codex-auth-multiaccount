@@ -2428,6 +2428,37 @@ describe("AccountManager", () => {
       }
     });
 
+    it("resolves settle waiters when flushPendingSave cancels a pending debounce", async () => {
+      vi.useFakeTimers();
+      try {
+        const { saveAccounts } = await import("../lib/storage.js");
+        const mockSaveAccounts = vi.mocked(saveAccounts);
+        mockSaveAccounts.mockClear();
+        mockSaveAccounts.mockResolvedValue();
+
+        const now = Date.now();
+        const stored = {
+          version: 3 as const,
+          activeIndex: 0,
+          accounts: [
+            { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          ],
+        };
+
+        const manager = new AccountManager(undefined, stored);
+
+        manager.saveToDiskDebounced(50);
+        const settlePromise = manager.waitForPendingSaveToSettle();
+        const flushPromise = manager.flushPendingSave();
+
+        await flushPromise;
+        await expect(settlePromise).resolves.toBeUndefined();
+        expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("drains saves queued during flush without overlapping writes", async () => {
       vi.useFakeTimers();
       try {

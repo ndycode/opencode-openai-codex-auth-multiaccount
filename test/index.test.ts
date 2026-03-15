@@ -2303,8 +2303,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 		expect(saveToDiskDebouncedSpy).toHaveBeenCalledTimes(1);
 		const responseText = await response.text();
-		expect(responseText).toContain("All stored Codex accounts are user-disabled");
-		expect(responseText).toContain("Re-enable them from account management");
+		expect(responseText).toContain(
+			"All stored Codex accounts are disabled. Re-enable any manually disabled accounts from account management, or run `opencode auth login` to restore access.",
+		);
 	});
 
 	it("surfaces the disabled-pool response when same-token variants were already user-disabled", async () => {

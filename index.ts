@@ -2803,7 +2803,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const hasUserDisabled = disabledSnapshot.some(
 									(account) =>
 										account.enabled === false &&
-										account.disabledReason !== "auth-failure",
+										account.disabledReason === "user",
 								);
 								const hasAuthFailureDisabled = disabledSnapshot.some(
 									(account) =>
@@ -2814,7 +2814,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 									? "All stored Codex accounts are disabled. Re-enable user-disabled accounts from account management, or run `opencode auth login` to restore auth-failure disables."
 									: hasAuthFailureDisabled
 										? "All stored Codex accounts are disabled after repeated auth failures. Run `opencode auth login` to restore access."
-										: "All stored Codex accounts are user-disabled. Re-enable them from account management.";
+										: hasUserDisabled
+											? "All stored Codex accounts are user-disabled. Re-enable them from account management."
+											: "All stored Codex accounts are disabled. Re-enable any manually disabled accounts from account management, or run `opencode auth login` to restore access.";
 								const message =
 									totalCount === 0
 										? "No Codex accounts configured. Run `opencode auth login`."

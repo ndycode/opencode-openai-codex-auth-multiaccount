@@ -181,9 +181,9 @@ describe("Graceful shutdown", () => {
 
 				resolveCleanup();
 				await vi.waitFor(() => {
-					expect(processOffSpy).not.toHaveBeenCalled();
 					expect(processExitSpy).toHaveBeenCalledWith(0);
 				});
+				expect(processOffSpy).toHaveBeenCalled();
 			} finally {
 				processOnSpy.mockRestore();
 				processOffSpy.mockRestore();
@@ -277,7 +277,7 @@ describe("Graceful shutdown", () => {
 			}
 		});
 
-		it("keeps later signals ignored after cleanup completes until process exit", async () => {
+		it("allows later signals again if process exit is intercepted", async () => {
 			const capturedHandlers = new Map<string, (...args: unknown[]) => void>();
 
 			const processOnSpy = vi.spyOn(process, "on").mockImplementation((event: string | symbol, handler: (...args: unknown[]) => void) => {
@@ -304,10 +304,11 @@ describe("Graceful shutdown", () => {
 				});
 
 				sigtermHandler!();
-				await Promise.resolve();
+				await vi.waitFor(() => {
+					expect(processExitSpy).toHaveBeenCalledTimes(2);
+				});
 
 				expect(cleanupFn).toHaveBeenCalledTimes(1);
-				expect(processExitSpy).toHaveBeenCalledTimes(1);
 			} finally {
 				processOnSpy.mockRestore();
 				processExitSpy.mockRestore();
@@ -387,7 +388,7 @@ describe("Graceful shutdown", () => {
 				await vi.waitFor(() => {
 					expect(processExitSpy).toHaveBeenCalledWith(0);
 				});
-				expect(processOffSpy).not.toHaveBeenCalled();
+				expect(processOffSpy).toHaveBeenCalled();
 			} finally {
 				processOnSpy.mockRestore();
 				processOffSpy.mockRestore();
