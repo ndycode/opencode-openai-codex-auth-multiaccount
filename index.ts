@@ -1431,22 +1431,27 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			persistAccountFooterStyle: PersistAccountFooterStyle;
 			ui: UiRuntimeOptions;
 		} => {
-			const persistAccountFooter = getPersistAccountFooter(pluginConfig);
+			const resolvedPluginConfig =
+				isFallbackPluginConfig(pluginConfig) &&
+				runtimePluginConfigSnapshot !== undefined
+					? runtimePluginConfigSnapshot
+					: pluginConfig;
+			const persistAccountFooter = getPersistAccountFooter(resolvedPluginConfig);
 			const persistAccountFooterStyle =
-				getPersistAccountFooterStyle(pluginConfig);
+				getPersistAccountFooterStyle(resolvedPluginConfig);
 			// Footer disable transitions intentionally reset the in-memory footer
 			// state. Authorize flows keep using the cached runtime snapshot here, so
 			// a transient config-loader fallback does not clear live indicators.
 			if (runtimePersistAccountFooter && !persistAccountFooter) {
 				resetPersistedAccountFooterState();
 			}
-			runtimePluginConfigSnapshot = pluginConfig;
+			runtimePluginConfigSnapshot = resolvedPluginConfig;
 			runtimePersistAccountFooter = persistAccountFooter;
 			runtimePersistAccountFooterStyle = persistAccountFooterStyle;
 			return {
 				persistAccountFooter,
 				persistAccountFooterStyle,
-				ui: applyUiRuntimeFromConfig(pluginConfig),
+				ui: applyUiRuntimeFromConfig(resolvedPluginConfig),
 			};
 		};
 
@@ -1460,7 +1465,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		const refreshAuthorizeStoragePath = (
 			initialConfig?: ReturnType<typeof loadPluginConfig>,
-		): void => {
+		): ReturnType<typeof loadPluginConfig> => {
 			// Auth writes should honor the latest per-project setting, but a Windows
 			// config-file lock can make loadPluginConfig() fall back to a marked
 			// default config.
@@ -1469,9 +1474,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			let storagePluginConfig =
 				initialConfig ?? runtimePluginConfigSnapshot ?? DEFAULT_CONFIG;
 			const shouldRefreshStorageConfig =
-				!initialConfig ||
-				(isFallbackPluginConfig(initialConfig) &&
-					runtimePluginConfigSnapshot !== undefined);
+				!initialConfig || isFallbackPluginConfig(initialConfig);
 			if (shouldRefreshStorageConfig) {
 				try {
 					const refreshedPluginConfig = loadPluginConfig();
@@ -1496,6 +1499,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 			const perProjectAccounts = getPerProjectAccounts(storagePluginConfig);
 			setStoragePath(perProjectAccounts ? process.cwd() : null);
+			return storagePluginConfig;
 		};
 
 		const getStatusMarker = (
@@ -3075,10 +3079,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 						authorize: async (inputs?: Record<string, string>) => {
 							const hadRuntimePluginConfig = runtimePluginConfigSnapshot !== undefined;
 							const authorizePluginConfig = resolveRuntimePluginConfig();
-							syncRuntimePluginConfig(authorizePluginConfig);
-							refreshAuthorizeStoragePath(
+							const refreshedAuthorizePluginConfig = refreshAuthorizeStoragePath(
 								hadRuntimePluginConfig ? undefined : authorizePluginConfig,
 							);
+							syncRuntimePluginConfig(refreshedAuthorizePluginConfig);
 
 							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =

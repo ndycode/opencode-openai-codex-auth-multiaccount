@@ -3018,7 +3018,6 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		];
 		const configModule = await import("../lib/config.js");
 		const healthyConfig = { source: "healthy-config" };
-		const lockedConfig = { source: "locked-config" };
 		vi.mocked(configModule.loadPluginConfig).mockReturnValue(healthyConfig);
 		vi.mocked(configModule.getPersistAccountFooter).mockImplementation(
 			(config) => config === healthyConfig,
@@ -3035,7 +3034,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		await sendPersistedAccountRequest(sdk, "session-authorize-refresh");
 		mockClient.tui.showToast.mockClear();
 
-		vi.mocked(configModule.loadPluginConfig).mockReturnValue(lockedConfig);
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(configModule.DEFAULT_CONFIG);
 		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
 		await manualMethod.authorize();
 		mockClient.tui.showToast.mockClear();
@@ -3202,6 +3201,45 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 		expect(configModule.loadPluginConfig).toHaveBeenCalledTimes(3);
 		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("recovers footer runtime state after a cold-start authorize fallback refresh", async () => {
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const configModule = await import("../lib/config.js");
+		const recoveredConfig = { source: "recovered-footer-config" };
+
+		vi.mocked(configModule.loadPluginConfig)
+			.mockReturnValueOnce(configModule.DEFAULT_CONFIG)
+			.mockReturnValueOnce(recoveredConfig);
+		vi.mocked(configModule.getPersistAccountFooter).mockImplementation(
+			(config) => config === recoveredConfig,
+		);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue("full-email");
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(
+			mockClient.tui.showToast.mock.calls.some(([payload]) => {
+				const body = (payload as { body?: { message?: string; variant?: string } })
+					?.body;
+				return body?.variant === "info" && body.message === "Switched to account 2";
+			}),
+		).toBe(false);
 	});
 
 	it("shows the account-switch info toast when the footer is disabled", async () => {
