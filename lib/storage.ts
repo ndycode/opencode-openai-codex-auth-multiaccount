@@ -1,4 +1,4 @@
-import { promises as fs, existsSync } from "node:fs";
+import { constants as fsConstants, promises as fs, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
@@ -50,6 +50,11 @@ export interface ImportAccountsOptions {
 	 */
 	backupMode?: ImportBackupMode;
 }
+
+type PrepareImportStorage = (
+	normalized: AccountStorageV3,
+	existing: AccountStorageV3 | null,
+) => AccountStorageV3;
 
 export type ImportBackupStatus = "created" | "skipped" | "failed";
 
@@ -152,6 +157,38 @@ async function renameWithWindowsRetry(sourcePath: string, destinationPath: strin
   if (lastError) {
     throw lastError;
   }
+}
+
+async function copyFileWithWindowsRetry(
+  sourcePath: string,
+  destinationPath: string,
+  mode = 0,
+): Promise<void> {
+  let lastError: NodeJS.ErrnoException | null = null;
+
+  for (let attempt = 0; attempt < WINDOWS_RENAME_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await fs.copyFile(sourcePath, destinationPath, mode);
+      return;
+    } catch (error) {
+      if (isWindowsLockError(error)) {
+        lastError = error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, WINDOWS_RENAME_RETRY_BASE_DELAY_MS * 2 ** attempt),
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+}
+
+function getAccountSubsetIdentity(account: AccountMetadataV3): string {
+  return [account.organizationId ?? "", account.accountId ?? "", account.refreshToken, account.email ?? ""].join("\u0000");
 }
 
 async function writeFileWithTimeout(filePath: string, content: string, timeoutMs: number): Promise<void> {
@@ -1009,14 +1046,58 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 	};
 }
 
-export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Promise<void> {
+	const path = getFlaggedAccountsPath();
+	const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+	const tempPath = `${path}.${uniqueSuffix}.tmp`;
+	try {
+		await fs.mkdir(dirname(path), { recursive: true });
+		const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
+		await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+		await renameWithWindowsRetry(tempPath, path);
+	} catch (error) {
+		try {
+			await fs.unlink(tempPath);
+		} catch {
+			// Ignore cleanup failures.
+		}
+		log.error("Failed to save flagged account storage", { path, error: String(error) });
+		throw error;
+	}
+}
+
+async function loadFlaggedAccountsUnlocked(
+	accountsSnapshot?: AccountStorageV3 | null,
+): Promise<FlaggedAccountStorageV1> {
 	const path = getFlaggedAccountsPath();
 	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
+	const removeOrphanedFlaggedAccounts = async (
+		storage: FlaggedAccountStorageV1,
+	): Promise<FlaggedAccountStorageV1> => {
+		const accounts =
+			accountsSnapshot === undefined
+				? await loadAccountsInternal(saveAccountsUnlocked)
+				: accountsSnapshot;
+		if (!accounts) {
+			return storage;
+		}
+		const activeRefreshTokens = new Set((accounts?.accounts ?? []).map((account) => account.refreshToken));
+		const filteredAccounts = storage.accounts.filter((flagged) => activeRefreshTokens.has(flagged.refreshToken));
+		if (filteredAccounts.length === storage.accounts.length) {
+			return storage;
+		}
+		const cleaned = {
+			version: 1 as const,
+			accounts: filteredAccounts,
+		};
+		await saveFlaggedAccountsUnlocked(cleaned);
+		return cleaned;
+	};
 
 	try {
 		const content = await fs.readFile(path, "utf-8");
 		const data = JSON.parse(content) as unknown;
-		return normalizeFlaggedStorage(data);
+		return await removeOrphanedFlaggedAccounts(normalizeFlaggedStorage(data));
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
 		if (code !== "ENOENT") {
@@ -1035,7 +1116,7 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 		const legacyData = JSON.parse(legacyContent) as unknown;
 		const migrated = normalizeFlaggedStorage(legacyData);
 		if (migrated.accounts.length > 0) {
-			await saveFlaggedAccounts(migrated);
+			await saveFlaggedAccountsUnlocked(migrated);
 		}
 		try {
 			await fs.unlink(legacyPath);
@@ -1047,7 +1128,7 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 			to: path,
 			accounts: migrated.accounts.length,
 		});
-		return migrated;
+		return await removeOrphanedFlaggedAccounts(migrated);
 	} catch (error) {
 		log.error("Failed to migrate legacy flagged account storage", {
 			from: legacyPath,
@@ -1058,26 +1139,47 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 	}
 }
 
+export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+	return withStorageLock(async () => {
+		const accountsSnapshot = await loadAccountsInternal(saveAccountsUnlocked);
+		return loadFlaggedAccountsUnlocked(accountsSnapshot);
+	});
+}
+
+/**
+ * Runs `handler` while the storage lock is held.
+ * Do not call lock-acquiring storage helpers from inside `handler`;
+ * use only `persist` for writes while the transaction is active.
+ */
+export async function withFlaggedAccountsTransaction<T>(
+	handler: (
+		current: FlaggedAccountStorageV1,
+		persist: (storage: FlaggedAccountStorageV1) => Promise<void>,
+	) => Promise<T>,
+): Promise<T> {
+	return withStorageLock(async () => {
+		const accountsSnapshot = await loadAccountsInternal(saveAccountsUnlocked);
+		const current = await loadFlaggedAccountsUnlocked(accountsSnapshot);
+		return handler(current, saveFlaggedAccountsUnlocked);
+	});
+}
+
+export async function loadAccountAndFlaggedStorageSnapshot(): Promise<{
+	accounts: AccountStorageV3 | null;
+	flagged: FlaggedAccountStorageV1;
+}> {
+	return withStorageLock(async () => {
+		const accounts = await loadAccountsInternal(saveAccountsUnlocked);
+		return {
+			accounts,
+			flagged: await loadFlaggedAccountsUnlocked(accounts),
+		};
+	});
+}
+
 export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
 	return withStorageLock(async () => {
-		const path = getFlaggedAccountsPath();
-		const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-		const tempPath = `${path}.${uniqueSuffix}.tmp`;
-
-		try {
-			await fs.mkdir(dirname(path), { recursive: true });
-			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
-			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-			await renameWithWindowsRetry(tempPath, path);
-		} catch (error) {
-			try {
-				await fs.unlink(tempPath);
-			} catch {
-				// Ignore cleanup failures.
-			}
-			log.error("Failed to save flagged account storage", { path, error: String(error) });
-			throw error;
-		}
+		await saveFlaggedAccountsUnlocked(storage);
 	});
 }
 
@@ -1155,26 +1257,71 @@ export async function previewImportAccounts(
 	const { normalized } = await readAndNormalizeImportFile(filePath);
 
 	return withAccountStorageTransaction((existing) => {
-		const existingAccounts = existing?.accounts ?? [];
-		const merged = [...existingAccounts, ...normalized.accounts];
+		return Promise.resolve(previewImportAccountsAgainstExistingNormalized(normalized, existing));
+	});
+}
 
-		if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-			const deduped = deduplicateAccountsForStorage(merged);
-			if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-				throw new Error(
-					`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
-				);
-			}
+export async function previewImportAccountsWithExistingStorage(
+	filePath: string,
+	existing: AccountStorageV3 | null | undefined,
+): Promise<{ imported: number; total: number; skipped: number }> {
+	const { normalized } = await readAndNormalizeImportFile(filePath);
+	return previewImportAccountsAgainstExistingNormalized(normalized, existing);
+}
+
+function previewImportAccountsAgainstExistingNormalized(
+	normalized: AccountStorageV3,
+	existing: AccountStorageV3 | null | undefined,
+): { imported: number; total: number; skipped: number } {
+	const existingAccounts = existing?.accounts ?? [];
+	const merged = [...existingAccounts, ...normalized.accounts];
+
+	if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+		const deduped = deduplicateAccountsForStorage(merged);
+		if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+			throw new Error(
+				`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
+			);
+		}
+	}
+
+	const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
+	const imported = Math.max(0, deduplicatedAccounts.length - existingAccounts.length);
+	const skipped = normalized.accounts.length - imported;
+	return {
+		imported,
+		total: deduplicatedAccounts.length,
+		skipped,
+	};
+}
+
+export async function backupRawAccountsFile(filePath: string, force = true): Promise<void> {
+	await withStorageLock(async () => {
+		const resolvedPath = resolvePath(filePath);
+		const copyMode = force ? 0 : fsConstants.COPYFILE_EXCL;
+
+		await migrateLegacyProjectStorageIfNeeded(saveAccountsUnlocked);
+		const storagePath = getStoragePath();
+		if (!existsSync(storagePath)) {
+			throw new Error("No accounts to back up");
 		}
 
-		const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
-		const imported = deduplicatedAccounts.length - existingAccounts.length;
-		const skipped = normalized.accounts.length - imported;
-		return Promise.resolve({
-			imported,
-			total: deduplicatedAccounts.length,
-			skipped,
+		await fs.mkdir(dirname(resolvedPath), { recursive: true });
+		try {
+			await copyFileWithWindowsRetry(storagePath, resolvedPath, copyMode);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+				throw new Error(`File already exists: ${resolvedPath}`);
+			}
+			throw error;
+		}
+		await fs.chmod(resolvedPath, 0o600).catch((chmodErr) => {
+			log.warn("Failed to restrict backup file permissions", {
+				path: resolvedPath,
+				error: String(chmodErr),
+			});
 		});
+		log.info("Backed up raw accounts storage", { path: resolvedPath, source: storagePath });
 	});
 }
 
@@ -1213,6 +1360,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 export async function importAccounts(
 	filePath: string,
 	options: ImportAccountsOptions = {},
+	prepare?: PrepareImportStorage,
 ): Promise<ImportAccountsResult> {
   const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
   const backupMode = options.backupMode ?? "none";
@@ -1227,6 +1375,25 @@ export async function importAccounts(
     backupError,
   } =
     await withAccountStorageTransaction(async (existing, persist) => {
+      const prepared = prepare
+        ? prepare(
+            structuredClone(normalized),
+            existing ? structuredClone(existing) : existing,
+          )
+        : normalized;
+      const preparedNormalized = normalizeAccountStorage(prepared);
+      if (!preparedNormalized) {
+        throw new Error("prepare() returned invalid account storage");
+      }
+      const normalizedIdentities = new Set(normalized.accounts.map((account) => getAccountSubsetIdentity(account)));
+      const preparedIdentities = preparedNormalized.accounts.map((account) => getAccountSubsetIdentity(account));
+      if (
+        preparedNormalized.accounts.length > normalized.accounts.length ||
+        preparedIdentities.some((identity) => !normalizedIdentities.has(identity))
+      ) {
+        throw new Error("prepare() must return a subset of normalized import accounts");
+      }
+      const skippedByPrepare = Math.max(0, normalized.accounts.length - preparedNormalized.accounts.length);
       const existingStorage: AccountStorageV3 =
         existing ??
         ({
@@ -1262,7 +1429,7 @@ export async function importAccounts(
         }
       }
 
-      const merged = [...existingAccounts, ...normalized.accounts];
+      const merged = [...existingAccounts, ...preparedNormalized.accounts];
 
       if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
         const deduped = deduplicateAccountsForStorage(merged);
@@ -1309,8 +1476,8 @@ export async function importAccounts(
 
       await persist(newStorage);
 
-      const imported = deduplicatedAccounts.length - existingAccounts.length;
-      const skipped = normalized.accounts.length - imported;
+      const imported = Math.max(0, deduplicatedAccounts.length - existingAccounts.length);
+      const skipped = skippedByPrepare + Math.max(0, preparedNormalized.accounts.length - imported);
       return {
         imported,
         total: deduplicatedAccounts.length,
