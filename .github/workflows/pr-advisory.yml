@@ -153,6 +153,8 @@ jobs:
             node: 22
           - os: macos-latest
             node: 20 # Intentionally pins the current default advisory lane; update when .nvmrc changes.
+          - os: windows-latest
+            node: 18 # Verify Windows + LTS compatibility; antivirus locking is a known risk.
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
