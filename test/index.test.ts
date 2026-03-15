@@ -2400,6 +2400,112 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(vi.mocked(storageModule.withAccountAndFlaggedStorageTransaction)).toHaveBeenCalled();
 			expect(vi.mocked(storageModule.withFlaggedAccountsTransaction)).not.toHaveBeenCalled();
 		});
+
+		it("restores sync prune backup when sync fails after successful prune removal", async () => {
+			const cliModule = await import("../lib/cli.js");
+			const confirmModule = await import("../lib/ui/confirm.js");
+			const configModule = await import("../lib/config.js");
+			const storageModule = await import("../lib/storage.js");
+			const syncModule = await import("../lib/codex-multi-auth-sync.js");
+
+			mockStorage.accounts = [
+				{
+					accountId: "remove-me",
+					email: "remove@example.com",
+					refreshToken: "refresh-remove",
+					accessToken: "access-remove",
+					idToken: "id-remove",
+					addedAt: 1,
+					lastUsed: 1,
+				},
+				{
+					accountId: "keep-me",
+					email: "keep@example.com",
+					refreshToken: "refresh-keep",
+					accessToken: "access-keep",
+					idToken: "id-keep",
+					addedAt: 2,
+					lastUsed: 2,
+				},
+			];
+			mockStorage.activeIndex = 1;
+			mockStorage.activeIndexByFamily = { codex: 1 };
+			mockFlaggedStorage.accounts = [
+				{
+					accountId: "remove-me",
+					email: "remove@example.com",
+					refreshToken: "refresh-remove",
+					accessToken: "flagged-access-remove",
+					idToken: "flagged-id-remove",
+					flaggedAt: 123,
+					addedAt: 1,
+					lastUsed: 1,
+				},
+			];
+
+			const originalAccounts = cloneMockStorage();
+			const originalFlagged = cloneMockFlaggedStorage();
+			const { CodexMultiAuthSyncCapacityError } = syncModule;
+			vi.mocked(configModule.getSyncFromCodexMultiAuthEnabled).mockReturnValue(true);
+			vi.mocked(cliModule.promptLoginMode)
+				.mockResolvedValueOnce({ mode: "experimental-sync-now" })
+				.mockResolvedValueOnce({ mode: "cancel" })
+				.mockResolvedValue({ mode: "cancel" });
+			vi.mocked(cliModule.promptCodexMultiAuthSyncPrune).mockResolvedValueOnce([0]);
+			vi.mocked(confirmModule.confirm).mockResolvedValue(true);
+			vi.mocked(syncModule.previewSyncFromCodexMultiAuth)
+				.mockRejectedValueOnce(
+					new CodexMultiAuthSyncCapacityError({
+						rootDir: "/tmp/codex-source",
+						accountsPath: "/tmp/codex-source/openai-codex-accounts.json",
+						scope: "global",
+						currentCount: 2,
+						sourceCount: 1,
+						sourceDedupedTotal: 1,
+						dedupedTotal: 3,
+						maxAccounts: 2,
+						needToRemove: 1,
+						importableNewAccounts: 1,
+						skippedOverlaps: 0,
+						suggestedRemovals: [
+							{
+								index: 0,
+								email: "remove@example.com",
+								accountLabel: "Remove Me",
+								refreshToken: "refresh-remove",
+								organizationId: undefined,
+								accountId: "remove-me",
+								isCurrentAccount: false,
+								score: 100,
+								reason: "test removal",
+							},
+						],
+					}),
+				)
+				.mockResolvedValueOnce({
+					rootDir: "/tmp/codex-source",
+					accountsPath: "/tmp/codex-source/openai-codex-accounts.json",
+					scope: "global",
+					imported: 1,
+					skipped: 0,
+					total: 2,
+				});
+			vi.mocked(syncModule.syncFromCodexMultiAuth).mockRejectedValueOnce(
+				new Error("sync failed after prune"),
+			);
+
+			const autoMethod = plugin.auth.methods[0] as unknown as {
+				authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+			};
+
+			const result = await autoMethod.authorize();
+			expect(result.instructions).toBe("Authentication cancelled");
+			expect(mockStorage).toMatchObject(originalAccounts);
+			expect(mockFlaggedStorage).toMatchObject(originalFlagged);
+			expect(vi.mocked(storageModule.loadAccountAndFlaggedStorageSnapshot)).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(storageModule.withAccountAndFlaggedStorageTransaction)).toHaveBeenCalledTimes(2);
+			expect(vi.mocked(syncModule.syncFromCodexMultiAuth)).toHaveBeenCalledTimes(1);
+		});
 	});
 });
 
