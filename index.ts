@@ -3406,6 +3406,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 							};
 
 							const SYNC_PRUNE_BACKUP_PREFIX = "codex-sync-prune-backup";
+							// Crash-safe prune restores can retain live tokens here when explicitly requested, so
+							// keep retention low; pruneOldSyncPruneBackups is the only automatic cleanup gate and
+							// Windows still relies on config-home ACLs because `mode: 0o600` is only advisory.
 							const SYNC_PRUNE_BACKUP_RETAIN_COUNT = 2;
 							const SYNC_PRUNE_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 							const SYNC_PRUNE_BACKUP_RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160] as const;
@@ -3921,13 +3924,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 											for (const line of removalPlan.previewLines) {
 												console.log(`  ${line}`);
 											}
+											if (!pruneBackup) {
+												pruneBackup = await createSyncPruneBackup();
+											}
 											if (!(await confirm(`Remove ${indexesToRemove.length} selected account(s) and retry sync?`))) {
 												await restorePruneBackup();
 												console.log("Sync cancelled.\n");
 												return;
-											}
-											if (!pruneBackup) {
-												pruneBackup = await createSyncPruneBackup();
 											}
 											try {
 												await removeAccountsForSync(removalPlan.targets);
@@ -3978,6 +3981,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									console.log(`Removed overlaps: ${result.removed}`);
 									console.log(`Updated synced records: ${result.updated}`);
 									console.log(`Backup: ${backupPath}`);
+									console.log("Remove this backup after you finish verifying the cleanup.");
 									console.log("");
 								} catch (error) {
 									const message = error instanceof Error ? error.message : String(error);
