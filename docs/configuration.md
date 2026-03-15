@@ -1,10 +1,10 @@
-# configuration
+# Configuration Reference
 
-complete reference for configuring the plugin. most of this is optional - defaults work fine for most people.
+Complete reference for configuring `oc-chatgpt-multi-auth`. Most of this is optional; the defaults work for most people.
 
 ---
 
-## quick start
+## Base Configuration
 
 ```json
 {
@@ -26,9 +26,9 @@ complete reference for configuring the plugin. most of this is optional - defaul
 
 ---
 
-## model options
+## Model Options
 
-### reasoningEffort
+### Reasoning Effort
 
 controls how much thinking the model does.
 
@@ -65,7 +65,7 @@ what they mean:
 - `high` - deep reasoning
 - `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`; available for `gpt-5.4` and optional `gpt-5.4-pro`)
 
-### reasoningSummary
+### Reasoning Summary
 
 | value | what it does |
 |-------|--------------|
@@ -75,7 +75,7 @@ what they mean:
 
 legacy `off`/`on` values are accepted from old configs but normalized to `auto` at request time.
 
-### textVerbosity
+### Text Verbosity
 
 | value | what it does |
 |-------|--------------|
@@ -83,7 +83,7 @@ legacy `off`/`on` values are accepted from old configs but normalized to `auto` 
 | `medium` | balanced (default) |
 | `high` | verbose responses |
 
-### include
+### Include
 
 array of extra response fields.
 
@@ -91,7 +91,7 @@ array of extra response fields.
 |-------|-----------------|
 | `reasoning.encrypted_content` | required for multi-turn with `store: false` |
 
-### store
+### Store
 
 | value | what it does |
 |-------|--------------|
@@ -100,7 +100,7 @@ array of extra response fields.
 
 ---
 
-## plugin config
+## Plugin Config
 
 advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 
@@ -137,7 +137,7 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
 
 The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bounded override; the default remains `Infinity` when the key is omitted.
 
-### options
+### Options
 
 | option | default | what it does |
 |--------|---------|--------------|
@@ -168,7 +168,7 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `fetchTimeoutMs` | `60000` | upstream fetch timeout in ms |
 | `streamStallTimeoutMs` | `45000` | max time to wait for next SSE chunk before aborting |
 
-### beginner safe mode behavior
+### Beginner Safe Mode Behavior
 
 when `beginnerSafeMode` is enabled (`true` or `CODEX_AUTH_BEGINNER_SAFE_MODE=1`), the plugin applies a safer retry profile automatically:
 - forces `retryProfile` to `conservative`
@@ -177,7 +177,7 @@ when `beginnerSafeMode` is enabled (`true` or `CODEX_AUTH_BEGINNER_SAFE_MODE=1`)
 
 this mode is intended for beginners who prefer quick failures + clearer recovery actions over long retry loops.
 
-### unsupported-model behavior + fallback chain
+### Unsupported-Model Behavior and Fallback Chain
 
 by default the plugin is strict (`unsupportedCodexPolicy: "strict"`). it returns entitlement errors directly for unsupported models.
 
@@ -210,7 +210,7 @@ legacy toggle compatibility:
 - `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1` maps to fallback mode
 - `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=0` maps to strict mode
 
-### environment variables
+### Environment Variables
 
 override any config with env vars:
 
@@ -245,9 +245,9 @@ override any config with env vars:
 
 ---
 
-## config patterns
+## Config Patterns
 
-### global options
+### Global Options
 
 same settings for all models:
 
@@ -266,7 +266,7 @@ same settings for all models:
 }
 ```
 
-### per-model options
+### Per-Model Options
 
 different settings for different models:
 
@@ -295,7 +295,7 @@ different settings for different models:
 
 model options override global options.
 
-### project-specific
+### Project-Specific
 
 global (`~/.config/opencode/opencode.json`):
 ```json
@@ -324,7 +324,7 @@ result: project uses `high`, other projects use `medium`.
 
 ---
 
-## file locations
+## File Locations
 
 | file | what it's for |
 |------|---------------|
@@ -341,16 +341,16 @@ result: project uses `high`, other projects use `medium`.
 
 ---
 
-## debugging
+## Debugging
 
-### check config is valid
+### Check Config Is Valid
 
 ```bash
 opencode
 # shows errors if config is invalid
 ```
 
-### verify model resolution
+### Verify Model Resolution
 
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/gpt-5.4
@@ -364,7 +364,7 @@ look for:
 }
 ```
 
-### test per-model options
+### Test Per-Model Options
 
 ```bash
 # modern opencode (variants)
@@ -381,9 +381,9 @@ cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasonin
 
 ---
 
-## troubleshooting
+## Troubleshooting
 
-### model not found
+### Model Not Found
 
 **error**: `Model 'openai/my-model' not found`
 
@@ -395,7 +395,7 @@ cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '.reasonin
 opencode run "test" --model=openai/my-model
 ```
 
-### per-model options not applied
+### Per-Model Options Not Applied
 
 ```bash
 DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/your-model
@@ -403,7 +403,7 @@ DEBUG_CODEX_PLUGIN=1 opencode run "test" --model=openai/your-model
 
 look for `hasModelSpecificConfig: true`. if it's false, config lookup failed - check for typos.
 
-### per-project accounts not working
+### Per-Project Accounts Not Working
 
 make sure you're in a project directory (has `.git`, `package.json`, etc). the plugin auto-detects the project root and uses a namespaced file under `~/.opencode/projects/`. if no project root is found, it falls back to global storage.
 

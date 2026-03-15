@@ -1,8 +1,8 @@
-# Contributing Guidelines
+# Contributing
 
-Thank you for your interest in contributing to oc-chatgpt-multi-auth!
+Thank you for contributing to `oc-chatgpt-multi-auth`.
 
-Before submitting contributions, please review these guidelines to ensure all changes maintain compliance with OpenAI's Terms of Service and the project's goals.
+This project accepts improvements that make the OpenCode plugin clearer, safer, easier to maintain, and more useful for personal development workflows.
 
 ## Compliance Requirements
 
@@ -33,13 +33,28 @@ All contributions MUST:
 - Credential sharing mechanisms
 - Features designed to violate OpenAI's terms
 
+## Scope and Compliance
+
+Contributions should stay within the project's intended scope:
+
+- personal development workflows in OpenCode
+- official OAuth authentication flows
+- reliable GPT-5/Codex model support
+- documentation, debugging, testing, and maintainability improvements
+
+The project does not accept work aimed at:
+
+- commercial resale or shared multi-user access
+- bypassing safeguards, scraping sessions, or avoiding platform controls
+- misleading documentation or exaggerated capability claims
+
 ## Code Standards
 
 - **TypeScript:** All code must be TypeScript with strict type checking
-- **Testing:** Include tests for new functionality (we maintain 200+ unit tests)
+- **Testing:** Include or update tests for behavioral changes
 - **Documentation:** Update README.md for user-facing changes
-- **Modular design:** Keep functions focused and under 40 lines
-- **No external dependencies:** Minimize dependencies (currently only @openauthjs/openauth)
+- **Modular design:** Keep functions focused and easy to review
+- **Dependencies:** Add new dependencies only when the benefit is clear
 
 ## Pull Request Process
 
@@ -48,8 +63,13 @@ All contributions MUST:
 3. **Include tests** for new functionality
 4. **Update documentation** (README.md, config examples, etc.)
 5. **Ensure compliance** with guidelines above
-6. **Test thoroughly** with actual ChatGPT Plus/Pro account
-7. **Submit PR** with clear description of changes
+6. **Test thoroughly** with the most appropriate validation for the change
+7. **Complete the pull request template** with summary, testing, and compliance details
+8. **Submit PR** with clear description of changes
+
+Pull requests are automatically screened for incomplete or suspicious submissions. Legitimate contributions are still welcome, but low-signal PRs may be flagged for maintainer review before they move forward.
+
+If a PR is flagged incorrectly, a maintainer can override the workflow with the `exempt` label after review.
 
 ## Reporting Issues
 
@@ -107,30 +127,18 @@ We will decline features that:
 
 ## Code of Conduct
 
-### Our Standards
-
-✅ **Encouraged:**
-- Respectful and constructive communication
-- Focus on legitimate use cases
-- Transparency about limitations and compliance
-- Helping other users with proper usage
-
-❌ **Not Acceptable:**
-- Requesting help with TOS violations
-- Promoting commercial misuse
-- Hostile or disrespectful behavior
-- Sharing credentials or tokens
+All contributors are expected to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Questions?
 
 For questions about:
-- **Plugin usage:** Open a GitHub issue
-- **OpenAI's terms:** Contact OpenAI support
-- **Contributing:** Open a discussion thread
+- **Plugin usage:** open a GitHub issue
+- **OpenAI's terms:** contact OpenAI support
+- **Contributing:** open an issue describing the proposed change
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License with Usage Disclaimer (see LICENSE file).
+By contributing, you agree that your contributions will be licensed under the MIT License (see [LICENSE](LICENSE)).
 
 ---
 

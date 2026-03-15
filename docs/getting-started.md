@@ -1,58 +1,43 @@
 # Getting Started
 
-Complete installation and setup guide for the OpenCode OpenAI Codex Auth Plugin.
+This guide covers the full installation and first-run flow for `oc-chatgpt-multi-auth`.
 
----
-
-<details open>
-<summary><b>Before You Begin</b></summary>
+## Before You Begin
 
 > [!CAUTION]
-> **This plugin is for personal development use only.** It uses OpenAI's official OAuth authentication for individual coding assistance with your ChatGPT Plus/Pro subscription.
+> This plugin is for personal development use with your own ChatGPT Plus/Pro subscription.
 >
-> **Not intended for:** Commercial services, API resale, multi-user applications, or any use that violates [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/).
->
-> For production applications, use the [OpenAI Platform API](https://platform.openai.com/).
-
-</details>
-
----
+> - It is not intended for commercial resale, shared multi-user access, or production services.
+> - It uses official OAuth authentication, but it is an independent open-source project and is not affiliated with OpenAI.
+> - For production applications, use the [OpenAI Platform API](https://platform.openai.com/).
 
 ## Prerequisites
 
 | Requirement | Notes |
 |-------------|-------|
-| **OpenCode** | [Installation guide](https://opencode.ai) |
-| **ChatGPT Plus or Pro** | Required for Codex access |
-| **Node.js 20+** | For OpenCode runtime |
+| OpenCode | Install from [opencode.ai](https://opencode.ai) |
+| ChatGPT Plus or Pro | Required for OAuth access and model entitlements |
+| Node.js 20+ | Needed for local OpenCode runtime and plugin installation |
 
----
-
-## Installation
-
-<details open>
-<summary><b>Option A: One-Command Install (Recommended)</b></summary>
-
-Works on **Windows, macOS, and Linux**:
+## Fastest Install Path
 
 ```bash
 npx -y oc-chatgpt-multi-auth@latest
+opencode auth login
+opencode run "Explain this repository" --model=openai/gpt-5.4 --variant=medium
 ```
 
-This:
-- Writes config to `~/.config/opencode/opencode.json`
-- Backs up existing config
-- Clears OpenCode plugin cache
+The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, and clears the cached plugin copy so OpenCode reinstalls the latest package.
 
-**Legacy OpenCode (v1.0.209 and below)?**
+If you are on OpenCode `v1.0.209` or earlier, use:
+
 ```bash
 npx -y oc-chatgpt-multi-auth@latest --legacy
 ```
 
-</details>
+## Install from Source
 
-<details>
-<summary><b>Option B: Install from Source</b></summary>
+Use this only when you want to develop or test the plugin locally.
 
 ```bash
 git clone https://github.com/ndycode/oc-chatgpt-multi-auth.git
@@ -61,7 +46,7 @@ npm ci
 npm run build
 ```
 
-Point OpenCode at the local build output:
+Point OpenCode at the built plugin:
 
 ```json
 {
@@ -69,17 +54,34 @@ Point OpenCode at the local build output:
 }
 ```
 
-> **Note**: Must point to `dist/` folder (built output), not root.
+Use the built `dist/` directory, not the repository root.
 
-</details>
+## Authentication
 
----
+Run:
 
-## Setup Steps
+```bash
+opencode auth login
+```
 
-### Step 1: Add Plugin to Config
+Then choose:
 
-Edit `~/.config/opencode/opencode.json`:
+1. `OpenAI`
+2. `ChatGPT Plus/Pro (Codex Subscription)`
+
+The browser-based OAuth flow uses the same local callback port as Codex CLI: `http://127.0.0.1:1455/auth/callback`.
+
+### Remote or Headless Login
+
+If you are on SSH, WSL, or another environment where the browser callback flow is inconvenient:
+
+1. rerun `opencode auth login`
+2. choose `ChatGPT Plus/Pro (Manual URL Paste)`
+3. paste the full redirect URL after login completes in the browser
+
+## Add the Plugin to OpenCode
+
+If you are not using the installer, edit `~/.config/opencode/opencode.json` manually:
 
 ```json
 {
@@ -88,78 +90,49 @@ Edit `~/.config/opencode/opencode.json`:
 }
 ```
 
-> If you installed from source, use the `file://` path instead.
+## Choose a Config Template
 
-### Step 2: Authenticate
+The repository ships two supported templates:
 
-```bash
-opencode auth login
-```
+| OpenCode version | Template |
+|------------------|----------|
+| `v1.0.210+` | [`config/opencode-modern.json`](../config/opencode-modern.json) |
+| `v1.0.209` and earlier | [`config/opencode-legacy.json`](../config/opencode-legacy.json) |
 
-1. Select **"OpenAI"**
-2. Choose **"ChatGPT Plus/Pro (Codex Subscription)"**
-3. Browser opens automatically for OAuth flow
-4. Log in with your ChatGPT account
-5. Done! Token saved to `~/.opencode/auth/openai.json`
+The templates include the supported GPT-5/Codex families, required `store: false` handling, and `reasoning.encrypted_content` for multi-turn sessions.
 
-<details>
-<summary><b>OAuth Not Working?</b></summary>
+Optional model IDs such as `gpt-5.4-pro` or entitlement-gated Spark variants should be added manually only when your workspace supports them.
 
-**Port conflict:**
-- Stop Codex CLI if running (both use port 1455)
-- Check: `lsof -i :1455` (macOS/Linux) or `netstat -ano | findstr :1455` (Windows)
+## Verify the Setup
 
-**SSH/WSL/Remote:**
-- Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
-- Paste the full redirect URL after login
-
-</details>
-
-### Step 3: Add Model Configuration
-
-Use one of the provided config files:
-
-| OpenCode Version | Config File |
-|------------------|-------------|
-| v1.0.210+ (modern) | `config/opencode-modern.json` |
-| v1.0.209 and below | `config/opencode-legacy.json` |
-
-Copy the relevant config to your `~/.config/opencode/opencode.json`.
-
-The shipped templates include 21 presets and intentionally omit optional IDs. Add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only when your workspace is entitled.
-
-<details>
-<summary><b>Why use the full config?</b></summary>
-
-- GPT-5 models need proper configuration to work reliably
-- Full configs include `limit` metadata for OpenCode UI features
-- Minimal configs are for debugging only
-
-</details>
-
-### Step 4: Test It
+Run one of these commands:
 
 ```bash
-# Modern OpenCode (v1.0.210+)
-opencode run "write hello world to test.txt" --model=openai/gpt-5.4 --variant=medium
-opencode run "write hello world to test.txt" --model=openai/gpt-5-codex --variant=medium
+# Modern OpenCode
+opencode run "Create a short TODO list for this repo" --model=openai/gpt-5.4 --variant=medium
+opencode run "Inspect the retry logic and summarize it" --model=openai/gpt-5-codex --variant=high
 
-# Legacy OpenCode (v1.0.209 and below)
-opencode run "write hello world to test.txt" --model=openai/gpt-5.4-medium
-
-# Or start interactive session
-opencode
+# Legacy OpenCode
+opencode run "Create a short TODO list for this repo" --model=openai/gpt-5.4-medium
 ```
 
-You'll see all 21 GPT-5.x variants in the model selector!
+If you want to verify request routing, run a request with logging enabled:
 
-If `gpt-5.4-pro`, `gpt-5-codex`, or `gpt-5.3-codex-spark` returns an unsupported-model entitlement error, re-auth with `opencode auth login` or add another entitled account/workspace first. The plugin tries remaining accounts/workspaces before model fallback. See [Configuration](configuration.md) for strict vs fallback policy controls.
+```bash
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4
+```
 
-If you manually add Spark IDs and want to confirm effective upstream routing, run with `ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1` and inspect `~/.opencode/logs/codex-plugin/request-*-after-transform.json`.
+The first request should create logs under `~/.opencode/logs/codex-plugin/`.
 
-### Step 5: Run Beginner Onboarding Commands (Recommended)
+## Multi-Account Setup
 
-After adding accounts, run:
+The plugin can manage multiple ChatGPT accounts and choose the healthiest account or workspace for each request.
+
+After your first successful login, you can add more accounts by running `opencode auth login` again or by using the guided commands below.
+
+## Guided Onboarding Commands
+
+These commands are useful after installation:
 
 ```text
 codex-setup
@@ -168,22 +141,16 @@ codex-doctor
 codex-next
 ```
 
-If your terminal supports menus, you can use guided onboarding:
-
-```text
-codex-setup wizard=true
-```
-
 Notes:
-- `codex-switch`, `codex-label`, and `codex-remove` support interactive account pickers when `index` is omitted in interactive terminals.
-- On plugin startup, a one-line preflight summary is shown (healthy/blocked/rate-limited + suggested next action).
 
-### Optional: Enable Beginner Safe Mode
+- `codex-switch`, `codex-label`, and `codex-remove` can show interactive account pickers when `index` is omitted in a supported terminal.
+- The plugin can show a startup preflight summary with the current account health state and suggested next step.
 
-If you want conservative retry behavior while learning:
+## Beginner Safe Mode
+
+If you want conservative retry behavior while learning the workflow, enable beginner safe mode:
 
 ```json
-// ~/.opencode/openai-codex-auth-config.json
 {
   "beginnerSafeMode": true
 }
@@ -195,110 +162,27 @@ Or via environment variable:
 CODEX_AUTH_BEGINNER_SAFE_MODE=1 opencode
 ```
 
-Safe mode effects:
-- Forces conservative retry profile
-- Disables all-accounts rate-limit wait/retry
-- Caps all-accounts retries to one attempt
+This mode forces a more conservative retry profile and reduces the chance of long retry loops while you are debugging setup issues.
 
----
+## Update the Plugin
 
-## Available Models
-
-| Model | Variants | Notes |
-|-------|----------|-------|
-| `gpt-5.4` | none, low, medium, high, xhigh | Latest GPT-5.4 (1,000,000 context) |
-| `gpt-5.4-pro` | low, medium, high, xhigh | Optional manual model for deeper reasoning; when `unsupportedCodexPolicy=fallback`, fallback includes `gpt-5.4-pro -> gpt-5.4` (1,000,000 context) |
-| `gpt-5-codex` | low, medium, high | Canonical Codex for code generation |
-| `gpt-5.3-codex-spark` | low, medium, high, xhigh | Optional manual model; entitlement-gated by account/workspace |
-| `gpt-5.1-codex-max` | low, medium, high, xhigh | Maximum context |
-| `gpt-5.1-codex` | low, medium, high | Standard Codex |
-| `gpt-5.1-codex-mini` | medium, high | Lightweight |
-| `gpt-5.1` | none, low, medium, high | Base model |
-
-**Total: 21 template presets** with mixed context sizing: shipped `gpt-5.4` presets at 1,000,000 / 128,000 and other shipped families at 272,000 / 128,000. Optional manual IDs such as `gpt-5.4-pro` and `gpt-5.3-codex-spark` are excluded from that count.
-
----
-
-## Configuration Locations
-
-OpenCode checks multiple config files in order:
-
-| Priority | Location | Use Case |
-|----------|----------|----------|
-| 1 | `./.opencode.json` | Project-specific |
-| 2 | Parent directories | Monorepo |
-| 3 | `~/.config/opencode/opencode.json` | Global defaults |
-
-**Recommendation**: Plugin in global config, model/agent overrides in project config.
-
----
-
-## Updating the Plugin
-
-<details>
-<summary><b>From npm</b></summary>
-
-OpenCode caches plugins. Re-run the installer:
+From npm:
 
 ```bash
 npx -y oc-chatgpt-multi-auth@latest
 ```
 
-</details>
-
-<details>
-<summary><b>From source</b></summary>
+From a local clone:
 
 ```bash
-cd oc-chatgpt-multi-auth
 git pull
 npm ci
 npm run build
 ```
 
-</details>
+## Next Reading
 
-**When to update:**
-- New features released
-- Bug fixes available
-- Security updates
-
-**Check for updates**: [Releases Page](https://github.com/ndycode/oc-chatgpt-multi-auth/releases)
-
----
-
-## Verifying Installation
-
-### Check Plugin is Loaded
-
-```bash
-opencode --version
-# Should not show any plugin errors
-```
-
-### Check Authentication
-
-```bash
-cat ~/.opencode/auth/openai.json
-# Should show OAuth credentials
-```
-
-### Test API Access
-
-```bash
-# Enable logging to verify requests
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4
-
-# Check logs
-ls ~/.opencode/logs/codex-plugin/
-```
-
----
-
-## Next Steps
-
-- [Configuration Guide](configuration.md) — Advanced config options
-- [Troubleshooting](troubleshooting.md) — Common issues and solutions
-- [Architecture](development/ARCHITECTURE.md) — Technical deep dive
-
-**Back to**: [Documentation Home](index.md) | [Main README](../README.md)
+- [Configuration Reference](configuration.md)
+- [Troubleshooting](troubleshooting.md)
+- [FAQ](faq.md)
+- [Privacy & Data Handling](privacy.md)

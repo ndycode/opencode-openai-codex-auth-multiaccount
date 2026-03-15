@@ -1,6 +1,6 @@
 # Privacy & Data Handling
 
-This page explains how the OpenCode OpenAI Codex Auth Plugin handles your data and protects your privacy.
+This page explains how `oc-chatgpt-multi-auth` handles local data, upstream requests, and debugging artifacts.
 
 ## Overview
 
@@ -198,6 +198,6 @@ For privacy-related questions:
 
 ---
 
-**Last Updated:** 2025-10-12
+**Last Updated:** 2026-03-11
 
 **Back to:** [Documentation Home](index.md) | [Getting Started](getting-started.md)

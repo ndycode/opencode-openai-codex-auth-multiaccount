@@ -17,6 +17,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
 - **account storage schema**: V3 account metadata now includes optional `accountTags` and `accountNote`.
 - **docs refresh for operational flows**: README + docs portal/development guides updated to reflect beginner commands, safe mode, interactive picker behavior, and backup/import safeguards.
+- **repository presentation refresh**: rewrote the README as a landing page, added a public FAQ and code of conduct, refreshed package metadata, and removed stale CI/test claims from public docs surfaces.
 - **test matrix expansion**: coverage now includes beginner UI helpers, safe-fix diagnostics edge cases, tag/note command behavior, and timestamped backup/import preview utilities.
 
 ### fixed

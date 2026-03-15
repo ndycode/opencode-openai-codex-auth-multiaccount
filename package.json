@@ -1,7 +1,7 @@
 {
   "name": "oc-chatgpt-multi-auth",
   "version": "5.4.4",
-  "description": "Multi-account rotation plugin for ChatGPT Plus/Pro (OAuth / Codex backend)",
+  "description": "OpenCode plugin for using ChatGPT Plus/Pro in GPT-5 and Codex workflows with OAuth login, multi-account rotation, and guided setup",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
@@ -12,17 +12,22 @@
     "url": "git+https://github.com/ndycode/oc-chatgpt-multi-auth.git"
   },
   "keywords": [
+    "typescript",
+    "nodejs",
     "opencode",
+    "opencode-plugin",
     "openai",
-    "codex",
     "chatgpt",
-    "oauth",
-    "gpt-5",
-    "plugin",
-    "auth",
     "chatgpt-plus",
     "chatgpt-pro",
-    "multi-account"
+    "oauth",
+    "oauth2",
+    "pkce",
+    "gpt-5",
+    "codex",
+    "multi-account",
+    "developer-tools",
+    "terminal"
   ],
   "homepage": "https://github.com/ndycode/oc-chatgpt-multi-auth#readme",
   "bugs": {

@@ -4,7 +4,7 @@ Generated: 2026-02-03
 
 ## OVERVIEW
 Vitest suites for OAuth flow, request transforms, response handling, rotation logic, and more.
-**1498 tests** across **49 test files** with 89% coverage.
+The suite is extensive and evolves frequently, so use the current test tree and local commands as the source of truth instead of hard-coded totals.
 
 ## STRUCTURE
 ```
