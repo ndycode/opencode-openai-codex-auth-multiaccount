@@ -1784,6 +1784,57 @@ describe("storage", () => {
       }
     });
 
+    it("reuses the loaded accounts snapshot inside loadFlaggedAccounts", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+          {
+            refreshToken: "orphan-refresh",
+            flaggedAt: 2,
+            addedAt: 2,
+            lastUsed: 2,
+          },
+        ],
+      });
+
+      const originalReadFile = fs.readFile.bind(fs);
+      const readSpy = vi.spyOn(fs, "readFile");
+      let accountReadCount = 0;
+      readSpy.mockImplementation(async (path, options) => {
+        if (String(path) === testStoragePath) {
+          accountReadCount++;
+        }
+        return originalReadFile(path as Parameters<typeof fs.readFile>[0], options as never);
+      });
+
+      try {
+        const flagged = await loadFlaggedAccounts();
+        expect(flagged.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+        expect(accountReadCount).toBe(1);
+      } finally {
+        readSpy.mockRestore();
+      }
+    });
+
     it("reuses the loaded accounts snapshot inside withFlaggedAccountsTransaction", async () => {
       await saveAccounts({
         version: 3,
@@ -1855,6 +1906,26 @@ describe("storage", () => {
 
       const raw = JSON.parse(await fs.readFile(backupPath, "utf-8")) as { accounts: Array<{ refreshToken: string }> };
       expect(raw.accounts[0]?.refreshToken).toBe("backup-refresh");
+    });
+
+    it("surfaces a copy-time EEXIST when backing up raw accounts without force", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [{ accountId: "existing", refreshToken: "ref-existing", addedAt: 1, lastUsed: 1 }],
+      });
+
+      const backupPath = join(testWorkDir, "raw-backup-race.json");
+      const copySpy = vi.spyOn(fs, "copyFile").mockRejectedValue(
+        Object.assign(new Error("exists"), { code: "EEXIST" }) as never,
+      );
+
+      try {
+        await expect(backupRawAccountsFile(backupPath, false)).rejects.toThrow(/File already exists/);
+      } finally {
+        copySpy.mockRestore();
+      }
     });
   });
 

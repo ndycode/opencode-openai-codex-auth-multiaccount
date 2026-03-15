@@ -861,6 +861,46 @@ describe('Plugin Configuration', () => {
 			}
 		});
 
+		it('does not consume retry budget when stale lock cleanup succeeds repeatedly', async () => {
+			mockExistsSync.mockReturnValue(true);
+			const readSpy = vi.spyOn(fs.promises, 'readFile').mockResolvedValue(
+				JSON.stringify({ experimental: { syncFromCodexMultiAuth: { enabled: false } } }) as never
+			);
+			const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as never);
+			const writeSpy = vi.spyOn(fs.promises, 'writeFile').mockResolvedValue(undefined);
+			const renameSpy = vi.spyOn(fs.promises, 'rename').mockResolvedValue(undefined);
+			const unlinkSpy = vi.spyOn(fs.promises, 'unlink').mockResolvedValue(undefined);
+			const closeSpy = vi.fn(async () => undefined);
+			const staleError = Object.assign(new Error('lock exists'), { code: 'EEXIST' });
+			const openSpy = vi.spyOn(fs.promises, 'open');
+			for (let attempt = 0; attempt < 5; attempt += 1) {
+				openSpy.mockRejectedValueOnce(staleError as never);
+			}
+			openSpy.mockResolvedValue({
+				close: closeSpy,
+			} as never);
+			const statSpy = vi.spyOn(fs.promises, 'stat').mockResolvedValue({
+				mtimeMs: Date.now() - 31_000,
+			} as never);
+
+			try {
+				await setSyncFromCodexMultiAuthEnabled(true);
+				expect(statSpy).toHaveBeenCalledTimes(5);
+				expect(openSpy).toHaveBeenCalledTimes(6);
+				expect(unlinkSpy).toHaveBeenCalledTimes(6);
+				expect(writeSpy).toHaveBeenCalled();
+				expect(renameSpy).toHaveBeenCalled();
+			} finally {
+				readSpy.mockRestore();
+				mkdirSpy.mockRestore();
+				writeSpy.mockRestore();
+				renameSpy.mockRestore();
+				unlinkSpy.mockRestore();
+				openSpy.mockRestore();
+				statSpy.mockRestore();
+			}
+		});
+
 		it('reads the persisted sync toggle flag', () => {
 			expect(getSyncFromCodexMultiAuthEnabled({ experimental: { syncFromCodexMultiAuth: { enabled: true } } })).toBe(true);
 			expect(getSyncFromCodexMultiAuthEnabled({})).toBe(false);

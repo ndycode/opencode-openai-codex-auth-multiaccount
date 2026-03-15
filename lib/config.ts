@@ -133,10 +133,11 @@ function withConfigMutationLock<T>(fn: () => Promise<T>): Promise<T> {
 
 async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
 	let lastError: NodeJS.ErrnoException | null = null;
+	let attempt = 0;
 
 	await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
 
-	for (let attempt = 0; attempt < CONFIG_LOCK_RETRY_ATTEMPTS; attempt += 1) {
+	while (attempt < CONFIG_LOCK_RETRY_ATTEMPTS) {
 		try {
 			const handle = await fs.open(CONFIG_LOCK_PATH, "wx", 0o600);
 			try {
@@ -167,6 +168,7 @@ async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
 						Math.min(CONFIG_LOCK_RETRY_BASE_DELAY_MS * 2 ** attempt, CONFIG_LOCK_RETRY_MAX_DELAY_MS),
 					),
 				);
+				attempt += 1;
 				continue;
 			}
 			throw error;
@@ -178,7 +180,7 @@ async function withConfigProcessLock<T>(fn: () => Promise<T>): Promise<T> {
 
 async function renameConfigWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
 	let lastError: NodeJS.ErrnoException | null = null;
-	for (let attempt = 0; attempt < 5; attempt += 1) {
+	for (let attempt = 0; attempt < CONFIG_LOCK_RETRY_ATTEMPTS; attempt += 1) {
 		try {
 			await fs.rename(sourcePath, destinationPath);
 			return;
@@ -186,7 +188,12 @@ async function renameConfigWithWindowsRetry(sourcePath: string, destinationPath:
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code === "EPERM" || code === "EBUSY") {
 				lastError = error as NodeJS.ErrnoException;
-				await new Promise((resolve) => setTimeout(resolve, 10 * 2 ** attempt));
+				await new Promise((resolve) =>
+					setTimeout(
+						resolve,
+						Math.min(CONFIG_LOCK_RETRY_BASE_DELAY_MS * 2 ** attempt, CONFIG_LOCK_RETRY_MAX_DELAY_MS),
+					),
+				);
 				continue;
 			}
 			throw error;

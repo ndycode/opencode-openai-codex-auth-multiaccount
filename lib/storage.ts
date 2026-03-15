@@ -1,4 +1,4 @@
-import { promises as fs, existsSync } from "node:fs";
+import { constants as fsConstants, promises as fs, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
@@ -159,12 +159,16 @@ async function renameWithWindowsRetry(sourcePath: string, destinationPath: strin
   }
 }
 
-async function copyFileWithWindowsRetry(sourcePath: string, destinationPath: string): Promise<void> {
+async function copyFileWithWindowsRetry(
+  sourcePath: string,
+  destinationPath: string,
+  mode = 0,
+): Promise<void> {
   let lastError: NodeJS.ErrnoException | null = null;
 
   for (let attempt = 0; attempt < WINDOWS_RENAME_RETRY_ATTEMPTS; attempt += 1) {
     try {
-      await fs.copyFile(sourcePath, destinationPath);
+      await fs.copyFile(sourcePath, destinationPath, mode);
       return;
     } catch (error) {
       if (isWindowsLockError(error)) {
@@ -1136,7 +1140,10 @@ async function loadFlaggedAccountsUnlocked(
 }
 
 export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
-	return withStorageLock(async () => loadFlaggedAccountsUnlocked());
+	return withStorageLock(async () => {
+		const accountsSnapshot = await loadAccountsInternal(saveAccountsUnlocked);
+		return loadFlaggedAccountsUnlocked(accountsSnapshot);
+	});
 }
 
 /**
@@ -1291,10 +1298,7 @@ function previewImportAccountsAgainstExistingNormalized(
 export async function backupRawAccountsFile(filePath: string, force = true): Promise<void> {
 	await withStorageLock(async () => {
 		const resolvedPath = resolvePath(filePath);
-
-		if (!force && existsSync(resolvedPath)) {
-			throw new Error(`File already exists: ${resolvedPath}`);
-		}
+		const copyMode = force ? 0 : fsConstants.COPYFILE_EXCL;
 
 		await migrateLegacyProjectStorageIfNeeded(saveAccountsUnlocked);
 		const storagePath = getStoragePath();
@@ -1303,7 +1307,14 @@ export async function backupRawAccountsFile(filePath: string, force = true): Pro
 		}
 
 		await fs.mkdir(dirname(resolvedPath), { recursive: true });
-		await copyFileWithWindowsRetry(storagePath, resolvedPath);
+		try {
+			await copyFileWithWindowsRetry(storagePath, resolvedPath, copyMode);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+				throw new Error(`File already exists: ${resolvedPath}`);
+			}
+			throw error;
+		}
 		await fs.chmod(resolvedPath, 0o600).catch((chmodErr) => {
 			log.warn("Failed to restrict backup file permissions", {
 				path: resolvedPath,
