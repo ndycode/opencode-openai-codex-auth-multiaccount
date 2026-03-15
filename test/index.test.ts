@@ -2998,6 +2998,19 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 	});
 
+	it("reuses the loader-synced config for UI-only tool renders", async () => {
+		const configModule = await import("../lib/config.js");
+		const { plugin } = await setupPlugin();
+
+		vi.mocked(configModule.loadPluginConfig).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockImplementation(() => {
+			throw new Error("config locked");
+		});
+
+		await expect(plugin.tool["codex-list"].execute()).resolves.toContain("Codex Accounts");
+		expect(configModule.loadPluginConfig).not.toHaveBeenCalled();
+	});
+
 	it("does not let authorize flows reset the loader-synced footer state", async () => {
 		mockStorage.accounts = [
 			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },

@@ -1451,7 +1451,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		const resolveUiRuntime = (): UiRuntimeOptions => {
-			return applyUiRuntimeFromConfig(loadPluginConfig());
+			return applyUiRuntimeFromConfig(resolveRuntimePluginConfig());
 		};
 
 		const resolveRuntimePluginConfig = (): ReturnType<typeof loadPluginConfig> => {
