@@ -941,7 +941,7 @@ export class AccountManager {
 		return removedCount;
 	}
 
-	setAccountEnabled(
+	trySetAccountEnabled(
 		index: number,
 		enabled: boolean,
 		reason?: AccountDisabledReason,
@@ -963,6 +963,15 @@ export class AccountManager {
 			account.disabledReason = "user";
 		}
 		return { ok: true, account };
+	}
+
+	setAccountEnabled(
+		index: number,
+		enabled: boolean,
+		reason?: AccountDisabledReason,
+	): ManagedAccount | null {
+		const result = this.trySetAccountEnabled(index, enabled, reason);
+		return result.ok ? result.account : null;
 	}
 
 	async saveToDisk(): Promise<void> {

@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
+import { normalizeAccountDisabledReason } from "./storage/migrations.js";
 
 // ============================================================================
 // Plugin Configuration Schema
@@ -74,13 +75,10 @@ export const CooldownReasonSchema = z.enum(["auth-failure", "network-error"]);
 
 export type CooldownReasonFromSchema = z.infer<typeof CooldownReasonSchema>;
 
-const normalizeDisabledReason = (value: unknown): unknown =>
-	value === "user" || value === "auth-failure" ? value : undefined;
-
 // Storage normalization strips unknown disabled reasons later; keep schema parsing
 // lenient so legacy/downgraded files don't warn or fail before that step runs.
 export const DisabledReasonSchema = z.preprocess(
-	normalizeDisabledReason,
+	normalizeAccountDisabledReason,
 	z.enum(["user", "auth-failure"]).optional(),
 );
 

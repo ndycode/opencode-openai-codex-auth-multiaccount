@@ -1074,6 +1074,26 @@ describe("storage", () => {
       });
     });
 
+    it("omits enabled for enabled accounts during v1 migration", () => {
+      const data = {
+        version: 1,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "t1",
+            accountId: "A",
+            enabled: true,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts[0]?.enabled).toBeUndefined();
+      expect(result?.accounts[0]).not.toHaveProperty("enabled");
+    });
+
     it("strips invalid disabledReason values from disabled v3 accounts", () => {
       const data = {
         version: 3,
@@ -1097,6 +1117,26 @@ describe("storage", () => {
       });
       expect(result?.accounts[0]?.disabledReason).toBeUndefined();
       expect(result?.accounts[0]).not.toHaveProperty("disabledReason");
+    });
+
+    it("strips enabled: true from v3 accounts during normalization", () => {
+      const data = {
+        version: 3,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "t1",
+            accountId: "A",
+            enabled: true,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.accounts[0]?.enabled).toBeUndefined();
+      expect(result?.accounts[0]).not.toHaveProperty("enabled");
     });
 
     it("preserves activeIndexByFamily when valid", () => {

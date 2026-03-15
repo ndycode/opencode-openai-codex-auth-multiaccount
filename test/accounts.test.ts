@@ -1137,7 +1137,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
 
-      const disabled = manager.setAccountEnabled(0, false, "user");
+      const disabled = manager.trySetAccountEnabled(0, false, "user");
       expect(disabled).toMatchObject({
         ok: true,
         account: {
@@ -1146,7 +1146,7 @@ describe("AccountManager", () => {
         },
       });
 
-      const reenabled = manager.setAccountEnabled(0, true);
+      const reenabled = manager.trySetAccountEnabled(0, true);
       expect(reenabled).toMatchObject({
         ok: true,
         account: {
@@ -1173,7 +1173,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
 
-      const disabled = manager.setAccountEnabled(0, false);
+      const disabled = manager.trySetAccountEnabled(0, false);
       expect(disabled).toMatchObject({
         ok: true,
         account: {
@@ -1201,7 +1201,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
 
-      const disabled = manager.setAccountEnabled(0, false);
+      const disabled = manager.trySetAccountEnabled(0, false);
       expect(disabled).toMatchObject({
         ok: true,
         account: {
@@ -1229,7 +1229,7 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
 
-      const reenabled = manager.setAccountEnabled(0, true);
+      const reenabled = manager.trySetAccountEnabled(0, true);
       expect(reenabled).toEqual({
         ok: false,
         reason: "auth-failure-blocked",
@@ -1237,6 +1237,34 @@ describe("AccountManager", () => {
       expect(manager.getAccountsSnapshot()[0]).toMatchObject({
         enabled: false,
         disabledReason: "auth-failure",
+      });
+    });
+
+    it("preserves the legacy setAccountEnabled account-or-null contract", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "token-1",
+            enabled: false,
+            disabledReason: "auth-failure" as const,
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      expect(manager.setAccountEnabled(0, true)).toBeNull();
+      expect(manager.setAccountEnabled(99, false)).toBeNull();
+
+      const userDisabled = manager.setAccountEnabled(0, false, "user");
+      expect(userDisabled).toMatchObject({
+        enabled: false,
+        disabledReason: "user",
       });
     });
   });

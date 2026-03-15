@@ -7,14 +7,16 @@ import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import { AnyAccountStorageSchema, getValidationErrors } from "./schemas.js";
 import { getConfigDir, getProjectConfigDir, getProjectGlobalConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
 import {
-  migrateV1ToV3,
-  type AccountDisabledReason,
-  type CooldownReason,
-  type RateLimitStateV3,
-  type AccountMetadataV1,
-  type AccountStorageV1,
-  type AccountMetadataV3,
-  type AccountStorageV3,
+	migrateV1ToV3,
+	normalizeStoredAccountDisabledReason,
+	normalizeStoredEnabled,
+	type AccountDisabledReason,
+	type CooldownReason,
+	type RateLimitStateV3,
+	type AccountMetadataV1,
+	type AccountStorageV1,
+	type AccountMetadataV3,
+	type AccountStorageV3,
 } from "./storage/migrations.js";
 
 export type {
@@ -133,17 +135,6 @@ function withStorageLock<T>(fn: () => Promise<T>): Promise<T> {
 const WINDOWS_RENAME_RETRY_ATTEMPTS = 5;
 const WINDOWS_RENAME_RETRY_BASE_DELAY_MS = 10;
 const PRE_IMPORT_BACKUP_WRITE_TIMEOUT_MS = 3_000;
-
-function isDisabledReason(value: unknown): value is AccountDisabledReason {
-  return value === "user" || value === "auth-failure";
-}
-
-function normalizeDisabledReason(
-  enabled: unknown,
-  disabledReason: unknown,
-): AccountDisabledReason | undefined {
-  return enabled === false && isDisabledReason(disabledReason) ? disabledReason : undefined;
-}
 
 function isWindowsLockError(error: unknown): error is NodeJS.ErrnoException {
   const code = (error as NodeJS.ErrnoException)?.code;
@@ -639,7 +630,13 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
     )
     .map((account) => {
       const normalizedAccount: AccountMetadataV3 = { ...account };
-      const disabledReason = normalizeDisabledReason(account.enabled, account.disabledReason);
+      const enabled = normalizeStoredEnabled(account.enabled);
+      const disabledReason = normalizeStoredAccountDisabledReason(account.enabled, account.disabledReason);
+      if (enabled === undefined) {
+        delete normalizedAccount.enabled;
+      } else {
+        normalizedAccount.enabled = enabled;
+      }
       if (disabledReason === undefined) {
         delete normalizedAccount.disabledReason;
       } else {
@@ -1003,7 +1000,10 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		const cooldownReason = isCooldownReason(rawAccount.cooldownReason)
 			? rawAccount.cooldownReason
 			: undefined;
-		const disabledReason = normalizeDisabledReason(rawAccount.enabled, rawAccount.disabledReason);
+		const disabledReason = normalizeStoredAccountDisabledReason(
+			rawAccount.enabled,
+			rawAccount.disabledReason,
+		);
 		const accountTags = normalizeTags(rawAccount.accountTags);
 		const accountNote =
 			typeof rawAccount.accountNote === "string" && rawAccount.accountNote.trim()
