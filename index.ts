@@ -25,7 +25,7 @@
 
 import { tool } from "@opencode-ai/plugin/tool";
 import { promises as fsPromises } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
 import {
@@ -3405,9 +3405,55 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 							};
 
+							const SYNC_PRUNE_BACKUP_PREFIX = "codex-sync-prune-backup";
+							const SYNC_PRUNE_BACKUP_RETAIN_COUNT = 2;
+
+							const pruneOldSyncPruneBackups = async (
+								backupDir: string,
+								keepPaths: string[] = [],
+							): Promise<void> => {
+								const entries = await fsPromises.readdir(backupDir, { withFileTypes: true }).catch((error) => {
+									const code = (error as NodeJS.ErrnoException).code;
+									if (code === "ENOENT") {
+										return null;
+									}
+									throw error;
+								});
+								if (!entries) return;
+
+								const keepSet = new Set(keepPaths);
+								const staleBackupPaths = entries
+									.filter(
+										(entry) =>
+											entry.isFile() &&
+											entry.name.startsWith(`${SYNC_PRUNE_BACKUP_PREFIX}-`) &&
+											entry.name.endsWith(".json"),
+									)
+									.map((entry) => join(backupDir, entry.name))
+									.filter((candidatePath) => !keepSet.has(candidatePath))
+									.sort((left, right) => right.localeCompare(left))
+									.slice(SYNC_PRUNE_BACKUP_RETAIN_COUNT);
+
+								for (const staleBackupPath of staleBackupPaths) {
+									try {
+										await fsPromises.unlink(staleBackupPath);
+									} catch (error) {
+										const code = (error as NodeJS.ErrnoException).code;
+										if (code === "ENOENT") {
+											continue;
+										}
+										const message = error instanceof Error ? error.message : String(error);
+										logWarn(
+											`[${PLUGIN_NAME}] Failed to prune stale sync prune backup ${staleBackupPath}: ${message}`,
+										);
+									}
+								}
+							};
+
 							const createSyncPruneBackup = async (): Promise<{
 								backupPath: string;
 								restore: () => Promise<void>;
+								cleanup: () => Promise<void>;
 							}> => {
 								const { accounts: loadedAccountsStorage, flagged: currentFlaggedStorage } =
 									await loadAccountAndFlaggedStorageSnapshot();
@@ -3419,8 +3465,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 										activeIndex: 0,
 										activeIndexByFamily: {},
 									} satisfies AccountStorageV3);
-								const backupPath = createTimestampedBackupPath("codex-sync-prune-backup");
-								await fsPromises.mkdir(dirname(backupPath), { recursive: true });
+								const backupPath = createTimestampedBackupPath(SYNC_PRUNE_BACKUP_PREFIX);
+								const backupDir = dirname(backupPath);
+								await fsPromises.mkdir(backupDir, { recursive: true });
 								const backupPayload = createSyncPruneBackupPayload(
 									currentAccountsStorage,
 									currentFlaggedStorage,
@@ -3434,6 +3481,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 										mode: 0o600,
 									});
 									await fsPromises.rename(tempBackupPath, backupPath);
+									await pruneOldSyncPruneBackups(backupDir, [backupPath]).catch((cleanupError) => {
+										const cleanupMessage =
+											cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+										logWarn(
+											`[${PLUGIN_NAME}] Failed to prune old sync prune backups in ${backupDir}: ${cleanupMessage}`,
+										);
+									});
 								} catch (error) {
 									try {
 										await fsPromises.unlink(tempBackupPath);
@@ -3483,6 +3537,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 											}
 										});
 										invalidateAccountManagerCache();
+									},
+									cleanup: async () => {
+										try {
+											await fsPromises.unlink(backupPath);
+										} catch (error) {
+											const code = (error as NodeJS.ErrnoException).code;
+											if (code !== "ENOENT") {
+												throw error;
+											}
+										}
+										await pruneOldSyncPruneBackups(backupDir);
 									},
 								};
 							};
@@ -3665,12 +3730,35 @@ while (attempted.size < Math.max(1, accountCount)) {
 									return;
 								}
 
-								let pruneBackup: { backupPath: string; restore: () => Promise<void> } | null = null;
+								let pruneBackup: {
+									backupPath: string;
+									restore: () => Promise<void>;
+									cleanup: () => Promise<void>;
+								} | null = null;
 								const restorePruneBackup = async (): Promise<void> => {
 									const currentBackup = pruneBackup;
 									if (!currentBackup) return;
 									await currentBackup.restore();
 									pruneBackup = null;
+									await currentBackup.cleanup().catch((cleanupError) => {
+										const cleanupMessage =
+											cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+										logWarn(
+											`[${PLUGIN_NAME}] Failed to delete sync prune backup ${currentBackup.backupPath}: ${cleanupMessage}`,
+										);
+									});
+								};
+								const cleanupPruneBackup = async (): Promise<void> => {
+									const currentBackup = pruneBackup;
+									if (!currentBackup) return;
+									pruneBackup = null;
+									await currentBackup.cleanup().catch((cleanupError) => {
+										const cleanupMessage =
+											cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+										logWarn(
+											`[${PLUGIN_NAME}] Failed to delete sync prune backup ${currentBackup.backupPath}: ${cleanupMessage}`,
+										);
+									});
 								};
 
 								while (true) {
@@ -3695,7 +3783,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										}
 
 										const result = await syncFromCodexMultiAuth(process.cwd(), loadedSource);
-										pruneBackup = null;
+										await cleanupPruneBackup();
 										invalidateAccountManagerCache();
 										const backupLabel =
 											result.backupStatus === "created"
