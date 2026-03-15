@@ -1,0 +1,247 @@
+name: PR Advisory
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advisory-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  HUSKY: 0
+
+jobs:
+  detect-dependency-change:
+    name: detect-dependency-change
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      dependency_changed: ${{ steps.detect.outputs.dependency_changed }}
+      code_changed: ${{ steps.detect.outputs.code_changed }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect dependency changes
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          dependency_changed=false
+          code_changed=false
+          files=()
+
+          collect_changed_files() {
+            local range="$1"
+
+            while IFS=$'\t' read -r status first_path second_path; do
+              [[ -z "${status}" ]] && continue
+
+              case "${status}" in
+                R*|C*)
+                  [[ -n "${first_path}" ]] && files+=("${first_path}")
+                  [[ -n "${second_path}" ]] && files+=("${second_path}")
+                  ;;
+                *)
+                  [[ -n "${first_path}" ]] && files+=("${first_path}")
+                  ;;
+              esac
+            done < <(git diff --find-renames --name-status "${range}")
+          }
+
+          if [[ "${EVENT_NAME}" == "schedule" || "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            dependency_changed=true
+            code_changed=true
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "${BASE_REF}"
+            collect_changed_files "origin/${BASE_REF}...HEAD"
+          elif [[ "${EVENT_NAME}" == "push" && -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            collect_changed_files "${BEFORE_SHA}...HEAD"
+          else
+            dependency_changed=true
+            code_changed=true
+          fi
+
+          for file in "${files[@]}"; do
+            [[ -z "${file}" ]] && continue
+            is_docs_markdown=false
+
+            if [[ "${file}" =~ ^(README\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md)$ ]] || [[ "${file}" =~ ^(\.github|config|docs|test)/.+\.(md|markdown)$ ]]; then
+              is_docs_markdown=true
+            fi
+
+            if [[ "${file}" =~ ^(package\.json|package-lock\.json)$ ]]; then
+              dependency_changed=true
+            fi
+
+            if [[ "${is_docs_markdown}" != "true" ]]; then
+              code_changed=true
+            fi
+          done
+
+          {
+            echo "dependency_changed=${dependency_changed}"
+            echo "code_changed=${code_changed}"
+          } >> "${GITHUB_OUTPUT}"
+
+  coverage:
+    name: coverage
+    needs: detect-dependency-change
+    if: needs.detect-dependency-change.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run coverage
+        id: coverage
+        continue-on-error: true
+        run: npm run test:coverage
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: coverage-report-${{ github.run_id }}
+          path: coverage
+          if-no-files-found: ignore
+
+      - name: Write coverage summary
+        if: always()
+        shell: bash
+        env:
+          COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
+        run: |
+          {
+            echo "## Coverage"
+            if [[ "${COVERAGE_OUTCOME}" == "success" ]]; then
+              echo ""
+              echo "- \`npm run test:coverage\` passed."
+            else
+              echo ""
+              echo "- \`npm run test:coverage\` is currently advisory."
+              echo "- The command failed during this run. Keep the artifact for inspection and remediate coverage before promoting it to a required gate."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  compat-matrix:
+    name: compat-matrix (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: detect-dependency-change
+    if: needs.detect-dependency-change.outputs.code_changed == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 18
+          - os: ubuntu-latest
+            node: 22
+          - os: macos-latest
+            node: 20 # Intentionally pins the current default advisory lane; update when .nvmrc changes.
+          - os: windows-latest
+            node: 18 # Verify Windows + LTS compatibility; antivirus locking is a known risk.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Write compat summary
+        if: always()
+        shell: bash
+        env:
+          COMPAT_OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "## Compat matrix (${{ matrix.os }}, Node ${{ matrix.node }})"
+            echo ""
+            if [[ "${COMPAT_OUTCOME}" == "success" ]]; then
+              echo "- build + tests passed."
+            else
+              echo "- build or tests failed. Review logs before promoting this lane to required."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  dependency-audit:
+    name: dependency-audit
+    needs: detect-dependency-change
+    if: needs.detect-dependency-change.outputs.dependency_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run dependency audit
+        id: audit
+        continue-on-error: true
+        run: npm run audit:ci
+
+      - name: Write dependency audit summary
+        if: always()
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          {
+            echo "## Dependency audit"
+            if [[ "${AUDIT_OUTCOME}" == "success" ]]; then
+              echo ""
+              echo "- \`npm run audit:ci\` passed."
+            else
+              echo ""
+              echo "- \`npm run audit:ci\` is currently advisory."
+              echo "- The audit found issues or baseline failures. Review the job log before promoting this lane to required status."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

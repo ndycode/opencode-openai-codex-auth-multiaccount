@@ -1,0 +1,302 @@
+name: PR Governance
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - labeled
+      - reopened
+      - synchronize
+      - unlabeled
+      - ready_for_review
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  # Serialize governance per PR so label/state mutations observe live state and
+  # synchronize runs are not canceled before invalidation logic completes.
+  group: governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  pr-governance:
+    # SECURITY: this job uses pull_request_target so the GitHub token carries
+    # issues: write even for fork PRs. DO NOT add a checkout of the PR head ref
+    # here - doing so would let a fork PR execute arbitrary code with write access.
+    name: pr-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate PR template and live verification markers
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.payload.pull_request.number;
+            const body = context.payload.pull_request.body || "";
+            function stripMarkdownCode(markdown) {
+              const output = [];
+              const lines = markdown.split(/\r?\n/);
+              let inFence = false;
+              let fenceChar = "";
+              let fenceLength = 0;
+
+              for (const line of lines) {
+                if (!inFence) {
+                  const openingFence = line.match(/^(?: {0,3})(`{3,}|~{3,})[^\n]*$/);
+                  if (openingFence) {
+                    inFence = true;
+                    fenceChar = openingFence[1][0];
+                    fenceLength = openingFence[1].length;
+                    output.push("");
+                    continue;
+                  }
+
+                  output.push(line);
+                  continue;
+                }
+
+                const closingFence = new RegExp(`^(?: {0,3})${fenceChar}{${fenceLength},}[^\\n]*$`);
+                if (closingFence.test(line)) {
+                  inFence = false;
+                  fenceChar = "";
+                  fenceLength = 0;
+                }
+
+                output.push("");
+              }
+
+              return output.join("\n").replace(/(`+)([^`\n]|`(?!\1))*\1/g, "");
+            }
+
+            const strippedBody = stripMarkdownCode(body.replace(/<!--[\s\S]*?-->/g, ""));
+            const liveLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner,
+              repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+            const currentLabels = new Set(
+              liveLabels
+                .map((label) => label?.name)
+                .filter((name) => typeof name === "string"),
+            );
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: issueNumber,
+              per_page: 100,
+            });
+
+            const changedFiles = files.map((file) => file.filename);
+            const riskyMatchers = [
+              /^index\.ts$/,
+              /^lib\/auth\//,
+              /^lib\/request\//,
+              /^lib\/storage(?:\/|\.ts$)/,
+              /^lib\/recovery\/storage\.ts$/,
+            ];
+
+            const riskyPaths = files
+              .filter((file) =>
+                [file.filename, file.previous_filename].some(
+                  (candidatePath) => candidatePath && riskyMatchers.some((matcher) => matcher.test(candidatePath))
+                )
+              )
+              .map((file) => file.filename);
+            const liveVerificationRequired = riskyPaths.length > 0;
+
+            const requiredHeadings = [
+              /^## Summary\s*$/m,
+              /^## Testing\s*$/m,
+              /^## Docs Impact\s*$/m,
+              /^## Compliance Confirmation\s*$/m,
+              /^## Notes\s*$/m,
+            ];
+
+            const missingSections = requiredHeadings.filter((pattern) => !pattern.test(strippedBody));
+            function getSectionContent(markdown, heading) {
+              const headingPattern = new RegExp(`^## ${heading}\\s*$`, "m");
+              const match = headingPattern.exec(markdown);
+              if (!match) return "";
+
+              const sectionStart = match.index + match[0].length;
+              const nextHeadingMatch = /^##\s+/m.exec(markdown.slice(sectionStart));
+              const sectionEnd = nextHeadingMatch ? sectionStart + nextHeadingMatch.index : markdown.length;
+              return markdown.slice(sectionStart, sectionEnd);
+            }
+
+            function hasCheckedChecklistLine(section, itemText) {
+              const escapedText = itemText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              return new RegExp(`^\\s*-\\s*\\[x\\]\\s+${escapedText}\\s*$`, "im").test(section);
+            }
+
+            const docsImpactSection = getSectionContent(strippedBody, "Docs Impact");
+            const complianceSection = getSectionContent(strippedBody, "Compliance Confirmation");
+            const complianceChecked = hasCheckedChecklistLine(
+              complianceSection,
+              "This change stays within the repository scope and OpenAI Terms of Service expectations.",
+            );
+            const docsImpactChecked =
+              hasCheckedChecklistLine(docsImpactSection, "README or docs updated") ||
+              hasCheckedChecklistLine(docsImpactSection, "No docs changes needed");
+            const officialAuthChecked = hasCheckedChecklistLine(
+              complianceSection,
+              "This change uses official authentication flows only and does not add bypass, scraping, or credential-sharing behavior.",
+            );
+            const testsDocsChecked = hasCheckedChecklistLine(
+              complianceSection,
+              "I updated tests and documentation when the change affected users, maintainers, or repository behavior.",
+            );
+            const noLiveRequiredChecked = hasCheckedChecklistLine(
+              complianceSection,
+              "No auth, request-routing, or storage paths changed.",
+            );
+            const manualLiveChecked = hasCheckedChecklistLine(
+              complianceSection,
+              "I manually tested with a real ChatGPT Plus/Pro account.",
+            );
+            const liveVerificationLabelName = "needs-live-verification";
+            const maintainerVerifiedLabelName = "maintainer-live-verified";
+            const invalidateMaintainerVerification =
+              context.payload.action === "synchronize" || context.payload.action === "reopened";
+            let maintainerLiveVerified = currentLabels.has(maintainerVerifiedLabelName);
+
+            async function ensureLabel(name, color, description) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                try {
+                  await github.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name,
+                    color,
+                    description,
+                  });
+                } catch (createError) {
+                  if (createError.status === 422) return;
+                  if (String(createError.message ?? "").includes("already_exists")) return;
+                  throw createError;
+                }
+              }
+            }
+
+            if (liveVerificationRequired) {
+              await ensureLabel(
+                maintainerVerifiedLabelName,
+                "0e8a16",
+                "Maintainer completed independent live ChatGPT Plus/Pro verification",
+              );
+              await ensureLabel(
+                liveVerificationLabelName,
+                "b60205",
+                "Manual ChatGPT Plus/Pro verification required before merge",
+              );
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                labels: [liveVerificationLabelName],
+              });
+
+              if (invalidateMaintainerVerification && maintainerLiveVerified) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    name: maintainerVerifiedLabelName,
+                  });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+                maintainerLiveVerified = false;
+              }
+            } else {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  name: liveVerificationLabelName,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+
+              if (invalidateMaintainerVerification && maintainerLiveVerified) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    name: maintainerVerifiedLabelName,
+                  });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+                maintainerLiveVerified = false;
+              }
+            }
+
+            const failures = [];
+
+            if (missingSections.length > 0) {
+              failures.push("PR description is missing one or more required template sections.");
+            }
+
+            if (!complianceChecked) {
+              failures.push("The compliance checkbox must be checked.");
+            }
+
+            if (!docsImpactChecked) {
+              failures.push("Check one of the Docs Impact options.");
+            }
+
+            if (!officialAuthChecked) {
+              failures.push("The official-authentication checkbox must be checked.");
+            }
+
+            if (!testsDocsChecked) {
+              failures.push("The tests/documentation checkbox must be checked.");
+            }
+
+            if (liveVerificationRequired) {
+              if (!manualLiveChecked && !maintainerLiveVerified) {
+                failures.push("This PR touches auth/request/storage paths and needs either the manual live-test checkbox or the maintainer-live-verified label.");
+              }
+            } else if (!noLiveRequiredChecked && !manualLiveChecked && !maintainerLiveVerified) {
+              failures.push('Check either "No auth, request-routing, or storage paths changed." or "I manually tested with a real ChatGPT Plus/Pro account.", or have a maintainer apply the maintainer-live-verified label.');
+            }
+
+            const summaryLines = [
+              "## PR governance",
+              "",
+              `- Changed files: ${changedFiles.length}`,
+              `- Live verification required: ${liveVerificationRequired ? "yes" : "no"}`,
+              `- Maintainer verification label present: ${maintainerLiveVerified ? "yes" : "no"}`,
+            ];
+
+            if (riskyPaths.length > 0) {
+              summaryLines.push(`- Risky paths: ${riskyPaths.join(", ")}`);
+            }
+
+            try {
+              await core.summary.addRaw(summaryLines.join("\n")).write();
+            } catch (summaryError) {
+              const message =
+                summaryError instanceof Error ? summaryError.message : String(summaryError);
+              core.warning(`Failed to write PR governance step summary: ${message}`);
+              console.log(summaryLines.join("\n"));
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(failures.join("\n"));
+            }

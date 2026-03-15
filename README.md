@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/oc-chatgpt-multi-auth/actions/workflows/ci.yml)
 
 Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/Codex model presets, and multi-account failover.
 
@@ -137,7 +138,9 @@ Short answers for the most common questions live in [docs/faq.md](docs/faq.md), 
 
 Contributions are welcome if they keep the project accurate, maintainable, and aligned with its personal-use scope.
 
+- Pull requests run split required checks (`lint`, `typecheck`, `build`, Linux and Windows unit tests, docs/workflow validation) plus advisory coverage, compatibility, and dependency-audit lanes.
 - [Contributing Guide](CONTRIBUTING.md)
+- [Testing & CI Notes](docs/development/TESTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security Policy](SECURITY.md)
 

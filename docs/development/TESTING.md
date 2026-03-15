@@ -30,8 +30,26 @@ Recommended validation command before release:
 ```bash
 npm run lint
 npm run typecheck
+npm run build
 npm test
+npm run docs:check
 ```
+
+Current PR automation is split into required and advisory lanes:
+
+- Required `required-pr`: aggregates `lint`, `typecheck`, `build`, `unit (linux)`, and `unit (windows)` for the default Node version, plus `docs-sanity` for Markdown changes and `actionlint` when workflows change.
+- Required `pr-governance`: enforces the pull request template, compliance checkbox, and a completed live-verification marker for auth/request/storage changes.
+- Advisory `PR Advisory`: runs `npm run test:coverage`, a wider compatibility matrix (Ubuntu Node 18 and 22, macOS on the default Node version, and Windows Node 18), and `npm run audit:ci`.
+
+Notes on the advisory lane:
+
+- `npm run test:coverage` is currently informational because the repo baseline is below the configured global coverage thresholds.
+- `npm run audit:ci` is currently informational because the production dependency audit still reports an unresolved `hono` advisory.
+
+Maintainer branch protection should require only:
+
+- `required-pr`
+- `pr-governance`
 
 ## Test Scenarios Matrix
 
@@ -786,6 +804,6 @@ describe('filterInput', () => {
 
 ## See Also
 
-- [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) - Complete summary
 - [CONFIG_FIELDS.md](./CONFIG_FIELDS.md) - Field usage guide
-- [BUGS_FIXED.md](./BUGS_FIXED.md) - Bug analysis
+- [CONFIG_FLOW.md](./CONFIG_FLOW.md) - Configuration loading and precedence
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical architecture and request flow

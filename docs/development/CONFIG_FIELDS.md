@@ -693,4 +693,4 @@ Notes:
 
 - [CONFIG_FLOW.md](./CONFIG_FLOW.md) - Complete config system guide
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical architecture
-- [BUGS_FIXED.md](./BUGS_FIXED.md) - Bug fixes and testing
+- [TESTING.md](./TESTING.md) - Validation matrix and CI guidance

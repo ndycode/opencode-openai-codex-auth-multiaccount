@@ -63,13 +63,32 @@ The project does not accept work aimed at:
 3. **Include tests** for new functionality
 4. **Update documentation** (README.md, config examples, etc.)
 5. **Ensure compliance** with guidelines above
-6. **Test thoroughly** with the most appropriate validation for the change
-7. **Complete the pull request template** with summary, testing, and compliance details
-8. **Submit PR** with clear description of changes
+6. **Run local validation**: `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, and `npm run docs:check` when docs or workflow files change
+7. **Test thoroughly** with the most appropriate validation for the change, including real ChatGPT Plus/Pro checks when touching auth, request-routing, or storage behavior
+8. **Complete the pull request template** with summary, testing, docs impact, and compliance details
+9. **Submit PR** with clear description of changes
 
 Pull requests are automatically screened for incomplete or suspicious submissions. Legitimate contributions are still welcome, but low-signal PRs may be flagged for maintainer review before they move forward.
 
 If a PR is flagged incorrectly, a maintainer can override the workflow with the `exempt` label after review.
+
+## CI and PR Checks
+
+The repository uses split required and advisory PR lanes:
+
+- Required code validation: `lint`, `typecheck`, `build`, `unit (linux)`, and `unit (windows)`
+- Required conditional validation: `docs-sanity` for Markdown changes and `actionlint` for workflow changes
+- Required policy checks: `required-pr` and `pr-governance`
+- Advisory lanes: `coverage`, `compat-matrix`, and `dependency-audit`
+
+`required-pr` is the aggregate gate that evaluates the required code, docs, and workflow jobs. `pr-governance` separately enforces the PR template and live-verification requirements for auth, request-routing, and storage changes. Maintainers can record an independent live check by applying the `maintainer-live-verified` label.
+
+For maintainers, GitHub branch protection should require only:
+
+- `required-pr`
+- `pr-governance`
+
+Advisory lanes should remain unrequired until their baselines are clean and stable.
 
 ## Reporting Issues
 

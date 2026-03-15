@@ -1,0 +1,335 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  HUSKY: 0
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      code_changed: ${{ steps.detect.outputs.code_changed }}
+      docs_changed: ${{ steps.detect.outputs.docs_changed }}
+      workflow_changed: ${{ steps.detect.outputs.workflow_changed }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          docs_changed=false
+          code_changed=false
+          workflow_changed=false
+          files=()
+
+          collect_changed_files() {
+            local range="$1"
+
+            while IFS=$'\t' read -r status first_path second_path; do
+              [[ -z "${status}" ]] && continue
+
+              case "${status}" in
+                R*|C*)
+                  [[ -n "${first_path}" ]] && files+=("${first_path}")
+                  [[ -n "${second_path}" ]] && files+=("${second_path}")
+                  ;;
+                *)
+                  [[ -n "${first_path}" ]] && files+=("${first_path}")
+                  ;;
+              esac
+            done < <(git diff --find-renames --name-status "${range}")
+          }
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "${BASE_REF}"
+            collect_changed_files "origin/${BASE_REF}...HEAD"
+          elif [[ "${EVENT_NAME}" == "push" && -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            collect_changed_files "${BEFORE_SHA}...HEAD"
+          else
+            # No reliable diff range is available on this event. docs_changed and
+            # code_changed are forced below, and workflow_changed intentionally
+            # stays false unless an actual diff classified workflow files.
+            :
+          fi
+
+          for file in "${files[@]}"; do
+            [[ -z "${file}" ]] && continue
+            is_docs_markdown=false
+
+            if [[ "${file}" =~ ^(README\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md)$ ]] || [[ "${file}" =~ ^(\.github|config|docs|test)/.+\.(md|markdown)$ ]]; then
+              docs_changed=true
+              is_docs_markdown=true
+            fi
+
+            case "${file}" in
+              scripts/ci/*)
+                docs_changed=true
+                code_changed=true
+                ;;
+              .github/workflows/*)
+                workflow_changed=true
+                code_changed=true
+                ;;
+              *)
+                if [[ "${is_docs_markdown}" != "true" ]]; then
+                  code_changed=true
+                fi
+                ;;
+            esac
+          done
+
+          if [[ "${EVENT_NAME}" != "pull_request" ]]; then
+            # Run full docs/code lanes on non-PR events, but keep workflow_changed
+            # diff-based so actionlint only runs when workflow files actually change.
+            docs_changed=true
+            code_changed=true
+          fi
+
+          {
+            echo "docs_changed=${docs_changed}"
+            echo "code_changed=${code_changed}"
+            echo "workflow_changed=${workflow_changed}"
+          } >> "${GITHUB_OUTPUT}"
+
+  lint:
+    name: lint
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  typecheck:
+    name: typecheck
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+  build:
+    name: build
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  unit-linux:
+    name: unit (linux)
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  unit-windows:
+    name: unit (windows)
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --reporter=verbose
+
+  docs-sanity:
+    name: docs-sanity
+    needs: changes
+    if: needs.changes.outputs.docs_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: .nvmrc
+
+      # docs-check.js is intentionally limited to Node built-ins, so this lane can skip npm ci.
+      - name: Verify markdown links and CI badge targets
+        run: npm run docs:check
+
+  actionlint:
+    name: actionlint
+    needs: changes
+    if: needs.changes.outputs.workflow_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint@sha256:5457037ba91acd225478edac3d4b32e45cf6c10291e0dabbfd2491c63129afe1 # rhysd/actionlint:1.7.11 linux/amd64
+        with:
+          args: -color
+
+  required-pr:
+    name: required-pr
+    needs:
+      - changes
+      - lint
+      - typecheck
+      - build
+      - unit-linux
+      - unit-windows
+      - docs-sanity
+      - actionlint
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate required checks
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
+          DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
+          WORKFLOW_CHANGED: ${{ needs.changes.outputs.workflow_changed }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          UNIT_LINUX_RESULT: ${{ needs.unit-linux.result }}
+          UNIT_WINDOWS_RESULT: ${{ needs.unit-windows.result }}
+          DOCS_RESULT: ${{ needs.docs-sanity.result }}
+          ACTIONLINT_RESULT: ${{ needs.actionlint.result }}
+        run: |
+          set -euo pipefail
+          failures=()
+
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Changes detection job did not succeed (result: ${CHANGES_RESULT}). Failing gate."
+            exit 1
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${LINT_RESULT}" != "success" ]]; then
+            failures+=("lint")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${TYPECHECK_RESULT}" != "success" ]]; then
+            failures+=("typecheck")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${BUILD_RESULT}" != "success" ]]; then
+            failures+=("build")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${UNIT_LINUX_RESULT}" != "success" ]]; then
+            failures+=("unit-linux")
+          fi
+
+          if [[ "${CODE_CHANGED}" == "true" && "${UNIT_WINDOWS_RESULT}" != "success" ]]; then
+            failures+=("unit-windows")
+          fi
+
+          if [[ "${DOCS_CHANGED}" == "true" && "${DOCS_RESULT}" != "success" ]]; then
+            failures+=("docs-sanity")
+          fi
+
+          if [[ "${WORKFLOW_CHANGED}" == "true" && "${ACTIONLINT_RESULT}" != "success" ]]; then
+            failures+=("actionlint")
+          fi
+
+          if [[ ${#failures[@]} -gt 0 ]]; then
+            echo "Required checks failed: ${failures[*]}"
+            exit 1
+          fi
+
+          echo "All required PR checks passed."
