@@ -204,6 +204,8 @@ import {
 // Shared across plugin instances so shutdown cleanup can flush debounced saves
 // even when multiple plugin objects coexist during reloads or tests.
 let accountManagerCleanupHook: (() => Promise<void>) | null = null;
+// `active...` retains only the shared currently cached manager. Older managers move to
+// `tracked...` only while they still have pending disk work and self-prune once settled.
 const activeAccountManagersForCleanup = new Set<AccountManager>();
 const trackedAccountManagersForCleanup = new Set<AccountManager>();
 

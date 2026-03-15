@@ -2284,6 +2284,103 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(await response.text()).toContain("All stored Codex accounts are disabled");
 	});
 
+	it("surfaces the disabled-pool response when same-token variants were already user-disabled", async () => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const { AccountManager } = await import("../lib/accounts.js");
+		const { ACCOUNT_LIMITS } = await import("../lib/constants.js");
+
+		vi.spyOn(fetchHelpers, "shouldRefreshToken").mockReturnValue(true);
+		vi.mocked(fetchHelpers.refreshAndUpdateToken).mockRejectedValue(
+			new Error("Token expired"),
+		);
+
+		let selected = false;
+		const disableGroupedAccountsSpy = vi.fn(() => 0);
+		const markAccountsWithRefreshTokenCoolingDownSpy = vi.fn(() => 0);
+		const saveToDiskDebouncedSpy = vi.fn();
+		const customManager = {
+			getAccountCount: () => 2,
+			getEnabledAccountCount: () => 0,
+			getCurrentOrNextForFamilyHybrid: () => {
+				if (selected) {
+					return null;
+				}
+				selected = true;
+				return {
+					index: 0,
+					email: "user1@example.com",
+					refreshToken: "refresh-shared",
+				};
+			},
+			getSelectionExplainability: () => [],
+			toAuthDetails: () => ({
+				type: "oauth" as const,
+				access: "access-disabled",
+				refresh: "refresh-shared",
+				expires: Date.now() + 60_000,
+			}),
+			hasRefreshToken: () => true,
+			saveToDiskDebounced: saveToDiskDebouncedSpy,
+			updateFromAuth: () => {},
+			clearAuthFailures: () => {},
+			incrementAuthFailures: () => ACCOUNT_LIMITS.MAX_AUTH_FAILURES_BEFORE_DISABLE,
+			disableAccountsWithSameRefreshToken: disableGroupedAccountsSpy,
+			markAccountsWithRefreshTokenCoolingDown: markAccountsWithRefreshTokenCoolingDownSpy,
+			markAccountCoolingDown: () => {},
+			markRateLimitedWithReason: () => {},
+			recordRateLimit: () => {},
+			consumeToken: () => true,
+			refundToken: () => {},
+			markSwitched: () => {},
+			removeAccount: () => {},
+			recordFailure: () => {},
+			recordSuccess: () => {},
+			getMinWaitTimeForFamily: () => 0,
+			shouldShowAccountToast: () => false,
+			setActiveIndex: () => null,
+			getAccountsSnapshot: () => [
+				{
+					index: 0,
+					email: "user1@example.com",
+					refreshToken: "refresh-shared",
+					enabled: false,
+					disabledReason: "user" as const,
+				},
+				{
+					index: 1,
+					email: "user1@example.com",
+					refreshToken: "refresh-shared",
+					enabled: false,
+					disabledReason: "user" as const,
+				},
+			],
+		};
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "should-not-fetch" }), { status: 200 }),
+		);
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(response.status).toBe(503);
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(disableGroupedAccountsSpy).toHaveBeenCalledTimes(1);
+		expect(markAccountsWithRefreshTokenCoolingDownSpy).toHaveBeenCalledWith(
+			"refresh-shared",
+			ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+			"auth-failure",
+		);
+		expect(saveToDiskDebouncedSpy).toHaveBeenCalledTimes(1);
+		const responseText = await response.text();
+		expect(responseText).toContain("All stored Codex accounts are disabled");
+		expect(responseText).toContain("Re-enable user-disabled accounts from account management");
+	});
+
 	it("skips fetch when local token bucket is depleted", async () => {
 		const { AccountManager } = await import("../lib/accounts.js");
 		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);

@@ -75,14 +75,20 @@ export const CooldownReasonSchema = z.enum(["auth-failure", "network-error"]);
 
 export type CooldownReasonFromSchema = z.infer<typeof CooldownReasonSchema>;
 
+const AccountDisabledReasonValueSchema = z.enum(["user", "auth-failure"]);
+
 // Storage normalization strips unknown disabled reasons later; keep schema parsing
 // lenient so legacy/downgraded files don't warn or fail before that step runs.
-export const DisabledReasonSchema = z.preprocess(
+export const AccountDisabledReasonSchema = z.preprocess(
 	normalizeAccountDisabledReason,
-	z.enum(["user", "auth-failure"]).optional(),
+	AccountDisabledReasonValueSchema.optional(),
 );
 
-export type DisabledReasonFromSchema = z.infer<typeof DisabledReasonSchema>;
+// Preserve the older export name for callers while using a more specific schema name internally.
+export const DisabledReasonSchema = AccountDisabledReasonSchema;
+
+export type AccountDisabledReasonFromSchema = z.infer<typeof AccountDisabledReasonSchema>;
+export type DisabledReasonFromSchema = AccountDisabledReasonFromSchema;
 
 /**
  * Last switch reason for account rotation tracking.
@@ -127,7 +133,7 @@ export const AccountMetadataV3Schema = z.object({
 	accessToken: z.string().optional(),
 	expiresAt: z.number().optional(),
 	enabled: z.boolean().optional(),
-	disabledReason: DisabledReasonSchema,
+	disabledReason: AccountDisabledReasonSchema,
 	addedAt: z.number(),
 	lastUsed: z.number(),
 	lastSwitchReason: SwitchReasonSchema.optional(),
@@ -175,7 +181,7 @@ export const AccountMetadataV1Schema = z.object({
 	accessToken: z.string().optional(),
 	expiresAt: z.number().optional(),
 	enabled: z.boolean().optional(),
-	disabledReason: DisabledReasonSchema,
+	disabledReason: AccountDisabledReasonSchema,
 	addedAt: z.number(),
 	lastUsed: z.number(),
 	lastSwitchReason: SwitchReasonSchema.optional(),
