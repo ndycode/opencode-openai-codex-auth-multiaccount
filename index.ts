@@ -1126,7 +1126,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 message: string,
                 variant: "info" | "success" | "warning" | "error" = "success",
                 options?: { title?: string; duration?: number },
-        ): Promise<void> => {
+        ): Promise<boolean> => {
                 try {
                         await client.tui.showToast({
                                 body: {
@@ -1136,8 +1136,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         ...(options?.duration && { duration: options.duration }),
                                 },
                         });
+                        return true;
                 } catch {
                         // Ignore when TUI is not available.
+                        return false;
                 }
         };
 
@@ -1705,6 +1707,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				return;
 			}
 
+			// Re-registering this waiter after each settle is intentional: a manager can
+			// move from "debounce only" to "in-flight save" repeatedly, and we do not
+			// want a transient idle check to drop shutdown tracking before the next save.
 			const waitForSettle = manager
 				.waitForPendingSaveToSettle()
 				.finally(() => {
@@ -3589,10 +3594,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 													logInfo("[account-menu] prompted re-auth for auth-failure disabled account", {
 														accountId: target.accountId ?? null,
 													});
-													await showToast(message, "warning");
-													console.log(
-														`\n${message}\n`,
-													);
+													const toastShown = await showToast(message, "warning");
+													if (!toastShown) {
+														console.log("\nRun 'opencode auth login' to re-enable this account.\n");
+													}
 													continue;
 												}
 												if (shouldEnable) {

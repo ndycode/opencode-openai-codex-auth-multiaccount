@@ -4215,9 +4215,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				coolingDownUntil: 30_000,
 				cooldownReason: "auth-failure",
 			});
-			expect(consoleLog).toHaveBeenCalledWith(
-				expect.stringContaining("Run 'opencode auth login' to re-enable with fresh credentials."),
-			);
+			expect(consoleLog).not.toHaveBeenCalled();
 			expect(mockClient.tui.showToast).toHaveBeenCalledWith({
 				body: expect.objectContaining({
 					message:
@@ -4225,6 +4223,66 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 					variant: "warning",
 				}),
 			});
+			expect(vi.mocked(loggerModule.logInfo)).toHaveBeenCalledWith(
+				"[account-menu] prompted re-auth for auth-failure disabled account",
+				expect.objectContaining({
+					accountId: "workspace-auth-failure",
+				}),
+			);
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				"[account-menu] blocked re-enable for auth-failure disabled account",
+				expect.objectContaining({
+					accountId: "workspace-auth-failure",
+				}),
+			);
+		} finally {
+			consoleLog.mockRestore();
+		}
+	});
+
+	it("falls back to a generic console hint when TUI toast is unavailable for auth-failure disables", async () => {
+		const cliModule = await import("../lib/cli.js");
+		const loggerModule = await import("../lib/logger.js");
+		const storageModule = await import("../lib/storage.js");
+		const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		try {
+			mockStorage.accounts = [
+				{
+					accountId: "workspace-auth-failure",
+					email: "blocked@example.com",
+					refreshToken: "refresh-blocked",
+					enabled: false,
+					disabledReason: "auth-failure",
+					coolingDownUntil: 30_000,
+					cooldownReason: "auth-failure",
+					addedAt: 10,
+					lastUsed: 10,
+				},
+			];
+
+			vi.mocked(cliModule.promptLoginMode)
+				.mockResolvedValueOnce({ mode: "manage", toggleAccountIndex: 0 })
+				.mockResolvedValueOnce({ mode: "cancel" });
+
+			const mockClient = createMockClient();
+			mockClient.tui.showToast.mockRejectedValueOnce(new Error("TUI unavailable"));
+			const { OpenAIOAuthPlugin } = await import("../index.js");
+			const plugin = (await OpenAIOAuthPlugin({
+				client: mockClient,
+			} as never)) as unknown as PluginType;
+			const autoMethod = plugin.auth.methods[0] as unknown as {
+				authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+			};
+
+			vi.mocked(loggerModule.logWarn).mockClear();
+			const authResult = await autoMethod.authorize();
+			expect(authResult.instructions).toBe("Authentication cancelled");
+
+			expect(vi.mocked(storageModule.saveAccounts)).not.toHaveBeenCalled();
+			expect(consoleLog).toHaveBeenCalledWith(
+				"\nRun 'opencode auth login' to re-enable this account.\n",
+			);
 			expect(vi.mocked(loggerModule.logInfo)).toHaveBeenCalledWith(
 				"[account-menu] prompted re-auth for auth-failure disabled account",
 				expect.objectContaining({

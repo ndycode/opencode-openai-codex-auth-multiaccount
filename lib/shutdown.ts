@@ -20,6 +20,15 @@ export function unregisterCleanup(fn: CleanupFn): void {
 	if (index !== -1) {
 		cleanupFunctions.splice(index, 1);
 	}
+	if (
+		cleanupFunctions.length === 0 &&
+		!cleanupInFlight &&
+		!signalExitPending &&
+		shutdownRegistered
+	) {
+		removeShutdownHandlers();
+		shutdownRegistered = false;
+	}
 }
 
 export function runCleanup(): Promise<void> {

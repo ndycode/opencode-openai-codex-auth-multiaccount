@@ -66,12 +66,6 @@ import {
 
 const log = createLogger("accounts");
 
-async function drainSaveMicrotasks(): Promise<void> {
-	// enqueueSave settles through an async IIFE and a trailing .finally().
-	await Promise.resolve();
-	await Promise.resolve();
-}
-
 export type CodexCliTokenCacheEntry = {
 	accessToken: string;
 	expiresAt?: number;
@@ -230,6 +224,8 @@ export class AccountManager {
 	private pendingSave: Promise<void> | null = null;
 	private authFailuresByRefreshToken: Map<string, number> = new Map();
 	private pendingSaveSettledWaiters = new Set<() => void>();
+	private saveFinalizationTick = 0;
+	private saveFinalizationWaiters = new Set<{ afterTick: number; resolve: () => void }>();
 
 	static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
 		const stored = await loadAccounts();
@@ -1046,6 +1042,7 @@ export class AccountManager {
 				this.pendingSave = null;
 			}
 			this.resolvePendingSaveSettledWaiters();
+			this.notifySaveFinalization();
 		});
 		this.pendingSave = nextSave;
 		return nextSave;
@@ -1060,9 +1057,33 @@ export class AccountManager {
 			return Promise.resolve();
 		}
 
+		// This intentionally treats debounce-only timers as pending work too. Callers
+		// such as scheduleTrackedManagerPrune wait across those gaps so a later re-arm
+		// cannot drop shutdown tracking before the deferred save actually runs.
 		return new Promise((resolve) => {
 			this.pendingSaveSettledWaiters.add(resolve);
 		});
+	}
+
+	private waitForSaveFinalization(afterTick: number): Promise<void> {
+		if (this.saveFinalizationTick > afterTick) {
+			return Promise.resolve();
+		}
+
+		return new Promise((resolve) => {
+			this.saveFinalizationWaiters.add({ afterTick, resolve });
+		});
+	}
+
+	private notifySaveFinalization(): void {
+		this.saveFinalizationTick += 1;
+		for (const waiter of [...this.saveFinalizationWaiters]) {
+			if (this.saveFinalizationTick <= waiter.afterTick) {
+				continue;
+			}
+			this.saveFinalizationWaiters.delete(waiter);
+			waiter.resolve();
+		}
 	}
 
 	private resolvePendingSaveSettledWaiters(): void {
@@ -1113,14 +1134,14 @@ export class AccountManager {
 				this.saveDebounceTimer = null;
 			}
 			if (this.pendingSave) {
+				const pendingSaveTick = this.saveFinalizationTick;
 				let pendingSaveError: unknown;
 				try {
 					await this.pendingSave;
 				} catch (error) {
 					pendingSaveError = error;
 				}
-				// Let debounced callbacks waiting on the completed save re-arm pendingSave.
-				await drainSaveMicrotasks();
+				await this.waitForSaveFinalization(pendingSaveTick);
 				if (this.saveDebounceTimer !== null || this.pendingSave !== null) {
 					continue;
 				}
@@ -1142,10 +1163,10 @@ export class AccountManager {
 			if (this.saveDebounceTimer !== null || this.pendingSave !== null) {
 				continue;
 			}
+			const flushSaveTick = this.saveFinalizationTick;
 			const flushSave = this.enqueueSave(() => this.saveToDisk());
 			await flushSave;
-			// Drain saves that were queued while the flush save was in flight.
-			await drainSaveMicrotasks();
+			await this.waitForSaveFinalization(flushSaveTick);
 			if (this.saveDebounceTimer === null && this.pendingSave === null) {
 				return;
 			}
