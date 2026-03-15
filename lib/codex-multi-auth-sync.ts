@@ -121,7 +121,7 @@ interface PreparedCodexMultiAuthPreviewStorage {
 
 const TEMP_CLEANUP_RETRY_DELAYS_MS = [100, 250, 500] as const;
 const STALE_TEMP_CLEANUP_RETRY_DELAY_MS = 150;
-const STALE_TEMP_SWEEP_RETRYABLE_CODES = new Set(["EBUSY", "EAGAIN", "EACCES", "EPERM", "ENOTEMPTY"]);
+const TEMP_CLEANUP_RETRYABLE_CODES = new Set(["EBUSY", "EAGAIN", "EACCES", "EPERM", "ENOTEMPTY"]);
 
 function sleepAsync(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -132,7 +132,6 @@ async function removeNormalizedImportTempDir(
 	tempPath: string,
 	options: NormalizedImportFileOptions,
 ): Promise<void> {
-	const retryableCodes = new Set(["EBUSY", "EAGAIN", "ENOTEMPTY", "EACCES", "EPERM"]);
 	let lastMessage = "unknown cleanup failure";
 	for (let attempt = 0; attempt <= TEMP_CLEANUP_RETRY_DELAYS_MS.length; attempt += 1) {
 		try {
@@ -141,7 +140,7 @@ async function removeNormalizedImportTempDir(
 		} catch (cleanupError) {
 			const code = (cleanupError as NodeJS.ErrnoException).code;
 			lastMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-			if ((!code || retryableCodes.has(code)) && attempt < TEMP_CLEANUP_RETRY_DELAYS_MS.length) {
+			if ((!code || TEMP_CLEANUP_RETRYABLE_CODES.has(code)) && attempt < TEMP_CLEANUP_RETRY_DELAYS_MS.length) {
 				const delayMs = TEMP_CLEANUP_RETRY_DELAYS_MS[attempt];
 				if (delayMs !== undefined) {
 					await sleepAsync(delayMs);
@@ -307,7 +306,7 @@ async function cleanupStaleNormalizedImportTempDirs(
 					continue;
 				}
 				let message = error instanceof Error ? error.message : String(error);
-				if (code && STALE_TEMP_SWEEP_RETRYABLE_CODES.has(code)) {
+				if (code && TEMP_CLEANUP_RETRYABLE_CODES.has(code)) {
 					await sleepAsync(STALE_TEMP_CLEANUP_RETRY_DELAY_MS);
 					try {
 						await fs.rm(candidateDir, { recursive: true, force: true });
@@ -1225,6 +1224,8 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 			await fs.mkdir(dirname(backupPath), { recursive: true });
 			const tempBackupPath = `${backupPath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
 			try {
+				// Keep live tokens here so overlap cleanup can fully restore the source file;
+				// Windows relies on home-directory ACLs because mode 0o600 is not enforced.
 				await fs.writeFile(tempBackupPath, `${JSON.stringify(fallback, null, 2)}\n`, {
 					encoding: "utf-8",
 					mode: 0o600,

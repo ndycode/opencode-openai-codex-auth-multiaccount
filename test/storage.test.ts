@@ -22,6 +22,7 @@ import {
   previewImportAccountsWithExistingStorage,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  withAccountAndFlaggedStorageTransaction,
   withFlaggedAccountsTransaction,
   loadAccountAndFlaggedStorageSnapshot,
   backupRawAccountsFile,
@@ -1833,6 +1834,120 @@ describe("storage", () => {
       } finally {
         readSpy.mockRestore();
       }
+    });
+
+    it("persists both files inside withAccountAndFlaggedStorageTransaction", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      await withAccountAndFlaggedStorageTransaction(async (current, persist) => {
+        await persist.flagged({
+          version: 1,
+          accounts: [
+            ...current.flagged.accounts,
+            {
+              refreshToken: "account-next",
+              flaggedAt: 2,
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        });
+        await persist.accounts({
+          version: 3,
+          activeIndex: 1,
+          activeIndexByFamily: { codex: 1 },
+          accounts: [
+            ...(current.accounts?.accounts ?? []),
+            {
+              refreshToken: "account-next",
+              accountId: "account-next-id",
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        });
+      });
+
+      const loadedAccounts = await loadAccounts();
+      const loadedFlagged = await loadFlaggedAccounts();
+      expect(loadedAccounts?.accounts.map((account) => account.refreshToken)).toEqual([
+        "account-refresh",
+        "account-next",
+      ]);
+      expect(loadedAccounts?.activeIndex).toBe(1);
+      expect(loadedAccounts?.activeIndexByFamily?.codex).toBe(1);
+      expect(Object.values(loadedAccounts?.activeIndexByFamily ?? {})).toSatisfy((values) =>
+        values.every((value) => value === 1),
+      );
+      expect(loadedFlagged.accounts.map((account) => account.refreshToken)).toEqual([
+        "account-refresh",
+        "account-next",
+      ]);
+    });
+
+    it("documents partial writes if withAccountAndFlaggedStorageTransaction throws after one persist", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      await expect(
+        withAccountAndFlaggedStorageTransaction(async (_current, persist) => {
+          await persist.flagged({
+            version: 1,
+            accounts: [],
+          });
+          throw new Error("stop after flagged write");
+        }),
+      ).rejects.toThrow("stop after flagged write");
+
+      const loadedAccounts = await loadAccounts();
+      const loadedFlagged = await loadFlaggedAccounts();
+      expect(loadedAccounts?.accounts.map((account) => account.refreshToken)).toEqual(["account-refresh"]);
+      expect(loadedFlagged.accounts).toEqual([]);
     });
 
     it("copies the raw accounts file for backup", async () => {
