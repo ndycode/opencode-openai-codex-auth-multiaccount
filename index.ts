@@ -3374,6 +3374,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								return `${target.organizationId ?? ""}|${target.accountId ?? ""}|${target.refreshToken}`;
 							};
 
+							const getSyncRemovalRefreshTokenKey = (refreshToken: string | undefined): string => {
+								return refreshToken?.trim() ?? "";
+							};
+
 							const findAccountIndexByExactIdentity = (
 								accounts: AccountStorageV3["accounts"],
 								target: SyncRemovalTarget | null | undefined,
@@ -3445,11 +3449,38 @@ while (attempted.size < Math.max(1, accountCount)) {
 										if (!normalizedAccounts) {
 											throw new Error("Prune backup account snapshot failed validation.");
 										}
-										await withAccountAndFlaggedStorageTransaction(async (_current, persist) => {
+										await withAccountAndFlaggedStorageTransaction(async (current, persist) => {
+											const rollbackAccounts =
+												current.accounts ??
+												({
+													version: 3,
+													accounts: [],
+													activeIndex: 0,
+													activeIndexByFamily: {},
+												} satisfies AccountStorageV3);
 											await persist.accounts(normalizedAccounts);
-											await persist.flagged(
-												restoreFlaggedSnapshot as { version: 1; accounts: FlaggedAccountMetadataV1[] },
-											);
+											try {
+												await persist.flagged(
+													restoreFlaggedSnapshot as {
+														version: 1;
+														accounts: FlaggedAccountMetadataV1[];
+													},
+												);
+											} catch (flaggedError) {
+												try {
+													await persist.accounts(rollbackAccounts);
+												} catch (rollbackError) {
+													const flaggedMessage =
+														flaggedError instanceof Error ? flaggedError.message : String(flaggedError);
+													const rollbackMessage =
+														rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+													throw new Error(
+														`Failed to restore sync prune flagged storage: ${flaggedMessage}; ` +
+															`failed to roll back account restore: ${rollbackMessage}`,
+													);
+												}
+												throw flaggedError;
+											}
 										});
 										invalidateAccountManagerCache();
 									},
@@ -3491,25 +3522,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 											return;
 										}
 
-										const removedFlaggedKeys = new Set(
+										const removedRefreshTokens = new Set(
 											removedTargets.map((entry) =>
-												getSyncRemovalTargetKey({
-													refreshToken: entry.account.refreshToken,
-													organizationId: entry.account.organizationId,
-													accountId: entry.account.accountId,
-												}),
+												getSyncRemovalRefreshTokenKey(entry.account.refreshToken),
 											),
 										);
 										const nextFlaggedStorage = {
 											version: 1 as const,
 											accounts: currentFlaggedStorage.accounts.filter(
 												(flagged) =>
-													!removedFlaggedKeys.has(
-														getSyncRemovalTargetKey({
-															refreshToken: flagged.refreshToken,
-															organizationId: flagged.organizationId,
-															accountId: flagged.accountId,
-														}),
+													!removedRefreshTokens.has(
+														getSyncRemovalRefreshTokenKey(flagged.refreshToken),
 													),
 											),
 										};

@@ -1873,6 +1873,9 @@ describe("codex-multi-auth sync", () => {
 	it("remaps active indices when synced overlap cleanup reorders accounts", async () => {
 		const storageModule = await import("../lib/storage.js");
 		const persist = vi.fn(async (_next: AccountStorageV3) => {});
+		vi.mocked(storageModule.deduplicateAccounts).mockImplementationOnce(
+			(accounts: AccountStorageV3["accounts"]) => [accounts[1], accounts[0]].filter(Boolean),
+		);
 		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
 			handler(
 				{
@@ -1881,21 +1884,22 @@ describe("codex-multi-auth sync", () => {
 					activeIndexByFamily: { codex: 0 },
 					accounts: [
 						{
-							accountId: "org-sync",
-							organizationId: "org-sync",
+							accountId: "sync-primary",
+							organizationId: "shared-org",
 							accountIdSource: "org",
 							accountTags: ["codex-multi-auth-sync"],
-							email: "sync@example.com",
-							refreshToken: "sync-token",
+							email: "primary@example.com",
+							refreshToken: "sync-token-primary",
 							addedAt: 3,
 							lastUsed: 3,
 						},
 						{
-							accountId: "org-local",
-							organizationId: "org-local",
+							accountId: "sync-sibling",
+							organizationId: "shared-org",
 							accountIdSource: "org",
-							email: "local@example.com",
-							refreshToken: "local-token",
+							accountTags: ["codex-multi-auth-sync"],
+							email: "sibling@example.com",
+							refreshToken: "sync-token-sibling",
 							addedAt: 4,
 							lastUsed: 4,
 						},
@@ -1912,7 +1916,7 @@ describe("codex-multi-auth sync", () => {
 		if (!saved) {
 			throw new Error("Expected persisted overlap cleanup result");
 		}
-		expect(saved.accounts.map((account) => account.accountId)).toEqual(["org-local", "org-sync"]);
+		expect(saved.accounts.map((account) => account.accountId)).toEqual(["sync-sibling", "sync-primary"]);
 		expect(saved.activeIndex).toBe(1);
 		expect(saved.activeIndexByFamily?.codex).toBe(1);
 	});

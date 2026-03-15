@@ -570,12 +570,24 @@ function normalizeIdentity(value: string | undefined): string | undefined {
 	return trimmed && trimmed.length > 0 ? trimmed.toLowerCase() : undefined;
 }
 
+function toCleanupExactIdentityKey(account: {
+	organizationId?: string;
+	accountId?: string;
+	refreshToken: string;
+}): string | undefined {
+	const refreshToken = normalizeTrimmedIdentity(account.refreshToken);
+	if (!refreshToken) return undefined;
+	return `exact:${normalizeIdentity(account.organizationId) ?? ""}|${normalizeIdentity(account.accountId) ?? ""}|${refreshToken}`;
+}
+
 function toCleanupIdentityKeys(account: {
 	organizationId?: string;
 	accountId?: string;
 	refreshToken: string;
 }): string[] {
 	const keys: string[] = [];
+	const exactIdentity = toCleanupExactIdentityKey(account);
+	if (exactIdentity) keys.push(exactIdentity);
 	const organizationId = normalizeIdentity(account.organizationId);
 	if (organizationId) keys.push(`org:${organizationId}`);
 	const accountId = normalizeIdentity(account.accountId);
@@ -1128,13 +1140,13 @@ function buildCodexMultiAuthOverlapCleanupPlan(existing: AccountStorageV3): {
 	const removed = Math.max(0, before - after);
 	const originalAccountsByKey = new Map<string, AccountStorageV3["accounts"][number]>();
 	for (const account of existing.accounts) {
-		const key = toCleanupIdentityKeys(account)[0];
+		const key = toCleanupExactIdentityKey(account);
 		if (key) {
 			originalAccountsByKey.set(key, account);
 		}
 	}
 	const updated = normalized.accounts.reduce((count, account) => {
-		const key = toCleanupIdentityKeys(account)[0];
+		const key = toCleanupExactIdentityKey(account);
 		if (!key) return count;
 		const original = originalAccountsByKey.get(key);
 		if (!original) return count;
