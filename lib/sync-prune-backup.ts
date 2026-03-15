@@ -13,6 +13,9 @@ export function createSyncPruneBackupPayload<TFlaggedAccount extends object>(
 	accounts: AccountStorageV3;
 	flagged: FlaggedSnapshot<TFlaggedAccount>;
 } {
+	// Intentionally retain live tokens so a mid-sync crash can fully restore pruned accounts.
+	// The backup is stored under the user's config home; on Windows its ACLs are the real boundary
+	// because the later write path's `mode: 0o600` hint is not strictly enforced there.
 	return {
 		version: 1,
 		accounts: structuredClone({
