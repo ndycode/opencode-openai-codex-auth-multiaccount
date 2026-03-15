@@ -123,7 +123,10 @@ export function migrateV1ToV3(v1: AccountStorageV1): AccountStorageV3 {
 				accessToken: account.accessToken,
 				expiresAt: account.expiresAt,
 				enabled: normalizeStoredEnabled(account.enabled),
-				disabledReason: account.enabled === false ? account.disabledReason ?? "user" : undefined,
+				disabledReason:
+					account.enabled === false
+						? normalizeAccountDisabledReason(account.disabledReason) ?? "user"
+						: undefined,
 				addedAt: account.addedAt,
 				lastUsed: account.lastUsed,
 				lastSwitchReason: account.lastSwitchReason,

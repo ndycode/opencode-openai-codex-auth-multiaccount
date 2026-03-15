@@ -1074,6 +1074,31 @@ describe("storage", () => {
       });
     });
 
+    it("defaults invalid migrated legacy disabled reasons to user", () => {
+      const data = {
+        version: 1,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "t1",
+            accountId: "A",
+            enabled: false,
+            disabledReason: "future-reason",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      };
+
+      const result = normalizeAccountStorage(data);
+      expect(result?.version).toBe(3);
+      expect(result?.accounts[0]).toMatchObject({
+        refreshToken: "t1",
+        enabled: false,
+        disabledReason: "user",
+      });
+    });
+
     it("omits enabled for enabled accounts during v1 migration", () => {
       const data = {
         version: 1,

@@ -1240,7 +1240,7 @@ describe("AccountManager", () => {
       });
     });
 
-    it("preserves the legacy setAccountEnabled account-or-null contract", () => {
+    it("ignores explicit disable-reason overrides for auth-failure disabled accounts", () => {
       const now = Date.now();
       const stored = {
         version: 3 as const,
@@ -1258,13 +1258,49 @@ describe("AccountManager", () => {
 
       const manager = new AccountManager(undefined, stored);
 
+      const disabled = manager.trySetAccountEnabled(0, false, "user");
+      expect(disabled).toMatchObject({
+        ok: true,
+        account: {
+          enabled: false,
+          disabledReason: "auth-failure",
+        },
+      });
+
+      expect(manager.trySetAccountEnabled(0, true)).toEqual({
+        ok: false,
+        reason: "auth-failure-blocked",
+      });
       expect(manager.setAccountEnabled(0, true)).toBeNull();
+    });
+
+    it("preserves the legacy setAccountEnabled account-or-null contract", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          {
+            refreshToken: "token-1",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
       expect(manager.setAccountEnabled(99, false)).toBeNull();
 
       const userDisabled = manager.setAccountEnabled(0, false, "user");
       expect(userDisabled).toMatchObject({
         enabled: false,
         disabledReason: "user",
+      });
+
+      const reenabled = manager.setAccountEnabled(0, true);
+      expect(reenabled).toMatchObject({
+        enabled: true,
       });
     });
   });

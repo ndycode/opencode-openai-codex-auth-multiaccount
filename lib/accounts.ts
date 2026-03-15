@@ -953,6 +953,12 @@ export class AccountManager {
 		if (enabled && account.disabledReason === "auth-failure") {
 			return { ok: false, reason: "auth-failure-blocked" };
 		}
+		// Once an account is auth-failure disabled, callers must refresh credentials
+		// instead of downgrading the reason to a manually re-enableable state.
+		if (!enabled && account.disabledReason === "auth-failure") {
+			account.enabled = false;
+			return { ok: true, account };
+		}
 		account.enabled = enabled;
 		if (enabled) {
 			delete account.disabledReason;
@@ -1065,6 +1071,8 @@ export class AccountManager {
 		while (true) {
 			flushIterations += 1;
 			if (flushIterations > MAX_FLUSH_ITERATIONS) {
+				// This is intentionally far above realistic debounce re-arm chains; if we
+				// still haven't converged, shutdown callers log the failure and continue exit.
 				log.warn("flushPendingSave exceeded max iterations; possible save loop", {
 					iterations: flushIterations - 1,
 				});
