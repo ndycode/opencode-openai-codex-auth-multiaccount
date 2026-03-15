@@ -699,7 +699,7 @@ describe("codex-multi-auth sync", () => {
 		}
 	});
 
-	it.each(["EACCES", "EPERM"] as const)(
+	it.each(["EACCES", "EPERM", "ENOTEMPTY", "EAGAIN"] as const)(
 		"retries Windows-style %s temp cleanup locks until they clear",
 		async (code) => {
 			const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
@@ -1017,6 +1017,60 @@ describe("codex-multi-auth sync", () => {
 				expect.stringContaining("Failed to sweep stale codex sync temp directory"),
 			);
 			await expect(fs.promises.stat(staleDir)).rejects.toThrow();
+		} finally {
+			rmSpy.mockRestore();
+			await fs.promises.rm(fakeHome, { recursive: true, force: true });
+		}
+	});
+
+	it("scrubs stale sync temp payloads before warning when stale cleanup stays locked", async () => {
+		const rootDir = join(process.cwd(), ".tmp-codex-multi-auth");
+		const fakeHome = await fs.promises.mkdtemp(join(os.tmpdir(), "codex-sync-home-"));
+		process.env.CODEX_MULTI_AUTH_DIR = rootDir;
+		process.env.HOME = fakeHome;
+		process.env.USERPROFILE = fakeHome;
+		const globalPath = join(rootDir, "openai-codex-accounts.json");
+		const tempRoot = join(fakeHome, ".opencode", "tmp");
+		const staleDir = join(tempRoot, "oc-chatgpt-multi-auth-sync-stale-scrub-test");
+		const staleFile = join(staleDir, "accounts.json");
+		mockExistsSync.mockImplementation((candidate) => String(candidate) === globalPath);
+		mockSourceStorageFile(
+			globalPath,
+			JSON.stringify({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [{ accountId: "org-source", organizationId: "org-source", refreshToken: "rt-source", addedAt: 1, lastUsed: 1 }],
+			}),
+		);
+
+		const originalRm = fs.promises.rm.bind(fs.promises);
+		const rmSpy = vi.spyOn(fs.promises, "rm").mockImplementation(async (path, options) => {
+			if (String(path) === staleDir) {
+				throw Object.assign(new Error("still locked"), { code: "EBUSY" });
+			}
+			return originalRm(path, options as never);
+		});
+		const loggerModule = await import("../lib/logger.js");
+
+		try {
+			await fs.promises.mkdir(staleDir, { recursive: true });
+			await fs.promises.writeFile(staleFile, "sensitive-refresh-token", "utf8");
+			const oldTime = new Date(Date.now() - (15 * 60 * 1000));
+			await fs.promises.utimes(staleDir, oldTime, oldTime);
+			await fs.promises.utimes(staleFile, oldTime, oldTime);
+
+			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				rootDir,
+				accountsPath: globalPath,
+				scope: "global",
+			});
+
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to sweep stale codex sync temp directory"),
+			);
+			expect(await fs.promises.readFile(staleFile, "utf8")).toBe("");
 		} finally {
 			rmSpy.mockRestore();
 			await fs.promises.rm(fakeHome, { recursive: true, force: true });

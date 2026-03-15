@@ -2161,7 +2161,7 @@ describe("OpenAIOAuthPlugin", () => {
 
 				const output = logSpy.mock.calls.flat().join("\n");
 				expect(output).toContain("Cleanup failed: cleanup persist failed");
-				expect(output).not.toContain("Backup: /tmp/codex-backup-20260101-000000.json");
+				expect(output).toContain("Backup: /tmp/codex-maintenance-overlap-backup-20260101-000000.json");
 			} finally {
 				logSpy.mockRestore();
 			}
@@ -2258,7 +2258,10 @@ describe("OpenAIOAuthPlugin", () => {
 
 			const mkdirSpy = vi.spyOn(nodeFsPromises, "mkdir").mockResolvedValue(undefined);
 			const writeSpy = vi.spyOn(nodeFsPromises, "writeFile").mockResolvedValue(undefined);
-			const renameSpy = vi.spyOn(nodeFsPromises, "rename").mockResolvedValue(undefined);
+			const renameSpy = vi
+				.spyOn(nodeFsPromises, "rename")
+				.mockRejectedValueOnce(Object.assign(new Error("rename locked"), { code: "EPERM" }))
+				.mockResolvedValueOnce(undefined);
 
 			try {
 				const autoMethod = plugin.auth.methods[0] as unknown as {
@@ -2273,13 +2276,14 @@ describe("OpenAIOAuthPlugin", () => {
 				);
 				expect(backupWrite).toBeDefined();
 				const backupContent = String(backupWrite?.[1] ?? "");
+				expect(backupWrite?.[2]).toMatchObject({ flag: "wx" });
 				expect(backupContent).toContain("\"refreshToken\": \"refresh-remove\"");
 				expect(backupContent).toContain("\"accessToken\": \"access-remove\"");
 				expect(backupContent).toContain("\"idToken\": \"id-remove\"");
 				expect(backupContent).toContain("\"accessToken\": \"flagged-access-remove\"");
 				expect(backupContent).toContain("\"idToken\": \"flagged-id-remove\"");
 				expect(mockFlaggedStorage.accounts).toHaveLength(0);
-				expect(renameSpy).toHaveBeenCalled();
+				expect(renameSpy).toHaveBeenCalledTimes(2);
 				expect(mkdirSpy).toHaveBeenCalled();
 			} finally {
 				mkdirSpy.mockRestore();

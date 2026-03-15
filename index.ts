@@ -3407,6 +3407,39 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 							const SYNC_PRUNE_BACKUP_PREFIX = "codex-sync-prune-backup";
 							const SYNC_PRUNE_BACKUP_RETAIN_COUNT = 2;
+							const SYNC_PRUNE_BACKUP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+							const SYNC_PRUNE_BACKUP_RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160] as const;
+
+							const renameSyncPruneBackupWithRetry = async (
+								sourcePath: string,
+								destinationPath: string,
+							): Promise<void> => {
+								let lastError: NodeJS.ErrnoException | null = null;
+								for (
+									let attempt = 0;
+									attempt <= SYNC_PRUNE_BACKUP_RENAME_RETRY_DELAYS_MS.length;
+									attempt += 1
+								) {
+									try {
+										await fsPromises.rename(sourcePath, destinationPath);
+										return;
+									} catch (error) {
+										const code = (error as NodeJS.ErrnoException).code;
+										if ((code === "EPERM" || code === "EBUSY")) {
+											lastError = error as NodeJS.ErrnoException;
+											const delayMs = SYNC_PRUNE_BACKUP_RENAME_RETRY_DELAYS_MS[attempt];
+											if (delayMs !== undefined) {
+												await new Promise((resolve) => setTimeout(resolve, delayMs));
+												continue;
+											}
+										}
+										throw error;
+									}
+								}
+								if (lastError) {
+									throw lastError;
+								}
+							};
 
 							const pruneOldSyncPruneBackups = async (
 								backupDir: string,
@@ -3422,17 +3455,49 @@ while (attempted.size < Math.max(1, accountCount)) {
 								if (!entries) return;
 
 								const keepSet = new Set(keepPaths);
-								const staleBackupPaths = entries
-									.filter(
-										(entry) =>
-											entry.isFile() &&
-											entry.name.startsWith(`${SYNC_PRUNE_BACKUP_PREFIX}-`) &&
-											entry.name.endsWith(".json"),
+								const now = Date.now();
+								const backupCandidates = (
+									await Promise.all(
+										entries
+											.filter(
+												(entry) =>
+													entry.isFile() &&
+													entry.name.startsWith(`${SYNC_PRUNE_BACKUP_PREFIX}-`) &&
+													entry.name.endsWith(".json"),
+											)
+											.map(async (entry) => {
+												const candidatePath = join(backupDir, entry.name);
+												if (keepSet.has(candidatePath)) {
+													return null;
+												}
+												const stats = await fsPromises.stat(candidatePath).catch((error) => {
+													const code = (error as NodeJS.ErrnoException).code;
+													if (code === "ENOENT") {
+														return null;
+													}
+													throw error;
+												});
+												if (!stats) {
+													return null;
+												}
+												return {
+													path: candidatePath,
+													mtimeMs: stats.mtimeMs,
+												};
+											}),
 									)
-									.map((entry) => join(backupDir, entry.name))
-									.filter((candidatePath) => !keepSet.has(candidatePath))
-									.sort((left, right) => right.localeCompare(left))
-									.slice(SYNC_PRUNE_BACKUP_RETAIN_COUNT);
+								)
+									.filter((candidate): candidate is { path: string; mtimeMs: number } => candidate !== null)
+									.sort((left, right) => right.path.localeCompare(left.path));
+								const staleBackupPaths = [
+									...backupCandidates
+										.filter((candidate) => now - candidate.mtimeMs > SYNC_PRUNE_BACKUP_MAX_AGE_MS)
+										.map((candidate) => candidate.path),
+									...backupCandidates
+										.filter((candidate) => now - candidate.mtimeMs <= SYNC_PRUNE_BACKUP_MAX_AGE_MS)
+										.slice(SYNC_PRUNE_BACKUP_RETAIN_COUNT)
+										.map((candidate) => candidate.path),
+								];
 
 								for (const staleBackupPath of staleBackupPaths) {
 									try {
@@ -3471,16 +3536,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const backupPayload = createSyncPruneBackupPayload(
 									currentAccountsStorage,
 									currentFlaggedStorage,
+									{ includeLiveTokens: true },
 								);
 								const restoreAccountsSnapshot = structuredClone(currentAccountsStorage);
 								const restoreFlaggedSnapshot = structuredClone(currentFlaggedStorage);
-								const tempBackupPath = `${backupPath}.${Date.now()}.tmp`;
+								let tempBackupPath: string | null = null;
 								try {
-									await fsPromises.writeFile(tempBackupPath, `${JSON.stringify(backupPayload, null, 2)}\n`, {
-										encoding: "utf-8",
-										mode: 0o600,
-									});
-									await fsPromises.rename(tempBackupPath, backupPath);
+									for (let attempt = 0; attempt < 3; attempt += 1) {
+										tempBackupPath = `${backupPath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+										try {
+											await fsPromises.writeFile(
+												tempBackupPath,
+												`${JSON.stringify(backupPayload, null, 2)}\n`,
+												{
+													encoding: "utf-8",
+													mode: 0o600,
+													flag: "wx",
+												},
+											);
+											break;
+										} catch (error) {
+											if ((error as NodeJS.ErrnoException).code === "EEXIST" && attempt < 2) {
+												tempBackupPath = null;
+												continue;
+											}
+											throw error;
+										}
+									}
+									if (!tempBackupPath) {
+										throw new Error("Failed to allocate a temporary sync prune backup path.");
+									}
+									await renameSyncPruneBackupWithRetry(tempBackupPath, backupPath);
 									await pruneOldSyncPruneBackups(backupDir, [backupPath]).catch((cleanupError) => {
 										const cleanupMessage =
 											cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
@@ -3490,7 +3576,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 									});
 								} catch (error) {
 									try {
-										await fsPromises.unlink(tempBackupPath);
+										if (tempBackupPath) {
+											await fsPromises.unlink(tempBackupPath);
+										}
 									} catch {
 										// best-effort cleanup
 									}
@@ -3898,7 +3986,8 @@ while (attempted.size < Math.max(1, accountCount)) {
 										typeof (error as Error & { backupPath?: unknown }).backupPath === "string"
 											? ((error as Error & { backupPath: string }).backupPath)
 											: undefined;
-									const backupHint = cleanupBackupPath ? `\nBackup: ${cleanupBackupPath}` : "";
+									const hintedBackupPath = cleanupBackupPath ?? backupPath;
+									const backupHint = hintedBackupPath ? `\nBackup: ${hintedBackupPath}` : "";
 									console.log(`\nCleanup failed: ${message}${backupHint}\n`);
 								}
 							};

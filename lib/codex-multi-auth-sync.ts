@@ -248,6 +248,18 @@ async function redactNormalizedImportTempFile(tempPath: string, storage: Account
 	}
 }
 
+async function scrubStaleNormalizedImportTempFile(candidateDir: string): Promise<void> {
+	const tempPath = join(candidateDir, "accounts.json");
+	try {
+		await fs.truncate(tempPath, 0);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" || code === "EACCES" || code === "EPERM" || code === "EBUSY" || code === "EAGAIN") {
+			return;
+		}
+	}
+}
+
 async function withNormalizedImportFile<T>(
 	storage: AccountStorageV3,
 	handler: (filePath: string) => Promise<T>,
@@ -306,6 +318,7 @@ async function cleanupStaleNormalizedImportTempDirs(
 					continue;
 				}
 				let message = error instanceof Error ? error.message : String(error);
+				await scrubStaleNormalizedImportTempFile(candidateDir);
 				if (code && TEMP_CLEANUP_RETRYABLE_CODES.has(code)) {
 					await sleepAsync(STALE_TEMP_CLEANUP_RETRY_DELAY_MS);
 					try {
@@ -317,6 +330,7 @@ async function cleanupStaleNormalizedImportTempDirs(
 							continue;
 						}
 						message = retryError instanceof Error ? retryError.message : String(retryError);
+						await scrubStaleNormalizedImportTempFile(candidateDir);
 					}
 				}
 				logWarn(`Failed to sweep stale codex sync temp directory ${candidateDir}: ${message}`);
@@ -1229,6 +1243,7 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 				await fs.writeFile(tempBackupPath, `${JSON.stringify(fallback, null, 2)}\n`, {
 					encoding: "utf-8",
 					mode: 0o600,
+					flag: "wx",
 				});
 				await fs.rename(tempBackupPath, backupPath);
 				writtenBackupPath = backupPath;

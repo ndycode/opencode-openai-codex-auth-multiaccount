@@ -3,7 +3,7 @@ import { createSyncPruneBackupPayload } from "../lib/sync-prune-backup.js";
 import type { AccountStorageV3 } from "../lib/storage.js";
 
 describe("sync prune backup payload", () => {
-	it("keeps live tokens in the prune backup payload so crash recovery stays restorable", () => {
+	it("redacts live tokens by default", () => {
 		const storage: AccountStorageV3 = {
 			version: 3,
 			activeIndex: 0,
@@ -31,6 +31,51 @@ describe("sync prune backup payload", () => {
 				},
 			],
 		});
+
+		expect(payload.accounts.accounts[0]).toMatchObject({
+			refreshToken: "__redacted__",
+			accessToken: undefined,
+			idToken: undefined,
+		});
+		expect(payload.flagged.accounts[0]).toMatchObject({
+			refreshToken: "__redacted__",
+			accessToken: undefined,
+			idToken: undefined,
+		});
+	});
+
+	it("keeps live tokens when explicitly requested for crash recovery", () => {
+		const storage: AccountStorageV3 = {
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
+				{
+					accountId: "org-sync",
+					organizationId: "org-sync",
+					accountIdSource: "org",
+					refreshToken: "refresh-token",
+					accessToken: "access-token",
+					idToken: "id-token",
+					addedAt: 1,
+					lastUsed: 1,
+				},
+			],
+		};
+		const payload = createSyncPruneBackupPayload(
+			storage,
+			{
+				version: 1,
+				accounts: [
+					{
+						refreshToken: "refresh-token",
+						accessToken: "flagged-access-token",
+						idToken: "flagged-id-token",
+					},
+				],
+			},
+			{ includeLiveTokens: true },
+		);
 
 		expect(payload.accounts.accounts[0]).toMatchObject({
 			refreshToken: "refresh-token",
@@ -80,7 +125,7 @@ describe("sync prune backup payload", () => {
 			],
 		};
 
-		const payload = createSyncPruneBackupPayload(storage, flagged);
+		const payload = createSyncPruneBackupPayload(storage, flagged, { includeLiveTokens: true });
 
 		storage.accounts[0]!.accountTags?.push("mutated");
 		storage.accounts[0]!.lastSelectedModelByFamily!.codex = "gpt-5.5";

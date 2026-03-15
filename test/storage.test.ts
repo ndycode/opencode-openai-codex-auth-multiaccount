@@ -1950,6 +1950,99 @@ describe("storage", () => {
       expect(loadedFlagged.accounts).toEqual([]);
     });
 
+    it("holds the shared lock until both account and flagged writes finish", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        activeIndexByFamily: {},
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            accountId: "account-id",
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "account-refresh",
+            flaggedAt: 1,
+            addedAt: 1,
+            lastUsed: 1,
+          },
+        ],
+      });
+
+      const events: string[] = [];
+      let releaseFirstTransaction!: () => void;
+      const firstTransactionPaused = new Promise<void>((resolve) => {
+        releaseFirstTransaction = resolve;
+      });
+      let firstTransactionReady!: () => void;
+      const firstTransactionEntered = new Promise<void>((resolve) => {
+        firstTransactionReady = resolve;
+      });
+      let secondEntered = false;
+
+      const firstTransaction = withAccountAndFlaggedStorageTransaction(async (current, persist) => {
+        events.push("first:start");
+        await persist.flagged({
+          version: 1,
+          accounts: [
+            ...current.flagged.accounts,
+            {
+              refreshToken: "account-next",
+              flaggedAt: 2,
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        });
+        events.push("first:after-flagged");
+        firstTransactionReady();
+        await firstTransactionPaused;
+        await persist.accounts({
+          version: 3,
+          activeIndex: 1,
+          activeIndexByFamily: { codex: 1 },
+          accounts: [
+            ...(current.accounts?.accounts ?? []),
+            {
+              refreshToken: "account-next",
+              accountId: "account-next-id",
+              addedAt: 2,
+              lastUsed: 2,
+            },
+          ],
+        });
+        events.push("first:after-accounts");
+      });
+
+      await firstTransactionEntered;
+
+      const secondTransaction = withAccountAndFlaggedStorageTransaction(async () => {
+        secondEntered = true;
+        events.push("second:start");
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(secondEntered).toBe(false);
+      expect(events).toEqual(["first:start", "first:after-flagged"]);
+
+      releaseFirstTransaction();
+      await Promise.all([firstTransaction, secondTransaction]);
+
+      expect(events).toEqual([
+        "first:start",
+        "first:after-flagged",
+        "first:after-accounts",
+        "second:start",
+      ]);
+    });
+
     it("copies the raw accounts file for backup", async () => {
       await saveAccounts({
         version: 3,
