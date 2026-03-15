@@ -153,7 +153,7 @@ jobs:
                 if (error.status !== 404) throw error;
               }
 
-              if (maintainerLiveVerified) {
+              if (context.payload.action === "synchronize" && maintainerLiveVerified) {
                 try {
                   await github.rest.issues.removeLabel({
                     owner,
