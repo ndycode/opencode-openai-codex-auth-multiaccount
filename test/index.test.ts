@@ -2111,7 +2111,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(response.status).toBe(503);
-		expect(await response.text()).toContain("All stored Codex accounts are disabled");
+		const responseText = await response.text();
+		expect(responseText).toContain("All stored Codex accounts are disabled");
+		expect(responseText).toContain("Re-enable user-disabled accounts from account management");
 	});
 
 	it("disables grouped accounts when auth failures hit the threshold", async () => {
@@ -3493,8 +3495,8 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			cooldownReason: "auth-failure",
 		});
 		expect(
-			revivedEntries.find((account) => account.accountId === "org-legacy"),
-		).not.toHaveProperty("disabledReason");
+			revivedEntries.find((account) => account.accountId === "org-legacy")?.disabledReason,
+		).toBeUndefined();
 		expect(
 			revivedEntries.find((account) => account.accountId === "org-shared")?.accessToken,
 		).toBe("access-shared-refresh");

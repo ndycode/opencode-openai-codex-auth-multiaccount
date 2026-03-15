@@ -637,10 +637,16 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
       (account): account is AccountMetadataV3 =>
         isRecord(account) && typeof account.refreshToken === "string" && !!account.refreshToken.trim(),
     )
-    .map((account) => ({
-      ...account,
-      disabledReason: normalizeDisabledReason(account.enabled, account.disabledReason),
-    }));
+    .map((account) => {
+      const normalizedAccount: AccountMetadataV3 = { ...account };
+      const disabledReason = normalizeDisabledReason(account.enabled, account.disabledReason);
+      if (disabledReason === undefined) {
+        delete normalizedAccount.disabledReason;
+      } else {
+        normalizedAccount.disabledReason = disabledReason;
+      }
+      return normalizedAccount;
+    });
 
   const deduplicatedAccounts = deduplicateAccountsForStorage(validAccounts);
 

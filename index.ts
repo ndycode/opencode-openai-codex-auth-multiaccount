@@ -2741,7 +2741,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									totalCount === 0
 										? "No Codex accounts configured. Run `opencode auth login`."
 										: enabledCount === 0
-											? "All stored Codex accounts are disabled. Re-enable them from account management or run `opencode auth login` to restore auth-failure disables."
+											? "All stored Codex accounts are disabled. Re-enable user-disabled accounts from account management, or run `opencode auth login` to restore auth-failure disables."
 										: waitMs > 0
 											? `All ${enabledCount} enabled account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`
 											: `All ${enabledCount} enabled account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;

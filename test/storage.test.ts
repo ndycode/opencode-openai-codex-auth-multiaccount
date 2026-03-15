@@ -1096,6 +1096,7 @@ describe("storage", () => {
         enabled: false,
       });
       expect(result?.accounts[0]?.disabledReason).toBeUndefined();
+      expect(result?.accounts[0]).not.toHaveProperty("disabledReason");
     });
 
     it("preserves activeIndexByFamily when valid", () => {

@@ -2388,6 +2388,83 @@ describe("AccountManager", () => {
       }
     });
 
+    it("flushes newer debounced state after an older pending save fails", async () => {
+      vi.useFakeTimers();
+      try {
+        const { saveAccounts } = await import("../lib/storage.js");
+        const mockSaveAccounts = vi.mocked(saveAccounts);
+        mockSaveAccounts.mockClear();
+
+        const savedSnapshots: Array<
+          Array<{
+            refreshToken?: string;
+            enabled?: false;
+            disabledReason?: string;
+          }>
+        > = [];
+
+        let rejectFirstSave: (error: Error) => void;
+        const firstSave = new Promise<void>((_resolve, reject) => {
+          rejectFirstSave = reject;
+        });
+        mockSaveAccounts.mockImplementationOnce(async (storage) => {
+          savedSnapshots.push(
+            storage.accounts.map((account) => ({
+              refreshToken: account.refreshToken,
+              enabled: account.enabled,
+              disabledReason: account.disabledReason,
+            })),
+          );
+          await firstSave;
+        });
+        mockSaveAccounts.mockImplementationOnce(async (storage) => {
+          savedSnapshots.push(
+            storage.accounts.map((account) => ({
+              refreshToken: account.refreshToken,
+              enabled: account.enabled,
+              disabledReason: account.disabledReason,
+            })),
+          );
+        });
+
+        const now = Date.now();
+        const stored = {
+          version: 3 as const,
+          activeIndex: 0,
+          accounts: [
+            { refreshToken: "shared-refresh", addedAt: now, lastUsed: now },
+          ],
+        };
+
+        const manager = new AccountManager(undefined, stored);
+
+        manager.saveToDiskDebounced(0);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+
+        const account = manager.getAccountsSnapshot()[0]!;
+        manager.disableAccountsWithSameRefreshToken(account);
+        manager.saveToDiskDebounced(50);
+
+        const flushPromise = manager.flushPendingSave();
+        await Promise.resolve();
+
+        rejectFirstSave!(Object.assign(new Error("EBUSY: file in use"), { code: "EBUSY" }));
+        await flushPromise;
+
+        expect(mockSaveAccounts).toHaveBeenCalledTimes(2);
+        expect(savedSnapshots[1]).toEqual([
+          expect.objectContaining({
+            refreshToken: "shared-refresh",
+            enabled: false,
+            disabledReason: "auth-failure",
+          }),
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("warns and rejects if flushPendingSave keeps discovering new saves", async () => {
       vi.useFakeTimers();
       try {

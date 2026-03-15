@@ -1062,11 +1062,27 @@ export class AccountManager {
 				this.saveDebounceTimer = null;
 			}
 			if (this.pendingSave) {
-				await this.pendingSave;
+				let pendingSaveError: unknown;
+				try {
+					await this.pendingSave;
+				} catch (error) {
+					pendingSaveError = error;
+				}
 				// Let debounced callbacks waiting on the completed save re-arm pendingSave.
 				await Promise.resolve();
 				if (this.saveDebounceTimer !== null || this.pendingSave !== null) {
 					continue;
+				}
+				if (pendingSaveError) {
+					if (!hadDebouncedSave) {
+						throw pendingSaveError;
+					}
+					log.warn("flushPendingSave: ignoring pending-save failure to flush newer state", {
+						error:
+							pendingSaveError instanceof Error
+								? pendingSaveError.message
+								: String(pendingSaveError),
+					});
 				}
 			}
 			if (!hadDebouncedSave) {
