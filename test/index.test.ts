@@ -2098,7 +2098,25 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			shouldShowAccountToast: () => false,
 			markToastShown: () => {},
 			setActiveIndex: () => null,
-			getAccountsSnapshot: () => [],
+			hasPendingSave: () => false,
+			waitForPendingSaveToSettle: async () => {},
+			flushPendingSave: async () => {},
+			getAccountsSnapshot: () => [
+				{
+					index: 0,
+					email: "user1@example.com",
+					refreshToken: "refresh-disabled-a",
+					enabled: false,
+					disabledReason: "user" as const,
+				},
+				{
+					index: 1,
+					email: "user2@example.com",
+					refreshToken: "refresh-disabled-b",
+					enabled: false,
+					disabledReason: "user" as const,
+				},
+			],
 		};
 		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
 		globalThis.fetch = vi.fn();
@@ -2112,8 +2130,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(response.status).toBe(503);
 		const responseText = await response.text();
-		expect(responseText).toContain("All stored Codex accounts are disabled");
-		expect(responseText).toContain("Re-enable user-disabled accounts from account management");
+		expect(responseText).toContain("All stored Codex accounts are user-disabled");
+		expect(responseText).toContain("Re-enable them from account management");
 	});
 
 	it("disables grouped accounts when auth failures hit the threshold", async () => {
@@ -2258,6 +2276,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			getMinWaitTimeForFamily: () => 0,
 			shouldShowAccountToast: () => false,
 			setActiveIndex: () => null,
+			hasPendingSave: () => false,
+			waitForPendingSaveToSettle: async () => {},
+			flushPendingSave: async () => {},
 			getAccountsSnapshot: () => [],
 		};
 		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
@@ -2281,7 +2302,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			"auth-failure",
 		);
 		expect(saveToDiskDebouncedSpy).toHaveBeenCalledTimes(1);
-		expect(await response.text()).toContain("All stored Codex accounts are disabled");
+		const responseText = await response.text();
+		expect(responseText).toContain("All stored Codex accounts are user-disabled");
+		expect(responseText).toContain("Re-enable them from account management");
 	});
 
 	it("surfaces the disabled-pool response when same-token variants were already user-disabled", async () => {
@@ -2338,6 +2361,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			getMinWaitTimeForFamily: () => 0,
 			shouldShowAccountToast: () => false,
 			setActiveIndex: () => null,
+			hasPendingSave: () => false,
+			waitForPendingSaveToSettle: async () => {},
+			flushPendingSave: async () => {},
 			getAccountsSnapshot: () => [
 				{
 					index: 0,
@@ -2377,8 +2403,76 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 		expect(saveToDiskDebouncedSpy).toHaveBeenCalledTimes(1);
 		const responseText = await response.text();
-		expect(responseText).toContain("All stored Codex accounts are disabled");
-		expect(responseText).toContain("Re-enable user-disabled accounts from account management");
+		expect(responseText).toContain("All stored Codex accounts are user-disabled");
+		expect(responseText).toContain("Re-enable them from account management");
+	});
+
+	it("surfaces an auth-failure-specific disabled-pool response when every account is auth-failure disabled", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+
+		const customManager = {
+			getAccountCount: () => 2,
+			getEnabledAccountCount: () => 0,
+			getCurrentOrNextForFamilyHybrid: () => null,
+			getSelectionExplainability: () => [],
+			toAuthDetails: () => ({
+				type: "oauth" as const,
+				access: "access-disabled",
+				refresh: "refresh-disabled",
+				expires: Date.now() + 60_000,
+			}),
+			hasRefreshToken: () => true,
+			saveToDiskDebounced: () => {},
+			updateFromAuth: () => {},
+			clearAuthFailures: () => {},
+			incrementAuthFailures: () => 1,
+			markAccountCoolingDown: () => {},
+			markRateLimitedWithReason: () => {},
+			recordRateLimit: () => {},
+			consumeToken: () => true,
+			refundToken: () => {},
+			markSwitched: () => {},
+			removeAccount: () => {},
+			recordFailure: () => {},
+			recordSuccess: () => {},
+			getMinWaitTimeForFamily: () => 0,
+			shouldShowAccountToast: () => false,
+			markToastShown: () => {},
+			setActiveIndex: () => null,
+			hasPendingSave: () => false,
+			waitForPendingSaveToSettle: async () => {},
+			flushPendingSave: async () => {},
+			getAccountsSnapshot: () => [
+				{
+					index: 0,
+					email: "user1@example.com",
+					refreshToken: "refresh-disabled-a",
+					enabled: false,
+					disabledReason: "auth-failure" as const,
+				},
+				{
+					index: 1,
+					email: "user2@example.com",
+					refreshToken: "refresh-disabled-b",
+					enabled: false,
+					disabledReason: "auth-failure" as const,
+				},
+			],
+		};
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		globalThis.fetch = vi.fn();
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(response.status).toBe(503);
+		const responseText = await response.text();
+		expect(responseText).toContain("disabled after repeated auth failures");
+		expect(responseText).toContain("Run `opencode auth login` to restore access");
 	});
 
 	it("skips fetch when local token bucket is depleted", async () => {
@@ -3452,7 +3546,6 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				organizationId: "org-keep",
 				email: "org@example.com",
 				refreshToken: "shared-refresh",
-				enabled: true,
 				addedAt: 10,
 				lastUsed: 10,
 			},
@@ -4034,7 +4127,6 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				accountId: "workspace-managed",
 				email: "managed@example.com",
 				refreshToken: "refresh-managed",
-				enabled: true,
 				addedAt: 10,
 				lastUsed: 10,
 			},
@@ -4106,7 +4198,6 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 				accountId: "workspace-managed",
 				email: "managed@example.com",
 				refreshToken: "refresh-managed",
-				enabled: true,
 				addedAt: 10,
 				lastUsed: 10,
 			},

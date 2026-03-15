@@ -1059,7 +1059,9 @@ export class AccountManager {
 
 		// This intentionally treats debounce-only timers as pending work too. Callers
 		// such as scheduleTrackedManagerPrune wait across those gaps so a later re-arm
-		// cannot drop shutdown tracking before the deferred save actually runs.
+		// cannot drop shutdown tracking before the deferred save actually runs. If a
+		// manager is abandoned before the debounce is replayed through flushPendingSave
+		// or the timer itself fires, cleanup-time pruning is the final backstop.
 		return new Promise((resolve) => {
 			this.pendingSaveSettledWaiters.add(resolve);
 		});

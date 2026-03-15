@@ -2798,11 +2798,28 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
+								const disabledSnapshot =
+									enabledCount === 0 ? accountManager.getAccountsSnapshot() : [];
+								const hasUserDisabled = disabledSnapshot.some(
+									(account) =>
+										account.enabled === false &&
+										account.disabledReason !== "auth-failure",
+								);
+								const hasAuthFailureDisabled = disabledSnapshot.some(
+									(account) =>
+										account.enabled === false &&
+										account.disabledReason === "auth-failure",
+								);
+								const disabledMessage = hasUserDisabled && hasAuthFailureDisabled
+									? "All stored Codex accounts are disabled. Re-enable user-disabled accounts from account management, or run `opencode auth login` to restore auth-failure disables."
+									: hasAuthFailureDisabled
+										? "All stored Codex accounts are disabled after repeated auth failures. Run `opencode auth login` to restore access."
+										: "All stored Codex accounts are user-disabled. Re-enable them from account management.";
 								const message =
 									totalCount === 0
 										? "No Codex accounts configured. Run `opencode auth login`."
 										: enabledCount === 0
-											? "All stored Codex accounts are disabled. Re-enable user-disabled accounts from account management, or run `opencode auth login` to restore auth-failure disables."
+											? disabledMessage
 										: waitMs > 0
 											? `All ${enabledCount} enabled account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`
 											: `All ${enabledCount} enabled account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;
