@@ -1686,6 +1686,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 		const managerHasPendingSave = (candidate: AccountManager): boolean =>
 			typeof candidate.hasPendingSave === "function" ? candidate.hasPendingSave() : true;
+		const trackedManagerSettledWaits = new WeakMap<AccountManager, Promise<void>>();
 
 		const pruneTrackedAccountManagersForCleanup = (): void => {
 			for (const trackedManager of [...trackedAccountManagersForCleanup]) {
@@ -1695,12 +1696,34 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			}
 		};
 
+		const scheduleTrackedManagerPrune = (manager: AccountManager): void => {
+			if (
+				!managerHasPendingSave(manager) ||
+				trackedManagerSettledWaits.has(manager) ||
+				typeof manager.waitForPendingSaveToSettle !== "function"
+			) {
+				return;
+			}
+
+			const waitForSettle = manager
+				.waitForPendingSaveToSettle()
+				.finally(() => {
+					trackedManagerSettledWaits.delete(manager);
+					if (!managerHasPendingSave(manager) && !activeAccountManagersForCleanup.has(manager)) {
+						trackedAccountManagersForCleanup.delete(manager);
+					}
+				});
+
+			trackedManagerSettledWaits.set(manager, waitForSettle);
+		};
+
 		const setCachedAccountManager = (manager: AccountManager): AccountManager => {
 			pruneTrackedAccountManagersForCleanup();
 			if (cachedAccountManager && cachedAccountManager !== manager) {
 				activeAccountManagersForCleanup.delete(cachedAccountManager);
 				if (managerHasPendingSave(cachedAccountManager)) {
 					trackedAccountManagersForCleanup.add(cachedAccountManager);
+					scheduleTrackedManagerPrune(cachedAccountManager);
 				} else {
 					trackedAccountManagersForCleanup.delete(cachedAccountManager);
 				}
@@ -1718,6 +1741,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				activeAccountManagersForCleanup.delete(cachedAccountManager);
 				if (managerHasPendingSave(cachedAccountManager)) {
 					trackedAccountManagersForCleanup.add(cachedAccountManager);
+					scheduleTrackedManagerPrune(cachedAccountManager);
 				} else {
 					trackedAccountManagersForCleanup.delete(cachedAccountManager);
 				}

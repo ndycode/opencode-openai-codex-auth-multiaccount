@@ -223,6 +223,7 @@ export class AccountManager {
 	private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingSave: Promise<void> | null = null;
 	private authFailuresByRefreshToken: Map<string, number> = new Map();
+	private pendingSaveSettledWaiters = new Set<() => void>();
 
 	static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
 		const stored = await loadAccounts();
@@ -1038,6 +1039,7 @@ export class AccountManager {
 			if (this.pendingSave === nextSave) {
 				this.pendingSave = null;
 			}
+			this.resolvePendingSaveSettledWaiters();
 		});
 		this.pendingSave = nextSave;
 		return nextSave;
@@ -1045,6 +1047,27 @@ export class AccountManager {
 
 	hasPendingSave(): boolean {
 		return this.saveDebounceTimer !== null || this.pendingSave !== null;
+	}
+
+	waitForPendingSaveToSettle(): Promise<void> {
+		if (!this.hasPendingSave()) {
+			return Promise.resolve();
+		}
+
+		return new Promise((resolve) => {
+			this.pendingSaveSettledWaiters.add(resolve);
+		});
+	}
+
+	private resolvePendingSaveSettledWaiters(): void {
+		if (this.hasPendingSave() || this.pendingSaveSettledWaiters.size === 0) {
+			return;
+		}
+
+		for (const resolve of [...this.pendingSaveSettledWaiters]) {
+			this.pendingSaveSettledWaiters.delete(resolve);
+			resolve();
+		}
 	}
 
 	saveToDiskDebounced(delayMs = 500): void {

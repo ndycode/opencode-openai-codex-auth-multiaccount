@@ -3910,17 +3910,19 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		const accountsModule = await import("../lib/accounts.js");
 		const cliModule = await import("../lib/cli.js");
 		const managerOne = await accountsModule.AccountManager.loadFromDisk();
-		const managerTwo = await accountsModule.AccountManager.loadFromDisk();
 		const flushManagerOne = vi.fn(async () => {});
-		const flushManagerTwo = vi.fn(async () => {});
 		let managerOneHasPendingSave = true;
+		let resolveManagerOneSettled: (() => void) | null = null;
 		managerOne.flushPendingSave = flushManagerOne;
-		managerTwo.flushPendingSave = flushManagerTwo;
 		managerOne.hasPendingSave = vi.fn(() => managerOneHasPendingSave);
-		managerTwo.hasPendingSave = vi.fn(() => false);
+		managerOne.waitForPendingSaveToSettle = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveManagerOneSettled = resolve;
+				}),
+		);
 		vi.spyOn(accountsModule.AccountManager, "loadFromDisk")
-			.mockResolvedValueOnce(managerOne)
-			.mockResolvedValue(managerTwo);
+			.mockResolvedValue(managerOne);
 
 		mockStorage.accounts = [
 			{
@@ -3961,20 +3963,13 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 		expect(authResult.instructions).toBe("Authentication cancelled");
 
 		managerOneHasPendingSave = false;
-		await plugin.auth.loader(
-			async () => ({
-				type: "oauth",
-				access: "access-token-2",
-				refresh: "refresh-token-2",
-				expires: Date.now() + 60_000,
-			}) as never,
-			{},
-		);
+		resolveManagerOneSettled?.();
+		await Promise.resolve();
+		await Promise.resolve();
 
 		await runCleanup();
 
 		expect(flushManagerOne).not.toHaveBeenCalled();
-		expect(flushManagerTwo).toHaveBeenCalledTimes(1);
 	});
 
 	it("flushes tracked account managers from multiple plugin instances during shutdown cleanup", async () => {
