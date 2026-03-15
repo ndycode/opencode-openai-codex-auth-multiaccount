@@ -1182,23 +1182,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			persistedAccountCountHint = Math.max(0, Math.trunc(count));
 		};
 
-		const resolvePersistedAccountSessionID = (
-			...candidates: Array<string | null | undefined>
-		): string | undefined => {
-			for (const candidate of [...candidates, process.env.CODEX_THREAD_ID]) {
-				const sessionID = candidate?.toString().trim();
-				if (sessionID) {
-					return sessionID;
-				}
-			}
-			return undefined;
+		const resetPersistedAccountFooterState = (): void => {
+			persistedAccountIndicators.clear();
+			persistedAccountCountHint = 0;
 		};
 
 		const resolvePersistedIndicatorSessionID = (
 			...candidates: Array<string | null | undefined>
 		): string | undefined => {
 			const runtimeThreadId = process.env.CODEX_THREAD_ID?.toString().trim();
-			return runtimeThreadId || resolvePersistedAccountSessionID(...candidates);
+			if (runtimeThreadId) {
+				return runtimeThreadId;
+			}
+			for (const candidate of candidates) {
+				const sessionID = candidate?.toString().trim();
+				if (sessionID) {
+					return sessionID;
+				}
+			}
+			return undefined;
 		};
 
 		const trimPersistedAccountIndicators = (): void => {
@@ -1242,6 +1244,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			accountCount: number,
 			style: PersistAccountFooterStyle,
 		): boolean => {
+			// Bulk refreshes are intentionally update-only: they only rewrite
+			// already-tracked sessions, so new entries still have to flow through
+			// setPersistedAccountIndicator() where the LRU cap is enforced.
 			const sessionIDs = Array.from(persistedAccountIndicators.keys());
 			if (sessionIDs.length === 0) return false;
 			const revision = nextPersistedAccountIndicatorRevision();
@@ -1438,9 +1443,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			const persistAccountFooter = getPersistAccountFooter(pluginConfig);
 			const persistAccountFooterStyle =
 				getPersistAccountFooterStyle(pluginConfig);
+			// Footer disable transitions intentionally reset the in-memory footer
+			// state. Authorize flows keep using the cached runtime snapshot here, so
+			// a transient config-loader fallback does not clear live indicators.
 			if (runtimePersistAccountFooter && !persistAccountFooter) {
-				persistedAccountIndicators.clear();
-				persistedAccountCountHint = 0;
+				resetPersistedAccountFooterState();
 			}
 			runtimePluginConfigSnapshot = pluginConfig;
 			runtimePersistAccountFooter = persistAccountFooter;
