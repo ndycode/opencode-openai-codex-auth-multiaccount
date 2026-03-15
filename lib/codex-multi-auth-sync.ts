@@ -1294,14 +1294,33 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 						.map((account) => normalizeTrimmedIdentity(account.refreshToken))
 						.filter((refreshToken): refreshToken is string => refreshToken !== undefined),
 				);
-				await persist.flagged({
-					version: 1,
+				const nextFlaggedStorage = {
+					version: 1 as const,
 					accounts: currentFlaggedStorage.accounts.filter((flaggedAccount) => {
 						const refreshToken = normalizeTrimmedIdentity(flaggedAccount.refreshToken);
 						return refreshToken !== undefined && remainingRefreshTokens.has(refreshToken);
 					}),
-				});
-				await persist.accounts(plan.nextStorage);
+				};
+				await persist.flagged(nextFlaggedStorage);
+				try {
+					await persist.accounts(plan.nextStorage);
+				} catch (accountsError) {
+					try {
+						await persist.flagged(currentFlaggedStorage);
+					} catch (restoreFlaggedError) {
+						const accountsMessage =
+							accountsError instanceof Error ? accountsError.message : String(accountsError);
+						const restoreFlaggedMessage =
+							restoreFlaggedError instanceof Error
+								? restoreFlaggedError.message
+								: String(restoreFlaggedError);
+						throw new Error(
+							`Failed to persist overlap cleanup accounts: ${accountsMessage}; ` +
+								`failed to restore flagged storage: ${restoreFlaggedMessage}`,
+						);
+					}
+					throw accountsError;
+				}
 			}
 			return plan.result;
 		} catch (error) {

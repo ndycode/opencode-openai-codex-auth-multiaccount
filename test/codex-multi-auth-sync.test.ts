@@ -1996,6 +1996,63 @@ describe("codex-multi-auth sync", () => {
 		}
 	});
 
+	it("rolls back flagged storage when overlap cleanup account persistence fails", async () => {
+		const originalFlaggedStorage: FlaggedAccountStorageV1 = {
+			version: 1,
+			accounts: [
+				{
+					accountId: "flagged-sync",
+					organizationId: "org-sync",
+					refreshToken: "rt-sync",
+					flaggedAt: 123,
+					addedAt: 4,
+					lastUsed: 4,
+				},
+			],
+		};
+		const persist = await mockOverlapCleanupTransaction(
+			{
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-local",
+						organizationId: "org-local",
+						accountIdSource: "org",
+						email: "shared@example.com",
+						refreshToken: "rt-local",
+						addedAt: 5,
+						lastUsed: 5,
+					},
+					{
+						accountTags: ["codex-multi-auth-sync"],
+						email: "shared@example.com",
+						refreshToken: "rt-sync",
+						addedAt: 4,
+						lastUsed: 4,
+					},
+				],
+			},
+			{
+				flagged: originalFlaggedStorage,
+				persistAccounts: async () => {
+					throw new Error("persist failed");
+				},
+			},
+		);
+
+		const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
+		await expect(cleanupCodexMultiAuthSyncedOverlaps()).rejects.toThrow("persist failed");
+
+		expect(persist.flagged).toHaveBeenCalledTimes(2);
+		expect(persist.flagged).toHaveBeenNthCalledWith(1, {
+			version: 1,
+			accounts: [],
+		});
+		expect(persist.flagged).toHaveBeenNthCalledWith(2, originalFlaggedStorage);
+	});
+
 
 	it("limits overlap cleanup to accounts tagged from codex-multi-auth sync", async () => {
 		await mockOverlapCleanupTransaction({
