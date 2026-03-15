@@ -79,40 +79,44 @@ vi.mock("../lib/cli.js", () => ({
 	promptAddAnotherAccount: vi.fn(async () => false),
 }));
 
-vi.mock("../lib/config.js", () => ({
-	getCodexMode: () => true,
-	getRequestTransformMode: () => "native",
-	getFastSession: () => false,
-	getFastSessionStrategy: () => "hybrid",
-	getFastSessionMaxInputItems: () => 30,
-	getPersistAccountFooter: vi.fn(() => false),
-	getPersistAccountFooterStyle: vi.fn(() => "label-masked-email"),
-	getRetryProfile: () => "balanced",
-	getRetryBudgetOverrides: () => ({}),
-	getRateLimitToastDebounceMs: () => 5000,
-	getRetryAllAccountsMaxRetries: vi.fn(() => 3),
-	getRetryAllAccountsMaxWaitMs: vi.fn(() => 30000),
-	getRetryAllAccountsRateLimited: vi.fn(() => true),
-	getUnsupportedCodexPolicy: vi.fn(() => "fallback"),
-	getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
-	getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
-	getUnsupportedCodexFallbackChain: () => ({}),
-	getTokenRefreshSkewMs: () => 60000,
-	getSessionRecovery: () => false,
-	getAutoResume: () => false,
-	getToastDurationMs: () => 5000,
-	getPerProjectAccounts: () => false,
-	getEmptyResponseMaxRetries: () => 2,
-	getEmptyResponseRetryDelayMs: () => 1000,
-	getPidOffsetEnabled: () => false,
-	getFetchTimeoutMs: () => 60000,
-	getStreamStallTimeoutMs: () => 45000,
-	getCodexTuiV2: () => false,
-	getCodexTuiColorProfile: () => "ansi16",
-	getCodexTuiGlyphMode: () => "ascii",
-	getBeginnerSafeMode: () => false,
-	loadPluginConfig: vi.fn(() => ({})),
-}));
+vi.mock("../lib/config.js", () => {
+	const DEFAULT_CONFIG = {};
+	return {
+		DEFAULT_CONFIG,
+		getCodexMode: () => true,
+		getRequestTransformMode: () => "native",
+		getFastSession: () => false,
+		getFastSessionStrategy: () => "hybrid",
+		getFastSessionMaxInputItems: () => 30,
+		getPersistAccountFooter: vi.fn(() => false),
+		getPersistAccountFooterStyle: vi.fn(() => "label-masked-email"),
+		getRetryProfile: () => "balanced",
+		getRetryBudgetOverrides: () => ({}),
+		getRateLimitToastDebounceMs: () => 5000,
+		getRetryAllAccountsMaxRetries: vi.fn(() => 3),
+		getRetryAllAccountsMaxWaitMs: vi.fn(() => 30000),
+		getRetryAllAccountsRateLimited: vi.fn(() => true),
+		getUnsupportedCodexPolicy: vi.fn(() => "fallback"),
+		getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
+		getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
+		getUnsupportedCodexFallbackChain: () => ({}),
+		getTokenRefreshSkewMs: () => 60000,
+		getSessionRecovery: () => false,
+		getAutoResume: () => false,
+		getToastDurationMs: () => 5000,
+		getPerProjectAccounts: vi.fn(() => false),
+		getEmptyResponseMaxRetries: () => 2,
+		getEmptyResponseRetryDelayMs: () => 1000,
+		getPidOffsetEnabled: () => false,
+		getFetchTimeoutMs: () => 60000,
+		getStreamStallTimeoutMs: () => 45000,
+		getCodexTuiV2: () => false,
+		getCodexTuiColorProfile: () => "ansi16",
+		getCodexTuiGlyphMode: () => "ascii",
+		getBeginnerSafeMode: () => false,
+		loadPluginConfig: vi.fn(() => ({})),
+	};
+});
 
 vi.mock("../lib/request/request-transformer.js", () => ({
 	applyFastSessionDefaults: <T>(config: T) => config,
@@ -2902,7 +2906,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const authorizeConfig = { source: "authorize-config" };
 
 		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
-		vi.spyOn(configModule, "getPerProjectAccounts").mockImplementation(
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
 			(config) => config === authorizeConfig,
 		);
 
@@ -2932,7 +2936,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		const loaderConfig = { source: "loader-config" };
 
 		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
-		vi.spyOn(configModule, "getPerProjectAccounts").mockImplementation(
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
 			(config) => config === loaderConfig,
 		);
 
@@ -2954,6 +2958,40 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
 		expect(loggerModule.logWarn).toHaveBeenCalledWith(
 			expect.stringContaining("Falling back to cached authorize storage config"),
+		);
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		await expect(manualMethod.authorize()).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("falls back to the cached authorize storage config when the fresh refresh returns DEFAULT_CONFIG", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const loggerModule = await import("../lib/logger.js");
+		const loaderConfig = { source: "loader-config" };
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
+			(config) => config === loaderConfig,
+		);
+
+		const { plugin } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<unknown>;
+		};
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		vi.mocked(loggerModule.logWarn).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(configModule.DEFAULT_CONFIG);
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+		expect(loggerModule.logWarn).toHaveBeenCalledWith(
+			"Falling back to cached authorize storage config after config loader returned defaults.",
 		);
 
 		vi.mocked(storageModule.setStoragePath).mockClear();

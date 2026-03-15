@@ -26,7 +26,7 @@ export type UnsupportedCodexPolicy = "strict" | "fallback";
  * Default plugin configuration
  * CODEX_MODE is enabled by default for better Codex CLI parity
  */
-const DEFAULT_CONFIG: PluginConfig = {
+export const DEFAULT_CONFIG: PluginConfig = {
 	codexMode: true,
 	requestTransformMode: "native",
 	codexTuiV2: true,

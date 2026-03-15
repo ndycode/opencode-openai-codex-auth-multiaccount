@@ -67,6 +67,7 @@ import {
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
 	getBeginnerSafeMode,
+	DEFAULT_CONFIG,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -1453,13 +1454,25 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		const refreshAuthorizeStoragePath = (): void => {
-			// Auth writes should honor the latest per-project setting, but if a mocked
-			// or future config loader throws, keep login usable with the last snapshot.
-			let storagePluginConfig = runtimePluginConfigSnapshot;
+			// Auth writes should honor the latest per-project setting, but a Windows
+			// config-file lock can make loadPluginConfig() fall back to DEFAULT_CONFIG.
+			// If we already have a runtime snapshot, keep using it instead of silently
+			// routing auth writes to the wrong storage path.
+			let storagePluginConfig = runtimePluginConfigSnapshot ?? DEFAULT_CONFIG;
 			try {
-				storagePluginConfig = loadPluginConfig();
+				const refreshedPluginConfig = loadPluginConfig();
+				if (
+					refreshedPluginConfig === DEFAULT_CONFIG &&
+					runtimePluginConfigSnapshot
+				) {
+					logWarn(
+						"Falling back to cached authorize storage config after config loader returned defaults.",
+					);
+				} else {
+					storagePluginConfig = refreshedPluginConfig;
+				}
 			} catch (error) {
-				if (!storagePluginConfig) {
+				if (!runtimePluginConfigSnapshot) {
 					throw error;
 				}
 				logWarn(
