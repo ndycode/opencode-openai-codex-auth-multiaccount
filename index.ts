@@ -1194,9 +1194,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		const trimPersistedAccountIndicators = (): void => {
-			while (persistedAccountIndicators.size > MAX_PERSISTED_ACCOUNT_INDICATORS) {
+			if (persistedAccountIndicators.size > MAX_PERSISTED_ACCOUNT_INDICATORS) {
 				const oldestKey = persistedAccountIndicators.keys().next().value;
-				if (oldestKey === undefined) break;
+				if (oldestKey === undefined) return;
 				persistedAccountIndicators.delete(oldestKey);
 			}
 		};
@@ -1453,9 +1453,19 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		};
 
 		const refreshAuthorizeStoragePath = (): void => {
-			// Auth writes are infrequent, so prefer a fresh storage-location read
-			// while footer runtime state stays on the last loader/fetch snapshot.
-			const storagePluginConfig = loadPluginConfig();
+			// Auth writes should honor the latest per-project setting, but if a mocked
+			// or future config loader throws, keep login usable with the last snapshot.
+			let storagePluginConfig = runtimePluginConfigSnapshot;
+			try {
+				storagePluginConfig = loadPluginConfig();
+			} catch (error) {
+				if (!storagePluginConfig) {
+					throw error;
+				}
+				logWarn(
+					`Falling back to cached authorize storage config after refresh failure: ${(error as Error).message}`,
+				);
+			}
 			const perProjectAccounts = getPerProjectAccounts(storagePluginConfig);
 			setStoragePath(perProjectAccounts ? process.cwd() : null);
 		};

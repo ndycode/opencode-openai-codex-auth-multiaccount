@@ -413,8 +413,8 @@ type PluginType = {
 					role: string;
 					sessionID?: string;
 					model?: {
-						providerID: string;
-						modelID: string;
+						providerID?: string;
+						modelID?: string;
 						variant?: string;
 					};
 					variant?: string;
@@ -2293,6 +2293,40 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		);
 	});
 
+	it("keeps the manual-switch account count hint available for a later zero-count fetch", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+			getAccountCount: () => number;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const { plugin, sdk } = await setupPlugin();
+		vi.spyOn(manager, "getAccountCount").mockImplementation(() => 0);
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+		await sendPersistedAccountRequest(sdk, "session-count-hint-after-switch");
+
+		expect(
+			(await readPersistedAccountIndicator(plugin, "session-count-hint-after-switch")).variant,
+		).toBe("user@example.com [1/2]");
+	});
+
 	it("decorates the last user message with a label-only indicator when configured", async () => {
 		await enablePersistedFooter("label-only");
 		const { plugin, sdk } = await setupPlugin();
@@ -2588,6 +2622,31 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		).toBe(expectedFullIndicator);
 	});
 
+	it("preserves partial model info in the transform hook while still setting model.variant", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-partial-model");
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+						sessionID: "session-partial-model",
+						model: { providerID: "openai" },
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(output.messages[0]?.info.variant).toBe(expectedFullIndicator);
+		expect(output.messages[0]?.info.model?.providerID).toBe("openai");
+		expect(output.messages[0]?.info.model?.modelID).toBeUndefined();
+		expect(output.messages[0]?.info.model?.variant).toBe(expectedFullIndicator);
+	});
+
 	it("stops applying persisted indicators after the footer is disabled", async () => {
 		await enablePersistedFooter("full-email");
 		const { plugin, sdk } = await setupPlugin();
@@ -2863,6 +2922,42 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 		vi.mocked(storageModule.setStoragePath).mockClear();
 		await manualMethod.authorize();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("falls back to the cached authorize storage config when the fresh refresh throws", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const loggerModule = await import("../lib/logger.js");
+		const loaderConfig = { source: "loader-config" };
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
+		vi.spyOn(configModule, "getPerProjectAccounts").mockImplementation(
+			(config) => config === loaderConfig,
+		);
+
+		const { plugin } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<unknown>;
+		};
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		vi.mocked(loggerModule.logWarn).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockImplementation(() => {
+			throw new Error("config locked");
+		});
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+		expect(loggerModule.logWarn).toHaveBeenCalledWith(
+			expect.stringContaining("Falling back to cached authorize storage config"),
+		);
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		await expect(manualMethod.authorize()).resolves.toBeDefined();
 		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
 	});
 
