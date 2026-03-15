@@ -564,6 +564,7 @@ beforeEach(async () => {
 	vi.mocked(storageModule.saveFlaggedAccounts).mockReset();
 	vi.mocked(storageModule.withFlaggedAccountsTransaction).mockReset();
 	vi.mocked(storageModule.normalizeAccountStorage).mockReset();
+	vi.mocked(storageModule.createTimestampedBackupPath).mockReset();
 
 	vi.mocked(cliModule.promptLoginMode).mockResolvedValue({ mode: "add" });
 	vi.mocked(cliModule.promptAddAnotherAccount).mockResolvedValue(false);
@@ -694,6 +695,9 @@ beforeEach(async () => {
 		},
 	);
 	vi.mocked(storageModule.normalizeAccountStorage).mockImplementation((value: unknown) => value);
+	vi.mocked(storageModule.createTimestampedBackupPath).mockImplementation(
+		(prefix?: string) => `/tmp/${prefix ?? "codex-backup"}-20260101-000000.json`,
+	);
 });
 
 type ToolExecute<T = void> = { execute: (args: T) => Promise<string> };
@@ -2296,7 +2300,7 @@ describe("OpenAIOAuthPlugin", () => {
 				.mockResolvedValue({ mode: "cancel" });
 			vi.mocked(cliModule.promptCodexMultiAuthSyncPrune).mockResolvedValueOnce([0]);
 			vi.mocked(confirmModule.confirm).mockResolvedValue(true);
-			vi.mocked(storageModule.createTimestampedBackupPath).mockImplementation(
+			vi.mocked(storageModule.createTimestampedBackupPath).mockImplementationOnce(
 				(prefix?: string) => `\\tmp\\${prefix ?? "codex-backup"}-20260101-000000.json`,
 			);
 			vi.mocked(syncModule.previewSyncFromCodexMultiAuth)

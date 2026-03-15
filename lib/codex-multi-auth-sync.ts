@@ -10,7 +10,7 @@ import {
 	loadAccounts,
 	normalizeAccountStorage,
 	previewImportAccountsWithExistingStorage,
-	withAccountStorageTransaction,
+	withAccountAndFlaggedStorageTransaction,
 	type AccountStorageV3,
 	type ImportAccountsResult,
 } from "./storage.js";
@@ -270,7 +270,7 @@ async function scrubStaleNormalizedImportTempFile(candidateDir: string): Promise
 async function renameOverlapCleanupBackupWithRetry(sourcePath: string, destinationPath: string): Promise<void> {
 	let lastError: NodeJS.ErrnoException | null = null;
 
-	for (let attempt = 0; attempt < BACKUP_RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+	for (let attempt = 0; attempt <= BACKUP_RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
 		try {
 			await fs.rename(sourcePath, destinationPath);
 			return;
@@ -291,6 +291,8 @@ async function renameOverlapCleanupBackupWithRetry(sourcePath: string, destinati
 	if (lastError) {
 		throw lastError;
 	}
+
+	throw new Error(`Failed to rename overlap cleanup backup ${sourcePath} to ${destinationPath}.`);
 }
 
 async function withNormalizedImportFile<T>(
@@ -977,11 +979,6 @@ function getSyncCapacityLimit(): number {
 	}
 	const message = `${SYNC_MAX_ACCOUNTS_OVERRIDE_ENV} override value "${override}" is not a positive integer; ignoring.`;
 	logWarn(message);
-	try {
-		process.stderr.write(`${message}\n`);
-	} catch {
-		// best-effort warning for non-interactive shells
-	}
 	return ACCOUNT_LIMITS.MAX_ACCOUNTS;
 }
 
@@ -1259,7 +1256,7 @@ export async function previewCodexMultiAuthSyncedOverlapCleanup(): Promise<Codex
 export async function cleanupCodexMultiAuthSyncedOverlaps(
 	backupPath?: string,
 ): Promise<CodexMultiAuthCleanupResult> {
-	return withAccountStorageTransaction(async (current, persist) => {
+	return withAccountAndFlaggedStorageTransaction(async ({ accounts: current, flagged: currentFlaggedStorage }, persist) => {
 		const fallback = current ?? {
 			version: 3 as const,
 			accounts: [],
@@ -1292,7 +1289,19 @@ export async function cleanupCodexMultiAuthSyncedOverlaps(
 		try {
 			const plan = buildCodexMultiAuthOverlapCleanupPlan(fallback);
 			if (plan.nextStorage) {
-				await persist(plan.nextStorage);
+				const remainingRefreshTokens = new Set(
+					plan.nextStorage.accounts
+						.map((account) => normalizeTrimmedIdentity(account.refreshToken))
+						.filter((refreshToken): refreshToken is string => refreshToken !== undefined),
+				);
+				await persist.flagged({
+					version: 1,
+					accounts: currentFlaggedStorage.accounts.filter((flaggedAccount) => {
+						const refreshToken = normalizeTrimmedIdentity(flaggedAccount.refreshToken);
+						return refreshToken !== undefined && remainingRefreshTokens.has(refreshToken);
+					}),
+				});
+				await persist.accounts(plan.nextStorage);
 			}
 			return plan.result;
 		} catch (error) {

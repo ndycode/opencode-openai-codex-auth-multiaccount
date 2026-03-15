@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { join, win32 as pathWin32 } from "node:path";
 import { findProjectRoot, getProjectStorageKey } from "../lib/storage/paths.js";
-import type { AccountStorageV3 } from "../lib/storage.js";
+import type { AccountStorageV3, FlaggedAccountStorageV1 } from "../lib/storage.js";
 
 vi.mock("../lib/logger.js", () => ({
 	logWarn: vi.fn(),
@@ -85,6 +85,42 @@ vi.mock("../lib/storage.js", () => ({
 			vi.fn(async () => {}),
 		),
 	),
+	withAccountAndFlaggedStorageTransaction: vi.fn(async (handler) =>
+		handler(
+			{
+				accounts: {
+					version: 3,
+					activeIndex: 0,
+					activeIndexByFamily: {},
+					accounts: [
+						{
+							accountId: "org-example123",
+							accountIdSource: "org",
+							refreshToken: "sync-refresh",
+							addedAt: 1,
+							lastUsed: 1,
+						},
+						{
+							accountId: "org-example123",
+							organizationId: "org-example123",
+							accountIdSource: "org",
+							refreshToken: "sync-refresh",
+							addedAt: 2,
+							lastUsed: 2,
+						},
+					],
+				},
+				flagged: {
+					version: 1,
+					accounts: [],
+				},
+			},
+			{
+				accounts: vi.fn(async () => {}),
+				flagged: vi.fn(async () => {}),
+			},
+		),
+	),
 }));
 
 describe("codex-multi-auth sync", () => {
@@ -134,6 +170,34 @@ describe("codex-multi-auth sync", () => {
 			},
 		],
 	});
+	const defaultFlaggedStorage = (): FlaggedAccountStorageV1 => ({
+		version: 1,
+		accounts: [],
+	});
+	const mockOverlapCleanupTransaction = async (
+		accounts: AccountStorageV3,
+		options: {
+			flagged?: FlaggedAccountStorageV1;
+			persistAccounts?: (nextStorage: AccountStorageV3) => Promise<void>;
+			persistFlagged?: (nextStorage: FlaggedAccountStorageV1) => Promise<void>;
+		} = {},
+	) => {
+		const storageModule = await import("../lib/storage.js");
+		const persist = {
+			accounts: vi.fn(options.persistAccounts ?? (async (_nextStorage: AccountStorageV3) => {})),
+			flagged: vi.fn(options.persistFlagged ?? (async (_nextStorage: FlaggedAccountStorageV1) => {})),
+		};
+		vi.mocked(storageModule.withAccountAndFlaggedStorageTransaction).mockImplementationOnce(async (handler) =>
+			handler(
+				{
+					accounts,
+					flagged: options.flagged ?? defaultFlaggedStorage(),
+				},
+				persist,
+			),
+		);
+		return persist;
+	};
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -178,6 +242,19 @@ describe("codex-multi-auth sync", () => {
 		vi.mocked(storageModule.withAccountStorageTransaction).mockReset();
 		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementation(async (handler) =>
 			handler(defaultTransactionalStorage(), vi.fn(async () => {})),
+		);
+		vi.mocked(storageModule.withAccountAndFlaggedStorageTransaction).mockReset();
+		vi.mocked(storageModule.withAccountAndFlaggedStorageTransaction).mockImplementation(async (handler) =>
+			handler(
+				{
+					accounts: defaultTransactionalStorage(),
+					flagged: defaultFlaggedStorage(),
+				},
+				{
+					accounts: vi.fn(async () => {}),
+					flagged: vi.fn(async () => {}),
+				},
+			),
 		);
 		delete process.env.CODEX_MULTI_AUTH_DIR;
 		delete process.env.CODEX_HOME;
@@ -368,6 +445,16 @@ describe("codex-multi-auth sync", () => {
 
 		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
 		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/local absolute path/i);
+	});
+
+	it("rejects relative Windows paths for CODEX_MULTI_AUTH_DIR", async () => {
+		Object.defineProperty(process, "platform", { value: "win32" });
+		process.env.CODEX_MULTI_AUTH_DIR = "relative\\path\\multi-auth";
+		process.env.USERPROFILE = "C:\\Users\\tester";
+		process.env.HOME = "C:\\Users\\tester";
+
+		const { getCodexMultiAuthSourceRootDir } = await import("../lib/codex-multi-auth-sync.js");
+		expect(() => getCodexMultiAuthSourceRootDir()).toThrow(/absolute local path/i);
 	});
 
 	it("accepts extended-length local Windows paths for CODEX_MULTI_AUTH_DIR", async () => {
@@ -725,6 +812,14 @@ describe("codex-multi-auth sync", () => {
 				.mockRejectedValueOnce(Object.assign(new Error("permission denied"), { code }))
 				.mockResolvedValueOnce(undefined);
 			const loggerModule = await import("../lib/logger.js");
+			const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+				((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+					if (typeof handler === "function") {
+						handler(...args);
+					}
+					return 0 as ReturnType<typeof setTimeout>;
+				}) as typeof setTimeout,
+			);
 
 			try {
 				const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
@@ -739,6 +834,7 @@ describe("codex-multi-auth sync", () => {
 					expect.stringContaining("Failed to remove temporary codex sync directory"),
 				);
 			} finally {
+				setTimeoutSpy.mockRestore();
 				rmSpy.mockRestore();
 			}
 		},
@@ -802,6 +898,14 @@ describe("codex-multi-auth sync", () => {
 			.mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
 			.mockResolvedValueOnce(undefined);
 		const loggerModule = await import("../lib/logger.js");
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+			((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+				if (typeof handler === "function") {
+					handler(...args);
+				}
+				return 0 as ReturnType<typeof setTimeout>;
+			}) as typeof setTimeout,
+		);
 
 		try {
 			const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
@@ -818,6 +922,7 @@ describe("codex-multi-auth sync", () => {
 				expect.stringContaining("Failed to remove temporary codex sync directory"),
 			);
 		} finally {
+			setTimeoutSpy.mockRestore();
 			rmSpy.mockRestore();
 		}
 	});
@@ -999,6 +1104,14 @@ describe("codex-multi-auth sync", () => {
 			return originalRm(path, options as never);
 		});
 		const loggerModule = await import("../lib/logger.js");
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+			((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+				if (typeof handler === "function") {
+					handler(...args);
+				}
+				return 0 as ReturnType<typeof setTimeout>;
+			}) as typeof setTimeout,
+		);
 
 		try {
 			await fs.promises.mkdir(staleDir, { recursive: true });
@@ -1021,6 +1134,7 @@ describe("codex-multi-auth sync", () => {
 			);
 			await expect(fs.promises.stat(staleDir)).rejects.toThrow();
 		} finally {
+			setTimeoutSpy.mockRestore();
 			rmSpy.mockRestore();
 			await fs.promises.rm(fakeHome, { recursive: true, force: true });
 		}
@@ -1531,13 +1645,19 @@ describe("codex-multi-auth sync", () => {
 
 		const loggerModule = await import("../lib/logger.js");
 		const { previewSyncFromCodexMultiAuth } = await import("../lib/codex-multi-auth-sync.js");
+		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-		await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
-			accountsPath: globalPath,
-		});
-		expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
-			expect.stringContaining('CODEX_AUTH_SYNC_MAX_ACCOUNTS override value "0" is not a positive integer; ignoring.'),
-		);
+		try {
+			await expect(previewSyncFromCodexMultiAuth(process.cwd())).resolves.toMatchObject({
+				accountsPath: globalPath,
+			});
+			expect(vi.mocked(loggerModule.logWarn)).toHaveBeenCalledWith(
+				expect.stringContaining('CODEX_AUTH_SYNC_MAX_ACCOUNTS override value "0" is not a positive integer; ignoring.'),
+			);
+			expect(stderrSpy).not.toHaveBeenCalled();
+		} finally {
+			stderrSpy.mockRestore();
+		}
 	});
 
 	it("reports when the source alone exceeds a finite sync capacity", async () => {
@@ -1613,35 +1733,30 @@ describe("codex-multi-auth sync", () => {
 
 	it("cleans up tagged synced overlaps by normalizing org-scoped identities first", async () => {
 		const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
+		await mockOverlapCleanupTransaction({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
 				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [
-						{
-							accountId: "org-example123",
-							accountIdSource: "org",
-							accountTags: ["codex-multi-auth-sync"],
-							refreshToken: "sync-refresh",
-							addedAt: 1,
-							lastUsed: 1,
-						},
-						{
-							accountId: "org-example123",
-							organizationId: "org-example123",
-							accountIdSource: "org",
-							accountTags: ["codex-multi-auth-sync"],
-							refreshToken: "sync-refresh",
-							addedAt: 2,
-							lastUsed: 2,
-						},
-					],
+					accountId: "org-example123",
+					accountIdSource: "org",
+					accountTags: ["codex-multi-auth-sync"],
+					refreshToken: "sync-refresh",
+					addedAt: 1,
+					lastUsed: 1,
 				},
-				vi.fn(async () => {}),
-			),
-		);
+				{
+					accountId: "org-example123",
+					organizationId: "org-example123",
+					accountIdSource: "org",
+					accountTags: ["codex-multi-auth-sync"],
+					refreshToken: "sync-refresh",
+					addedAt: 2,
+					lastUsed: 2,
+				},
+			],
+		});
 		vi.mocked(storageModule.normalizeAccountStorage).mockImplementationOnce((value: unknown): AccountStorageV3 => {
 			const record = value as {
 				version: 3;
@@ -1664,29 +1779,22 @@ describe("codex-multi-auth sync", () => {
 	});
 
 	it("does not count synced overlap records as updated when only key order differs", async () => {
-			const storageModule = await import("../lib/storage.js");
-			const persist = vi.fn(async () => {});
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
+		const persist = await mockOverlapCleanupTransaction({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
 				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [
-						{
-							refreshToken: "sync-token",
-							accountTags: ["codex-multi-auth-sync"],
-							organizationId: "org-sync",
-							accountId: "org-sync",
-							accountIdSource: "org",
-							addedAt: 2,
-							lastUsed: 2,
-						},
-					],
+					refreshToken: "sync-token",
+					accountTags: ["codex-multi-auth-sync"],
+					organizationId: "org-sync",
+					accountId: "org-sync",
+					accountIdSource: "org",
+					addedAt: 2,
+					lastUsed: 2,
 				},
-				persist,
-			),
-		);
+			],
+		});
 		mockSourceStorageFile(
 			"/tmp/opencode-accounts.json",
 			JSON.stringify({
@@ -1713,39 +1821,48 @@ describe("codex-multi-auth sync", () => {
 			after: 1,
 			removed: 0,
 			updated: 0,
-			});
-			expect(persist).not.toHaveBeenCalled();
+		});
+		expect(persist.accounts).not.toHaveBeenCalled();
+		expect(persist.flagged).not.toHaveBeenCalled();
 	});
 
 	it("writes overlap cleanup backups via a temp file and retries transient EACCES renames", async () => {
-			const storageModule = await import("../lib/storage.js");
-			vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-					handler(defaultTransactionalStorage(), vi.fn(async () => {})),
-			);
-			const mkdirSpy = vi.spyOn(fs.promises, "mkdir").mockResolvedValue(undefined);
-			const writeSpy = vi.spyOn(fs.promises, "writeFile").mockResolvedValue(undefined);
-			const renameSpy = vi
-				.spyOn(fs.promises, "rename")
-				.mockRejectedValueOnce(Object.assign(new Error("rename locked"), { code: "EACCES" }))
-				.mockResolvedValueOnce(undefined);
-			const unlinkSpy = vi.spyOn(fs.promises, "unlink").mockResolvedValue(undefined);
+		await mockOverlapCleanupTransaction(defaultTransactionalStorage());
+		const mkdirSpy = vi.spyOn(fs.promises, "mkdir").mockResolvedValue(undefined);
+		const writeSpy = vi.spyOn(fs.promises, "writeFile").mockResolvedValue(undefined);
+		const renameSpy = vi
+			.spyOn(fs.promises, "rename")
+			.mockRejectedValueOnce(Object.assign(new Error("rename locked"), { code: "EACCES" }))
+			.mockRejectedValueOnce(Object.assign(new Error("rename locked"), { code: "EACCES" }))
+			.mockRejectedValueOnce(Object.assign(new Error("rename locked"), { code: "EACCES" }))
+			.mockResolvedValueOnce(undefined);
+		const unlinkSpy = vi.spyOn(fs.promises, "unlink").mockResolvedValue(undefined);
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+			((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+				if (typeof handler === "function") {
+					handler(...args);
+				}
+				return 0 as ReturnType<typeof setTimeout>;
+			}) as typeof setTimeout,
+		);
 
-			try {
-					const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
-					await cleanupCodexMultiAuthSyncedOverlaps("/tmp/overlap-cleanup-backup.json");
+		try {
+			const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
+			await cleanupCodexMultiAuthSyncedOverlaps("/tmp/overlap-cleanup-backup.json");
 
-					expect(mkdirSpy).toHaveBeenCalledWith("/tmp", { recursive: true });
-					const tempBackupPath = writeSpy.mock.calls[0]?.[0];
-					expect(String(tempBackupPath)).toMatch(/^\/tmp\/overlap-cleanup-backup\.json\.\d+\.[a-z0-9]+\.tmp$/);
-					expect(renameSpy).toHaveBeenCalledWith(tempBackupPath, "/tmp/overlap-cleanup-backup.json");
-					expect(renameSpy).toHaveBeenCalledTimes(2);
-					expect(unlinkSpy).not.toHaveBeenCalled();
-			} finally {
-					mkdirSpy.mockRestore();
-					writeSpy.mockRestore();
-					renameSpy.mockRestore();
-					unlinkSpy.mockRestore();
-			}
+			expect(mkdirSpy).toHaveBeenCalledWith("/tmp", { recursive: true });
+			const tempBackupPath = writeSpy.mock.calls[0]?.[0];
+			expect(String(tempBackupPath)).toMatch(/^\/tmp\/overlap-cleanup-backup\.json\.\d+\.[a-z0-9]+\.tmp$/);
+			expect(renameSpy).toHaveBeenCalledWith(tempBackupPath, "/tmp/overlap-cleanup-backup.json");
+			expect(renameSpy).toHaveBeenCalledTimes(4);
+			expect(unlinkSpy).not.toHaveBeenCalled();
+		} finally {
+			setTimeoutSpy.mockRestore();
+			mkdirSpy.mockRestore();
+			writeSpy.mockRestore();
+			renameSpy.mockRestore();
+			unlinkSpy.mockRestore();
+		}
 	});
 
 	it.each([
@@ -1754,36 +1871,29 @@ describe("codex-multi-auth sync", () => {
 	] as const)(
 		"aborts overlap cleanup persistence when backup %s fails and attempts temp cleanup",
 		async (failureStep, expectedMessage) => {
-			const storageModule = await import("../lib/storage.js");
-			const persist = vi.fn(async (_next: AccountStorageV3) => {});
-			vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-				handler(
+			const persist = await mockOverlapCleanupTransaction({
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
 					{
-						version: 3,
-						activeIndex: 0,
-						activeIndexByFamily: {},
-						accounts: [
-							{
-								accountId: "org-local",
-								organizationId: "org-local",
-								accountIdSource: "org",
-								email: "shared@example.com",
-								refreshToken: "rt-local",
-								addedAt: 5,
-								lastUsed: 5,
-							},
-							{
-								accountTags: ["codex-multi-auth-sync"],
-								email: "shared@example.com",
-								refreshToken: "rt-sync",
-								addedAt: 4,
-								lastUsed: 4,
-							},
-						],
+						accountId: "org-local",
+						organizationId: "org-local",
+						accountIdSource: "org",
+						email: "shared@example.com",
+						refreshToken: "rt-local",
+						addedAt: 5,
+						lastUsed: 5,
 					},
-					persist,
-				),
-			);
+					{
+						accountTags: ["codex-multi-auth-sync"],
+						email: "shared@example.com",
+						refreshToken: "rt-sync",
+						addedAt: 4,
+						lastUsed: 4,
+					},
+				],
+			});
 			const mkdirSpy = vi.spyOn(fs.promises, "mkdir").mockResolvedValue(undefined);
 			const writeSpy = vi
 				.spyOn(fs.promises, "writeFile")
@@ -1816,7 +1926,8 @@ describe("codex-multi-auth sync", () => {
 						: renameSpy.mock.calls[0]?.[0];
 				expect(String(tempBackupPath)).toMatch(/^\/tmp\/overlap-cleanup-backup\.json\.\d+\.[a-z0-9]+\.tmp$/);
 				expect(unlinkSpy).toHaveBeenCalledWith(tempBackupPath);
-				expect(persist).not.toHaveBeenCalled();
+				expect(persist.accounts).not.toHaveBeenCalled();
+				expect(persist.flagged).not.toHaveBeenCalled();
 			} finally {
 				mkdirSpy.mockRestore();
 				writeSpy.mockRestore();
@@ -1827,37 +1938,35 @@ describe("codex-multi-auth sync", () => {
 	);
 
 	it("annotates overlap cleanup failures with the written backup path", async () => {
-		const storageModule = await import("../lib/storage.js");
-		const persist = vi.fn(async () => {
-			throw new Error("persist failed");
-		});
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
-				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [
-						{
-							accountId: "org-local",
-							organizationId: "org-local",
-							accountIdSource: "org",
-							email: "shared@example.com",
-							refreshToken: "rt-local",
-							addedAt: 5,
-							lastUsed: 5,
-						},
-						{
-							accountTags: ["codex-multi-auth-sync"],
-							email: "shared@example.com",
-							refreshToken: "rt-sync",
-							addedAt: 4,
-							lastUsed: 4,
-						},
-					],
+		await mockOverlapCleanupTransaction(
+			{
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-local",
+						organizationId: "org-local",
+						accountIdSource: "org",
+						email: "shared@example.com",
+						refreshToken: "rt-local",
+						addedAt: 5,
+						lastUsed: 5,
+					},
+					{
+						accountTags: ["codex-multi-auth-sync"],
+						email: "shared@example.com",
+						refreshToken: "rt-sync",
+						addedAt: 4,
+						lastUsed: 4,
+					},
+				],
+			},
+			{
+				persistAccounts: async () => {
+					throw new Error("persist failed");
 				},
-				persist,
-			),
+			},
 		);
 		const mkdirSpy = vi.spyOn(fs.promises, "mkdir").mockResolvedValue(undefined);
 		const writeSpy = vi.spyOn(fs.promises, "writeFile").mockResolvedValue(undefined);
@@ -1889,51 +1998,45 @@ describe("codex-multi-auth sync", () => {
 
 
 	it("limits overlap cleanup to accounts tagged from codex-multi-auth sync", async () => {
-			const storageModule = await import("../lib/storage.js");
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
+		await mockOverlapCleanupTransaction({
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: {},
+			accounts: [
 				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
-					accounts: [
-						{
-							refreshToken: "legacy-a",
-							email: "shared@example.com",
-							addedAt: 1,
-							lastUsed: 1,
-						},
-						{
-							refreshToken: "legacy-b",
-							email: "shared@example.com",
-							addedAt: 2,
-							lastUsed: 2,
-						},
-						{
-							accountId: "org-sync",
-							organizationId: "org-sync",
-							accountIdSource: "org",
-							accountTags: ["codex-multi-auth-sync"],
-							email: "sync@example.com",
-							refreshToken: "sync-token",
-							addedAt: 3,
-							lastUsed: 3,
-						},
-						{
-							accountId: "org-sync",
-							organizationId: "org-sync",
-							accountIdSource: "org",
-							accountTags: ["codex-multi-auth-sync"],
-							email: "sync@example.com",
-							refreshToken: "sync-token",
-							addedAt: 4,
-							lastUsed: 4,
-						},
-					],
+					refreshToken: "legacy-a",
+					email: "shared@example.com",
+					addedAt: 1,
+					lastUsed: 1,
 				},
-				vi.fn(async () => {}),
-			),
-		);
+				{
+					refreshToken: "legacy-b",
+					email: "shared@example.com",
+					addedAt: 2,
+					lastUsed: 2,
+				},
+				{
+					accountId: "org-sync",
+					organizationId: "org-sync",
+					accountIdSource: "org",
+					accountTags: ["codex-multi-auth-sync"],
+					email: "sync@example.com",
+					refreshToken: "sync-token",
+					addedAt: 3,
+					lastUsed: 3,
+				},
+				{
+					accountId: "org-sync",
+					organizationId: "org-sync",
+					accountIdSource: "org",
+					accountTags: ["codex-multi-auth-sync"],
+					email: "sync@example.com",
+					refreshToken: "sync-token",
+					addedAt: 4,
+					lastUsed: 4,
+				},
+			],
+		});
 
 		const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
 		await expect(cleanupCodexMultiAuthSyncedOverlaps()).resolves.toEqual({
@@ -1944,36 +2047,50 @@ describe("codex-multi-auth sync", () => {
 		});
 	});
 
-	it("removes synced accounts that overlap preserved local accounts", async () => {
-		const storageModule = await import("../lib/storage.js");
-		const persist = vi.fn(async (_next: AccountStorageV3) => {});
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
-				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: {},
+	it("removes synced accounts that overlap preserved local accounts and prunes stale flagged entries", async () => {
+		const persist = await mockOverlapCleanupTransaction(
+			{
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: {},
+				accounts: [
+					{
+						accountId: "org-local",
+						organizationId: "org-local",
+						accountIdSource: "org",
+						email: "shared@example.com",
+						refreshToken: "rt-local",
+						addedAt: 5,
+						lastUsed: 5,
+					},
+					{
+						accountTags: ["codex-multi-auth-sync"],
+						email: "shared@example.com",
+						refreshToken: "rt-sync",
+						addedAt: 4,
+						lastUsed: 4,
+					},
+				],
+			},
+			{
+				flagged: {
+					version: 1,
 					accounts: [
 						{
-							accountId: "org-local",
-							organizationId: "org-local",
-							accountIdSource: "org",
-							email: "shared@example.com",
 							refreshToken: "rt-local",
 							addedAt: 5,
 							lastUsed: 5,
+							flaggedAt: 10,
 						},
 						{
-							accountTags: ["codex-multi-auth-sync"],
-							email: "shared@example.com",
 							refreshToken: "rt-sync",
 							addedAt: 4,
 							lastUsed: 4,
+							flaggedAt: 20,
 						},
 					],
 				},
-				persist,
-			),
+			},
 		);
 
 		const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
@@ -1983,57 +2100,65 @@ describe("codex-multi-auth sync", () => {
 			removed: 1,
 			updated: 0,
 		});
-		const saved = persist.mock.calls[0]?.[0];
+		const saved = persist.accounts.mock.calls[0]?.[0];
 		if (!saved) {
 			throw new Error("Expected persisted overlap cleanup result");
 		}
 		expect(saved.accounts).toHaveLength(1);
 		expect(saved.accounts[0]?.accountId).toBe("org-local");
+		expect(persist.flagged).toHaveBeenCalledWith({
+			version: 1,
+			accounts: [
+				expect.objectContaining({
+					refreshToken: "rt-local",
+				}),
+			],
+		});
 	});
 
 	it("remaps active indices when synced overlap cleanup reorders accounts", async () => {
 		const storageModule = await import("../lib/storage.js");
-		const persist = vi.fn(async (_next: AccountStorageV3) => {});
+		const persistAccounts = vi.fn(async (_next: AccountStorageV3) => {});
 		vi.mocked(storageModule.deduplicateAccounts).mockImplementationOnce(
 			(accounts: AccountStorageV3["accounts"]) => [accounts[1], accounts[0]].filter(Boolean),
 		);
-		vi.mocked(storageModule.withAccountStorageTransaction).mockImplementationOnce(async (handler) =>
-			handler(
-				{
-					version: 3,
-					activeIndex: 0,
-					activeIndexByFamily: { codex: 0 },
-					accounts: [
-						{
-							accountId: "sync-primary",
-							organizationId: "shared-org",
-							accountIdSource: "org",
-							accountTags: ["codex-multi-auth-sync"],
-							email: "primary@example.com",
-							refreshToken: "sync-token-primary",
-							addedAt: 3,
-							lastUsed: 3,
-						},
-						{
-							accountId: "sync-sibling",
-							organizationId: "shared-org",
-							accountIdSource: "org",
-							accountTags: ["codex-multi-auth-sync"],
-							email: "sibling@example.com",
-							refreshToken: "sync-token-sibling",
-							addedAt: 4,
-							lastUsed: 4,
-						},
-					],
-				},
-				persist,
-			),
+		await mockOverlapCleanupTransaction(
+			{
+				version: 3,
+				activeIndex: 0,
+				activeIndexByFamily: { codex: 0 },
+				accounts: [
+					{
+						accountId: "sync-primary",
+						organizationId: "shared-org",
+						accountIdSource: "org",
+						accountTags: ["codex-multi-auth-sync"],
+						email: "primary@example.com",
+						refreshToken: "sync-token-primary",
+						addedAt: 3,
+						lastUsed: 3,
+					},
+					{
+						accountId: "sync-sibling",
+						organizationId: "shared-org",
+						accountIdSource: "org",
+						accountTags: ["codex-multi-auth-sync"],
+						email: "sibling@example.com",
+						refreshToken: "sync-token-sibling",
+						addedAt: 4,
+						lastUsed: 4,
+					},
+				],
+			},
+			{
+				persistAccounts,
+			},
 		);
 
 		const { cleanupCodexMultiAuthSyncedOverlaps } = await import("../lib/codex-multi-auth-sync.js");
 		await cleanupCodexMultiAuthSyncedOverlaps();
 
-		const saved = persist.mock.calls[0]?.[0];
+		const saved = persistAccounts.mock.calls[0]?.[0];
 		if (!saved) {
 			throw new Error("Expected persisted overlap cleanup result");
 		}
