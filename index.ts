@@ -1892,7 +1892,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								if (!account) {
 									return;
 								}
-								const previousManagedAccount =
+								const preReloadTargetAccount =
 									cachedAccountManager?.getAccountsSnapshot()[index];
 
 								const now = Date.now();
@@ -1915,17 +1915,17 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 									accountManagerPromise = Promise.resolve(reloadedManager);
 								}
 
-								if (
-									!runtimePersistAccountFooter ||
-									!refreshVisiblePersistedAccountIndicators(
-										// Prefer the pre-reload managed account so label-only footers keep
-										// the same token-derived id suffix until disk catches up.
-										previousManagedAccount ?? account,
-										index,
-										storage.accounts.length,
-										runtimePersistAccountFooterStyle,
-									)
-								) {
+								const refreshedVisibleIndicator = runtimePersistAccountFooter
+									? refreshVisiblePersistedAccountIndicators(
+											// Prefer the pre-reload target account so label-only footers keep
+											// the same token-derived id suffix until disk catches up.
+											preReloadTargetAccount ?? account,
+											index,
+											storage.accounts.length,
+											runtimePersistAccountFooterStyle,
+										)
+									: false;
+								if (!runtimePersistAccountFooter || !refreshedVisibleIndicator) {
 									await showToast(`Switched to account ${index + 1}`, "info");
 								}
                         }
