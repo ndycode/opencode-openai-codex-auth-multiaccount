@@ -48,12 +48,12 @@ controls how much thinking the model does.
 
 the shipped config templates include 21 presets and do not add optional IDs by default. add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only for entitled workspaces.
 for context sizing, shipped templates use:
-- `gpt-5.4` and `gpt-5.4-pro`: `context=1000000`, `output=128000`
+- `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.4-pro`: `context=1000000`, `output=128000`
 - other shipped families: `context=272000`, `output=128000`
 
 model normalization aliases:
 - legacy `gpt-5`, `gpt-5-mini`, `gpt-5-nano` map to `gpt-5.4` (not to `gpt-5.4-mini`)
-- snapshot ids `gpt-5.4-2026-03-05*` and `gpt-5.4-pro-2026-03-05*` map to stable `gpt-5.4` / `gpt-5.4-pro`
+- snapshot ids `gpt-5.4-2026-03-05*`, `gpt-5.4-mini-2026-03-05*`, and `gpt-5.4-pro-2026-03-05*` map to stable `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-pro`
 
 if your OpenCode runtime supports global compaction tuning, you can set:
 - `model_context_window = 1000000`

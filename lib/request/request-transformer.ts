@@ -85,7 +85,7 @@ export function normalizeModel(model: string | undefined): string {
 	}
 
 	// 5. GPT-5.4 Mini (first-class model)
-	if (/(?:\bgpt(?:-| )5\.4(?:-| )mini(?:\b|[- ]))/.test(normalized)) {
+	if (/\bgpt(?:-| )5\.4(?:-| )mini(?:\b|[- ])/.test(normalized)) {
 		return "gpt-5.4-mini";
 	}
 
@@ -477,11 +477,8 @@ export function getReasoningConfig(
 		normalizedName.includes("gpt-5.4-pro") ||
 		normalizedName.includes("gpt 5.4 pro");
 
-	// GPT-5.4 Mini should behave like the GPT-5.4 family, but as an explicit model.
-	const isGpt54Mini =
-		canonicalModelName === "gpt-5.4-mini" ||
-		normalizedName.includes("gpt-5.4-mini") ||
-		normalizedName.includes("gpt 5.4 mini");
+	// GPT-5.4 Mini is a first-class explicit model.
+	const isGpt54Mini = canonicalModelName === "gpt-5.4-mini";
 
 	// GPT-5.4 general purpose (latest default family)
 	const isGpt54General =
@@ -501,17 +498,12 @@ export function getReasoningConfig(
 	const isCodexMax =
 		normalizedName.includes("codex-max") ||
 		normalizedName.includes("codex max");
-	const isCodexMini =
-		normalizedName.includes("codex-mini") ||
-		normalizedName.includes("codex mini") ||
-		normalizedName.includes("codex_mini") ||
-		normalizedName.includes("codex-mini-latest");
+	const isCodexMini = canonicalModelName === "gpt-5.1-codex-mini";
 	const isCodex = normalizedName.includes("codex") && !isCodexMini;
 	const isLightweight =
 		!isGpt54Mini &&
 		!isCodexMini &&
-		(normalizedName.includes("nano") ||
-			normalizedName.includes("mini"));
+		/\bgpt(?:-| )5(?:-| )(?:mini|nano)(?:\b|[- ])/.test(normalizedName);
 
 	// GPT-5.1 general purpose (not codex variants) - supports "none" per OpenAI API docs
 	const isGpt51General =
@@ -542,7 +534,7 @@ export function getReasoningConfig(
 	// GPT 5.1/5.2/5.4 general and GPT-5.4 Mini support "none" reasoning per:
 	// - OpenAI API docs: "gpt-5.1 defaults to none, supports: none, low, medium, high"
 	// - GPT-5.4 latest model docs list reasoning controls for the base model family
-	// - GPT-5.4 Mini should stay aligned with GPT-5.4 reasoning support as an explicit model
+	// - GPT-5.4 Mini should stay aligned with GPT-5.4 reasoning support as a first-class model
 	// - Legacy lightweight aliases like gpt-5-mini/gpt-5-nano stay distinct and do not inherit
 	//   full "none" support from their gpt-5.4 normalization target
 	// - Codex CLI: ReasoningEffort enum includes None variant (codex-rs/protocol/src/openai_models.rs)

@@ -18,73 +18,73 @@ import type { RequestBody, UserConfig, InputItem } from '../lib/types.js';
 describe('Request Transformer Module', () => {
 	describe('normalizeModel', () => {
 		// NOTE: legacy gpt-5 base aliases normalize to gpt-5.4; codex aliases stay on gpt-5-codex.
-		it('should normalize gpt-5-codex to canonical codex', async () => {
+		it('should normalize gpt-5-codex to canonical codex', () => {
 			expect(normalizeModel('gpt-5-codex')).toBe('gpt-5-codex');
 		});
 
-		it('should normalize gpt-5 to gpt-5.4', async () => {
+		it('should normalize gpt-5 to gpt-5.4', () => {
 			expect(normalizeModel('gpt-5')).toBe('gpt-5.4');
 		});
 
-		it('should normalize variants containing "codex" to canonical codex', async () => {
+		it('should normalize variants containing "codex" to canonical codex', () => {
 			expect(normalizeModel('openai/gpt-5-codex')).toBe('gpt-5-codex');
 			expect(normalizeModel('custom-gpt-5-codex-variant')).toBe('gpt-5-codex');
 		});
 
-		it('should normalize legacy gpt-5 variants to gpt-5.4', async () => {
+		it('should normalize legacy gpt-5 variants to gpt-5.4', () => {
 			expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.4');
 			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.4');
 		});
 
-		it('should return gpt-5.4 as default for unknown models', async () => {
+		it('should return gpt-5.4 as default for unknown models', () => {
 			expect(normalizeModel('unknown-model')).toBe('gpt-5.4');
 			expect(normalizeModel('gpt-4')).toBe('gpt-5.4');
 		});
 
-		it('should return gpt-5.4 for undefined', async () => {
+		it('should return gpt-5.4 for undefined', () => {
 			expect(normalizeModel(undefined)).toBe('gpt-5.4');
 		});
 
 		// Codex CLI preset name tests - legacy gpt-5 base aliases now map to gpt-5.4
 		describe('Codex CLI preset names', () => {
-			it('should normalize all gpt-5-codex presets to canonical codex', async () => {
+			it('should normalize all gpt-5-codex presets to canonical codex', () => {
 				expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt-5-codex-medium')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt-5-codex-high')).toBe('gpt-5-codex');
 			});
 
-			it('should normalize all gpt-5 presets to gpt-5.4', async () => {
+			it('should normalize all gpt-5 presets to gpt-5.4', () => {
 				expect(normalizeModel('gpt-5-minimal')).toBe('gpt-5.4');
 				expect(normalizeModel('gpt-5-low')).toBe('gpt-5.4');
 				expect(normalizeModel('gpt-5-medium')).toBe('gpt-5.4');
 				expect(normalizeModel('gpt-5-high')).toBe('gpt-5.4');
 			});
 
-			it('should prioritize codex over gpt-5 in model name', async () => {
+			it('should prioritize codex over gpt-5 in model name', () => {
 				// Model name contains BOTH "codex" and "gpt-5"
 				// Should return "gpt-5-codex" (codex checked first)
 				expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex');
 				expect(normalizeModel('my-gpt-5-codex-model')).toBe('gpt-5-codex');
 			});
 
-				it('should normalize codex mini presets to gpt-5.1-codex-mini', async () => {
-					expect(normalizeModel('gpt-5-codex-mini')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('gpt-5-codex-mini-low')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('gpt-5-codex-mini-medium')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('gpt-5-codex-mini-high')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('openai/gpt-5-codex-mini-high')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('codex-mini-latest')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('openai/codex-mini-latest')).toBe('gpt-5.1-codex-mini');
-			});
+			it('should normalize codex mini presets to gpt-5.1-codex-mini', () => {
+				expect(normalizeModel('gpt-5-codex-mini')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('gpt-5-codex-mini-low')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('gpt-5-codex-mini-medium')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('gpt-5-codex-mini-high')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('openai/gpt-5-codex-mini-high')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('codex-mini-latest')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('openai/codex-mini-latest')).toBe('gpt-5.1-codex-mini');
+		});
 
-			it('should normalize gpt-5.1 codex max presets', async () => {
+			it('should normalize gpt-5.1 codex max presets', () => {
 				expect(normalizeModel('gpt-5.1-codex-max')).toBe('gpt-5.1-codex-max');
 				expect(normalizeModel('gpt-5.1-codex-max-high')).toBe('gpt-5.1-codex-max');
 				expect(normalizeModel('gpt-5.1-codex-max-xhigh')).toBe('gpt-5.1-codex-max');
 				expect(normalizeModel('openai/gpt-5.1-codex-max-medium')).toBe('gpt-5.1-codex-max');
 			});
 
-			it('should normalize gpt-5.2 codex presets', async () => {
+			it('should normalize gpt-5.2 codex presets', () => {
 				expect(normalizeModel('gpt-5.2-codex')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt-5.2-codex-low')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt-5.2-codex-medium')).toBe('gpt-5-codex');
@@ -93,68 +93,68 @@ describe('Request Transformer Module', () => {
 				expect(normalizeModel('openai/gpt-5.2-codex-xhigh')).toBe('gpt-5-codex');
 			});
 
-			it('should normalize gpt-5.4 general presets', async () => {
-					expect(normalizeModel('gpt-5.4')).toBe('gpt-5.4');
-					expect(normalizeModel('gpt-5.4-low')).toBe('gpt-5.4');
-					expect(normalizeModel('gpt-5.4-medium')).toBe('gpt-5.4');
-					expect(normalizeModel('gpt-5.4-high')).toBe('gpt-5.4');
-					expect(normalizeModel('gpt-5.4-xhigh')).toBe('gpt-5.4');
-					expect(normalizeModel('openai/gpt-5.4-xhigh')).toBe('gpt-5.4');
-					expect(normalizeModel('gpt-5.4-2026-03-05')).toBe('gpt-5.4');
-					expect(normalizeModel('gpt-5.4-2026-03-05-high')).toBe('gpt-5.4');
+			it('should normalize gpt-5.4 general presets', () => {
+				expect(normalizeModel('gpt-5.4')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4-low')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4-medium')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4-high')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4-xhigh')).toBe('gpt-5.4');
+				expect(normalizeModel('openai/gpt-5.4-xhigh')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4-2026-03-05')).toBe('gpt-5.4');
+				expect(normalizeModel('gpt-5.4-2026-03-05-high')).toBe('gpt-5.4');
+		});
+
+			it('should normalize gpt-5.4-pro presets', () => {
+				expect(normalizeModel('gpt-5.4-pro')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-none')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-low')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-medium')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-high')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('openai/gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-2026-03-05')).toBe('gpt-5.4-pro');
+				expect(normalizeModel('gpt-5.4-pro-2026-03-05-high')).toBe('gpt-5.4-pro');
+		});
+
+			it('should normalize gpt-5.4-mini presets as a first-class family', () => {
+				expect(normalizeModel('gpt-5.4-mini')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('gpt-5.4-mini-none')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('gpt-5.4-mini-low')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('gpt-5.4-mini-medium')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('gpt-5.4-mini-high')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('gpt-5.4-mini-xhigh')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('openai/gpt-5.4-mini-xhigh')).toBe('gpt-5.4-mini');
+				expect(normalizeModel('gpt-5.4-mini-2026-03-05-high')).toBe('gpt-5.4-mini');
+		});
+
+			it('should normalize gpt-5.3 codex presets', () => {
+				expect(normalizeModel('gpt-5.3-codex')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-low')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-medium')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-high')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-xhigh')).toBe('gpt-5-codex');
+				expect(normalizeModel('openai/gpt-5.3-codex-xhigh')).toBe('gpt-5-codex');
 			});
 
-			it('should normalize gpt-5.4-pro presets', async () => {
-					expect(normalizeModel('gpt-5.4-pro')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-none')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-low')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-medium')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-high')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('openai/gpt-5.4-pro-xhigh')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-2026-03-05')).toBe('gpt-5.4-pro');
-					expect(normalizeModel('gpt-5.4-pro-2026-03-05-high')).toBe('gpt-5.4-pro');
+			it('should normalize gpt-5.3 codex spark presets', () => {
+				expect(normalizeModel('gpt-5.3-codex-spark')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-spark-low')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-spark-medium')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-spark-high')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.3-codex-spark-xhigh')).toBe('gpt-5-codex');
+				expect(normalizeModel('openai/gpt-5.3-codex-spark-xhigh')).toBe('gpt-5-codex');
 			});
 
-			it('should normalize gpt-5.4-mini presets as a first-class family', async () => {
-					expect(normalizeModel('gpt-5.4-mini')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('gpt-5.4-mini-none')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('gpt-5.4-mini-low')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('gpt-5.4-mini-medium')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('gpt-5.4-mini-high')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('gpt-5.4-mini-xhigh')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('openai/gpt-5.4-mini-xhigh')).toBe('gpt-5.4-mini');
-					expect(normalizeModel('gpt-5.4-mini-2026-03-05-high')).toBe('gpt-5.4-mini');
+			it('should normalize gpt-5.1 codex and mini slugs', () => {
+				expect(normalizeModel('gpt-5.1-codex')).toBe('gpt-5-codex');
+				expect(normalizeModel('openai/gpt-5.1-codex')).toBe('gpt-5-codex');
+				expect(normalizeModel('gpt-5.1-codex-mini')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('gpt-5.1-codex-mini-low')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('gpt-5.1-codex-mini-high')).toBe('gpt-5.1-codex-mini');
+				expect(normalizeModel('openai/gpt-5.1-codex-mini-medium')).toBe('gpt-5.1-codex-mini');
 			});
 
-				it('should normalize gpt-5.3 codex presets', async () => {
-					expect(normalizeModel('gpt-5.3-codex')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-low')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-medium')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-high')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-xhigh')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.3-codex-xhigh')).toBe('gpt-5-codex');
-				});
-
-				it('should normalize gpt-5.3 codex spark presets', async () => {
-					expect(normalizeModel('gpt-5.3-codex-spark')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-low')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-medium')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-high')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.3-codex-spark-xhigh')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.3-codex-spark-xhigh')).toBe('gpt-5-codex');
-				});
-
-			it('should normalize gpt-5.1 codex and mini slugs', async () => {
-					expect(normalizeModel('gpt-5.1-codex')).toBe('gpt-5-codex');
-					expect(normalizeModel('openai/gpt-5.1-codex')).toBe('gpt-5-codex');
-					expect(normalizeModel('gpt-5.1-codex-mini')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('gpt-5.1-codex-mini-low')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('gpt-5.1-codex-mini-high')).toBe('gpt-5.1-codex-mini');
-					expect(normalizeModel('openai/gpt-5.1-codex-mini-medium')).toBe('gpt-5.1-codex-mini');
-				});
-
-			it('should normalize gpt-5.1 general-purpose slugs', async () => {
+			it('should normalize gpt-5.1 general-purpose slugs', () => {
 				expect(normalizeModel('gpt-5.1')).toBe('gpt-5.1');
 				expect(normalizeModel('openai/gpt-5.1')).toBe('gpt-5.1');
 				expect(normalizeModel('GPT 5.1 High')).toBe('gpt-5.1');
@@ -163,7 +163,7 @@ describe('Request Transformer Module', () => {
 
 		// Edge case tests - legacy gpt-5 base aliases now map to gpt-5.4
 			describe('Edge cases', () => {
-			it('should handle uppercase model names', async () => {
+			it('should handle uppercase model names', () => {
 				expect(normalizeModel('GPT-5-CODEX')).toBe('gpt-5-codex');
 				expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5.4');
 				expect(normalizeModel('CODEx-MINI-LATEST')).toBe('gpt-5.1-codex-mini');
@@ -172,34 +172,34 @@ describe('Request Transformer Module', () => {
 				expect(normalizeModel('GPT-5.3-CODEX-SPARK')).toBe('gpt-5-codex');
 			});
 
-			it('should not misclassify unrelated gpt-5.4x model strings', async () => {
+			it('should not misclassify unrelated gpt-5.4x model strings', () => {
 				// Boundary-aware matching avoids false 5.4-family matches, then generic GPT-5 fallback applies.
 				expect(normalizeModel('gpt-5.40')).toBe('gpt-5.4');
 				expect(normalizeModel('gpt-5.4pro')).toBe('gpt-5.4');
 			});
 
-			it('should prioritize gpt-5.4-mini over generic gpt-5.4 and lightweight fallback matching', async () => {
+			it('should prioritize gpt-5.4-mini over generic gpt-5.4 and lightweight fallback matching', () => {
 				expect(normalizeModel('gpt-5.4-mini-high')).toBe('gpt-5.4-mini');
 				expect(normalizeModel('custom-gpt-5.4-mini-variant')).toBe('gpt-5.4-mini');
 				expect(normalizeModel('openai/gpt-5.4-mini')).not.toBe('gpt-5.4');
 			});
 
-			it('should handle mixed case', async () => {
+			it('should handle mixed case', () => {
 				expect(normalizeModel('Gpt-5-Codex-Low')).toBe('gpt-5-codex');
 				expect(normalizeModel('GpT-5-MeDiUm')).toBe('gpt-5.4');
 			});
 
-			it('should handle special characters', async () => {
+			it('should handle special characters', () => {
 				expect(normalizeModel('my_gpt-5_codex')).toBe('gpt-5-codex');
 				expect(normalizeModel('gpt.5.high')).toBe('gpt-5.4');
 			});
 
-			it('should handle old verbose names', async () => {
+			it('should handle old verbose names', () => {
 				expect(normalizeModel('GPT 5 Codex Low (ChatGPT Subscription)')).toBe('gpt-5-codex');
 				expect(normalizeModel('GPT 5 High (ChatGPT Subscription)')).toBe('gpt-5.4');
 			});
 
-			it('should handle empty string', async () => {
+			it('should handle empty string', () => {
 				expect(normalizeModel('')).toBe('gpt-5.4');
 			});
 		});
@@ -207,7 +207,7 @@ describe('Request Transformer Module', () => {
 
 	describe('getModelConfig', () => {
 			describe('Per-model options (Bug Fix Verification)', () => {
-			it('should find per-model options using config key', async () => {
+			it('should find per-model options using config key', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'medium' },
 					models: {
@@ -222,7 +222,7 @@ describe('Request Transformer Module', () => {
 				expect(result.textVerbosity).toBe('low');
 			});
 
-			it('should resolve provider-prefixed model ids to base model config', async () => {
+			it('should resolve provider-prefixed model ids to base model config', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'medium' },
 					models: {
@@ -237,7 +237,7 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningSummary).toBe('detailed');
 			});
 
-			it('should apply variants from modern base-model config when variant suffix is used', async () => {
+			it('should apply variants from modern base-model config when variant suffix is used', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'medium', reasoningSummary: 'auto' },
 					models: {
@@ -255,7 +255,7 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningSummary).toBe('detailed');
 			});
 
-			it('should resolve provider-prefixed gpt-5.4-mini ids to base-model config', async () => {
+			it('should resolve provider-prefixed gpt-5.4-mini ids to base-model config', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'medium' },
 					models: {
@@ -270,7 +270,7 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningSummary).toBe('concise');
 			});
 
-			it('should apply gpt-5.4-mini variant options from base-model config', async () => {
+			it('should apply gpt-5.4-mini variant options from base-model config', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'medium', reasoningSummary: 'auto' },
 					models: {
@@ -288,7 +288,7 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningSummary).toBe('detailed');
 			});
 
-			it('should merge global and per-model options (per-model wins)', async () => {
+			it('should merge global and per-model options (per-model wins)', () => {
 				const userConfig: UserConfig = {
 					global: {
 						reasoningEffort: 'medium',
@@ -308,7 +308,7 @@ describe('Request Transformer Module', () => {
 				expect(result.include).toEqual(['reasoning.encrypted_content']);  // From global
 			});
 
-			it('should return global options when model not in config', async () => {
+			it('should return global options when model not in config', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'medium' },
 					models: {
@@ -321,12 +321,12 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningEffort).toBe('medium');  // Global only
 			});
 
-			it('should handle empty config', async () => {
+			it('should handle empty config', () => {
 				const result = getModelConfig('gpt-5-codex', { global: {}, models: {} });
 				expect(result).toEqual({});
 			});
 
-			it('should handle missing models object', async () => {
+			it('should handle missing models object', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'low' },
 					models: undefined as any
@@ -337,7 +337,7 @@ describe('Request Transformer Module', () => {
 		});
 
 		describe('Backwards compatibility', () => {
-			it('should work with old verbose config keys', async () => {
+			it('should work with old verbose config keys', () => {
 				const userConfig: UserConfig = {
 					global: {},
 					models: {
@@ -351,7 +351,7 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningEffort).toBe('low');
 			});
 
-			it('should work with old configs that have id field', async () => {
+			it('should work with old configs that have id field', () => {
 				const userConfig: UserConfig = {
 					global: {},
 					models: {
@@ -368,7 +368,7 @@ describe('Request Transformer Module', () => {
 		});
 
 		describe('Default models (no custom config)', () => {
-			it('should return global options for default gpt-5-codex', async () => {
+			it('should return global options for default gpt-5-codex', () => {
 				const userConfig: UserConfig = {
 					global: { reasoningEffort: 'high' },
 					models: {}
@@ -378,7 +378,7 @@ describe('Request Transformer Module', () => {
 				expect(result.reasoningEffort).toBe('high');
 			});
 
-			it('should return empty when no config at all', async () => {
+			it('should return empty when no config at all', () => {
 				const result = getModelConfig('gpt-5', undefined);
 				expect(result).toEqual({});
 			});
@@ -386,20 +386,19 @@ describe('Request Transformer Module', () => {
 		});
 
 		describe('getReasoningConfig', () => {
-			it('should treat gpt-5.4-mini as first-class for none and xhigh support', async () => {
+			it('should treat gpt-5.4-mini as first-class for none and xhigh support', () => {
 				expect(getReasoningConfig('gpt-5.4-mini', {}).effort).toBe('high');
 				expect(getReasoningConfig('gpt-5.4-mini', { reasoningEffort: 'none' }).effort).toBe('none');
 				expect(getReasoningConfig('gpt-5.4-mini', { reasoningEffort: 'xhigh' }).effort).toBe('xhigh');
 			});
 
-			it('should keep gpt-5.4-mini distinct from unsupported lightweight fallbacks', async () => {
-				expect(getReasoningConfig('gpt-5.4-mini', { reasoningEffort: 'none' }).effort).toBe('none');
+			it('should downgrade legacy gpt-5-mini none requests to low', () => {
 				expect(getReasoningConfig('gpt-5-mini', { reasoningEffort: 'none' }).effort).toBe('low');
 			});
 		});
 
 	describe('filterInput', () => {
-		it('should keep items without IDs unchanged', async () => {
+		it('should keep items without IDs unchanged', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
@@ -408,7 +407,7 @@ describe('Request Transformer Module', () => {
 			expect(result![0]).not.toHaveProperty('id');
 		});
 
-		it('should remove ALL message IDs (rs_, msg_, etc.) for store:false compatibility', async () => {
+		it('should remove ALL message IDs (rs_, msg_, etc.) for store:false compatibility', () => {
 			const input: InputItem[] = [
 				{ id: 'rs_123', type: 'message', role: 'assistant', content: 'hello' },
 				{ id: 'msg_456', type: 'message', role: 'user', content: 'world' },
@@ -426,7 +425,7 @@ describe('Request Transformer Module', () => {
 			expect(result![2].content).toBe('test');
 		});
 
-		it('should strip ID field but preserve all other properties', async () => {
+		it('should strip ID field but preserve all other properties', () => {
 			const input: InputItem[] = [
 				{
 					id: 'msg_123',
@@ -446,7 +445,7 @@ describe('Request Transformer Module', () => {
 			expect(result![0]).toHaveProperty('metadata');
 		});
 
-		it('should handle mixed items with and without IDs', async () => {
+		it('should handle mixed items with and without IDs', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: '1' },
 				{ id: 'rs_stored', type: 'message', role: 'assistant', content: '2' },
@@ -464,7 +463,7 @@ describe('Request Transformer Module', () => {
 			expect(result![2].content).toBe('3');
 		});
 
-		it('should handle custom ID formats (future-proof)', async () => {
+		it('should handle custom ID formats (future-proof)', () => {
 			const input: InputItem[] = [
 				{ id: 'custom_id_format', type: 'message', role: 'user', content: 'test' },
 				{ id: 'another-format-123', type: 'message', role: 'user', content: 'test2' },
@@ -476,16 +475,16 @@ describe('Request Transformer Module', () => {
 			expect(result![1]).not.toHaveProperty('id');
 		});
 
-		it('should return undefined for undefined input', async () => {
+		it('should return undefined for undefined input', () => {
 			expect(filterInput(undefined)).toBeUndefined();
 		});
 
-		it('should return non-array input as-is', async () => {
+		it('should return non-array input as-is', () => {
 			const notArray = { notAnArray: true };
 			expect(filterInput(notArray as any)).toBe(notArray);
 		});
 
-		it('should handle empty array', async () => {
+		it('should handle empty array', () => {
 			const input: InputItem[] = [];
 			const result = filterInput(input);
 			expect(result).toEqual([]);
@@ -493,7 +492,7 @@ describe('Request Transformer Module', () => {
 	});
 
 	describe('addToolRemapMessage', () => {
-		it('should prepend tool remap message when tools present', async () => {
+		it('should prepend tool remap message when tools present', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
@@ -506,7 +505,7 @@ describe('Request Transformer Module', () => {
 			expect((result![0].content as any)[0].text).toContain('active tool schema/manifest');
 		});
 
-		it('should not modify input when tools not present', async () => {
+		it('should not modify input when tools not present', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
@@ -514,18 +513,18 @@ describe('Request Transformer Module', () => {
 			expect(result).toEqual(input);
 		});
 
-		it('should return undefined for undefined input', async () => {
+		it('should return undefined for undefined input', () => {
 			expect(addToolRemapMessage(undefined, true)).toBeUndefined();
 		});
 
-		it('should handle non-array input', async () => {
+		it('should handle non-array input', () => {
 			const notArray = { notAnArray: true };
 			expect(addToolRemapMessage(notArray as any, true)).toBe(notArray);
 		});
 	});
 
 	describe('isOpenCodeSystemPrompt', () => {
-		it('should detect OpenCode system prompt with string content', async () => {
+		it('should detect OpenCode system prompt with string content', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
@@ -534,7 +533,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(true);
 		});
 
-		it('should detect OpenCode system prompt with array content', async () => {
+		it('should detect OpenCode system prompt with array content', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
@@ -548,7 +547,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(true);
 		});
 
-		it('should detect with system role', async () => {
+		it('should detect with system role', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'system',
@@ -557,7 +556,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(true);
 		});
 
-		it('should not detect non-system roles', async () => {
+		it('should not detect non-system roles', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'user',
@@ -566,7 +565,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(false);
 		});
 
-		it('should not detect different content', async () => {
+		it('should not detect different content', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
@@ -575,7 +574,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(false);
 		});
 
-		it('should NOT detect AGENTS.md content', async () => {
+		it('should NOT detect AGENTS.md content', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
@@ -584,7 +583,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(false);
 		});
 
-		it('should NOT detect environment info concatenated with AGENTS.md', async () => {
+		it('should NOT detect environment info concatenated with AGENTS.md', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
@@ -593,7 +592,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, null)).toBe(false);
 		});
 
-		it('should NOT detect content with codex signature in the middle', async () => {
+		it('should NOT detect content with codex signature in the middle', () => {
 			const cachedPrompt = 'You are a coding agent running in the opencode.';
 			const item: InputItem = {
 				type: 'message',
@@ -605,7 +604,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, cachedPrompt)).toBe(false);
 		});
 
-		it('should detect with cached prompt exact match', async () => {
+		it('should detect with cached prompt exact match', () => {
 			const cachedPrompt = 'You are a coding agent running in the opencode';
 			const item: InputItem = {
 				type: 'message',
@@ -615,7 +614,7 @@ describe('Request Transformer Module', () => {
 			expect(isOpenCodeSystemPrompt(item, cachedPrompt)).toBe(true);
 		});
 
-		it('should detect alternative OpenCode prompt signatures', async () => {
+		it('should detect alternative OpenCode prompt signatures', () => {
 			const item: InputItem = {
 				type: 'message',
 				role: 'developer',
@@ -626,7 +625,7 @@ describe('Request Transformer Module', () => {
 	});
 
 	describe('filterOpenCodeSystemPrompts', () => {
-		it('should filter out OpenCode system prompts', async () => {
+		it('should filter out OpenCode system prompts', () => {
 			const input: InputItem[] = [
 				{
 					type: 'message',
@@ -640,7 +639,7 @@ describe('Request Transformer Module', () => {
 			expect(result![0].role).toBe('user');
 		});
 
-		it('should keep user messages', async () => {
+		it('should keep user messages', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: 'message 1' },
 				{ type: 'message', role: 'user', content: 'message 2' },
@@ -649,7 +648,7 @@ describe('Request Transformer Module', () => {
 			expect(result).toHaveLength(2);
 		});
 
-		it('should keep non-OpenCode developer messages', async () => {
+		it('should keep non-OpenCode developer messages', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'developer', content: 'Custom instruction' },
 				{ type: 'message', role: 'user', content: 'hello' },
@@ -658,7 +657,7 @@ describe('Request Transformer Module', () => {
 			expect(result).toHaveLength(2);
 		});
 
-		it('should keep AGENTS.md content (not filter it)', async () => {
+		it('should keep AGENTS.md content (not filter it)', () => {
 			const input: InputItem[] = [
 				{
 					type: 'message',
@@ -679,7 +678,7 @@ describe('Request Transformer Module', () => {
 			expect(result![1].role).toBe('user');
 		});
 
-		it('should strip OpenCode prompt but keep concatenated env/instructions', async () => {
+		it('should strip OpenCode prompt but keep concatenated env/instructions', () => {
 			const input: InputItem[] = [
 				{
 					type: 'message',
@@ -704,7 +703,7 @@ describe('Request Transformer Module', () => {
 			expect(preserved).not.toContain('You are a coding agent running in the opencode');
 		});
 
-		it('should keep environment+AGENTS.md concatenated message', async () => {
+		it('should keep environment+AGENTS.md concatenated message', () => {
 			const input: InputItem[] = [
 				{
 					type: 'message',
@@ -732,7 +731,7 @@ describe('Request Transformer Module', () => {
 	});
 
 	describe('addCodexBridgeMessage', () => {
-		it('should prepend bridge message when tools present', async () => {
+		it('should prepend bridge message when tools present', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
@@ -744,7 +743,7 @@ describe('Request Transformer Module', () => {
 			expect((result![0].content as any)[0].text).toContain('Codex Running in OpenCode');
 		});
 
-		it('should not modify input when tools not present', async () => {
+		it('should not modify input when tools not present', () => {
 			const input: InputItem[] = [
 				{ type: 'message', role: 'user', content: 'hello' },
 			];
@@ -752,7 +751,7 @@ describe('Request Transformer Module', () => {
 			expect(result).toEqual(input);
 		});
 
-		it('should return undefined for undefined input', async () => {
+		it('should return undefined for undefined input', () => {
 			expect(addCodexBridgeMessage(undefined, true)).toBeUndefined();
 		});
 	});
