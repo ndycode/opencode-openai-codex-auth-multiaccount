@@ -97,6 +97,17 @@ export const MODEL_MAP: Record<string, string> = {
 	...expandDatedAliases(`gpt-5.4-pro-${GPT_54_SNAPSHOT_DATE}`, "gpt-5.4-pro"),
 
 	// ============================================================================
+	// GPT-5.4 Mini Models (latest efficient family)
+	// ============================================================================
+	"gpt-5.4-mini": "gpt-5.4-mini",
+	"gpt-5.4-mini-none": "gpt-5.4-mini",
+	"gpt-5.4-mini-low": "gpt-5.4-mini",
+	"gpt-5.4-mini-medium": "gpt-5.4-mini",
+	"gpt-5.4-mini-high": "gpt-5.4-mini",
+	"gpt-5.4-mini-xhigh": "gpt-5.4-mini",
+	...expandDatedAliases(`gpt-5.4-mini-${GPT_54_SNAPSHOT_DATE}`, "gpt-5.4-mini"),
+
+	// ============================================================================
 	// GPT-5.2 Models (supports none/low/medium/high/xhigh per OpenAI API docs)
 	// ============================================================================
 	"gpt-5.2": "gpt-5.2",
