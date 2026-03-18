@@ -543,6 +543,8 @@ export function getReasoningConfig(
 	// - OpenAI API docs: "gpt-5.1 defaults to none, supports: none, low, medium, high"
 	// - GPT-5.4 latest model docs list reasoning controls for the base model family
 	// - GPT-5.4 Mini should stay aligned with GPT-5.4 reasoning support as an explicit model
+	// - Legacy lightweight aliases like gpt-5-mini/gpt-5-nano stay distinct and do not inherit
+	//   full "none" support from their gpt-5.4 normalization target
 	// - Codex CLI: ReasoningEffort enum includes None variant (codex-rs/protocol/src/openai_models.rs)
 	// - Codex CLI: docs/config.md lists "none" as valid for model_reasoning_effort
 	// - gpt-5.2 and gpt-5.4 general models support: none, low, medium, high, xhigh
@@ -551,7 +553,7 @@ export function getReasoningConfig(
 		isGpt54General ||
 		isGpt54Mini ||
 		isGpt52General ||
-		isGpt51General;
+		(isGpt51General && !isLightweight);
 
 	// Default based on model type (Codex CLI defaults + plugin opinionated tuning)
 	// Note: OpenAI docs say gpt-5.1 defaults to "none", but we default to "medium"
