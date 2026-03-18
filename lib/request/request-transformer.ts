@@ -79,12 +79,12 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5-codex";
 	}
 
-	// 4. GPT-5.4 Pro (optional/manual model)
+	// 4. GPT-5.4 Pro (first-class model)
 	if (/\bgpt(?:-| )5\.4(?:-| )pro(?:\b|[- ])/.test(normalized)) {
 		return "gpt-5.4-pro";
 	}
 
-	// 5. GPT-5.4 Mini (optional/manual model)
+	// 5. GPT-5.4 Mini (first-class model)
 	if (/(?:\bgpt(?:-| )5\.4(?:-| )mini(?:\b|[- ]))/.test(normalized)) {
 		return "gpt-5.4-mini";
 	}
