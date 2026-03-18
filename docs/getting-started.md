@@ -27,7 +27,7 @@ opencode auth login
 opencode run "Explain this repository" --model=openai/gpt-5.4 --variant=medium
 ```
 
-The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, and clears the cached plugin copy so OpenCode reinstalls the latest package.
+The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, normalizes the plugin entry to `oc-chatgpt-multi-auth`, and clears the cached plugin copy so OpenCode reinstalls the latest package.
 
 If you are on OpenCode `v1.0.209` or earlier, use:
 
@@ -86,7 +86,7 @@ If you are not using the installer, edit `~/.config/opencode/opencode.json` manu
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["oc-chatgpt-multi-auth@latest"]
+  "plugin": ["oc-chatgpt-multi-auth"]
 }
 ```
 
@@ -100,6 +100,7 @@ The repository ships two supported templates:
 | `v1.0.209` and earlier | [`config/opencode-legacy.json`](../config/opencode-legacy.json) |
 
 The templates include the supported GPT-5/Codex families, required `store: false` handling, and `reasoning.encrypted_content` for multi-turn sessions.
+Current templates expose 7 shipped base model families and 26 shipped presets overall (26 modern variants or 26 legacy explicit entries), including `gpt-5.4-mini`.
 
 Optional model IDs such as `gpt-5.4-pro` or entitlement-gated Spark variants should be added manually only when your workspace supports them.
 
@@ -123,6 +124,8 @@ ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.4
 ```
 
 The first request should create logs under `~/.opencode/logs/codex-plugin/`.
+
+Use `opencode debug config` when you want to verify that template-defined or custom models were merged into your effective config. `opencode models openai` currently shows OpenCode's built-in provider catalog and can omit config-defined entries such as `gpt-5.4-mini`.
 
 ## Multi-Account Setup
 

@@ -11,7 +11,7 @@ If you prefer guided recovery before manual debugging, run:
 ```text
 codex-setup
 codex-doctor
-codex-doctor fix=true
+codex-doctor --fix
 codex-next
 ```
 
@@ -41,7 +41,7 @@ The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-m
 Update your `~/.config/opencode/opencode.json`:
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth@latest"]
+  "plugin": ["oc-chatgpt-multi-auth"]
 }
 ```
 
@@ -64,7 +64,7 @@ Update your `~/.config/opencode/opencode.json`:
 1. **Verify config path and plugin list**:
    - Global: `~/.config/opencode/opencode.json`
    - Project: `./.opencode.json`
-   - Entry should include: `"plugin": ["oc-chatgpt-multi-auth@latest"]`
+   - Entry should include: `"plugin": ["oc-chatgpt-multi-auth"]`
 2. **Confirm plugin cache location** (npm plugins are cached, not stored in `~/.opencode/plugins/`):
    ```bash
    ls ~/.cache/opencode/node_modules/oc-chatgpt-multi-auth
@@ -77,7 +77,7 @@ Update your `~/.config/opencode/opencode.json`:
    ```bash
    npm view oc-chatgpt-multi-auth version
    ```
-5. **If the plugin is present but still won’t load**, upgrade to v4.8.1+ (fixes Node ESM load issues with `@opencode-ai/plugin`).
+5. **If the plugin is present but still won’t load**, rerun `npx -y oc-chatgpt-multi-auth@latest` so the installer refreshes the config and clears OpenCode's cached plugin copy.
 
 </details>
 
@@ -90,7 +90,7 @@ Update your `~/.config/opencode/opencode.json`:
 
 **What’s normal:**
 - The first request may fetch **Codex instructions** and/or the **OpenCode codex prompt** from GitHub.
-- v4.14.1+ uses **stale-while-revalidate caching** and a **startup prewarm** to reduce first-turn latency.
+- Current releases use **stale-while-revalidate caching** and a **startup prewarm** to reduce first-turn latency.
 
 **Tuning knobs:**
 1. Disable prewarm (if you prefer zero background fetches at startup):
@@ -222,7 +222,7 @@ Failed to access Codex API
 **Cause:** The plugin is using the wrong workspace/account id (personal vs business).
 
 **Solutions:**
-1. Upgrade to `oc-chatgpt-multi-auth@5.1.0` or newer (workspace routing logic was hardened for Business + Personal dual accounts).
+1. Upgrade to the current release of `oc-chatgpt-multi-auth` (workspace routing logic was hardened for Business + Personal dual accounts in the 5.x line).
 2. Re-run `opencode auth login` and select the correct workspace when prompted.
 3. If running non-interactively, set `CODEX_AUTH_ACCOUNT_ID` to the workspace account id and re-login.
 4. Verify the workspace has Codex access in the ChatGPT UI.
@@ -259,14 +259,14 @@ Failed to access Codex API
 6. Run guided diagnostics and safe auto-remediation:
    ```text
    codex-doctor
-   codex-doctor fix=true
+   codex-doctor --fix
    ```
 7. If you are onboarding or returning after a long gap, run:
    ```text
    codex-setup
-   codex-setup wizard=true
+   codex-setup --wizard
    codex-next
-   ```
+```
 
 </details>
 
@@ -300,6 +300,8 @@ opencode run "test" --model=openai/gpt-5-codex-low  # Must match config key
 | Wrong | Correct |
 |-------|---------|
 | `--model=gpt-5-codex-low` | `--model=openai/gpt-5-codex-low` |
+
+**Note:** `opencode models openai` currently shows only OpenCode's built-in provider catalog. If you add template-defined or custom models, use `opencode debug config` to confirm they were merged into the effective config.
 
 </details>
 

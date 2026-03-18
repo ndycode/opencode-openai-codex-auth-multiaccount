@@ -32,6 +32,7 @@ What the installer does:
 
 - writes `~/.config/opencode/opencode.json`
 - backs up an existing config before changing it
+- normalizes the plugin entry to `"oc-chatgpt-multi-auth"`
 - clears the cached plugin copy so OpenCode reinstalls the latest package
 
 ## Example Usage
@@ -120,7 +121,7 @@ Start here if the plugin does not load or authenticate correctly:
 
 Common first checks:
 
-- confirm `"plugin": ["oc-chatgpt-multi-auth@latest"]` is present in your OpenCode config
+- confirm `"plugin": ["oc-chatgpt-multi-auth"]` is present in your OpenCode config
 - rerun `opencode auth login`
 - inspect `~/.opencode/logs/codex-plugin/` after running one request with `ENABLE_PLUGIN_REQUEST_LOGGING=1`
 

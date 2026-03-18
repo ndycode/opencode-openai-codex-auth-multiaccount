@@ -1,275 +1,95 @@
-# OpenCode Config Flow: Complete Guide
+# OpenCode Config Flow
 
-This document explains how OpenCode configuration flows from user files through the plugin system to the Codex API.
+This document describes the current config surfaces used by `oc-chatgpt-multi-auth` on `main`.
 
-## Table of Contents
-- [Config Loading Order](#config-loading-order)
-- [Provider Options Flow](#provider-options-flow)
-- [Model Selection & Persistence](#model-selection--persistence)
-- [Plugin Configuration](#plugin-configuration)
-- [Examples](#examples)
-- [Best Practices](#best-practices)
+## Primary Config Surfaces
 
----
+### Global OpenCode config
 
-## Config Loading Order
+The installer writes and updates:
 
-OpenCode loads and merges configuration from multiple sources in this order (**last wins**):
-
-### 1. Global Config
-```
-~/.opencode/config.json
-~/.opencode/opencode.json
-~/.opencode/opencode.jsonc
+```text
+~/.config/opencode/opencode.json
 ```
 
-### 2. Project Configs (traversed upward from cwd)
-```
-<project>/.opencode/opencode.json
-<parent>/.opencode/opencode.json
-... (up to worktree root)
+That file is the primary global config surface used by the shipped install flow in this repository.
+
+### Project override
+
+Project-specific overrides can live in:
+
+```text
+<project>/.opencode.json
 ```
 
-### 3. Custom Config (via flags)
+Use that when you want per-project model or provider overrides without changing the global install.
+
+### One-shot overrides
+
+OpenCode can also accept override content at process start:
+
 ```bash
 OPENCODE_CONFIG=/path/to/config.json opencode
-# or
-OPENCODE_CONFIG_CONTENT='{"model":"openai/gpt-5"}' opencode
+OPENCODE_CONFIG_CONTENT='{"model":"openai/gpt-5.4"}' opencode
 ```
 
-### 4. Auth Configs
-```
-# From .well-known/opencode endpoints (for OAuth providers)
-https://auth.example.com/.well-known/opencode
-```
+### Plugin runtime config
 
-**Source**: `tmp/opencode/packages/opencode/src/config/config.ts:26-51`
+Plugin-specific runtime settings live outside the OpenCode config file:
 
----
-
-## Provider Options Flow
-
-Options are merged at multiple stages before reaching the plugin:
-
-### Stage 1: Database Defaults
-Models.dev provides baseline capabilities for each provider/model.
-
-### Stage 2: Environment Variables
-```bash
-export OPENAI_API_KEY="sk-..."
+```text
+~/.opencode/openai-codex-auth-config.json
 ```
 
-### Stage 3: Custom Loaders
-Plugins can inject options via the `loader()` function.
+That file controls plugin behavior such as retry policy, beginner safe mode, fallback policy, TUI output, and per-project account storage.
 
-### Stage 4: User Config (HIGHEST PRIORITY)
-```json
-{
-  "provider": {
-    "openai": {
-      "options": {
-        "reasoningEffort": "medium",
-        "textVerbosity": "low"
-      }
-    }
-  }
-}
-```
+## Installer Flow
 
-**Result**: User config overrides everything else.
+`scripts/install-opencode-codex-auth.js` performs these steps:
 
-**Source**: `tmp/opencode/packages/opencode/src/provider/provider.ts:236-339`
+1. Load the selected template (`config/opencode-modern.json` by default, `config/opencode-legacy.json` with `--legacy`).
+2. Back up an existing `~/.config/opencode/opencode.json`.
+3. Normalize the plugin list so it ends with plain `oc-chatgpt-multi-auth`.
+4. Replace `provider.openai` with the selected shipped template block.
+5. Clear the cached OpenCode plugin copy under `~/.cache/opencode/`.
 
----
+Important detail:
 
-## Model Selection & Persistence
+- The installer intentionally writes the plugin entry as `oc-chatgpt-multi-auth`, not `oc-chatgpt-multi-auth@latest`.
 
-### Display Names vs Internal IDs
+## Shipped Template Structure
 
-**Your Config** (`config/opencode-legacy.json`):
-```json
-{
-  "provider": {
-    "openai": {
-      "models": {
-        "gpt-5-codex-medium": {
-          "name": "GPT 5 Codex Medium (OAuth)",
-          "limit": {
-            "context": 272000,
-            "output": 128000
-          },
-          "options": {
-            "reasoningEffort": "medium",
-            "reasoningSummary": "auto",
-            "textVerbosity": "medium",
-            "include": [
-              "reasoning.encrypted_content"
-            ],
-            "store": false
-          }
-        }
-      }
-    }
-  }
-}
-```
+### Modern template
 
-**What OpenCode Uses**:
-- **UI Display**: "GPT 5 Codex Medium (OAuth)" ✅
-- **Persistence**: `provider_id: "openai"` + `model_id: "gpt-5-codex-medium"` ✅
-- **Plugin lookup**: `models["gpt-5-codex-medium"]` → used to build Codex request ✅
+`config/opencode-modern.json` is the default for OpenCode `v1.0.210+`.
 
-### TUI Persistence
+It currently ships:
 
-The TUI stores recently used models in `~/.opencode/tui`:
+- 7 base model families
+- 26 total variants
+- `gpt-5.4` and `gpt-5.4-mini` at 1,000,000 context / 128,000 output
+- `store: false` plus `include: ["reasoning.encrypted_content"]`
 
-```toml
-[[recently_used_models]]
-provider_id = "openai"
-model_id = "gpt-5-codex"
-last_used = 2025-10-12T10:30:00Z
-```
+Example shape:
 
-**Key Point**: Custom display names are **UI-only**. The underlying `id` field is what gets persisted and sent to APIs.
-
-**Source**: `tmp/opencode/packages/tui/internal/app/state.go:54-79`
-
----
-
-## Plugin Configuration
-
-### How This Plugin Receives Config
-
-**Plugin Entry Point** (`index.ts:64-86`):
-```typescript
-async loader(getAuth: () => Promise<Auth>, provider: unknown) {
-  const providerConfig = provider as {
-    options?: Record<string, unknown>;
-    models?: UserConfig["models"]
-  };
-
-  const userConfig: UserConfig = {
-    global: providerConfig?.options || {},  // Global options
-    models: providerConfig?.models || {},   // Per-model options
-  };
-
-  // ... use userConfig in custom fetch()
-}
-```
-
-### Config Structure
-
-```typescript
-type UserConfig = {
-  global: {
-    // Applied to ALL models
-    reasoningEffort?: "minimal" | "low" | "medium" | "high";
-    textVerbosity?: "low" | "medium" | "high";
-    include?: string[];
-  };
-  models: {
-    [modelName: string]: {
-      options?: {
-        // Override global for specific model
-        reasoningEffort?: "minimal" | "low" | "medium" | "high";
-        textVerbosity?: "low" | "medium" | "high";
-      };
-    };
-  };
-};
-```
-
-### Option Precedence
-
-For a given model, options are merged:
-1. **Global options** (`provider.openai.options`)
-2. **Model-specific options** (`provider.openai.models[modelName].options`) ← WINS
-
-**Implementation**: `lib/request/request-transformer.ts:getModelConfig()`
-
----
-
-## Examples
-
-### Example 1: Global Options Only
 ```json
 {
   "plugin": ["oc-chatgpt-multi-auth"],
-  "provider": {
-    "openai": {
-      "options": {
-        "reasoningEffort": "medium",
-        "textVerbosity": "medium",
-        "include": ["reasoning.encrypted_content"]
-      }
-    }
-  }
-}
-```
-
-**Result**: All OpenAI models use these options.
-
-### Example 2: Per-Model Override
-```json
-{
-  "plugin": ["oc-chatgpt-multi-auth"],
-  "provider": {
-    "openai": {
-      "options": {
-        "reasoningEffort": "medium",
-        "textVerbosity": "medium"
-      },
-      "models": {
-        "gpt-5-codex-high": {
-          "name": "GPT 5 Codex High (OAuth)",
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed"
-          }
-        },
-        "gpt-5-nano": {
-          "name": "GPT 5 Nano (OAuth)",
-          "options": {
-            "reasoningEffort": "minimal",
-            "textVerbosity": "low"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-**Result**:
-- `gpt-5-codex-high` uses `reasoningEffort: "high"` (overridden) + `textVerbosity: "medium"` (from global)
-- `gpt-5-nano` uses `reasoningEffort: "minimal"` + `textVerbosity: "low"` (both overridden)
-
-### Example 3: Full Configuration
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["oc-chatgpt-multi-auth"],
-  "model": "openai/gpt-5-codex-medium",
   "provider": {
     "openai": {
       "options": {
         "reasoningEffort": "medium",
         "reasoningSummary": "auto",
         "textVerbosity": "medium",
-        "include": ["reasoning.encrypted_content"]
+        "include": ["reasoning.encrypted_content"],
+        "store": false
       },
       "models": {
-        "gpt-5-codex-low": {
-          "name": "GPT 5 Codex Low (OAuth)",
-          "options": {
-            "reasoningEffort": "low"
-          }
-        },
-        "gpt-5-codex-high": {
-          "name": "GPT 5 Codex High (OAuth)",
-          "options": {
-            "reasoningEffort": "high",
-            "reasoningSummary": "detailed"
+        "gpt-5.4": {
+          "name": "GPT 5.4 (OAuth)",
+          "variants": {
+            "medium": { "reasoningEffort": "medium" },
+            "high": { "reasoningEffort": "high" }
           }
         }
       }
@@ -278,133 +98,72 @@ For a given model, options are merged:
 }
 ```
 
----
+Modern OpenCode selection uses:
 
-## Best Practices
-
-### 1. Use Per-Model Options for Variants
-Instead of duplicating global options, override only what's different:
-
-❌ **Bad**:
-```json
-{
-  "models": {
-    "gpt-5-low": {
-      "id": "gpt-5",
-      "options": {
-        "reasoningEffort": "low",
-        "textVerbosity": "low",
-        "include": ["reasoning.encrypted_content"]
-      }
-    },
-    "gpt-5-high": {
-      "id": "gpt-5",
-      "options": {
-        "reasoningEffort": "high",
-        "textVerbosity": "high",
-        "include": ["reasoning.encrypted_content"]
-      }
-    }
-  }
-}
+```bash
+opencode run "task" --model=openai/gpt-5.4 --variant=high
 ```
 
-✅ **Good**:
-```json
-{
-  "options": {
-    "include": ["reasoning.encrypted_content"]
-  },
-  "models": {
-    "gpt-5-low": {
-      "id": "gpt-5",
-      "options": {
-        "reasoningEffort": "low",
-        "textVerbosity": "low"
-      }
-    },
-    "gpt-5-high": {
-      "id": "gpt-5",
-      "options": {
-        "reasoningEffort": "high",
-        "textVerbosity": "high"
-      }
-    }
-  }
-}
+### Legacy template
+
+`config/opencode-legacy.json` is for OpenCode `v1.0.209` and earlier.
+
+It currently ships:
+
+- 26 explicit model entries
+- separate model IDs such as `gpt-5.4-high` and `gpt-5.4-mini-xhigh`
+- the same OpenAI provider defaults (`store: false`, `reasoning.encrypted_content`)
+
+Legacy OpenCode selection uses:
+
+```bash
+opencode run "task" --model=openai/gpt-5.4-high
 ```
 
-### 2. Keep Display Names Meaningful
-Custom model names help you remember what each variant does:
+## Runtime Resolution
 
-```json
-{
-  "models": {
-    "GPT 5 Codex - Fast & Cheap": {
-      "id": "gpt-5-codex",
-      "options": { "reasoningEffort": "low" }
-    },
-    "GPT 5 Codex - Balanced": {
-      "id": "gpt-5-codex",
-      "options": { "reasoningEffort": "medium" }
-    },
-    "GPT 5 Codex - Max Quality": {
-      "id": "gpt-5-codex",
-      "options": { "reasoningEffort": "high" }
-    }
-  }
-}
+At runtime, OpenCode passes `provider.openai.options` and `provider.openai.models` into the plugin loader. The plugin then:
+
+1. Reads global provider options.
+2. Reads per-model definitions.
+3. Applies request-shaping behavior (`native` by default, `legacy` when explicitly enabled).
+4. Normalizes selected model IDs to canonical upstream Codex/ChatGPT model families before the final API call.
+
+Examples:
+
+- `openai/gpt-5.4` stays `gpt-5.4`
+- `openai/gpt-5.4-mini-xhigh` normalizes to `gpt-5.4-mini`
+- legacy aliases such as `gpt-5-mini` normalize to `gpt-5.4`
+
+## Verification
+
+Use these commands when checking the effective config:
+
+```bash
+opencode debug config
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.4
 ```
 
-### 3. Set Defaults at Global Level
-Most common settings should be global:
+Important runtime behavior:
 
-```json
-{
-  "options": {
-    "reasoningEffort": "medium",
-    "reasoningSummary": "auto",
-    "textVerbosity": "medium",
-    "include": ["reasoning.encrypted_content"]
-  }
-}
-```
+- `opencode debug config` shows merged provider models from your config.
+- `opencode models openai` currently shows OpenCode's built-in provider catalog only.
+- Because of that, config-defined entries such as `gpt-5.4-mini` can appear in `opencode debug config` while being omitted from `opencode models openai`.
 
-### 4. Use Config Files, Not Environment Variables
-While you can set `CODEX_MODE=0` to disable the bridge prompt, it's better to document such settings in config files:
+## File Locations
 
-❌ **Bad**: `CODEX_MODE=0 opencode`
-
-✅ **Good**: Create `~/.opencode/openai-codex-auth-config.json`:
-```json
-{
-  "codexMode": false
-}
-```
-
----
-
-## Troubleshooting
-
-### Config Not Being Applied
-1. Check config file syntax with `jq . < config.json`
-2. Verify config file location (use absolute paths)
-3. Check OpenCode logs for config load errors
-4. Use `OPENCODE_CONFIG_CONTENT` to test minimal configs
-
-### Model Not Persisting
-1. TUI remembers the `id` field, not the display name
-2. Check `~/.opencode/tui` for recently used models
-3. Verify your config has the correct `id` field
-
-### Options Not Taking Effect
-1. Model-specific options override global options
-2. Plugin receives merged config from OpenCode
-3. Add debug logging to verify what plugin receives
-
----
+| Path | Purpose |
+|------|---------|
+| `~/.config/opencode/opencode.json` | global OpenCode config used by the installer |
+| `<project>/.opencode.json` | project-local OpenCode override |
+| `~/.opencode/openai-codex-auth-config.json` | plugin runtime config |
+| `~/.opencode/auth/openai.json` | OAuth token storage |
+| `~/.opencode/openai-codex-accounts.json` | global account storage |
+| `~/.opencode/projects/<project-key>/openai-codex-accounts.json` | per-project account storage |
+| `~/.opencode/logs/codex-plugin/` | plugin request/debug logs |
 
 ## See Also
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - Plugin architecture and design decisions
-- [OpenCode Config Schema](https://opencode.ai/config.json) - Official schema
-- [Models.dev](https://models.dev) - Model capability database
+
+- [CONFIG_FIELDS.md](./CONFIG_FIELDS.md)
+- [ARCHITECTURE.md](./ARCHITECTURE.md)
+- [../../config/README.md](../../config/README.md)

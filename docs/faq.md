@@ -25,7 +25,7 @@ See [config/README.md](../config/README.md) for the template split.
 
 ## What models are included by default?
 
-The shipped templates focus on current GPT-5 and Codex families such as `gpt-5.4`, `gpt-5-codex`, and `gpt-5.1-*`. Optional or entitlement-gated model IDs can be added manually when your workspace supports them.
+The shipped templates focus on current GPT-5 and Codex families such as `gpt-5.4`, `gpt-5.4-mini`, `gpt-5-codex`, and `gpt-5.1-*`. Optional or entitlement-gated model IDs can be added manually when your workspace supports them.
 
 ## Can I use multiple accounts?
 
@@ -41,4 +41,4 @@ Start with [Troubleshooting](troubleshooting.md), rerun `opencode auth login`, a
 
 ## I used the old package name. What changed?
 
-The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`. If you still reference the old name in your OpenCode config, replace it with `oc-chatgpt-multi-auth@latest`.
+The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`. If you still reference the old name in your OpenCode config, replace it with `oc-chatgpt-multi-auth`.

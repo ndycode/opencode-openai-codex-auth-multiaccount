@@ -9,7 +9,7 @@ Complete reference for configuring `oc-chatgpt-multi-auth`. Most of this is opti
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["oc-chatgpt-multi-auth@latest"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -46,7 +46,7 @@ controls how much thinking the model does.
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-the shipped config templates include 21 presets and do not add optional IDs by default. add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only for entitled workspaces.
+the shipped config templates include 7 base model families and 26 shipped presets overall (26 modern variants or 26 legacy explicit entries). add `gpt-5.4-pro` and/or `gpt-5.3-codex-spark` manually only for entitled workspaces.
 for context sizing, shipped templates use:
 - `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.4-pro`: `context=1000000`, `output=128000`
 - other shipped families: `context=272000`, `output=128000`
@@ -54,6 +54,7 @@ for context sizing, shipped templates use:
 model normalization aliases:
 - legacy `gpt-5`, `gpt-5-mini`, `gpt-5-nano` map to `gpt-5.4` (not to `gpt-5.4-mini`)
 - snapshot ids `gpt-5.4-2026-03-05*`, `gpt-5.4-mini-2026-03-05*`, and `gpt-5.4-pro-2026-03-05*` map to stable `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-pro`
+- `opencode debug config` is the reliable way to confirm merged custom/template model entries; `opencode models openai` currently shows only the built-in provider catalog
 
 if your OpenCode runtime supports global compaction tuning, you can set:
 - `model_context_window = 1000000`
@@ -254,7 +255,7 @@ same settings for all models:
 
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth@latest"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -301,7 +302,7 @@ model options override global options.
 global (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth@latest"],
+  "plugin": ["oc-chatgpt-multi-auth"],
   "provider": {
     "openai": {
       "options": { "reasoningEffort": "medium" }

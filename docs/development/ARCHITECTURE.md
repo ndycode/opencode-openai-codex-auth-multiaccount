@@ -368,7 +368,7 @@ let include: Vec<String> = if reasoning.is_some() {
 **Alternative**: Single global config
 
 **Problem**:
-- `gpt-5-codex` optimal settings differ from `gpt-5-nano`
+- `gpt-5-codex` optimal settings differ from `gpt-5.4` or `gpt-5.4-mini`
 - Users want quick switching between quality levels
 - No way to save "presets"
 
@@ -472,12 +472,12 @@ The plugin now includes a beginner-focused operational layer in `index.ts` and `
 
 2. **Checklist and wizard flow**
    - `codex-setup` renders a checklist (`add account`, `set active`, `verify health`, `label accounts`, `learn commands`).
-   - `codex-setup wizard=true` launches an interactive menu when terminal supports TTY interaction.
+   - `codex-setup --wizard` launches an interactive menu when terminal supports TTY interaction.
    - Wizard gracefully falls back to checklist output when menus are unavailable.
 
 3. **Doctor + next-action diagnostics**
    - `codex-doctor` maps runtime/account states into severity findings (`ok`, `warning`, `error`) with specific action text.
-   - `codex-doctor fix=true` performs safe remediation:
+   - `codex-doctor --fix` performs safe remediation:
      - refreshes tokens using queued refresh,
      - persists refreshed credentials,
      - switches active account to healthiest eligible account when beneficial.

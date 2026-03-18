@@ -6,8 +6,8 @@ This directory contains the official OpenCode config templates for the ChatGPT C
 
 | File | OpenCode version | Description |
 |------|------------------|-------------|
-| [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+** | Variant-based config: 6 base models with 21 total presets |
-| [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Legacy explicit entries: 21 individual model definitions |
+| [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+** | Variant-based config: 7 base models with 26 total presets |
+| [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Legacy explicit entries: 26 individual model definitions |
 
 ## Quick pick
 
@@ -34,10 +34,12 @@ opencode --version
 OpenCode v1.0.210+ added model `variants`, so one model entry can expose multiple reasoning levels. That keeps modern config much smaller while preserving the same effective presets.
 
 Both templates include:
-- GPT-5.4, GPT-5 Codex, GPT-5.1, GPT-5.1 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex Mini
+- GPT-5.4, GPT-5.4 Mini, GPT-5 Codex, GPT-5.1, GPT-5.1 Codex, GPT-5.1 Codex Max, GPT-5.1 Codex Mini
 - Reasoning variants per model family
 - `store: false` and `include: ["reasoning.encrypted_content"]`
 - Context metadata (`gpt-5.4*`: 1,000,000 context / 128,000 output; other shipped models: 272,000 / 128,000)
+
+Use `opencode debug config` to verify that these template entries were merged into your effective config. `opencode models openai` currently shows OpenCode's built-in provider catalog and can omit config-defined entries such as `gpt-5.4-mini`.
 
 If your OpenCode runtime supports global compaction tuning, you can also set:
 - `model_context_window = 1000000`
