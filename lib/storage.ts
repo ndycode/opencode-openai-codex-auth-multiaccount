@@ -921,7 +921,31 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		return { version: 1, accounts: [] };
 	}
 
-	const byRefreshToken = new Map<string, FlaggedAccountMetadataV1>();
+	const normalizeFlaggedIdentityPart = (value: unknown): string | undefined =>
+		typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+	// Flagged storage must keep sibling workspace entries separate when they share an
+	// organization but have different accountIds, so this key is more specific than
+	// the normal account identity collapse used in active storage.
+	const getFlaggedIdentityKey = (account: {
+		organizationId?: string;
+		accountId?: string;
+		refreshToken: string;
+	}): string => {
+		const organizationId = normalizeFlaggedIdentityPart(account.organizationId);
+		const accountId = normalizeFlaggedIdentityPart(account.accountId);
+		const refreshToken = normalizeFlaggedIdentityPart(account.refreshToken) ?? "";
+		if (organizationId) {
+			return accountId
+				? `organizationId:${organizationId}|accountId:${accountId}`
+				: `organizationId:${organizationId}`;
+		}
+		if (accountId) {
+			return `accountId:${accountId}`;
+		}
+		return `refreshToken:${refreshToken}`;
+	};
+
+	const byIdentityKey = new Map<string, FlaggedAccountMetadataV1>();
 	for (const rawAccount of data.accounts) {
 		if (!isRecord(rawAccount)) continue;
 		const refreshToken =
@@ -1000,16 +1024,18 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			flaggedReason: typeof rawAccount.flaggedReason === "string" ? rawAccount.flaggedReason : undefined,
 			lastError: typeof rawAccount.lastError === "string" ? rawAccount.lastError : undefined,
 		};
-		byRefreshToken.set(refreshToken, normalized);
+		byIdentityKey.set(getFlaggedIdentityKey(normalized), normalized);
 	}
 
 	return {
 		version: 1,
-		accounts: Array.from(byRefreshToken.values()),
+		accounts: Array.from(byIdentityKey.values()),
 	};
 }
 
-export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+async function loadFlaggedAccountsUnlocked(
+	saveUnlocked: (storage: FlaggedAccountStorageV1) => Promise<void>,
+): Promise<FlaggedAccountStorageV1> {
 	const path = getFlaggedAccountsPath();
 	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
 
@@ -1035,7 +1061,7 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 		const legacyData = JSON.parse(legacyContent) as unknown;
 		const migrated = normalizeFlaggedStorage(legacyData);
 		if (migrated.accounts.length > 0) {
-			await saveFlaggedAccounts(migrated);
+			await saveUnlocked(migrated);
 		}
 		try {
 			await fs.unlink(legacyPath);
@@ -1058,26 +1084,50 @@ export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
 	}
 }
 
+export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
+	return withStorageLock(async () => loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked));
+}
+
+async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Promise<void> {
+	const path = getFlaggedAccountsPath();
+	const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+	const tempPath = `${path}.${uniqueSuffix}.tmp`;
+
+	try {
+		await fs.mkdir(dirname(path), { recursive: true });
+		const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
+		await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
+		await renameWithWindowsRetry(tempPath, path);
+	} catch (error) {
+		try {
+			await fs.unlink(tempPath);
+		} catch {
+			// Ignore cleanup failures.
+		}
+		log.error("Failed to save flagged account storage", { path, error: String(error) });
+		throw error;
+	}
+}
+
+/**
+ * Executes a read-modify-write transaction for flagged account storage under the
+ * shared storage lock so concurrent callers cannot lose updates.
+ */
+export async function withFlaggedAccountStorageTransaction<T>(
+	handler: (
+		current: FlaggedAccountStorageV1,
+		persist: (storage: FlaggedAccountStorageV1) => Promise<void>,
+	) => Promise<T>,
+): Promise<T> {
+	return withStorageLock(async () => {
+		const current = await loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked);
+		return handler(current, saveFlaggedAccountsUnlocked);
+	});
+}
+
 export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
 	return withStorageLock(async () => {
-		const path = getFlaggedAccountsPath();
-		const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-		const tempPath = `${path}.${uniqueSuffix}.tmp`;
-
-		try {
-			await fs.mkdir(dirname(path), { recursive: true });
-			const content = JSON.stringify(normalizeFlaggedStorage(storage), null, 2);
-			await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
-			await renameWithWindowsRetry(tempPath, path);
-		} catch (error) {
-			try {
-				await fs.unlink(tempPath);
-			} catch {
-				// Ignore cleanup failures.
-			}
-			log.error("Failed to save flagged account storage", { path, error: String(error) });
-			throw error;
-		}
+		await saveFlaggedAccountsUnlocked(storage);
 	});
 }
 

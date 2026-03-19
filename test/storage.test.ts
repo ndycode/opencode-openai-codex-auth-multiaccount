@@ -21,6 +21,7 @@ import {
   previewImportAccounts,
   createTimestampedBackupPath,
   withAccountStorageTransaction,
+  withFlaggedAccountStorageTransaction,
 } from "../lib/storage.js";
 
 // Mocking the behavior we're about to implement for TDD
@@ -1468,6 +1469,71 @@ describe("storage", () => {
       expect(loaded.accounts).toHaveLength(1);
       expect(loaded.accounts[0]?.organizationId).toBe("org-secondary");
       expect(loaded.accounts[0]?.accountIdSource).toBe("id_token");
+    });
+
+    it("preserves sibling flagged workspaces when organizationId is shared but accountId differs", async () => {
+      await saveFlaggedAccounts({
+        version: 1,
+        accounts: [
+          {
+            refreshToken: "shared-refresh",
+            organizationId: "org-shared",
+            accountId: "workspace-a",
+            flaggedAt: 100,
+            addedAt: 100,
+            lastUsed: 100,
+          },
+          {
+            refreshToken: "shared-refresh",
+            organizationId: "org-shared",
+            accountId: "workspace-b",
+            flaggedAt: 200,
+            addedAt: 200,
+            lastUsed: 200,
+          },
+        ],
+      });
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts).toHaveLength(2);
+      expect(new Set(loaded.accounts.map((account) => account.accountId))).toEqual(
+        new Set(["workspace-a", "workspace-b"]),
+      );
+    });
+
+    it("serializes flagged account read-modify-write updates", async () => {
+      const writeWorkspace = async (
+        refreshToken: string,
+        accountId: string,
+        delayMs: number,
+      ) =>
+        withFlaggedAccountStorageTransaction(async (current, persist) => {
+          const nextStorage = {
+            ...current,
+            accounts: current.accounts.map((account) => ({ ...account })),
+          };
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          nextStorage.accounts.push({
+            refreshToken,
+            organizationId: "org-shared",
+            accountId,
+            flaggedAt: Date.now(),
+            addedAt: Date.now(),
+            lastUsed: Date.now(),
+          });
+          await persist(nextStorage);
+        });
+
+      await Promise.all([
+        writeWorkspace("shared-refresh", "workspace-a", 25),
+        writeWorkspace("shared-refresh", "workspace-b", 0),
+      ]);
+
+      const loaded = await loadFlaggedAccounts();
+      expect(loaded.accounts).toHaveLength(2);
+      expect(new Set(loaded.accounts.map((account) => account.accountId))).toEqual(
+        new Set(["workspace-a", "workspace-b"]),
+      );
     });
 
     it("retries flagged storage rename on EBUSY and succeeds", async () => {

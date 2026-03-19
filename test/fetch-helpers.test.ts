@@ -9,6 +9,7 @@ import {
     handleErrorResponse,
     handleSuccessResponse,
     isEntitlementError,
+    isDeactivatedWorkspaceError,
     createEntitlementErrorResponse,
 	getUnsupportedCodexModelInfo,
 	resolveUnsupportedCodexFallbackModel,
@@ -487,8 +488,21 @@ describe('Fetch Helpers Module', () => {
 		});
 	});
 
-	describe('handleErrorResponse error normalization', () => {
-		it('extracts nested error.message', async () => {
+		describe('handleErrorResponse error normalization', () => {
+			it('normalizes deactivated workspace errors with dedicated code', async () => {
+				const body = { detail: { code: 'deactivated_workspace' } };
+				const response = new Response(JSON.stringify(body), { status: 402, statusText: 'Payment Required' });
+
+				const { response: result, errorBody } = await handleErrorResponse(response);
+				const json = await result.json() as { error: { message: string; type?: string; code?: string } };
+
+				expect(isDeactivatedWorkspaceError(errorBody, 402)).toBe(true);
+				expect(json.error.code).toBe('deactivated_workspace');
+				expect(json.error.type).toBe('workspace_deactivated');
+				expect(json.error.message).toContain('workspace is deactivated');
+			});
+
+			it('extracts nested error.message', async () => {
 			const body = { error: { message: 'nested error message', type: 'test_type', code: 'test_code' } };
 			const response = new Response(JSON.stringify(body), { status: 500 });
 			
