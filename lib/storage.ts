@@ -34,6 +34,28 @@ export interface FlaggedAccountStorageV1 {
 	accounts: FlaggedAccountMetadataV1[];
 }
 
+const normalizeWorkspaceIdentityPart = (value: unknown): string | undefined =>
+	typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+export function getWorkspaceIdentityKey(account: {
+	organizationId?: string;
+	accountId?: string;
+	refreshToken: string;
+}): string {
+	const organizationId = normalizeWorkspaceIdentityPart(account.organizationId);
+	const accountId = normalizeWorkspaceIdentityPart(account.accountId);
+	const refreshToken = normalizeWorkspaceIdentityPart(account.refreshToken) ?? "";
+	if (organizationId) {
+		return accountId
+			? `organizationId:${organizationId}|accountId:${accountId}`
+			: `organizationId:${organizationId}`;
+	}
+	if (accountId) {
+		return `accountId:${accountId}`;
+	}
+	return `refreshToken:${refreshToken}`;
+}
+
 export type ImportBackupMode = "none" | "best-effort" | "required";
 
 export interface ImportAccountsOptions {
@@ -921,8 +943,6 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		return { version: 1, accounts: [] };
 	}
 
-	const normalizeFlaggedIdentityPart = (value: unknown): string | undefined =>
-		typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 	// Flagged storage must keep sibling workspace entries separate when they share an
 	// organization but have different accountIds, so this key is more specific than
 	// the normal account identity collapse used in active storage.
@@ -930,20 +950,7 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		organizationId?: string;
 		accountId?: string;
 		refreshToken: string;
-	}): string => {
-		const organizationId = normalizeFlaggedIdentityPart(account.organizationId);
-		const accountId = normalizeFlaggedIdentityPart(account.accountId);
-		const refreshToken = normalizeFlaggedIdentityPart(account.refreshToken) ?? "";
-		if (organizationId) {
-			return accountId
-				? `organizationId:${organizationId}|accountId:${accountId}`
-				: `organizationId:${organizationId}`;
-		}
-		if (accountId) {
-			return `accountId:${accountId}`;
-		}
-		return `refreshToken:${refreshToken}`;
-	};
+	}): string => getWorkspaceIdentityKey(account);
 
 	const byIdentityKey = new Map<string, FlaggedAccountMetadataV1>();
 	for (const rawAccount of data.accounts) {

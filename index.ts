@@ -119,6 +119,7 @@ import {
 	saveFlaggedAccounts,
 	withFlaggedAccountStorageTransaction,
 	clearFlaggedAccounts,
+	getWorkspaceIdentityKey,
 	StorageError,
 	formatStorageErrorHint,
 	type AccountStorageV3,
@@ -184,23 +185,6 @@ import {
 	detectErrorType,
 	getRecoveryToastContent,
 } from "./lib/recovery.js";
-
-function getWorkspaceIdentityKey(account: {
-	organizationId?: string;
-	accountId?: string;
-	refreshToken: string;
-}): string {
-	const organizationId = account.organizationId?.trim();
-	const accountId = account.accountId?.trim();
-	const refreshToken = account.refreshToken.trim();
-	if (organizationId) {
-		return accountId
-			? `organizationId:${organizationId}|accountId:${accountId}`
-			: `organizationId:${organizationId}`;
-	}
-	if (accountId) return `accountId:${accountId}`;
-	return `refreshToken:${refreshToken}`;
-}
 
 function matchesWorkspaceIdentity(
 	account: {
