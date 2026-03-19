@@ -943,15 +943,6 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 		return { version: 1, accounts: [] };
 	}
 
-	// Flagged storage must keep sibling workspace entries separate when they share an
-	// organization but have different accountIds, so this key is more specific than
-	// the normal account identity collapse used in active storage.
-	const getFlaggedIdentityKey = (account: {
-		organizationId?: string;
-		accountId?: string;
-		refreshToken: string;
-	}): string => getWorkspaceIdentityKey(account);
-
 	const byIdentityKey = new Map<string, FlaggedAccountMetadataV1>();
 	for (const rawAccount of data.accounts) {
 		if (!isRecord(rawAccount)) continue;
@@ -1031,7 +1022,9 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 			flaggedReason: typeof rawAccount.flaggedReason === "string" ? rawAccount.flaggedReason : undefined,
 			lastError: typeof rawAccount.lastError === "string" ? rawAccount.lastError : undefined,
 		};
-		byIdentityKey.set(getFlaggedIdentityKey(normalized), normalized);
+		// Keep flagged dedup aligned with active cleanup so sibling workspaces only
+		// collapse when they resolve to the same shared workspace identity.
+		byIdentityKey.set(getWorkspaceIdentityKey(normalized), normalized);
 	}
 
 	return {

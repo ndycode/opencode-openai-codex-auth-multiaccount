@@ -20,6 +20,7 @@ import {
   importAccounts,
   previewImportAccounts,
   createTimestampedBackupPath,
+  getWorkspaceIdentityKey,
   withAccountStorageTransaction,
   withFlaggedAccountStorageTransaction,
 } from "../lib/storage.js";
@@ -30,6 +31,37 @@ import {
 // But Task 0 says: "Tests should fail initially (RED phase)"
 
 describe("storage", () => {
+  describe("getWorkspaceIdentityKey", () => {
+    it("uses organizationId and accountId when both are present", () => {
+      expect(
+        getWorkspaceIdentityKey({
+          organizationId: " org-shared ",
+          accountId: " workspace-a ",
+          refreshToken: " refresh-a ",
+        }),
+      ).toBe("organizationId:org-shared|accountId:workspace-a");
+    });
+
+    it("falls back to accountId when organizationId is missing", () => {
+      expect(
+        getWorkspaceIdentityKey({
+          accountId: " workspace-only ",
+          refreshToken: " refresh-b ",
+        }),
+      ).toBe("accountId:workspace-only");
+    });
+
+    it("falls back to refreshToken when workspace ids are missing", () => {
+      expect(
+        getWorkspaceIdentityKey({
+          organizationId: "   ",
+          accountId: "",
+          refreshToken: " refresh-c ",
+        }),
+      ).toBe("refreshToken:refresh-c");
+    });
+  });
+
   describe("deduplication", () => {
     it("remaps activeIndex after deduplication using active account key", () => {
       const now = Date.now();

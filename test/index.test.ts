@@ -272,7 +272,10 @@ const mockSaveFlaggedAccounts = vi.fn(async (nextStorage: typeof mockFlaggedStor
 	await persistMockFlaggedStorage(nextStorage);
 });
 
-vi.mock("../lib/storage.js", () => ({
+vi.mock("../lib/storage.js", async () => {
+	const actual = await vi.importActual<typeof import("../lib/storage.js")>("../lib/storage.js");
+
+	return {
 	getStoragePath: () => "/mock/path/accounts.json",
 	loadAccounts: vi.fn(async () => cloneMockStorage()),
 	saveAccounts: vi.fn(async (nextStorage: typeof mockStorage) => {
@@ -311,18 +314,7 @@ vi.mock("../lib/storage.js", () => ({
 	previewImportAccounts: vi.fn(async () => ({ imported: 2, skipped: 1, total: 5 })),
 	createTimestampedBackupPath: vi.fn((prefix?: string) => `/tmp/${prefix ?? "codex-backup"}-20260101-000000.json`),
 	loadFlaggedAccounts: vi.fn(async () => cloneMockFlaggedStorage()),
-	getWorkspaceIdentityKey: vi.fn((account: { organizationId?: string; accountId?: string; refreshToken: string }) => {
-		const organizationId = account.organizationId?.trim();
-		const accountId = account.accountId?.trim();
-		const refreshToken = account.refreshToken.trim();
-		if (organizationId) {
-			return accountId
-				? `organizationId:${organizationId}|accountId:${accountId}`
-				: `organizationId:${organizationId}`;
-		}
-		if (accountId) return `accountId:${accountId}`;
-		return `refreshToken:${refreshToken}`;
-	}),
+	getWorkspaceIdentityKey: vi.fn(actual.getWorkspaceIdentityKey),
 	saveFlaggedAccounts: mockSaveFlaggedAccounts,
 	withFlaggedAccountStorageTransaction: vi.fn(
 		async <T>(
@@ -347,7 +339,8 @@ vi.mock("../lib/storage.js", () => ({
 		}
 	},
 	formatStorageErrorHint: () => "Check file permissions",
-}));
+	};
+});
 
 vi.mock("../lib/accounts.js", () => {
 	class MockAccountManager {
