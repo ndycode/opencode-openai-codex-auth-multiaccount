@@ -186,6 +186,9 @@ vi.mock("../lib/request/rate-limit-backoff.js", () => ({
 		refreshAndUpdateToken: vi.fn(async (auth: unknown) => auth),
 		createCodexHeaders: vi.fn(() => new Headers()),
 		handleErrorResponse: vi.fn(async (response: Response) => ({ response })),
+		isDeactivatedWorkspaceError: vi.fn((errorBody: unknown) =>
+			(errorBody as { error?: { code?: string } })?.error?.code === "deactivated_workspace",
+		),
 	getUnsupportedCodexModelInfo: vi.fn(() => ({ isUnsupported: false })),
 	resolveUnsupportedCodexFallbackModel: vi.fn(() => undefined),
 	shouldFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
@@ -2457,6 +2460,137 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				{ model: "gpt-5-codex", accessToken: "access-account-1" },
 			]);
 			expect(response.status).toBe(200);
+		});
+
+		it("removes only the deactivated workspace and fails over to a healthy sibling workspace", async () => {
+			const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+			const storageModule = await import("../lib/storage.js");
+			const accountsModule = await import("../lib/accounts.js");
+			const { AccountManager } = accountsModule;
+
+			const deadWorkspace = {
+				index: 0,
+				accountId: "org-dead",
+				organizationId: "org-dead",
+				accountIdSource: "org",
+				accountLabel: "Dead workspace",
+				email: "same@example.com",
+				refreshToken: "shared-refresh",
+			};
+			const liveWorkspace = {
+				index: 1,
+				accountId: "org-live",
+				organizationId: "org-live",
+				accountIdSource: "org",
+				accountLabel: "Live workspace",
+				email: "same@example.com",
+				refreshToken: "shared-refresh",
+			};
+
+			const accounts = [deadWorkspace, liveWorkspace];
+			const removeAccount = vi.fn((target: typeof deadWorkspace) => {
+				const idx = accounts.findIndex((account) => account.accountId === target.accountId);
+				if (idx < 0) return false;
+				accounts.splice(idx, 1);
+				accounts.forEach((account, index) => {
+					account.index = index;
+				});
+				return true;
+			});
+			const removeAccountsWithSameRefreshToken = vi.fn(() => 0);
+
+			const customManager = {
+				getAccountCount: () => accounts.length,
+				getCurrentOrNextForFamilyHybrid: () => accounts[0] ?? null,
+				getSelectionExplainability: () =>
+					accounts.map((account, index) => ({
+						index,
+						enabled: true,
+						isCurrentForFamily: index === 0,
+						eligible: true,
+						reasons: ["eligible"],
+						healthScore: 100,
+						tokensAvailable: 50,
+						lastUsed: Date.now(),
+					})),
+				toAuthDetails: (account: typeof deadWorkspace) => ({
+					type: "oauth" as const,
+					access: `access-${account.accountId}`,
+					refresh: account.refreshToken,
+					expires: Date.now() + 60_000,
+				}),
+				hasRefreshToken: () => true,
+				saveToDiskDebounced: vi.fn(),
+				updateFromAuth: vi.fn(),
+				clearAuthFailures: vi.fn(),
+				incrementAuthFailures: vi.fn(() => 1),
+				markAccountCoolingDown: vi.fn(),
+				markRateLimitedWithReason: vi.fn(),
+				recordRateLimit: vi.fn(),
+				consumeToken: vi.fn(() => true),
+				refundToken: vi.fn(),
+				markSwitched: vi.fn(),
+				removeAccount,
+				removeAccountsWithSameRefreshToken,
+				recordFailure: vi.fn(),
+				recordSuccess: vi.fn(),
+				getMinWaitTimeForFamily: vi.fn(() => 0),
+				shouldShowAccountToast: vi.fn(() => false),
+				markToastShown: vi.fn(),
+				setActiveIndex: vi.fn(() => accounts[0] ?? null),
+				getAccountsSnapshot: vi.fn(() => [...accounts]),
+			};
+			vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+			vi.mocked(accountsModule.extractAccountId).mockImplementation((token?: string) => {
+				if (token === "access-org-dead") return "org-dead";
+				if (token === "access-org-live") return "org-live";
+				return "account-1";
+			});
+
+			vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+				(_init, _accountId, accessToken) =>
+					new Headers({ "x-test-access-token": String(accessToken) }),
+			);
+			vi.mocked(fetchHelpers.handleErrorResponse).mockImplementation(async (response) => {
+				const errorBody = await response.clone().json().catch(() => ({}));
+				return { response, rateLimit: undefined, errorBody };
+			});
+
+			globalThis.fetch = vi.fn(async (_url, init) => {
+				const headers = new Headers(init?.headers);
+				const accessToken = headers.get("x-test-access-token");
+				if (accessToken === "access-org-dead") {
+					return new Response(JSON.stringify({ error: { code: "deactivated_workspace", message: "workspace dead" } }), {
+						status: 402,
+					});
+				}
+				return new Response(JSON.stringify({ content: "ok" }), { status: 200 });
+			});
+
+			const { sdk } = await setupPlugin();
+			const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.1" }),
+			});
+
+			expect(response.status).toBe(200);
+			expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+			expect(removeAccount).toHaveBeenCalledTimes(1);
+			expect(removeAccountsWithSameRefreshToken).not.toHaveBeenCalled();
+			expect(accounts.map((account) => account.accountId)).toEqual(["org-live"]);
+			expect(vi.mocked(storageModule.saveFlaggedAccounts)).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(storageModule.saveFlaggedAccounts).mock.calls[0]?.[0]).toEqual(
+				expect.objectContaining({
+					accounts: expect.arrayContaining([
+						expect.objectContaining({
+							accountId: "org-dead",
+							organizationId: "org-dead",
+							flaggedReason: "workspace-deactivated",
+							lastError: "deactivated_workspace",
+						}),
+					]),
+				}),
+			);
 		});
 
 		it("handles empty body in request", async () => {

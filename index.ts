@@ -128,6 +128,7 @@ import {
 	extractRequestUrl,
         handleErrorResponse,
         handleSuccessResponse,
+	isDeactivatedWorkspaceError,
 	getUnsupportedCodexModelInfo,
 	resolveUnsupportedCodexFallbackModel,
         refreshAndUpdateToken,
@@ -182,6 +183,27 @@ import {
 	detectErrorType,
 	getRecoveryToastContent,
 } from "./lib/recovery.js";
+
+function getWorkspaceIdentityKey(account: {
+	organizationId?: string;
+	accountId?: string;
+	refreshToken: string;
+}): string {
+	if (account.organizationId) return `organizationId:${account.organizationId}`;
+	if (account.accountId) return `accountId:${account.accountId}`;
+	return `refreshToken:${account.refreshToken}`;
+}
+
+function matchesWorkspaceIdentity(
+	account: {
+		organizationId?: string;
+		accountId?: string;
+		refreshToken: string;
+	},
+	identityKey: string,
+): boolean {
+	return getWorkspaceIdentityKey(account) === identityKey;
+}
 
 /**
  * OpenAI Codex OAuth authentication plugin for opencode
@@ -2358,6 +2380,62 @@ while (attempted.size < Math.max(1, accountCount)) {
 											threadId: threadIdCandidate,
 										});
 
+			const workspaceDeactivated = isDeactivatedWorkspaceError(errorBody, response.status);
+			if (workspaceDeactivated) {
+				const identityKey = getWorkspaceIdentityKey(account);
+				const accountLabel = formatAccountLabel(account, account.index);
+				accountManager.refundToken(account, modelFamily, model);
+				accountManager.recordFailure(account, modelFamily, model);
+				account.lastSwitchReason = "rotation";
+				runtimeMetrics.failedRequests++;
+				runtimeMetrics.accountRotations++;
+				runtimeMetrics.lastError = `Deactivated workspace on ${accountLabel}`;
+				runtimeMetrics.lastErrorCategory = "workspace-deactivated";
+
+				try {
+					const flaggedStorage = await loadFlaggedAccounts();
+					const flaggedRecord: FlaggedAccountMetadataV1 = {
+						...account,
+						flaggedAt: Date.now(),
+						flaggedReason: "workspace-deactivated",
+						lastError: "deactivated_workspace",
+					};
+					const existingIndex = flaggedStorage.accounts.findIndex((flagged) =>
+						matchesWorkspaceIdentity(flagged, identityKey),
+					);
+					if (existingIndex >= 0) {
+						flaggedStorage.accounts[existingIndex] = flaggedRecord;
+					} else {
+						flaggedStorage.accounts.push(flaggedRecord);
+					}
+					await saveFlaggedAccounts(flaggedStorage);
+				} catch (flagError) {
+					logWarn(
+						`Failed to persist deactivated workspace flag for ${accountLabel}: ${flagError instanceof Error ? flagError.message : String(flagError)}`,
+					);
+				}
+
+				if (accountManager.removeAccount(account)) {
+					accountManager.saveToDiskDebounced();
+					attempted.clear();
+					accountCount = accountManager.getAccountCount();
+					await showToast(
+						`Workspace deactivated. Removed ${accountLabel} from rotation and switching accounts.`,
+						"warning",
+						{ duration: toastDurationMs },
+					);
+					break;
+				}
+
+				accountManager.markAccountCoolingDown(
+					account,
+					ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+					"auth-failure",
+				);
+				accountManager.saveToDiskDebounced();
+				break;
+			}
+
 			const unsupportedModelInfo = getUnsupportedCodexModelInfo(errorBody);
 			const hasRemainingAccounts = attempted.size < Math.max(1, accountCount);
 
@@ -2964,6 +3042,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 												(typeof (errorBody as { error?: { message?: unknown } })?.error?.message === "string"
 													? (errorBody as { error?: { message?: string } }).error?.message
 													: bodyText) || `HTTP ${response.status}`;
+											if (isDeactivatedWorkspaceError(errorBody, response.status)) {
+												throw new Error("deactivated_workspace");
+											}
 											throw new Error(message);
 										}
 
@@ -3115,7 +3196,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 													} else {
 														flaggedStorage.accounts.push(flaggedRecord);
 													}
-													removeFromActive.add(account.refreshToken);
+													removeFromActive.add(`refreshToken:${account.refreshToken}`);
 													flaggedChanged = true;
 												}
 												continue;
@@ -3194,13 +3275,31 @@ while (attempted.size < Math.max(1, accountCount)) {
 											console.log(
 												`[${i + 1}/${total}] ${label}: ${formatCodexQuotaLine(snapshot)}`,
 											);
-										} catch (error) {
-											errors += 1;
-											const message = error instanceof Error ? error.message : String(error);
-											console.log(
-												`[${i + 1}/${total}] ${label}: ERROR (${message.slice(0, 160)})`,
-											);
-										}
+											} catch (error) {
+												errors += 1;
+												const message = error instanceof Error ? error.message : String(error);
+												if (message.includes("deactivated_workspace")) {
+													const existingIndex = flaggedStorage.accounts.findIndex((flagged) =>
+														matchesWorkspaceIdentity(flagged, getWorkspaceIdentityKey(account)),
+													);
+													const flaggedRecord: FlaggedAccountMetadataV1 = {
+														...account,
+														flaggedAt: Date.now(),
+														flaggedReason: "workspace-deactivated",
+														lastError: message,
+													};
+													if (existingIndex >= 0) {
+														flaggedStorage.accounts[existingIndex] = flaggedRecord;
+													} else {
+														flaggedStorage.accounts.push(flaggedRecord);
+													}
+													removeFromActive.add(getWorkspaceIdentityKey(account));
+													flaggedChanged = true;
+												}
+												console.log(
+													`[${i + 1}/${total}] ${label}: ERROR (${message.slice(0, 160)})`,
+												);
+											}
 									} catch (error) {
 										errors += 1;
 										const message = error instanceof Error ? error.message : String(error);
@@ -3210,7 +3309,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 								if (removeFromActive.size > 0) {
 									workingStorage.accounts = workingStorage.accounts.filter(
-										(account) => !removeFromActive.has(account.refreshToken),
+										(account) => !removeFromActive.has(getWorkspaceIdentityKey(account)),
 									);
 									clampActiveIndices(workingStorage);
 									storageChanged = true;
@@ -3228,7 +3327,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								console.log(`Results: ${ok} ok, ${errors} error, ${disabled} disabled`);
 								if (removeFromActive.size > 0) {
 									console.log(
-										`Moved ${removeFromActive.size} account(s) to flagged pool (invalid refresh token).`,
+										`Moved ${removeFromActive.size} account(s) to flagged pool.`,
 									);
 								}
 								console.log("");

@@ -279,6 +279,35 @@ export interface ErrorDiagnostics {
 	httpStatus?: number;
 }
 
+const DEACTIVATED_WORKSPACE_CODE = "deactivated_workspace";
+
+function getStructuredErrorCode(errorBody: unknown): string | undefined {
+	if (!isRecord(errorBody)) return undefined;
+
+	const directCode = errorBody.code;
+	if (typeof directCode === "string" && directCode.trim()) return directCode.trim();
+
+	const detail = errorBody.detail;
+	if (isRecord(detail)) {
+		const detailCode = detail.code;
+		if (typeof detailCode === "string" && detailCode.trim()) return detailCode.trim();
+	}
+
+	const nestedError = errorBody.error;
+	if (isRecord(nestedError)) {
+		const nestedCode = nestedError.code ?? nestedError.type;
+		if (typeof nestedCode === "string" && nestedCode.trim()) return nestedCode.trim();
+	}
+
+	return undefined;
+}
+
+export function isDeactivatedWorkspaceError(errorBody: unknown, status?: number): boolean {
+	if (status !== undefined && status !== 402) return false;
+	const code = getStructuredErrorCode(errorBody);
+	return code === DEACTIVATED_WORKSPACE_CODE;
+}
+
 /**
  * Determines if the current auth token needs to be refreshed
  * @param auth - Current authentication state
@@ -730,6 +759,21 @@ function normalizeErrorPayload(
         status: number,
         diagnostics?: ErrorDiagnostics,
 ): ErrorPayload {
+	if (isDeactivatedWorkspaceError(errorBody, status)) {
+		const payload: ErrorPayload = {
+			error: {
+				message:
+					"The selected ChatGPT workspace is deactivated. This workspace entry should be removed from rotation or re-authorized before retrying.",
+				type: "workspace_deactivated",
+				code: DEACTIVATED_WORKSPACE_CODE,
+			},
+		};
+		if (diagnostics && Object.keys(diagnostics).length > 0) {
+			payload.error.diagnostics = diagnostics;
+		}
+		return payload;
+	}
+
         if (isUnsupportedCodexModelForChatGpt(status, bodyText)) {
                 const unsupportedModel =
 			extractUnsupportedCodexModelFromText(bodyText) ?? "requested model";
