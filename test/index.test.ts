@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { SessionModelRef } from "../lib/persist-account-footer.js";
 
 vi.mock("@opencode-ai/plugin/tool", () => {
 	const makeSchema = () => ({
@@ -79,61 +80,89 @@ vi.mock("../lib/cli.js", () => ({
 	promptAddAnotherAccount: vi.fn(async () => false),
 }));
 
-vi.mock("../lib/config.js", () => ({
-	getCodexMode: () => true,
-	getRequestTransformMode: () => "native",
-	getFastSession: () => false,
-	getFastSessionStrategy: () => "hybrid",
-	getFastSessionMaxInputItems: () => 30,
-	getRetryProfile: () => "balanced",
-	getRetryBudgetOverrides: () => ({}),
-	getRateLimitToastDebounceMs: () => 5000,
-	getRetryAllAccountsMaxRetries: () => 3,
-	getRetryAllAccountsMaxWaitMs: () => 30000,
-	getRetryAllAccountsRateLimited: () => true,
-	getUnsupportedCodexPolicy: vi.fn(() => "fallback"),
-	getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
-	getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
-	getUnsupportedCodexFallbackChain: () => ({}),
-	getTokenRefreshSkewMs: () => 60000,
-	getSessionRecovery: () => false,
-	getAutoResume: () => false,
-	getToastDurationMs: () => 5000,
-	getPerProjectAccounts: () => false,
-	getEmptyResponseMaxRetries: () => 2,
-	getEmptyResponseRetryDelayMs: () => 1000,
-	getPidOffsetEnabled: () => false,
-	getFetchTimeoutMs: () => 60000,
-	getStreamStallTimeoutMs: () => 45000,
-	getCodexTuiV2: () => false,
-	getCodexTuiColorProfile: () => "ansi16",
-	getCodexTuiGlyphMode: () => "ascii",
-	getBeginnerSafeMode: () => false,
-	loadPluginConfig: () => ({}),
-}));
+vi.mock("../lib/config.js", () => {
+	const FALLBACK_PLUGIN_CONFIG = Symbol("fallbackPluginConfig");
+	const markFallbackPluginConfig = <T extends Record<string, unknown>>(config: T): T => {
+		Object.defineProperty(config, FALLBACK_PLUGIN_CONFIG, {
+			value: true,
+			enumerable: false,
+		});
+		return config;
+	};
+	const DEFAULT_CONFIG = markFallbackPluginConfig({});
+	return {
+		DEFAULT_CONFIG,
+		getCodexMode: () => true,
+		getRequestTransformMode: () => "native",
+		getFastSession: () => false,
+		getFastSessionStrategy: () => "hybrid",
+		getFastSessionMaxInputItems: () => 30,
+		getPersistAccountFooter: vi.fn(() => false),
+		getPersistAccountFooterStyle: vi.fn(() => "label-masked-email"),
+		getRetryProfile: () => "balanced",
+		getRetryBudgetOverrides: () => ({}),
+		getRateLimitToastDebounceMs: () => 5000,
+		getRetryAllAccountsMaxRetries: vi.fn(() => 3),
+		getRetryAllAccountsMaxWaitMs: vi.fn(() => 30000),
+		getRetryAllAccountsRateLimited: vi.fn(() => true),
+		getUnsupportedCodexPolicy: vi.fn(() => "fallback"),
+		getFallbackOnUnsupportedCodexModel: vi.fn(() => true),
+		getFallbackToGpt52OnUnsupportedGpt53: vi.fn(() => false),
+		getUnsupportedCodexFallbackChain: () => ({}),
+		getTokenRefreshSkewMs: () => 60000,
+		getSessionRecovery: () => false,
+		getAutoResume: () => false,
+		getToastDurationMs: () => 5000,
+		getPerProjectAccounts: vi.fn(() => false),
+		getEmptyResponseMaxRetries: () => 2,
+		getEmptyResponseRetryDelayMs: () => 1000,
+		getPidOffsetEnabled: () => false,
+		getFetchTimeoutMs: () => 60000,
+		getStreamStallTimeoutMs: () => 45000,
+		getCodexTuiV2: () => false,
+		getCodexTuiColorProfile: () => "ansi16",
+		getCodexTuiGlyphMode: () => "ascii",
+		getBeginnerSafeMode: () => false,
+		isFallbackPluginConfig: vi.fn(
+			(config) =>
+				!!config &&
+				(config as Record<PropertyKey, unknown>)[FALLBACK_PLUGIN_CONFIG] === true,
+		),
+		// NOTE: loadPluginConfig returns a fresh {} by default (not marked as a
+		// loader fallback). Tests that exercise the fallback marker should return
+		// DEFAULT_CONFIG explicitly.
+		loadPluginConfig: vi.fn(() => ({})),
+	};
+});
 
 vi.mock("../lib/request/request-transformer.js", () => ({
 	applyFastSessionDefaults: <T>(config: T) => config,
 }));
 
-vi.mock("../lib/logger.js", () => ({
-	initLogger: vi.fn(),
-	logRequest: vi.fn(),
-	logDebug: vi.fn(),
-	logInfo: vi.fn(),
-	logWarn: vi.fn(),
-	logError: vi.fn(),
-	setCorrelationId: vi.fn(() => "test-correlation-id"),
-	clearCorrelationId: vi.fn(),
-	createLogger: vi.fn(() => ({
-		debug: vi.fn(),
-		info: vi.fn(),
-		warn: vi.fn(),
-		error: vi.fn(),
-		time: vi.fn(() => vi.fn(() => 0)),
-		timeEnd: vi.fn(),
-	})),
-}));
+vi.mock("../lib/logger.js", async () => {
+	const actual = await vi.importActual<typeof import("../lib/logger.js")>(
+		"../lib/logger.js",
+	);
+	return {
+		...actual,
+		initLogger: vi.fn(),
+		logRequest: vi.fn(),
+		logDebug: vi.fn(),
+		logInfo: vi.fn(),
+		logWarn: vi.fn(),
+		logError: vi.fn(),
+		setCorrelationId: vi.fn(() => "test-correlation-id"),
+		clearCorrelationId: vi.fn(),
+		createLogger: vi.fn(() => ({
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			time: vi.fn(() => vi.fn(() => 0)),
+			timeEnd: vi.fn(),
+		})),
+	};
+});
 
 vi.mock("../lib/auto-update-checker.js", () => ({
 	checkAndNotify: vi.fn(async () => {}),
@@ -461,6 +490,28 @@ type ToolExecute<T = void> = { execute: (args: T) => Promise<string> };
 type OptionalToolExecute<T> = { execute: (args?: T) => Promise<string> };
 type PluginType = {
 	event: (input: { event: { type: string; properties?: unknown } }) => Promise<void>;
+	"chat.message": (
+		input: {
+			sessionID: string;
+			model?: SessionModelRef;
+		},
+		output: { message: unknown; parts: unknown[] },
+	) => Promise<void>;
+	"experimental.chat.messages.transform": (
+		input: Record<string, never>,
+		output: {
+			messages: Array<{
+				info: {
+					role: string;
+					sessionID?: string;
+					model?: Partial<SessionModelRef> & { variant?: string };
+					variant?: string;
+					thinking?: string;
+				};
+				parts: unknown[];
+			}>;
+		},
+	) => Promise<void>;
 	auth: {
 		provider: string;
 		methods: Array<{ label: string; type: string }>;
@@ -2046,9 +2097,23 @@ describe("OpenAIOAuthPlugin edge cases", () => {
 
 describe("OpenAIOAuthPlugin fetch handler", () => {
 	let originalFetch: typeof globalThis.fetch;
+	let originalThreadId: string | undefined;
 
-	beforeEach(() => {
+	beforeEach(async () => {
+		vi.resetModules();
 		vi.clearAllMocks();
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(
+			"label-masked-email",
+		);
+		vi.mocked(configModule.getRetryAllAccountsMaxRetries).mockReturnValue(3);
+		vi.mocked(configModule.getRetryAllAccountsMaxWaitMs).mockReturnValue(30000);
+		vi.mocked(configModule.getRetryAllAccountsRateLimited).mockReturnValue(true);
+		vi.mocked(configModule.getUnsupportedCodexPolicy).mockReturnValue("fallback");
+		vi.mocked(configModule.getFallbackOnUnsupportedCodexModel).mockReturnValue(true);
+		vi.mocked(configModule.getFallbackToGpt52OnUnsupportedGpt53).mockReturnValue(false);
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue({});
 		mockStorage.accounts = [
 			{
 				accountId: "acc-1",
@@ -2058,11 +2123,18 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		];
 		mockStorage.activeIndex = 0;
 		mockStorage.activeIndexByFamily = {};
+		originalThreadId = process.env.CODEX_THREAD_ID;
+		delete process.env.CODEX_THREAD_ID;
 		originalFetch = globalThis.fetch;
 	});
 
 	afterEach(() => {
 		globalThis.fetch = originalFetch;
+		if (originalThreadId === undefined) {
+			delete process.env.CODEX_THREAD_ID;
+		} else {
+			process.env.CODEX_THREAD_ID = originalThreadId;
+		}
 		vi.restoreAllMocks();
 	});
 
@@ -2083,6 +2155,87 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		return { plugin, sdk, mockClient };
 	};
 
+	const createPersistedAccountRequestBody = (
+		promptCacheKey?: string,
+		model = "gpt-5.1",
+	) =>
+		promptCacheKey
+			? { model, prompt_cache_key: promptCacheKey }
+			: { model };
+
+	const enablePersistedFooter = async (
+		style: "label-masked-email" | "full-email" | "label-only",
+	) => {
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(true);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue(style);
+	};
+
+	const disablePersistedFooter = async () => {
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
+	};
+
+	const sendPersistedAccountRequest = async (
+		sdk: Awaited<ReturnType<typeof setupPlugin>>["sdk"],
+		promptCacheKey?: string,
+		model = "gpt-5.1",
+	) => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const requestBody = createPersistedAccountRequestBody(promptCacheKey, model);
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+			updatedInit: {
+				method: "POST",
+				body: JSON.stringify(requestBody),
+			},
+			body: requestBody,
+		});
+
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "ok" }), { status: 200 }),
+		);
+
+		return await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify(requestBody),
+		});
+	};
+
+	const expectedMaskedIndicator = "us***@***.com [1/1]";
+	const expectedFullIndicator = "user@example.com [1/1]";
+	const expectedLabelOnlyIndicator = "Account 1 [id:ount-1] [1/1]";
+
+	const buildMessageTransformOutput = (
+		sessionID: string,
+		modelID = "gpt-5.1",
+	): Parameters<PluginType["experimental.chat.messages.transform"]>[1] => ({
+		messages: [
+			{
+				info: {
+					role: "user",
+					sessionID,
+					model: { providerID: "openai", modelID },
+				},
+				parts: [],
+			},
+		],
+	});
+
+	const readPersistedAccountIndicator = async (
+		plugin: PluginType,
+		sessionID: string,
+		modelID = "gpt-5.1",
+	) => {
+		const output = buildMessageTransformOutput(sessionID, modelID);
+		await plugin["experimental.chat.messages.transform"]({}, output);
+		return {
+			variant:
+				output.messages[0]?.info.model?.variant ??
+				output.messages[0]?.info.variant,
+			thinking: output.messages[0]?.info.thinking,
+		};
+	};
+
 	it("returns success response for successful fetch", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify({ content: "test" }), { status: 200 }),
@@ -2095,6 +2248,1345 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		});
 
 		expect(response.status).toBe(200);
+	});
+
+	it("decorates the last user message with a masked-email indicator after the first successful response", async () => {
+		await enablePersistedFooter("label-masked-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-masked");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-masked")).variant).toBe(
+			expectedMaskedIndicator,
+		);
+	});
+
+	it("decorates the last user message with a full-email indicator when configured", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-full");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-full")).variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("does not reload account storage on the successful footer hot path", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const storageModule = await import("../lib/storage.js");
+		const { sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-warmup");
+		vi.mocked(storageModule.loadAccounts).mockClear();
+
+		await sendPersistedAccountRequest(sdk, "session-no-read");
+
+		expect(storageModule.loadAccounts).not.toHaveBeenCalled();
+	});
+
+	it("does not add storage reads during loader init when footer counts are enabled", async () => {
+		const storageModule = await import("../lib/storage.js");
+		const getAuth = async () => ({
+			type: "oauth" as const,
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			multiAccount: true,
+		});
+		const runLoaderAndCountStorageReads = async (): Promise<number> => {
+			const mockClient = createMockClient();
+			const { OpenAIOAuthPlugin } = await import("../index.js");
+			const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+			vi.mocked(storageModule.loadAccounts).mockClear();
+			await plugin.auth.loader(getAuth, { options: {}, models: {} });
+			return vi.mocked(storageModule.loadAccounts).mock.calls.length;
+		};
+
+		await disablePersistedFooter();
+		const baselineReadCount = await runLoaderAndCountStorageReads();
+
+		await enablePersistedFooter("full-email");
+		const footerReadCount = await runLoaderAndCountStorageReads();
+
+		expect(footerReadCount).toBe(baselineReadCount);
+	});
+
+	it("uses the live account count when the cached footer hint is stale", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-live-count");
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+		];
+
+		await sendPersistedAccountRequest(sdk, "session-live-count");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-live-count")).variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("falls back to the persisted account count hint when the live count transiently drops to zero", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+			getAccountCount: () => number;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const { plugin, sdk } = await setupPlugin();
+		vi.spyOn(manager, "getAccountCount")
+			.mockImplementationOnce(() => 2)
+			.mockImplementation(() => 0);
+
+		await sendPersistedAccountRequest(sdk, "session-count-hint");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-count-hint")).variant).toBe(
+			"user@example.com [1/2]",
+		);
+	});
+
+	it("keeps the manual-switch account count hint available for a later zero-count fetch", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+			getAccountCount: () => number;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const { plugin, sdk } = await setupPlugin();
+		vi.spyOn(manager, "getAccountCount").mockImplementation(() => 0);
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+		await sendPersistedAccountRequest(sdk, "session-count-hint-after-switch");
+
+		expect(
+			(await readPersistedAccountIndicator(plugin, "session-count-hint-after-switch")).variant,
+		).toBe("user@example.com [1/2]");
+	});
+
+	it("decorates the last user message with a label-only indicator when configured", async () => {
+		await enablePersistedFooter("label-only");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-label");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-label")).variant).toBe(
+			expectedLabelOnlyIndicator,
+		);
+	});
+
+	it("keeps the label-only indicator stable across manual account switches", async () => {
+		await enablePersistedFooter("label-only");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		vi.mocked(accountsModule.extractAccountId).mockImplementation((token) => {
+			if (token === "token-2") return "account-2";
+			if (token) return "account-1";
+			return undefined;
+		});
+		type TestManagedAccount = {
+			index: number;
+			accountId: string;
+			email: string;
+			refreshToken: string;
+			accessToken?: string;
+		};
+		const previousManager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: TestManagedAccount[];
+		};
+		const reloadedManager = await accountsModule.AccountManager.loadFromDisk() as typeof previousManager;
+		previousManager.accounts = [
+			{
+				index: 0,
+				accountId: "account-1",
+				email: "user@example.com",
+				refreshToken: "refresh-token",
+				accessToken: "token-1",
+			},
+			{
+				index: 1,
+				accountId: "account-2",
+				email: "user2@example.com",
+				refreshToken: "refresh-2",
+				accessToken: "token-2",
+			},
+		];
+		reloadedManager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk")
+			.mockResolvedValueOnce(previousManager as never)
+			.mockResolvedValueOnce(reloadedManager as never);
+
+		const { plugin, sdk } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-label-switch");
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect((await readPersistedAccountIndicator(plugin, "session-label-switch")).variant).toBe(
+			"Account 2 [id:ount-2] [2/2]",
+		);
+	});
+
+	it("skips persisted indicators when the request has no session key", async () => {
+		await enablePersistedFooter("label-masked-email");
+		const { plugin, sdk } = await setupPlugin();
+		await plugin["chat.message"](
+			{
+				sessionID: "session-no-key",
+				model: { providerID: "openai", modelID: "gpt-5.1" },
+			},
+			{ message: {}, parts: [] },
+		);
+
+		await sendPersistedAccountRequest(sdk);
+
+		expect((await readPersistedAccountIndicator(plugin, "session-no-key")).variant).toBeUndefined();
+	});
+
+	it("decorates live user chat.message output with the visible account indicator without leaking to thinking", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-chat-message", "gpt-5.4");
+
+		const output = {
+			message: {
+				role: "user",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "session-chat-message",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			output,
+		);
+
+		expect((output.message as { variant?: string }).variant).toBe(expectedFullIndicator);
+		expect((output.message as { thinking?: string }).thinking).toBeUndefined();
+		expect((output.message as { model?: { modelID?: string } }).model?.modelID).toBe("gpt-5.4");
+		expect((output.message as { model?: { variant?: string } }).model?.variant).toBe(
+			expectedFullIndicator,
+		);
+		expect((await readPersistedAccountIndicator(plugin, "session-chat-message")).thinking).toBeUndefined();
+	});
+
+	it("uses CODEX_THREAD_ID as the footer session key when it differs from prompt_cache_key", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-session";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-explicit");
+
+		expect((await readPersistedAccountIndicator(plugin, "env-session")).variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("falls back to CODEX_THREAD_ID in the transform hook when the message session is missing", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-fallback";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk);
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+						model: { providerID: "openai", modelID: "gpt-5.1" },
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(
+			output.messages[0]?.info.model?.variant ?? output.messages[0]?.info.variant,
+		).toBe(expectedFullIndicator);
+	});
+
+	it("ignores transform outputs when there are no messages", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin } = await setupPlugin();
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [],
+		};
+
+		await expect(
+			plugin["experimental.chat.messages.transform"]({}, output),
+		).resolves.toBeUndefined();
+		expect(output.messages).toEqual([]);
+	});
+
+	it("ignores transform outputs when no user message is present", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-assistant-only");
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "assistant",
+						sessionID: "session-assistant-only",
+						model: { providerID: "openai", modelID: "gpt-5.1" },
+					},
+					parts: [],
+				},
+			],
+		};
+
+		await expect(
+			plugin["experimental.chat.messages.transform"]({}, output),
+		).resolves.toBeUndefined();
+		expect(output.messages[0]?.info.variant).toBeUndefined();
+		expect(output.messages[0]?.info.model?.variant).toBeUndefined();
+	});
+
+	it("prefers CODEX_THREAD_ID over a non-empty transform session id when looking up the footer", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-transform-priority";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-explicit");
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+						sessionID: "session-different",
+						model: { providerID: "openai", modelID: "gpt-5.1" },
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(
+			output.messages[0]?.info.model?.variant ?? output.messages[0]?.info.variant,
+		).toBe(expectedFullIndicator);
+	});
+
+	it("falls back to CODEX_THREAD_ID in chat.message when the session id is empty", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-chat-message";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk);
+
+		const output = {
+			message: {
+				role: "user",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			output,
+		);
+
+		expect((output.message as { variant?: string }).variant).toBe(expectedFullIndicator);
+		expect((output.message as { model?: { variant?: string } }).model?.variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("prefers CODEX_THREAD_ID over a non-empty chat.message session id when looking up the footer", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-chat-priority";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-explicit");
+
+		const output = {
+			message: {
+				role: "user",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "session-different",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			output,
+		);
+
+		expect((output.message as { variant?: string }).variant).toBe(expectedFullIndicator);
+		expect((output.message as { model?: { variant?: string } }).model?.variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("does not apply a persisted footer when prompt_cache_key and hook session ids differ without CODEX_THREAD_ID", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-request-only");
+
+		const transformOutput = buildMessageTransformOutput("session-hook-only");
+		await plugin["experimental.chat.messages.transform"]({}, transformOutput);
+		expect(transformOutput.messages[0]?.info.variant).toBeUndefined();
+		expect(transformOutput.messages[0]?.info.model?.variant).toBeUndefined();
+
+		const liveOutput = {
+			message: {
+				role: "user",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "session-hook-only",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			liveOutput,
+		);
+
+		expect((liveOutput.message as { variant?: string }).variant).toBeUndefined();
+		expect(
+			(liveOutput.message as { model?: { variant?: string } }).model?.variant,
+		).toBeUndefined();
+	});
+
+	it("does not set the chat.message indicator when role is missing", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-chat-message-missing-role");
+
+		const output = {
+			message: {},
+			parts: [],
+		};
+
+		await expect(
+			plugin["chat.message"](
+				{
+					sessionID: "session-chat-message-missing-role",
+					model: { providerID: "openai", modelID: "gpt-5.4" },
+				},
+				output,
+			),
+		).resolves.toBeUndefined();
+
+		expect((output.message as { variant?: string }).variant).toBeUndefined();
+		expect(
+			(output.message as { model?: { variant?: string } }).model?.variant,
+		).toBeUndefined();
+	});
+
+	it("uses input.model as the fallback chat.message model when model info is absent", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-chat-message-no-model");
+
+		const output = {
+			message: { role: "user" },
+			parts: [],
+		};
+
+		await expect(
+			plugin["chat.message"](
+				{
+					sessionID: "session-chat-message-no-model",
+					model: { providerID: "openai", modelID: "gpt-5.4" },
+				},
+				output,
+			),
+		).resolves.toBeUndefined();
+
+		expect((output.message as { variant?: string }).variant).toBe(expectedFullIndicator);
+		expect(
+			(output.message as { model?: { providerID?: string } }).model?.providerID,
+		).toBe("openai");
+		expect(
+			(output.message as { model?: { modelID?: string } }).model?.modelID,
+		).toBe("gpt-5.4");
+		expect((output.message as { model?: { variant?: string } }).model?.variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("does not set the chat.message indicator on assistant messages", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-chat-message-assistant");
+
+		const output = {
+			message: {
+				role: "assistant",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+
+		await expect(
+			plugin["chat.message"](
+				{
+					sessionID: "session-chat-message-assistant",
+					model: { providerID: "openai", modelID: "gpt-5.4" },
+				},
+				output,
+			),
+		).resolves.toBeUndefined();
+
+		expect((output.message as { variant?: string }).variant).toBeUndefined();
+		expect(
+			(output.message as { model?: { variant?: string } }).model?.variant,
+		).toBeUndefined();
+	});
+
+	it("fills model.variant in the transform hook even when the stored message has no model info", async () => {
+		await enablePersistedFooter("full-email");
+		process.env.CODEX_THREAD_ID = "env-model-less";
+		const { plugin, sdk } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk);
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(output.messages[0]?.info.variant).toBe(expectedFullIndicator);
+		expect(
+			(output.messages[0]?.info.model as { variant?: string } | undefined)?.variant,
+		).toBe(expectedFullIndicator);
+	});
+
+	it("preserves partial model info in the transform hook while still setting model.variant", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-partial-model");
+
+		const output: Parameters<PluginType["experimental.chat.messages.transform"]>[1] = {
+			messages: [
+				{
+					info: {
+						role: "user",
+						sessionID: "session-partial-model",
+						model: { providerID: "openai" },
+					},
+					parts: [],
+				},
+			],
+		};
+		await plugin["experimental.chat.messages.transform"]({}, output);
+
+		expect(output.messages[0]?.info.variant).toBe(expectedFullIndicator);
+		expect(output.messages[0]?.info.model?.providerID).toBe("openai");
+		expect(output.messages[0]?.info.model?.modelID).toBeUndefined();
+		expect(output.messages[0]?.info.model?.variant).toBe(expectedFullIndicator);
+	});
+
+	it("stops applying persisted indicators after the footer is disabled", async () => {
+		await enablePersistedFooter("full-email");
+		const { plugin, sdk } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-footer-toggle");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-footer-toggle")).variant).toBe(
+			expectedFullIndicator,
+		);
+
+		await disablePersistedFooter();
+		await sendPersistedAccountRequest(sdk, "session-footer-toggle");
+
+		const liveOutput = {
+			message: {
+				role: "user",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			parts: [],
+		};
+		await plugin["chat.message"](
+			{
+				sessionID: "session-footer-toggle",
+				model: { providerID: "openai", modelID: "gpt-5.4" },
+			},
+			liveOutput,
+		);
+
+		expect((await readPersistedAccountIndicator(plugin, "session-footer-toggle")).variant).toBeUndefined();
+		expect((liveOutput.message as { variant?: string }).variant).toBeUndefined();
+		expect(
+			(liveOutput.message as { model?: { variant?: string } }).model?.variant,
+		).toBeUndefined();
+	});
+
+	it("clears the persisted account count hint when the footer is disabled", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+			getAccountCount: () => number;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const { plugin, sdk } = await setupPlugin();
+		vi.spyOn(manager, "getAccountCount")
+			.mockImplementationOnce(() => 2)
+			.mockImplementation(() => 0);
+
+		await sendPersistedAccountRequest(sdk, "session-count-hint-prime");
+		expect((await readPersistedAccountIndicator(plugin, "session-count-hint-prime")).variant).toBe(
+			"user@example.com [1/2]",
+		);
+
+		await disablePersistedFooter();
+		await sendPersistedAccountRequest(sdk, "session-count-hint-disabled");
+
+		await enablePersistedFooter("full-email");
+		await sendPersistedAccountRequest(sdk, "session-count-hint-reset");
+
+		expect((await readPersistedAccountIndicator(plugin, "session-count-hint-reset")).variant).toBe(
+			expectedFullIndicator,
+		);
+	});
+
+	it("suppresses account-switch info toasts when the footer is enabled and refreshes the visible indicator", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		const configModule = await import("../lib/config.js");
+
+		const { plugin, sdk, mockClient } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-switch");
+		const configReadCountBeforeSwitch =
+			vi.mocked(configModule.loadPluginConfig).mock.calls.length;
+		mockClient.tui.showToast.mockClear();
+
+		expect((await readPersistedAccountIndicator(plugin, "session-switch")).variant).toBe(
+			"user@example.com [1/2]",
+		);
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+		expect(vi.mocked(configModule.loadPluginConfig)).toHaveBeenCalledTimes(
+			configReadCountBeforeSwitch,
+		);
+		expect((await readPersistedAccountIndicator(plugin, "session-switch")).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+	});
+
+	it("syncs account-switch footer behavior after a fetch refresh enables it", async () => {
+		await disablePersistedFooter();
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { plugin, sdk, mockClient } = await setupPlugin();
+
+		await enablePersistedFooter("full-email");
+		await sendPersistedAccountRequest(sdk, "session-switch-sync");
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+		expect(
+			(await readPersistedAccountIndicator(plugin, "session-switch-sync")).variant,
+		).toBe("user2@example.com [2/2]");
+	});
+
+	it("does not show the switch toast before the first footer session exists", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { plugin, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+	});
+
+	it("does not let UI-only config refreshes reset the loader-synced footer state", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const configModule = await import("../lib/config.js");
+		const { plugin, sdk, mockClient } = await setupPlugin();
+
+		await sendPersistedAccountRequest(sdk, "session-ui-refresh");
+		mockClient.tui.showToast.mockClear();
+
+		vi.mocked(configModule.getPersistAccountFooter).mockReturnValue(false);
+		await plugin.tool["codex-list"].execute();
+		await enablePersistedFooter("full-email");
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+		expect((await readPersistedAccountIndicator(plugin, "session-ui-refresh")).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+	});
+
+	it("reuses the loader-synced config for UI-only tool renders", async () => {
+		const configModule = await import("../lib/config.js");
+		const { plugin } = await setupPlugin();
+
+		vi.mocked(configModule.loadPluginConfig).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockImplementation(() => {
+			throw new Error("config locked");
+		});
+
+		await expect(plugin.tool["codex-list"].execute()).resolves.toContain("Codex Accounts");
+		expect(configModule.loadPluginConfig).not.toHaveBeenCalled();
+	});
+
+	it("does not let authorize flows reset the loader-synced footer state", async () => {
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const configModule = await import("../lib/config.js");
+		const healthyConfig = { source: "healthy-config" };
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(healthyConfig);
+		vi.mocked(configModule.getPersistAccountFooter).mockImplementation(
+			(config) => config === healthyConfig,
+		);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue("full-email");
+		const { plugin, sdk, mockClient } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<{ instructions: string }>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<{ instructions: string }>;
+		};
+
+		await sendPersistedAccountRequest(sdk, "session-authorize-refresh");
+		mockClient.tui.showToast.mockClear();
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(configModule.DEFAULT_CONFIG);
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		await manualMethod.authorize();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+	});
+
+	it("uses the latest perProjectAccounts setting when authorize writes storage", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const loaderConfig = { source: "loader-config" };
+		const authorizeConfig = { source: "authorize-config" };
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
+			(config) => config === authorizeConfig,
+		);
+
+		const { plugin } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<unknown>;
+		};
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(authorizeConfig);
+
+		await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		await manualMethod.authorize();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("falls back to the cached authorize storage config when the fresh refresh throws", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const loggerModule = await import("../lib/logger.js");
+		const loaderConfig = { source: "loader-config" };
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
+			(config) => config === loaderConfig,
+		);
+
+		const { plugin } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<unknown>;
+		};
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		vi.mocked(loggerModule.logWarn).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockImplementation(() => {
+			throw new Error("config locked");
+		});
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+		expect(loggerModule.logWarn).toHaveBeenCalledWith(
+			expect.stringContaining("Falling back to cached authorize storage config"),
+		);
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		await expect(manualMethod.authorize()).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("falls back to the cached authorize storage config when the fresh refresh returns DEFAULT_CONFIG", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const loggerModule = await import("../lib/logger.js");
+		const loaderConfig = { source: "loader-config" };
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(loaderConfig);
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
+			(config) => config === loaderConfig,
+		);
+
+		const { plugin } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+		const manualMethod = plugin.auth.methods[1] as unknown as {
+			authorize: () => Promise<unknown>;
+		};
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		vi.mocked(loggerModule.logWarn).mockClear();
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(configModule.DEFAULT_CONFIG);
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+		expect(loggerModule.logWarn).toHaveBeenCalledWith(
+			"Falling back to cached authorize storage config after config loader returned defaults.",
+		);
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+		await expect(manualMethod.authorize()).resolves.toBeDefined();
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("reuses the cold-start authorize config instead of re-reading config twice", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const coldStartConfig = { source: "cold-start-config" };
+
+		vi.mocked(configModule.loadPluginConfig).mockReturnValue(coldStartConfig);
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
+			(config) => config === coldStartConfig,
+		);
+
+		const { plugin } = await setupPlugin();
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+
+		vi.mocked(configModule.loadPluginConfig).mockClear();
+		vi.mocked(storageModule.setStoragePath).mockClear();
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+
+		expect(configModule.loadPluginConfig).toHaveBeenCalledTimes(1);
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("retries a pre-loader authorize refresh when the first authorize config falls back to defaults", async () => {
+		const configModule = await import("../lib/config.js");
+		const storageModule = await import("../lib/storage.js");
+		const recoveredConfig = { source: "recovered-config" };
+
+		vi.mocked(configModule.loadPluginConfig)
+			.mockReturnValueOnce(configModule.DEFAULT_CONFIG)
+			.mockReturnValueOnce(configModule.DEFAULT_CONFIG)
+			.mockReturnValueOnce(recoveredConfig);
+		vi.mocked(configModule.getPerProjectAccounts).mockImplementation(
+			(config) => config === recoveredConfig,
+		);
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+
+		vi.mocked(storageModule.setStoragePath).mockClear();
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+
+		expect(configModule.loadPluginConfig).toHaveBeenCalledTimes(3);
+		expect(storageModule.setStoragePath).toHaveBeenCalledWith(process.cwd());
+	});
+
+	it("recovers footer runtime state after a cold-start authorize fallback refresh", async () => {
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const configModule = await import("../lib/config.js");
+		const recoveredConfig = { source: "recovered-footer-config" };
+
+		vi.mocked(configModule.loadPluginConfig)
+			.mockReturnValueOnce(configModule.DEFAULT_CONFIG)
+			.mockReturnValueOnce(recoveredConfig);
+		vi.mocked(configModule.getPersistAccountFooter).mockImplementation(
+			(config) => config === recoveredConfig,
+		);
+		vi.mocked(configModule.getPersistAccountFooterStyle).mockReturnValue("full-email");
+
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+		const autoMethod = plugin.auth.methods[0] as unknown as {
+			authorize: (inputs?: Record<string, string>) => Promise<unknown>;
+		};
+
+		await expect(autoMethod.authorize({ loginMode: "add", accountCount: "1" })).resolves.toBeDefined();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(
+			mockClient.tui.showToast.mock.calls.some(([payload]) => {
+				const body = (payload as { body?: { message?: string; variant?: string } })
+					?.body;
+				return body?.variant === "info" && body.message === "Switched to account 2";
+			}),
+		).toBe(false);
+	});
+
+	it("shows the account-switch info toast when the footer is disabled", async () => {
+		await disablePersistedFooter();
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { plugin, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "Switched to account 2",
+				variant: "info",
+			},
+		});
+	});
+
+	it("keeps the newer account indicator when an in-flight response completes after a manual switch", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+
+		const { plugin, sdk, mockClient } = await setupPlugin();
+		await sendPersistedAccountRequest(sdk, "session-stale");
+		mockClient.tui.showToast.mockClear();
+
+		let resolveFetch: ((response: Response) => void) | undefined;
+		let markFetchStarted: (() => void) | undefined;
+		const fetchStarted = new Promise<void>((resolve) => {
+			markFetchStarted = resolve;
+		});
+		globalThis.fetch = vi.fn().mockImplementation(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolveFetch = resolve;
+					markFetchStarted?.();
+				}),
+		);
+
+		const pendingResponse = sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1", prompt_cache_key: "session-stale" }),
+		});
+
+		await fetchStarted;
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		resolveFetch?.(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+		await pendingResponse;
+
+		expect((await readPersistedAccountIndicator(plugin, "session-stale")).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+	});
+
+	it("keeps the higher revision when same-session responses resolve out of order", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+			toAuthDetails: (account: {
+				index: number;
+				refreshToken: string;
+			}) => {
+				type: "oauth";
+				access: string;
+				refresh: string;
+				expires: number;
+			};
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		vi.mocked(accountsModule.extractAccountEmail).mockImplementation((accessToken?: string) =>
+			accessToken === "access-token-2" ? "user2@example.com" : "user@example.com",
+		);
+		manager.toAuthDetails = (account) => ({
+			type: "oauth",
+			access: account.index === 1 ? "access-token-2" : "access-token-1",
+			refresh: account.refreshToken,
+			expires: Date.now() + 60_000,
+		});
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockImplementation(
+			async (init, _url, _config, _codexMode, parsedBody) => ({
+				updatedInit: init,
+				body: parsedBody,
+			}),
+		);
+
+		const { plugin, sdk } = await setupPlugin();
+		const requestBody = JSON.stringify({
+			model: "gpt-5.1",
+			prompt_cache_key: "session-same-revision",
+		});
+		const fetchResolvers: Array<(response: Response) => void> = [];
+		let releaseFirstFetch: (() => void) | undefined;
+		const firstFetchStarted = new Promise<void>((resolve) => {
+			releaseFirstFetch = resolve;
+		});
+		let releaseSecondFetch: (() => void) | undefined;
+		const secondFetchStarted = new Promise<void>((resolve) => {
+			releaseSecondFetch = resolve;
+		});
+		let fetchCallIndex = 0;
+
+		globalThis.fetch = vi.fn().mockImplementation(
+			() =>
+				new Promise<Response>((resolve) => {
+					fetchResolvers[fetchCallIndex] = resolve;
+					if (fetchCallIndex === 0) {
+						releaseFirstFetch?.();
+					} else {
+						releaseSecondFetch?.();
+					}
+					fetchCallIndex += 1;
+				}),
+		);
+
+		const requestA = sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: requestBody,
+		});
+		await firstFetchStarted;
+
+		manager.accounts = [
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+		];
+
+		const requestB = sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: requestBody,
+		});
+		await secondFetchStarted;
+
+		fetchResolvers[1]?.(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+		await requestB;
+		fetchResolvers[0]?.(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+		await requestA;
+
+		expect(
+			(await readPersistedAccountIndicator(plugin, "session-same-revision")).variant,
+		).toBe("user2@example.com [2/2]");
+	});
+
+	it("evicts the oldest persisted indicator after a full refresh when a new session overflows the cap", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const { MAX_PERSISTED_ACCOUNT_INDICATORS } = await import("../index.js");
+		const sessionIDs = Array.from(
+			{ length: MAX_PERSISTED_ACCOUNT_INDICATORS },
+			(_, index) => `session-overflow-${index}`,
+		);
+
+		const { plugin, sdk } = await setupPlugin();
+		for (const sessionID of sessionIDs) {
+			await sendPersistedAccountRequest(sdk, sessionID);
+		}
+
+		await plugin.event({
+			event: { type: "account.select", properties: { index: 1 } },
+		});
+
+		await sendPersistedAccountRequest(sdk, "session-overflow-new");
+
+		expect((await readPersistedAccountIndicator(plugin, sessionIDs[0]!)).variant).toBeUndefined();
+		expect((await readPersistedAccountIndicator(plugin, sessionIDs[1]!)).variant).toBe(
+			"user2@example.com [2/2]",
+		);
+		expect((await readPersistedAccountIndicator(plugin, "session-overflow-new")).variant).toBeDefined();
+	});
+
+	it("shows the account-use info toast when the footer is disabled", async () => {
+		await disablePersistedFooter();
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		vi.spyOn(accountsModule, "formatAccountLabel").mockImplementation(
+			(account: { email?: string }, index: number) =>
+				account.email ?? `Account ${index + 1}`,
+		);
+		vi.spyOn(accountsModule.AccountManager.prototype, "shouldShowAccountToast").mockReturnValue(true);
+
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+
+		await sendPersistedAccountRequest(sdk, "session-using-shown");
+
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "Using user@example.com (1/2)",
+				variant: "info",
+			},
+		});
+	});
+
+	it("suppresses the account-use info toast when the footer is enabled", async () => {
+		await enablePersistedFooter("full-email");
+		mockStorage.accounts = [
+			{ accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		const accountsModule = await import("../lib/accounts.js");
+		const manager = await accountsModule.AccountManager.loadFromDisk() as unknown as {
+			accounts: Array<{
+				index: number;
+				accountId: string;
+				email: string;
+				refreshToken: string;
+			}>;
+		};
+		manager.accounts = [
+			{ index: 0, accountId: "acc-1", email: "user@example.com", refreshToken: "refresh-token" },
+			{ index: 1, accountId: "acc-2", email: "user2@example.com", refreshToken: "refresh-2" },
+		];
+		vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue(manager as never);
+		vi.spyOn(accountsModule, "formatAccountLabel").mockImplementation(
+			(account: { email?: string }, index: number) =>
+				account.email ?? `Account ${index + 1}`,
+		);
+		vi.spyOn(accountsModule.AccountManager.prototype, "shouldShowAccountToast").mockReturnValue(true);
+
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+
+		await sendPersistedAccountRequest(sdk, "session-using-hidden");
+
+		expect(mockClient.tui.showToast).not.toHaveBeenCalledWith({
+			body: {
+				message: "Using user@example.com (1/2)",
+				variant: "info",
+			},
+		});
 	});
 
 	it("handles network errors and rotates to next account", async () => {
@@ -2158,7 +3650,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
 		);
 
-		const { sdk } = await setupPlugin();
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
 		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
 			method: "POST",
 			body: JSON.stringify({ model: "gpt-5.1" }),
@@ -2167,6 +3660,67 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(globalThis.fetch).not.toHaveBeenCalled();
 		expect(response.status).toBe(503);
 		expect(await response.text()).toContain("server errors or auth issues");
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "All 1 account(s) failed (server errors or auth issues). Check account health with `codex-health`.",
+				variant: "error",
+				duration: 5000,
+			},
+		});
+		consumeSpy.mockRestore();
+	});
+
+	it("still returns a terminal 503 when the TUI toast channel throws", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
+		);
+
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockRejectedValue(new Error("tui closed"));
+
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(response.status).toBe(503);
+		expect(await response.text()).toContain("server errors or auth issues");
+		consumeSpy.mockRestore();
+	});
+
+	it("uses a warning toast for all-accounts rate-limit terminal responses", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const configModule = await import("../lib/config.js");
+		vi.mocked(configModule.getRetryAllAccountsRateLimited).mockReturnValue(false);
+		const consumeSpy = vi.spyOn(AccountManager.prototype, "consumeToken").mockReturnValue(false);
+		const waitSpy = vi
+			.spyOn(AccountManager.prototype, "getMinWaitTimeForFamily")
+			.mockReturnValue(60_000);
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ content: "should-not-be-returned" }), { status: 200 }),
+		);
+
+		const { sdk, mockClient } = await setupPlugin();
+		mockClient.tui.showToast.mockClear();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(response.status).toBe(429);
+		expect(mockClient.tui.showToast).toHaveBeenCalledWith({
+			body: {
+				message: "All 1 account(s) are rate-limited. Try again in 60s or add another account with `opencode auth login`.",
+				variant: "warning",
+				duration: 5000,
+			},
+		});
+
+		waitSpy.mockRestore();
 		consumeSpy.mockRestore();
 	});
 
@@ -3891,5 +5445,29 @@ describe("OpenAIOAuthPlugin event handler edge cases", () => {
 		await plugin.event({
 			event: { type: "account.select", properties: { index: "invalid" } },
 		});
+	});
+
+	it("ignores account.select with an out-of-bounds index", async () => {
+		const mockClient = createMockClient();
+		const { OpenAIOAuthPlugin } = await import("../index.js");
+		const plugin = await OpenAIOAuthPlugin({ client: mockClient } as never) as unknown as PluginType;
+
+		const getAuth = async () => ({
+			type: "oauth" as const,
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			multiAccount: true,
+		});
+
+		await plugin.auth.loader(getAuth, { options: {}, models: {} });
+
+		await expect(
+			plugin.event({
+				event: { type: "account.select", properties: { index: 99 } },
+			}),
+		).resolves.toBeUndefined();
+		expect(mockStorage.activeIndex).toBe(0);
+		expect(mockStorage.activeIndexByFamily).toEqual({});
 	});
 });

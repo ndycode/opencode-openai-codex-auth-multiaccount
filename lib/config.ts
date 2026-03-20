@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PluginConfig } from "./types.js";
 import {
+	PERSIST_ACCOUNT_FOOTER_STYLES,
+	type PersistAccountFooterStyle,
+} from "./persist-account-footer.js";
+import {
 	normalizeRetryBudgetValue,
 	type RetryBudgetOverrides,
 	type RetryProfile,
@@ -16,14 +20,28 @@ const TUI_GLYPH_MODES = new Set(["ascii", "unicode", "auto"]);
 const REQUEST_TRANSFORM_MODES = new Set(["native", "legacy"]);
 const UNSUPPORTED_CODEX_POLICIES = new Set(["strict", "fallback"]);
 const RETRY_PROFILES = new Set(["conservative", "balanced", "aggressive"]);
-
+const FALLBACK_PLUGIN_CONFIG = Symbol("fallbackPluginConfig");
 export type UnsupportedCodexPolicy = "strict" | "fallback";
+type PluginConfigWithFallbackMarker = PluginConfig & {
+	[FALLBACK_PLUGIN_CONFIG]?: true;
+};
+
+const markFallbackPluginConfig = <T extends PluginConfig>(config: T): T => {
+	if ((config as PluginConfigWithFallbackMarker)[FALLBACK_PLUGIN_CONFIG]) {
+		return config;
+	}
+	Object.defineProperty(config, FALLBACK_PLUGIN_CONFIG, {
+		value: true,
+		enumerable: false,
+	});
+	return config;
+};
 
 /**
  * Default plugin configuration
  * CODEX_MODE is enabled by default for better Codex CLI parity
  */
-const DEFAULT_CONFIG: PluginConfig = {
+export const DEFAULT_CONFIG: PluginConfig = markFallbackPluginConfig({
 	codexMode: true,
 	requestTransformMode: "native",
 	codexTuiV2: true,
@@ -45,6 +63,8 @@ const DEFAULT_CONFIG: PluginConfig = {
 	tokenRefreshSkewMs: 60_000,
 	rateLimitToastDebounceMs: 60_000,
 	toastDurationMs: 5_000,
+	persistAccountFooter: false,
+	persistAccountFooterStyle: "label-masked-email",
 	perProjectAccounts: true,
 	sessionRecovery: true,
 	autoResume: true,
@@ -55,7 +75,22 @@ const DEFAULT_CONFIG: PluginConfig = {
 	pidOffsetEnabled: false,
 	fetchTimeoutMs: 60_000,
 	streamStallTimeoutMs: 45_000,
-};
+});
+
+function createFallbackPluginConfig(): PluginConfig {
+	// Spread drops the non-enumerable fallback marker, so exact-default config
+	// files stay distinct from loader fallbacks.
+	return markFallbackPluginConfig({ ...DEFAULT_CONFIG });
+}
+
+export function isFallbackPluginConfig(
+	pluginConfig: PluginConfig | undefined,
+): boolean {
+	return !!(
+		pluginConfig &&
+		(pluginConfig as PluginConfigWithFallbackMarker)[FALLBACK_PLUGIN_CONFIG]
+	);
+}
 
 /**
  * Load plugin configuration from ~/.opencode/openai-codex-auth-config.json
@@ -66,7 +101,7 @@ const DEFAULT_CONFIG: PluginConfig = {
 export function loadPluginConfig(): PluginConfig {
 	try {
 		if (!existsSync(CONFIG_PATH)) {
-			return DEFAULT_CONFIG;
+			return createFallbackPluginConfig();
 		}
 
 		const fileContent = readFileSync(CONFIG_PATH, "utf-8");
@@ -102,7 +137,7 @@ export function loadPluginConfig(): PluginConfig {
 		logWarn(
 			`Failed to load config from ${CONFIG_PATH}: ${(error as Error).message}`,
 		);
-		return DEFAULT_CONFIG;
+		return createFallbackPluginConfig();
 	}
 }
 
@@ -430,6 +465,25 @@ export function getToastDurationMs(pluginConfig: PluginConfig): number {
 		pluginConfig.toastDurationMs,
 		5_000,
 		{ min: 1_000 },
+	);
+}
+
+export function getPersistAccountFooter(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_PERSIST_ACCOUNT_FOOTER",
+		pluginConfig.persistAccountFooter,
+		false,
+	);
+}
+
+export function getPersistAccountFooterStyle(
+	pluginConfig: PluginConfig,
+): PersistAccountFooterStyle {
+	return resolveStringSetting(
+		"CODEX_AUTH_PERSIST_ACCOUNT_FOOTER_STYLE",
+		pluginConfig.persistAccountFooterStyle,
+		"label-masked-email",
+		new Set(PERSIST_ACCOUNT_FOOTER_STYLES),
 	);
 }
 

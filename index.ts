@@ -55,6 +55,8 @@ import {
 	getSessionRecovery,
 	getAutoResume,
 	getToastDurationMs,
+	getPersistAccountFooter,
+	getPersistAccountFooterStyle,
 	getPerProjectAccounts,
 	getEmptyResponseMaxRetries,
 	getEmptyResponseRetryDelayMs,
@@ -65,6 +67,8 @@ import {
 	getCodexTuiColorProfile,
 	getCodexTuiGlyphMode,
 	getBeginnerSafeMode,
+	DEFAULT_CONFIG,
+	isFallbackPluginConfig,
 	loadPluginConfig,
 } from "./lib/config.js";
 import {
@@ -83,6 +87,7 @@ import {
 	logInfo,
 	logWarn,
 	logError,
+	maskEmail,
 	setCorrelationId,
 	clearCorrelationId,
 } from "./lib/logger.js";
@@ -125,6 +130,12 @@ import {
 	type AccountStorageV3,
 	type FlaggedAccountMetadataV1,
 } from "./lib/storage.js";
+import type {
+	PersistAccountFooterStyle,
+	PersistedAccountDetails,
+	PersistedAccountIndicatorEntry,
+	SessionModelRef,
+} from "./lib/persist-account-footer.js";
 import {
 	createCodexHeaders,
 	extractRequestUrl,
@@ -228,6 +239,8 @@ function upsertFlaggedAccountRecord(
  * }
  * ```
  */
+export const MAX_PERSISTED_ACCOUNT_INDICATORS = 200;
+
 // eslint-disable-next-line @typescript-eslint/require-await
 export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	initLogger(client);
@@ -400,13 +413,63 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						);
 				}
 
-				return {
-						primary,
-						variantsForPersistence,
-				};
+		return {
+				primary,
+				variantsForPersistence,
 		};
+	};
 
-		const buildManualOAuthFlow = (
+	const getPersistedAccountLabel = (
+		account: PersistedAccountDetails,
+		index: number,
+	): string => {
+		const accountLabel = account.accountLabel?.trim();
+		const storedAccountId = account.accountId?.trim();
+		const tokenAccountId = extractAccountId(
+			(typeof account.access === "string" && account.access.trim()) ||
+				(typeof account.accessToken === "string" && account.accessToken.trim()) ||
+				undefined,
+		);
+		const accountId =
+			tokenAccountId &&
+			shouldUpdateAccountIdFromToken(
+				account.accountIdSource,
+				storedAccountId,
+			)
+				? tokenAccountId
+				: storedAccountId;
+		const idSuffix = accountId
+			? accountId.length > 6
+				? accountId.slice(-6)
+				: accountId
+			: null;
+		return accountLabel ||
+			(idSuffix ? `Account ${index + 1} [id:${idSuffix}]` : `Account ${index + 1}`);
+	};
+
+	const getPersistedAccountValue = (
+		account: PersistedAccountDetails,
+		index: number,
+		style: PersistAccountFooterStyle,
+	): string => {
+		const sanitizedEmail = sanitizeEmail(account.email);
+		if (style === "label-only" || !sanitizedEmail) {
+			return getPersistedAccountLabel(account, index);
+		}
+		return style === "full-email" ? sanitizedEmail : maskEmail(sanitizedEmail);
+	};
+
+	const formatPersistedAccountIndicator = (
+		account: PersistedAccountDetails,
+		index: number,
+		accountCount: number,
+		style: PersistAccountFooterStyle,
+	): string => {
+		const accountPosition = `[${index + 1}/${Math.max(1, accountCount)}]`;
+		return `${getPersistedAccountValue(account, index, style)} ${accountPosition}`;
+	};
+
+	const buildManualOAuthFlow = (
 				pkce: { verifier: string },
 				url: string,
 				expectedState: string,
@@ -1113,6 +1176,155 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 }
         };
 
+		const persistedAccountIndicators = new Map<string, PersistedAccountIndicatorEntry>();
+		let persistedAccountIndicatorRevision = 0;
+		let persistedAccountCountHint = 0;
+		let runtimePersistAccountFooter = false;
+		let runtimePersistAccountFooterStyle: PersistAccountFooterStyle =
+			"label-masked-email";
+		let runtimePluginConfigSnapshot: ReturnType<typeof loadPluginConfig> | undefined;
+
+		const nextPersistedAccountIndicatorRevision = (): number => {
+			persistedAccountIndicatorRevision += 1;
+			return persistedAccountIndicatorRevision;
+		};
+
+		const updatePersistedAccountCountHint = (
+			count: number | null | undefined,
+		): void => {
+			if (typeof count !== "number" || !Number.isFinite(count)) {
+				return;
+			}
+			persistedAccountCountHint = Math.max(0, Math.trunc(count));
+		};
+
+		const resetPersistedAccountFooterState = (): void => {
+			persistedAccountIndicators.clear();
+			persistedAccountCountHint = 0;
+		};
+
+		const resolvePersistedIndicatorSessionID = (
+			...candidates: Array<string | null | undefined>
+		): string | undefined => {
+			const runtimeThreadId = process.env.CODEX_THREAD_ID?.toString().trim();
+			if (runtimeThreadId) {
+				return runtimeThreadId;
+			}
+			for (const candidate of candidates) {
+				const sessionID = candidate?.toString().trim();
+				if (sessionID) {
+					return sessionID;
+				}
+			}
+			return undefined;
+		};
+
+		const trimPersistedAccountIndicators = (): void => {
+			// setPersistedAccountIndicator() is the only insertion path and adds at
+			// most one new entry per call, so a single oldest-entry eviction is
+			// sufficient to restore the cap.
+			if (persistedAccountIndicators.size > MAX_PERSISTED_ACCOUNT_INDICATORS) {
+				const oldestKey = persistedAccountIndicators.keys().next().value;
+				if (oldestKey === undefined) return;
+				persistedAccountIndicators.delete(oldestKey);
+			}
+		};
+
+		const setPersistedAccountIndicator = (
+			sessionID: string | null | undefined,
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+			revision: number,
+		): boolean => {
+			if (!sessionID) return false;
+			const existing = persistedAccountIndicators.get(sessionID);
+			if (existing && existing.revision > revision) {
+				return false;
+			}
+			const nextEntry = {
+				label: formatPersistedAccountIndicator(account, index, accountCount, style),
+				revision,
+			};
+			if (existing) {
+				// Default writes are true LRU touches: reinserting moves active sessions
+				// to the tail so only inactive sessions age out first.
+				persistedAccountIndicators.delete(sessionID);
+			}
+			persistedAccountIndicators.set(sessionID, nextEntry);
+			trimPersistedAccountIndicators();
+			return true;
+		};
+
+		const refreshVisiblePersistedAccountIndicators = (
+			account: PersistedAccountDetails,
+			index: number,
+			accountCount: number,
+			style: PersistAccountFooterStyle,
+		): boolean => {
+			// Bulk refreshes are intentionally update-only: they only rewrite
+			// already-tracked sessions, so they never grow the map. New entries
+			// still have to flow through setPersistedAccountIndicator() where
+			// trimPersistedAccountIndicators() enforces the LRU cap.
+			const sessionIDs = Array.from(persistedAccountIndicators.keys());
+			if (sessionIDs.length === 0) return false;
+			const revision = nextPersistedAccountIndicatorRevision();
+			const label = formatPersistedAccountIndicator(
+				account,
+				index,
+				accountCount,
+				style,
+			);
+			for (const sessionID of sessionIDs) {
+				const existing = persistedAccountIndicators.get(sessionID);
+				if (existing && existing.revision > revision) {
+					continue;
+				}
+				// Bulk switch refreshes should update the visible label without
+				// re-promoting every tracked session to the newest LRU position.
+				persistedAccountIndicators.set(sessionID, { label, revision });
+			}
+			return true;
+		};
+
+		const getPersistedAccountIndicatorLabel = (
+			sessionID: string | null | undefined,
+		): string | undefined => {
+			if (!sessionID) return undefined;
+			return persistedAccountIndicators.get(sessionID)?.label;
+		};
+
+		const applyPersistedAccountIndicator = (
+			messageInfo: Record<string, unknown>,
+			indicatorLabel: string,
+			fallbackModel?: SessionModelRef,
+		): void => {
+			// `full-email` is an explicit user opt-in for visible variant fields only.
+			// Keep it out of thinking, and route any logging through `lib/logger.ts`,
+			// which masks emails in both message strings and structured payloads.
+			messageInfo.variant = indicatorLabel;
+
+			const existingModel =
+				typeof messageInfo.model === "object" && messageInfo.model !== null
+					? (messageInfo.model as Record<string, unknown>)
+					: {};
+			const providerID =
+				typeof existingModel.providerID === "string"
+					? existingModel.providerID
+					: fallbackModel?.providerID;
+			const modelID =
+				typeof existingModel.modelID === "string"
+					? existingModel.modelID
+					: fallbackModel?.modelID;
+			messageInfo.model = {
+				...existingModel,
+				variant: indicatorLabel,
+				...(providerID ? { providerID } : {}),
+				...(modelID ? { modelID } : {}),
+			};
+		};
+
 		const resolveActiveIndex = (
 				storage: {
 						activeIndex: number;
@@ -1241,8 +1453,82 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			});
 		};
 
+		const syncRuntimePluginConfig = (
+			pluginConfig: ReturnType<typeof loadPluginConfig>,
+		): {
+			persistAccountFooter: boolean;
+			persistAccountFooterStyle: PersistAccountFooterStyle;
+			ui: UiRuntimeOptions;
+		} => {
+			const resolvedPluginConfig =
+				isFallbackPluginConfig(pluginConfig) &&
+				runtimePluginConfigSnapshot !== undefined
+					? runtimePluginConfigSnapshot
+					: pluginConfig;
+			const persistAccountFooter = getPersistAccountFooter(resolvedPluginConfig);
+			const persistAccountFooterStyle =
+				getPersistAccountFooterStyle(resolvedPluginConfig);
+			// Footer disable transitions intentionally reset the in-memory footer
+			// state. Authorize flows keep using the cached runtime snapshot here, so
+			// a transient config-loader fallback does not clear live indicators.
+			if (runtimePersistAccountFooter && !persistAccountFooter) {
+				resetPersistedAccountFooterState();
+			}
+			runtimePluginConfigSnapshot = resolvedPluginConfig;
+			runtimePersistAccountFooter = persistAccountFooter;
+			runtimePersistAccountFooterStyle = persistAccountFooterStyle;
+			return {
+				persistAccountFooter,
+				persistAccountFooterStyle,
+				ui: applyUiRuntimeFromConfig(resolvedPluginConfig),
+			};
+		};
+
 		const resolveUiRuntime = (): UiRuntimeOptions => {
-			return applyUiRuntimeFromConfig(loadPluginConfig());
+			return applyUiRuntimeFromConfig(resolveRuntimePluginConfig());
+		};
+
+		const resolveRuntimePluginConfig = (): ReturnType<typeof loadPluginConfig> => {
+			return runtimePluginConfigSnapshot ?? loadPluginConfig();
+		};
+
+		const refreshAuthorizeStoragePath = (
+			initialConfig?: ReturnType<typeof loadPluginConfig>,
+		): ReturnType<typeof loadPluginConfig> => {
+			// Auth writes should honor the latest per-project setting, but a Windows
+			// config-file lock can make loadPluginConfig() fall back to a marked
+			// default config.
+			// If we already have a runtime snapshot, keep using it instead of silently
+			// routing auth writes to the wrong storage path.
+			let storagePluginConfig =
+				initialConfig ?? runtimePluginConfigSnapshot ?? DEFAULT_CONFIG;
+			const shouldRefreshStorageConfig =
+				!initialConfig || isFallbackPluginConfig(initialConfig);
+			if (shouldRefreshStorageConfig) {
+				try {
+					const refreshedPluginConfig = loadPluginConfig();
+					if (
+						isFallbackPluginConfig(refreshedPluginConfig) &&
+						runtimePluginConfigSnapshot
+					) {
+						logWarn(
+							"Falling back to cached authorize storage config after config loader returned defaults.",
+						);
+					} else {
+						storagePluginConfig = refreshedPluginConfig;
+					}
+				} catch (error) {
+					if (!runtimePluginConfigSnapshot) {
+						throw error;
+					}
+					logWarn(
+						`Falling back to cached authorize storage config after refresh failure: ${(error as Error).message}`,
+					);
+				}
+			}
+			const perProjectAccounts = getPerProjectAccounts(storagePluginConfig);
+			setStoragePath(perProjectAccounts ? process.cwd() : null);
+			return storagePluginConfig;
 		};
 
 		const getStatusMarker = (
@@ -1684,12 +1970,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                         return;
                                 }
 
-                                const now = Date.now();
-                                const account = storage.accounts[index];
-                                if (account) {
-                                        account.lastUsed = now;
-                                        account.lastSwitchReason = "rotation";
-                                }
+								const account = storage.accounts[index];
+								if (!account) {
+									return;
+								}
+								const preReloadTargetAccount =
+									cachedAccountManager?.getAccountsSnapshot()[index];
+
+								const now = Date.now();
+								account.lastUsed = now;
+								account.lastSwitchReason = "rotation";
                                 storage.activeIndex = index;
                                 storage.activeIndexByFamily = storage.activeIndexByFamily ?? {};
                                 for (const family of MODEL_FAMILIES) {
@@ -1697,16 +1987,28 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 }
 
                                 await saveAccounts(storage);
+								updatePersistedAccountCountHint(storage.accounts.length);
 
                                 // Reload manager from disk so we don't overwrite newer rotated
                                 // refresh tokens with stale in-memory state.
-                                if (cachedAccountManager) {
-                                        const reloadedManager = await AccountManager.loadFromDisk();
-                                        cachedAccountManager = reloadedManager;
-                                        accountManagerPromise = Promise.resolve(reloadedManager);
-                                }
+								if (cachedAccountManager) {
+									const reloadedManager = await AccountManager.loadFromDisk();
+									cachedAccountManager = reloadedManager;
+									accountManagerPromise = Promise.resolve(reloadedManager);
+								}
 
-                                await showToast(`Switched to account ${index + 1}`, "info");
+								if (runtimePersistAccountFooter) {
+									refreshVisiblePersistedAccountIndicators(
+										// Prefer the pre-reload target account so label-only footers keep
+										// the same token-derived id suffix until disk catches up.
+										preReloadTargetAccount ?? account,
+										index,
+										storage.accounts.length,
+										runtimePersistAccountFooterStyle,
+									);
+								} else {
+									await showToast(`Switched to account ${index + 1}`, "info");
+								}
                         }
                 }
           } catch (error) {
@@ -1719,6 +2021,70 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
         return {
                 event: eventHandler,
+		"chat.message": (
+			input: {
+				sessionID: string;
+				model?: SessionModelRef;
+			},
+			output: { message: unknown; parts: unknown[] },
+		): Promise<void> => {
+			if (!runtimePersistAccountFooter) {
+				return Promise.resolve();
+			}
+			const indicator = getPersistedAccountIndicatorLabel(
+				resolvePersistedIndicatorSessionID(input.sessionID),
+			);
+			if (indicator) {
+				const message =
+					typeof output.message === "object" && output.message !== null
+						? (output.message as Record<string, unknown>)
+						: null;
+				const messageRole =
+					typeof message?.role === "string" ? message.role : undefined;
+				if (message && messageRole === "user") {
+					applyPersistedAccountIndicator(message, indicator, input.model);
+				}
+			}
+			return Promise.resolve();
+		},
+		"experimental.chat.messages.transform": (
+			_input: Record<string, never>,
+			output: {
+				messages: Array<{
+					info: Record<string, unknown>;
+					parts: unknown[];
+				}>;
+			},
+		): Promise<void> => {
+			if (!runtimePersistAccountFooter) {
+				return Promise.resolve();
+			}
+			let lastUserMessage:
+				| {
+					info: Record<string, unknown>;
+					parts: unknown[];
+				}
+				| undefined;
+			for (let i = output.messages.length - 1; i >= 0; i -= 1) {
+				const message = output.messages[i];
+				if (message?.info.role === "user") {
+					lastUserMessage = message;
+					break;
+				}
+			}
+			if (!lastUserMessage) return Promise.resolve();
+
+			const sessionID = resolvePersistedIndicatorSessionID(
+				typeof lastUserMessage.info.sessionID === "string"
+					? lastUserMessage.info.sessionID
+					: undefined,
+			);
+			const indicator = getPersistedAccountIndicatorLabel(sessionID);
+			if (!indicator) return Promise.resolve();
+
+			applyPersistedAccountIndicator(lastUserMessage.info, indicator);
+			return Promise.resolve();
+		},
                 auth: {
 			provider: PROVIDER_ID,
 			/**
@@ -1738,7 +2104,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			async loader(getAuth: () => Promise<Auth>, provider: unknown) {
 				const auth = await getAuth();
 				const pluginConfig = loadPluginConfig();
-				applyUiRuntimeFromConfig(pluginConfig);
+				syncRuntimePluginConfig(pluginConfig);
 				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
 				setStoragePath(perProjectAccounts ? process.cwd() : null);
 				const authFallback = auth.type === "oauth" ? (auth as OAuthAuthDetails) : undefined;
@@ -1774,6 +2140,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					}
 					let accountManager = await accountManagerPromise;
 					cachedAccountManager = accountManager;
+					updatePersistedAccountCountHint(accountManager.getAccountCount());
 					const refreshToken = authFallback?.refresh ?? "";
 					const needsPersist =
 						refreshToken &&
@@ -1884,6 +2251,23 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						)
 					: null;
 
+			const showTerminalToastResponse = async (
+				message: string,
+				status: 429 | 503,
+			): Promise<Response> => {
+				await showToast(
+					message,
+					status === 429 ? "warning" : "error",
+					{ duration: toastDurationMs },
+				);
+				return new Response(JSON.stringify({ error: { message } }), {
+					status,
+					headers: {
+						"content-type": "application/json; charset=utf-8",
+					},
+				});
+			};
+
 			checkAndNotify(async (message, variant) => {
 				await showToast(message, variant);
 			}).catch((err) => {
@@ -1916,6 +2300,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						init?: RequestInit,
 					): Promise<Response> {
 						try {
+							// Re-apply env overrides against the loader's config snapshot without
+							// another disk read on the request hot path. Use request-local copies
+							// below so concurrent fetches cannot observe another request's footer state.
+							const {
+								persistAccountFooter,
+								persistAccountFooterStyle,
+							} = syncRuntimePluginConfig(pluginConfig);
 							if (cachedAccountManager && cachedAccountManager !== accountManager) {
 								accountManager = cachedAccountManager;
 							}
@@ -2017,10 +2408,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let model = transformedBody?.model;
 										let modelFamily = model ? getModelFamily(model) : "gpt-5.4";
 										let quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
+						// When the host provides a runtime thread id, prefer it over
+						// prompt_cache_key so the fetch path stores indicators under the
+						// same session key that the chat hooks resolve later. Without
+						// CODEX_THREAD_ID, the host has to reuse the same session id in the
+						// hooks or the persisted footer cannot be resolved back.
 						const threadIdCandidate =
-							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")
-								.toString()
-								.trim() || undefined;
+							resolvePersistedIndicatorSessionID(promptCacheKey);
+						const indicatorRevision = persistAccountFooter
+							? nextPersistedAccountIndicatorRevision()
+							: 0;
 							const requestCorrelationId = setCorrelationId(
 								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
 							);
@@ -2167,19 +2564,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Auth refresh failed for account ${account.index + 1}`,
 					)
 				) {
-					return new Response(
-						JSON.stringify({
-							error: {
-								message:
-									"Auth refresh retry budget exhausted for this request. Try again or switch accounts.",
-							},
-						}),
-						{
-							status: 503,
-							headers: {
-								"content-type": "application/json; charset=utf-8",
-							},
-						},
+					return await showTerminalToastResponse(
+						"Auth refresh retry budget exhausted for this request. Try again or switch accounts.",
+						503,
 					);
 				}
 				runtimeMetrics.authRefreshFailures++;
@@ -2256,12 +2643,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 											account.email =
 												extractAccountEmail(accountAuth.access) ?? account.email;
 
-											if (
-												accountCount > 1 &&
-												accountManager.shouldShowAccountToast(
-													account.index,
-													rateLimitToastDebounceMs,
-												)
+								if (
+									!persistAccountFooter &&
+									accountCount > 1 &&
+									accountManager.shouldShowAccountToast(
+										account.index,
+										rateLimitToastDebounceMs,
+									)
 											) {
 												const accountLabel = formatAccountLabel(account, account.index);
 												await showToast(
@@ -2336,19 +2724,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 									)
 								) {
 									accountManager.refundToken(account, modelFamily, model);
-									return new Response(
-										JSON.stringify({
-											error: {
-												message:
-													"Network retry budget exhausted for this request. Try again in a moment.",
-											},
-										}),
-										{
-											status: 503,
-											headers: {
-												"content-type": "application/json; charset=utf-8",
-											},
-										},
+									return await showTerminalToastResponse(
+										"Network retry budget exhausted for this request. Try again in a moment.",
+										503,
 									);
 								}
 								runtimeMetrics.failedRequests++;
@@ -2699,6 +3077,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					accountManager.recordSuccess(account, modelFamily, model);
+					if (persistAccountFooter) {
+						const liveAccountCount = accountManager.getAccountCount();
+						const persistedAccountCount =
+							liveAccountCount > 0
+								? liveAccountCount
+								: persistedAccountCountHint > 0
+									? persistedAccountCountHint
+									: 1;
+						setPersistedAccountIndicator(
+							threadIdCandidate,
+							account,
+							account.index,
+							persistedAccountCount,
+							persistAccountFooterStyle,
+							indicatorRevision,
+						);
+					}
 					runtimeMetrics.successfulRequests++;
 					runtimeMetrics.lastError = null;
 					runtimeMetrics.lastErrorCategory = null;
@@ -2744,12 +3139,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.lastError = message;
 								runtimeMetrics.lastErrorCategory = waitMs > 0 ? "rate-limit" : "account-failure";
-								return new Response(JSON.stringify({ error: { message } }), {
-									status: waitMs > 0 ? 429 : 503,
-											headers: {
-												"content-type": "application/json; charset=utf-8",
-											},
-										});
+								return await showTerminalToastResponse(
+									message,
+									waitMs > 0 ? 429 : 503,
+								);
 									}
 						} finally {
 							clearCorrelationId();
@@ -2766,10 +3159,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						label: AUTH_LABELS.OAUTH,
 						type: "oauth" as const,
 						authorize: async (inputs?: Record<string, string>) => {
-							const authPluginConfig = loadPluginConfig();
-							applyUiRuntimeFromConfig(authPluginConfig);
-							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
-							setStoragePath(authPerProjectAccounts ? process.cwd() : null);
+							const hadRuntimePluginConfig = runtimePluginConfigSnapshot !== undefined;
+							const authorizePluginConfig = resolveRuntimePluginConfig();
+							const refreshedAuthorizePluginConfig = refreshAuthorizeStoragePath(
+								hadRuntimePluginConfig ? undefined : authorizePluginConfig,
+							);
+							syncRuntimePluginConfig(refreshedAuthorizePluginConfig);
 
 							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =
@@ -3777,10 +4172,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 					authorize: async () => {
                                                         // Initialize storage path for manual OAuth flow
                                                         // Must happen BEFORE persistAccountPool to ensure correct storage location
-                                                        const manualPluginConfig = loadPluginConfig();
-							applyUiRuntimeFromConfig(manualPluginConfig);
-                                                        const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
-							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
+							const hadRuntimePluginConfig = runtimePluginConfigSnapshot !== undefined;
+							const authorizePluginConfig = resolveRuntimePluginConfig();
+							syncRuntimePluginConfig(authorizePluginConfig);
+							refreshAuthorizeStoragePath(
+								hadRuntimePluginConfig ? undefined : authorizePluginConfig,
+							);
 
 												const { pkce, state, url } = await createAuthorizationFlow();
 												return buildManualOAuthFlow(pkce, url, state, async (selection) => {

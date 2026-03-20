@@ -423,6 +423,40 @@ describe('Logger Module', () => {
 			expect(message).not.toContain(jwtToken);
 			expect(message).toContain('...');
 		});
+
+		it('masks full-email footer indicators in structured app logs', () => {
+			const mockLog = vi.fn();
+			const rawIndicator = 'user@example.com [1/2]';
+			initLogger({ app: { log: mockLog } });
+
+			logError('persisted footer indicator', {
+				messageInfo: {
+					variant: rawIndicator,
+					model: {
+						variant: rawIndicator,
+					},
+				},
+			});
+
+			const call = mockLog.mock.calls[0][0] as {
+				body: {
+					extra?: {
+						data?: {
+							messageInfo?: {
+								variant?: string;
+								model?: { variant?: string };
+							};
+						};
+					};
+				};
+			};
+			const data = call.body.extra?.data;
+			const serialized = JSON.stringify(call);
+
+			expect(data?.messageInfo?.variant).toBe('us***@***.com [1/2]');
+			expect(data?.messageInfo?.model?.variant).toBe('us***@***.com [1/2]');
+			expect(serialized).not.toContain(rawIndicator);
+		});
 	});
 
 	describe('sanitizeValue edge cases', () => {
