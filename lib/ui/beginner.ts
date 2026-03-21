@@ -18,6 +18,9 @@ export interface BeginnerRuntimeSnapshot {
 	serverErrors: number;
 	networkErrors: number;
 	lastErrorCategory: string | null;
+	promptCacheEnabledRequests: number;
+	promptCacheMissingRequests: number;
+	lastPromptCacheKey: string | null;
 }
 
 export interface BeginnerChecklistItem {
@@ -239,6 +242,27 @@ export function buildBeginnerDoctorFindings(input: {
 			summary: `Auth refresh failed ${input.runtime.authRefreshFailures} time(s).`,
 			action: "Run `codex-refresh` and `codex-health`; re-login if failures continue.",
 		});
+	}
+
+	if (input.runtime.totalRequests > 0) {
+		if (input.runtime.promptCacheEnabledRequests === 0) {
+			findings.push({
+				severity: "warning",
+				code: "prompt-cache-missing",
+				summary: "Recent requests did not include a prompt cache key.",
+				action:
+					"Use a session-backed OpenCode flow that forwards `prompt_cache_key` so Codex prompt caching can engage.",
+			});
+		} else if (input.runtime.promptCacheMissingRequests > 0) {
+			findings.push({
+				severity: "warning",
+				code: "prompt-cache-inconsistent",
+				summary:
+					"Prompt cache keys were present for some recent requests but missing for others.",
+				action:
+					"Keep requests on a stable session/thread path so `prompt_cache_key` stays consistent across turns.",
+			});
+		}
 	}
 
 	const failureRate = getFailureRate(input.runtime);

@@ -19,6 +19,9 @@ const healthyRuntime: BeginnerRuntimeSnapshot = {
 	serverErrors: 0,
 	networkErrors: 0,
 	lastErrorCategory: null,
+	promptCacheEnabledRequests: 12,
+	promptCacheMissingRequests: 0,
+	lastPromptCacheKey: "ses_prompt_cache",
 };
 
 function buildAccount(
@@ -116,6 +119,38 @@ describe("buildBeginnerDoctorFindings", () => {
 		expect(findings.some((f) => f.code === "high-failure-rate")).toBe(true);
 		expect(findings.some((f) => f.code === "auth-refresh-failures")).toBe(true);
 		expect(findings.some((f) => f.code === "recent-error-category")).toBe(true);
+	});
+
+	it("flags missing prompt cache keys when recent requests never supplied one", () => {
+		const findings = buildBeginnerDoctorFindings({
+			accounts: [buildAccount()],
+			now,
+			runtime: {
+				...healthyRuntime,
+				totalRequests: 5,
+				promptCacheEnabledRequests: 0,
+				promptCacheMissingRequests: 5,
+				lastPromptCacheKey: null,
+			},
+		});
+
+		expect(findings.some((f) => f.code === "prompt-cache-missing")).toBe(true);
+	});
+
+	it("flags inconsistent prompt cache usage when only some requests had keys", () => {
+		const findings = buildBeginnerDoctorFindings({
+			accounts: [buildAccount()],
+			now,
+			runtime: {
+				...healthyRuntime,
+				totalRequests: 6,
+				promptCacheEnabledRequests: 4,
+				promptCacheMissingRequests: 2,
+				lastPromptCacheKey: null,
+			},
+		});
+
+		expect(findings.some((f) => f.code === "prompt-cache-inconsistent")).toBe(true);
 	});
 });
 

@@ -278,6 +278,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastRequestAt: number | null;
 		lastError: string | null;
 		lastErrorCategory: string | null;
+		promptCacheEnabledRequests: number;
+		promptCacheMissingRequests: number;
+		lastPromptCacheKey: string | null;
 		lastSelectedAccountIndex: number | null;
 		lastQuotaKey: string | null;
 		lastSelectionSnapshot: SelectionSnapshot | null;
@@ -304,6 +307,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastRequestAt: null,
 		lastError: null,
 		lastErrorCategory: null,
+		promptCacheEnabledRequests: 0,
+		promptCacheMissingRequests: 0,
+		lastPromptCacheKey: null,
 		lastSelectedAccountIndex: null,
 		lastQuotaKey: null,
 		lastSelectionSnapshot: null,
@@ -1373,6 +1379,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			serverErrors: runtimeMetrics.serverErrors,
 			networkErrors: runtimeMetrics.networkErrors,
 			lastErrorCategory: runtimeMetrics.lastErrorCategory,
+			promptCacheEnabledRequests: runtimeMetrics.promptCacheEnabledRequests,
+			promptCacheMissingRequests: runtimeMetrics.promptCacheMissingRequests,
+			lastPromptCacheKey: runtimeMetrics.lastPromptCacheKey,
 		});
 
 		const formatDoctorSeverity = (
@@ -2025,6 +2034,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
 							);
 							runtimeMetrics.lastRequestAt = Date.now();
+							runtimeMetrics.lastPromptCacheKey = promptCacheKey ?? null;
+							if (promptCacheKey) {
+								runtimeMetrics.promptCacheEnabledRequests += 1;
+							} else {
+								runtimeMetrics.promptCacheMissingRequests += 1;
+							}
 							const retryBudget = new RetryBudgetTracker(retryBudgetLimits);
 							const consumeRetryBudget = (
 								bucket: RetryBudgetClass,
@@ -5197,6 +5212,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 									"muted",
 								),
 							);
+							lines.push(
+								formatUiKeyValue(
+									ui,
+									"Prompt cache",
+									runtime.promptCacheEnabledRequests > 0
+										? `enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${runtime.lastPromptCacheKey ?? "none"}`
+										: `enabled=0, missing=${runtime.promptCacheMissingRequests}, lastKey=none`,
+									"muted",
+								),
+							);
 						}
 
 						return lines.join("\n");
@@ -5235,6 +5260,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push(`  Storage: ${getStoragePath()}`);
 						lines.push(
 							`  Runtime failures: failed=${runtime.failedRequests}, rateLimited=${runtime.rateLimitedResponses}, authRefreshFailed=${runtime.authRefreshFailures}, server=${runtime.serverErrors}, network=${runtime.networkErrors}`,
+						);
+						lines.push(
+							`  Prompt cache: enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${runtime.lastPromptCacheKey ?? "none"}`,
 						);
 					}
 					return lines.join("\n");
