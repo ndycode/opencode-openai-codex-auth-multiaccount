@@ -18,7 +18,7 @@
         "gpt-5.4-none": {
           "name": "GPT 5.4 None (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -43,7 +43,7 @@
         "gpt-5.4-low": {
           "name": "GPT 5.4 Low (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -68,7 +68,7 @@
         "gpt-5.4-medium": {
           "name": "GPT 5.4 Medium (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -93,7 +93,7 @@
         "gpt-5.4-high": {
           "name": "GPT 5.4 High (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -118,7 +118,7 @@
         "gpt-5.4-xhigh": {
           "name": "GPT 5.4 Extra High (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -143,7 +143,7 @@
         "gpt-5.4-mini-none": {
           "name": "GPT 5.4 Mini None (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -168,7 +168,7 @@
         "gpt-5.4-mini-low": {
           "name": "GPT 5.4 Mini Low (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -193,7 +193,7 @@
         "gpt-5.4-mini-medium": {
           "name": "GPT 5.4 Mini Medium (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -218,7 +218,7 @@
         "gpt-5.4-mini-high": {
           "name": "GPT 5.4 Mini High (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -243,7 +243,207 @@
         "gpt-5.4-mini-xhigh": {
           "name": "GPT 5.4 Mini Extra High (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-pro-medium": {
+          "name": "GPT 5.4 Pro Medium (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-pro-high": {
+          "name": "GPT 5.4 Pro High (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-pro-xhigh": {
+          "name": "GPT 5.4 Pro Extra High (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-nano-none": {
+          "name": "GPT 5.4 Nano None (OAuth)",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "none",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-nano-low": {
+          "name": "GPT 5.4 Nano Low (OAuth)",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "low",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-nano-medium": {
+          "name": "GPT 5.4 Nano Medium (OAuth)",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-nano-high": {
+          "name": "GPT 5.4 Nano High (OAuth)",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.4-nano-xhigh": {
+          "name": "GPT 5.4 Nano Extra High (OAuth)",
+          "limit": {
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -268,7 +468,7 @@
         "gpt-5.1-codex-max-low": {
           "name": "GPT 5.1 Codex Max Low (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -293,7 +493,7 @@
         "gpt-5.1-codex-max-medium": {
           "name": "GPT 5.1 Codex Max Medium (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -318,7 +518,7 @@
         "gpt-5.1-codex-max-high": {
           "name": "GPT 5.1 Codex Max High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -343,7 +543,7 @@
         "gpt-5.1-codex-max-xhigh": {
           "name": "GPT 5.1 Codex Max Extra High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -368,7 +568,7 @@
         "gpt-5.1-codex-low": {
           "name": "GPT 5.1 Codex Low (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -393,7 +593,7 @@
         "gpt-5.1-codex-medium": {
           "name": "GPT 5.1 Codex Medium (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -418,7 +618,7 @@
         "gpt-5.1-codex-high": {
           "name": "GPT 5.1 Codex High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -443,7 +643,7 @@
         "gpt-5.1-codex-mini-medium": {
           "name": "GPT 5.1 Codex Mini Medium (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -468,7 +668,7 @@
         "gpt-5.1-codex-mini-high": {
           "name": "GPT 5.1 Codex Mini High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -593,7 +793,7 @@
         "gpt-5-codex-low": {
           "name": "GPT 5 Codex Low (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -618,7 +818,7 @@
         "gpt-5-codex-medium": {
           "name": "GPT 5 Codex Medium (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
@@ -643,7 +843,7 @@
         "gpt-5-codex-high": {
           "name": "GPT 5 Codex High (OAuth)",
           "limit": {
-            "context": 272000,
+            "context": 400000,
             "output": 128000
           },
           "modalities": {
