@@ -71,10 +71,8 @@ describe("GPT-5.4 Model Support", () => {
 			expect(getNormalizedModel("gpt-5.4-pro")).toBe("gpt-5.4-pro");
 		});
 
-		it("should normalize all gpt-5.4-pro reasoning effort variants", () => {
+		it("should normalize supported gpt-5.4-pro reasoning effort variants", () => {
 			const variants = [
-				"gpt-5.4-pro-none",
-				"gpt-5.4-pro-low",
 				"gpt-5.4-pro-medium",
 				"gpt-5.4-pro-high",
 				"gpt-5.4-pro-xhigh",
@@ -84,6 +82,11 @@ describe("GPT-5.4 Model Support", () => {
 				expect(normalizeModel(variant)).toBe("gpt-5.4-pro");
 				expect(getNormalizedModel(variant)).toBe("gpt-5.4-pro");
 			}
+		});
+
+		it("should not have MODEL_MAP entries for unsupported pro-none and pro-low", () => {
+			expect(getNormalizedModel("gpt-5.4-pro-none")).toBeUndefined();
+			expect(getNormalizedModel("gpt-5.4-pro-low")).toBeUndefined();
 		});
 
 		it("should handle gpt-5.4-pro with provider prefix", () => {
@@ -104,8 +107,8 @@ describe("GPT-5.4 Model Support", () => {
 
 		it("should handle gpt-5.4-pro in MODEL_MAP", () => {
 			expect(MODEL_MAP["gpt-5.4-pro"]).toBe("gpt-5.4-pro");
-			expect(MODEL_MAP["gpt-5.4-pro-none"]).toBe("gpt-5.4-pro");
-			expect(MODEL_MAP["gpt-5.4-pro-low"]).toBe("gpt-5.4-pro");
+			expect(MODEL_MAP["gpt-5.4-pro-none"]).toBeUndefined();
+			expect(MODEL_MAP["gpt-5.4-pro-low"]).toBeUndefined();
 			expect(MODEL_MAP["gpt-5.4-pro-medium"]).toBe("gpt-5.4-pro");
 			expect(MODEL_MAP["gpt-5.4-pro-high"]).toBe("gpt-5.4-pro");
 			expect(MODEL_MAP["gpt-5.4-pro-xhigh"]).toBe("gpt-5.4-pro");
@@ -270,10 +273,10 @@ describe("GPT-5.4 Model Support", () => {
 			expect(config.effort).toBe("high");
 		});
 
-		it("should not support 'none' for gpt-5.4-pro (codex/pro models)", () => {
+		it("should coerce 'none' to 'medium' for gpt-5.4-pro (none→low→medium chain)", () => {
 			const config = getReasoningConfig("gpt-5.4-pro", { reasoningEffort: "none" });
 			expect(config.effort).not.toBe("none");
-			expect(config.effort).toBe("low");
+			expect(config.effort).toBe("medium");
 		});
 
 		it("should support xhigh reasoning for gpt-5.4-pro", () => {
@@ -387,10 +390,10 @@ describe("GPT-5.4 Model Support", () => {
 	});
 
 	describe("GPT-5.4 Integration with Existing Models", () => {
-		it("should map legacy gpt-5 aliases to gpt-5.4", () => {
+		it("should map legacy gpt-5 aliases to correct gpt-5.4 variants", () => {
 			expect(normalizeModel("gpt-5")).toBe("gpt-5.4");
-			expect(normalizeModel("gpt-5-mini")).toBe("gpt-5.4");
-			expect(normalizeModel("gpt-5-nano")).toBe("gpt-5.4");
+			expect(normalizeModel("gpt-5-mini")).toBe("gpt-5.4-mini");
+			expect(normalizeModel("gpt-5-nano")).toBe("gpt-5.4-nano");
 			expect(getNormalizedModel("gpt-5")).toBe("gpt-5.4");
 		});
 
@@ -480,7 +483,7 @@ describe("GPT-5.4 Model Support", () => {
 
 			for (const key of gpt54Keys) {
 				const normalized = MODEL_MAP[key];
-				expect(normalized).toMatch(/^gpt-5\.4(-pro|-mini)?$/);
+				expect(normalized).toMatch(/^gpt-5\.4(-pro|-mini|-nano)?$/);
 			}
 		});
 	});

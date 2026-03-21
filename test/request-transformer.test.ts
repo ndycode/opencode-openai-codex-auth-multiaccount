@@ -31,9 +31,14 @@ describe('Request Transformer Module', () => {
 			expect(normalizeModel('custom-gpt-5-codex-variant')).toBe('gpt-5-codex');
 		});
 
-		it('should normalize legacy gpt-5 variants to gpt-5.4', () => {
-			expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.4');
-			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.4');
+		it('should normalize legacy gpt-5 aliases to proper canonical models', () => {
+			expect(normalizeModel('gpt-5-mini')).toBe('gpt-5.4-mini');
+			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.4-nano');
+		});
+
+		it('should normalize gpt-5.4 nano patterns', () => {
+			expect(normalizeModel('gpt 5.4 nano high')).toBe('gpt-5.4-nano');
+			expect(normalizeModel('GPT-5.4-Nano')).toBe('gpt-5.4-nano');
 		});
 
 		it('should return gpt-5.4 as default for unknown models', () => {
@@ -392,8 +397,33 @@ describe('Request Transformer Module', () => {
 				expect(getReasoningConfig('gpt-5.4-mini', { reasoningEffort: 'xhigh' }).effort).toBe('xhigh');
 			});
 
-			it('should downgrade legacy gpt-5-mini none requests to low', () => {
-				expect(getReasoningConfig('gpt-5-mini', { reasoningEffort: 'none' }).effort).toBe('low');
+			it('should support none effort for gpt-5-mini (maps to gpt-5.4-mini)', () => {
+				expect(getReasoningConfig('gpt-5-mini', { reasoningEffort: 'none' }).effort).toBe('none');
+			});
+
+			it('should coerce Pro low effort to medium', () => {
+				const result = getReasoningConfig('gpt-5.4-pro', { reasoningEffort: 'low' });
+				expect(result.effort).toBe('medium');
+			});
+
+			it('should keep Pro medium effort as medium', () => {
+				const result = getReasoningConfig('gpt-5.4-pro', { reasoningEffort: 'medium' });
+				expect(result.effort).toBe('medium');
+			});
+
+			it('should support none effort for gpt-5.4-nano', () => {
+				const result = getReasoningConfig('gpt-5.4-nano', { reasoningEffort: 'none' });
+				expect(result.effort).toBe('none');
+			});
+
+			it('should support xhigh effort for gpt-5.4-nano', () => {
+				const result = getReasoningConfig('gpt-5.4-nano', { reasoningEffort: 'xhigh' });
+				expect(result.effort).toBe('xhigh');
+			});
+
+			it('should default gpt-5.4-nano effort to high', () => {
+				const result = getReasoningConfig('gpt-5.4-nano');
+				expect(result.effort).toBe('high');
 			});
 		});
 
@@ -797,7 +827,7 @@ describe('Request Transformer Module', () => {
 				input: [],
 			};
 			const result = await transformRequestBody(body, codexInstructions);
-			expect(result.model).toBe('gpt-5.4');  // legacy gpt-5 aliases now map to gpt-5.4
+			expect(result.model).toBe('gpt-5.4-mini');  // gpt-5-mini now maps to gpt-5.4-mini
 		});
 
 		it('should apply default reasoning config', async () => {
@@ -1670,7 +1700,7 @@ describe('Request Transformer Module', () => {
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
 			expect(result.model).toBe('gpt-5.4-pro');
-			expect(result.reasoning?.effort).toBe('low');
+			expect(result.reasoning?.effort).toBe('medium');
 		});
 
 		it('should preserve xhigh for GPT-5.4-pro when requested', async () => {
@@ -1869,13 +1899,13 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.effort).toBe('minimal');
 		});
 
-		it('should use minimal effort for lightweight models', async () => {
+		it('should use high effort for gpt-5-nano (maps to gpt-5.4-nano)', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5-nano',
 				input: [],
 			};
 			const result = await transformRequestBody(body, codexInstructions);
-			expect(result.reasoning?.effort).toBe('minimal');
+			expect(result.reasoning?.effort).toBe('high');
 		});
 
 		it('should convert orphaned function_call_output to message to preserve context', async () => {
@@ -2206,7 +2236,7 @@ describe('Request Transformer Module', () => {
 					expect(result.store).toBe(false);
 				});
 
-				it('should handle gpt-5-mini normalizing to gpt-5.4', async () => {
+				it('should handle gpt-5-mini normalizing to gpt-5.4-mini', async () => {
 					const body: RequestBody = {
 						model: 'gpt-5-mini',
 						input: []
@@ -2214,11 +2244,11 @@ describe('Request Transformer Module', () => {
 
 					const result = await transformRequestBody(body, codexInstructions);
 
-					expect(result.model).toBe('gpt-5.4');  // legacy gpt-5 aliases now map to gpt-5.4
-					expect(result.reasoning?.effort).toBe('minimal');  // Lightweight gpt-5-mini defaults to minimal
+					expect(result.model).toBe('gpt-5.4-mini');  // gpt-5-mini now maps to gpt-5.4-mini
+					expect(result.reasoning?.effort).toBe('high');  // First-class gpt-5.4-mini defaults to high
 				});
 
-				it('should preserve xhigh effort for gpt-5-mini (normalized to gpt-5.4)', async () => {
+				it('should preserve xhigh effort for gpt-5-mini (normalized to gpt-5.4-mini)', async () => {
 					const body: RequestBody = {
 						model: 'gpt-5-mini',
 						input: [],
@@ -2227,11 +2257,11 @@ describe('Request Transformer Module', () => {
 
 					const result = await transformRequestBody(body, codexInstructions);
 
-					expect(result.model).toBe('gpt-5.4');
+					expect(result.model).toBe('gpt-5.4-mini');
 					expect(result.reasoning?.effort).toBe('xhigh');
 				});
 
-				it('should preserve xhigh effort for gpt-5-nano (normalized to gpt-5.4)', async () => {
+				it('should preserve xhigh effort for gpt-5-nano (normalized to gpt-5.4-nano)', async () => {
 					const body: RequestBody = {
 						model: 'gpt-5-nano',
 						input: [],
@@ -2240,7 +2270,7 @@ describe('Request Transformer Module', () => {
 
 					const result = await transformRequestBody(body, codexInstructions);
 
-					expect(result.model).toBe('gpt-5.4');
+					expect(result.model).toBe('gpt-5.4-nano');
 					expect(result.reasoning?.effort).toBe('xhigh');
 				});
 			});
