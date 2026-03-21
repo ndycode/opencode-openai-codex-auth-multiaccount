@@ -1437,12 +1437,22 @@ describe('Request Transformer Module', () => {
 			expect(result.input![0].role).toBe('user');
 		});
 
-		it('should remove unsupported parameters', async () => {
+		it('should preserve max_output_tokens while removing max_completion_tokens', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',
 				input: [],
 				max_output_tokens: 1000,
 				max_completion_tokens: 2000,
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+			expect(result.max_output_tokens).toBe(1000);
+			expect(result.max_completion_tokens).toBeUndefined();
+		});
+
+		it('should leave max_output_tokens unset when not provided', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
 			};
 			const result = await transformRequestBody(body, codexInstructions);
 			expect(result.max_output_tokens).toBeUndefined();

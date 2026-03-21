@@ -1088,7 +1088,6 @@ export async function transformRequestBody(
 	body.include = resolveInclude(modelConfig, body);
 
 	// Remove unsupported parameters
-	body.max_output_tokens = undefined;
 	body.max_completion_tokens = undefined;
 
 	return body;
