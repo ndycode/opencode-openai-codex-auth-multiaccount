@@ -421,6 +421,12 @@ function extractRuntimeToolNames(tools: unknown): string[] {
 	for (const tool of tools) {
 		if (!tool || typeof tool !== "object") continue;
 
+		const toolType = (tool as { type?: unknown }).type;
+		if (typeof toolType === "string" && toolType.trim() && toolType !== "function") {
+			names.push(toolType);
+			continue;
+		}
+
 		const directName = (tool as { name?: unknown }).name;
 		if (typeof directName === "string" && directName.trim()) {
 			names.push(directName);

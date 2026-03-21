@@ -754,6 +754,22 @@ describe('Request Transformer Module', () => {
 		it('should return undefined for undefined input', () => {
 			expect(addCodexBridgeMessage(undefined, true)).toBeUndefined();
 		});
+
+		it('should list built-in Responses tools in the runtime manifest', () => {
+			const input: InputItem[] = [
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+			const result = addCodexBridgeMessage(input, true, [
+				{ type: 'web_search_preview', search_context_size: 'medium' },
+				{ type: 'file_search', vector_store_ids: ['vs_123'] },
+				{ type: 'function', function: { name: 'read_file' } },
+			]);
+
+			const bridgeText = (result?.[0].content as any)[0].text;
+			expect(bridgeText).toContain('`web_search_preview`');
+			expect(bridgeText).toContain('`file_search`');
+			expect(bridgeText).toContain('`read_file`');
+		});
 	});
 
 		describe('transformRequestBody', () => {
@@ -1447,6 +1463,27 @@ describe('Request Transformer Module', () => {
 			const result = await transformRequestBody(body, codexInstructions);
 			expect(result.max_output_tokens).toBeUndefined();
 			expect(result.max_completion_tokens).toBeUndefined();
+		});
+
+		it('should preserve newer Responses passthrough fields', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5',
+				input: [],
+				previous_response_id: 'resp_123',
+				parallel_tool_calls: true,
+				service_tier: 'auto',
+				metadata: { source: 'test-suite' },
+				tool_choice: 'auto',
+				truncation: 'auto',
+			};
+			const result = await transformRequestBody(body, codexInstructions);
+
+			expect(result.previous_response_id).toBe('resp_123');
+			expect(result.parallel_tool_calls).toBe(true);
+			expect(result.service_tier).toBe('auto');
+			expect(result.metadata).toEqual({ source: 'test-suite' });
+			expect(result.tool_choice).toBe('auto');
+			expect(result.truncation).toBe('auto');
 		});
 
 		it('should normalize minimal to low for gpt-5-codex', async () => {
