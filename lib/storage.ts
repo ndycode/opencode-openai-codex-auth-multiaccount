@@ -1,6 +1,6 @@
 import { promises as fs, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
@@ -1210,17 +1210,12 @@ function analyzeImportedAccounts(
 	importedAccounts: AccountStorageV3["accounts"],
 ): ImportPreviewResult & { accounts: AccountMetadataV3[] } {
 	const merged = [...existingAccounts, ...importedAccounts];
-
-	if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-		const deduped = deduplicateAccountsForStorage(merged);
-		if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-			throw new Error(
-				`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
-			);
-		}
-	}
-
 	const accounts = deduplicateAccountsForStorage(merged);
+	if (accounts.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+		throw new Error(
+			`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${accounts.length})`,
+		);
+	}
 	const imported = Math.max(0, accounts.length - existingAccounts.length);
 	const skipped = Math.max(0, importedAccounts.length - imported);
 	return {
@@ -1230,6 +1225,14 @@ function analyzeImportedAccounts(
 		skipped,
 	};
 }
+
+/**
+ * Import preview/apply analysis is pure in-memory work: it does not touch disk
+ * and it does not log token or workspace values. The surrounding
+ * `withAccountStorageTransaction` caller keeps Windows lock-retry and
+ * serialized read-modify-write behavior; see `test/storage.test.ts` for the
+ * overlapping transaction regression and pre-import backup lock coverage.
+ */
 
 export async function previewImportAccounts(
 	filePath: string,
@@ -1313,6 +1316,7 @@ export async function importAccounts(
       let backupStatus: ImportBackupStatus = "skipped";
       let backupPath: string | undefined;
       let backupError: string | undefined;
+      let backupLogError: string | undefined;
       if (backupMode !== "none" && existingAccounts.length > 0) {
         backupPath = createTimestampedBackupPath(backupPrefix);
         try {
@@ -1321,12 +1325,20 @@ export async function importAccounts(
         } catch (error) {
           backupStatus = "failed";
           backupError = error instanceof Error ? error.message : String(error);
+          const backupCode = (error as NodeJS.ErrnoException)?.code;
+          backupLogError = backupCode
+            ? `pre-import backup failed (${backupCode})`
+            : "pre-import backup failed";
           if (backupMode === "required") {
-            throw new Error(`Pre-import backup failed: ${backupError}`);
+            throw new Error(
+              backupCode
+                ? `Pre-import backup failed (${backupCode})`
+                : "Pre-import backup failed",
+            );
           }
           log.warn("Pre-import backup failed; continuing import apply", {
-            path: backupPath,
-            error: backupError,
+            backupFile: backupPath ? basename(backupPath) : undefined,
+            error: backupLogError,
           });
         }
       }
@@ -1384,8 +1396,8 @@ export async function importAccounts(
     skipped: skippedCount,
     total,
     backupStatus,
-    backupPath,
-    backupError,
+    backupFile: backupPath ? basename(backupPath) : undefined,
+    backupError: backupError ? "available on command result" : undefined,
   });
 
   return {

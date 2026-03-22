@@ -204,6 +204,32 @@ describe("storage", () => {
       expect(loaded?.accounts[0]?.accountId).toBe("existing");
     });
 
+    it("keeps preview and apply counts aligned for the same import fixture", async () => {
+      await saveAccounts({
+        version: 3,
+        activeIndex: 0,
+        accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }],
+      });
+
+      await fs.writeFile(
+        exportPath,
+        JSON.stringify({
+          version: 3,
+          activeIndex: 0,
+          accounts: [{ accountId: "preview", refreshToken: "ref2", addedAt: 3, lastUsed: 4 }],
+        }),
+      );
+
+      const preview = await previewImportAccounts(exportPath);
+      const applied = await importAccounts(exportPath);
+
+      expect(preview).toMatchObject({
+        imported: applied.imported,
+        skipped: applied.skipped,
+        total: applied.total,
+      });
+    });
+
     it("creates timestamped backup paths in storage backups directory", () => {
       const path = createTimestampedBackupPath();
       const expectedBackupDir = join(dirname(testStoragePath), "backups");
@@ -730,7 +756,7 @@ describe("storage", () => {
             preImportBackupPrefix: "codex-pre-import-backup",
             backupMode: "required",
           }),
-        ).rejects.toThrow(/Pre-import backup failed: Timed out writing file/);
+        ).rejects.toThrow("Pre-import backup failed");
       } finally {
         writeSpy.mockRestore();
       }
