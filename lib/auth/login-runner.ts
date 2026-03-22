@@ -24,6 +24,16 @@ export type AccountSelectionResult = {
 	variantsForPersistence: TokenSuccessWithAccount[];
 };
 
+export type PersistAccountSelections = (
+	results: TokenSuccessWithAccount[],
+	replaceAll: boolean,
+) => Promise<void>;
+
+export type AccountSelectionFallbacks = Pick<
+	TokenSuccessWithAccount,
+	"accountIdOverride" | "accountIdSource" | "organizationIdOverride" | "accountLabel"
+>;
+
 const createSelectionVariant = (
 	tokens: TokenSuccess,
 	candidate: {
@@ -102,6 +112,71 @@ export function resolveAccountSelection(tokens: TokenSuccess): AccountSelectionR
 		primary,
 		variantsForPersistence,
 	};
+}
+
+export function applyAccountSelectionFallbacks(
+	selection: AccountSelectionResult,
+	fallbacks: AccountSelectionFallbacks,
+): AccountSelectionResult {
+	const primary = { ...selection.primary };
+	let variantsForPersistence = selection.variantsForPersistence.map((variant) =>
+		variant === selection.primary ? primary : { ...variant },
+	);
+
+	const accountIdOverride = fallbacks.accountIdOverride?.trim();
+	if (!primary.accountIdOverride && accountIdOverride) {
+		primary.accountIdOverride = accountIdOverride;
+		primary.accountIdSource = fallbacks.accountIdSource ?? "manual";
+		variantsForPersistence = [primary];
+	}
+
+	const organizationIdOverride = fallbacks.organizationIdOverride?.trim();
+	if (!primary.organizationIdOverride && organizationIdOverride) {
+		primary.organizationIdOverride = organizationIdOverride;
+	}
+
+	const accountLabel = fallbacks.accountLabel?.trim();
+	if (!primary.accountLabel && accountLabel) {
+		primary.accountLabel = accountLabel;
+	}
+
+	return {
+		primary,
+		variantsForPersistence,
+	};
+}
+
+export async function persistResolvedAccountSelection(
+	selection: AccountSelectionResult,
+	options?: {
+		persistSelections?: PersistAccountSelections;
+		replaceAll?: boolean;
+	},
+): Promise<AccountSelectionResult> {
+	if (!options?.persistSelections) {
+		return selection;
+	}
+
+	await options.persistSelections(
+		selection.variantsForPersistence,
+		options.replaceAll ?? false,
+	);
+	return selection;
+}
+
+export async function resolveAndPersistAccountSelection(
+	tokens: TokenSuccess,
+	options?: {
+		fallbacks?: AccountSelectionFallbacks;
+		persistSelections?: PersistAccountSelections;
+		replaceAll?: boolean;
+	},
+): Promise<AccountSelectionResult> {
+	let selection = resolveAccountSelection(tokens);
+	if (options?.fallbacks) {
+		selection = applyAccountSelectionFallbacks(selection, options.fallbacks);
+	}
+	return persistResolvedAccountSelection(selection, options);
 }
 
 /**

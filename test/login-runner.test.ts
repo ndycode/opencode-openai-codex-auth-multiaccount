@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	applyAccountSelectionFallbacks,
 	persistAccountPool,
+	resolveAccountSelection,
+	resolveAndPersistAccountSelection,
 	type TokenSuccessWithAccount,
 } from "../lib/auth/login-runner.js";
 import { loadAccounts, setStoragePathDirect } from "../lib/storage.js";
@@ -92,5 +95,59 @@ describe("login-runner persistAccountPool", () => {
 		} finally {
 			resolveFirstRename?.();
 		}
+	});
+});
+
+describe("login-runner selection finalization", () => {
+	it("applies flagged-account fallbacks without overwriting resolved ids", () => {
+		const selection = resolveAccountSelection({
+			type: "success",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			idToken: "id-token",
+			accountIdOverride: "resolved-account",
+			organizationIdOverride: "resolved-org",
+			accountLabel: "Resolved label",
+		});
+
+		const updated = applyAccountSelectionFallbacks(selection, {
+			accountIdOverride: "flagged-account",
+			accountIdSource: "manual",
+			organizationIdOverride: "flagged-org",
+			accountLabel: "Flagged label",
+		});
+
+		expect(updated.primary.accountIdOverride).toBe("resolved-account");
+		expect(updated.primary.organizationIdOverride).toBe("resolved-org");
+		expect(updated.primary.accountLabel).toBe("Resolved label");
+		expect(updated.variantsForPersistence).toHaveLength(selection.variantsForPersistence.length);
+	});
+
+	it("resolves and persists the selected variants through the shared callback", async () => {
+		const persistSelections = vi.fn(async () => {});
+		const result = await resolveAndPersistAccountSelection(
+			{
+				type: "success",
+				access: "persist-access",
+				refresh: "persist-refresh",
+				expires: Date.now() + 60_000,
+				idToken: "persist-id",
+			},
+			{
+				persistSelections,
+				replaceAll: true,
+				fallbacks: {
+					accountIdOverride: "flagged-account",
+					accountIdSource: "manual",
+					accountLabel: "Flagged label",
+				},
+			},
+		);
+
+		expect(result.primary.accountIdOverride).toBe("flagged-account");
+		expect(result.primary.accountLabel).toBe("Flagged label");
+		expect(persistSelections).toHaveBeenCalledTimes(1);
+		expect(persistSelections).toHaveBeenCalledWith(result.variantsForPersistence, true);
 	});
 });
