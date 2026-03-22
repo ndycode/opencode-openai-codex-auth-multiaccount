@@ -38,7 +38,10 @@ import {
 	createDeviceCodeSession,
 } from "./lib/auth/device-code.js";
 import {
+	applyAccountSelectionFallbacks,
+	persistResolvedAccountSelection,
 	persistAccountPool,
+	resolveAndPersistAccountSelection,
 	resolveAccountSelection,
 	type AccountSelectionResult,
 	type TokenSuccessWithAccount,
@@ -617,7 +620,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			pkce: { verifier: string },
 			url: string,
 			expectedState: string,
-			onSuccess?: (selection: AccountSelectionResult) => Promise<void>,
+			replaceAll: boolean,
 		) => ({
                 url,
                 method: "code" as const,
@@ -657,10 +660,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				REDIRECT_URI,
 			);
 			if (tokens?.type === "success") {
-								const resolved = resolveAccountSelection(tokens);
-								if (onSuccess) {
-										await onSuccess(resolved);
-								}
+								const resolved = await resolveAndPersistAccountSelection(tokens, {
+									persistSelections: persistAuthenticatedSelections,
+									replaceAll,
+								});
 								return resolved.primary;
 						}
                         return tokens?.type === "failed"
@@ -3095,24 +3098,21 @@ while (attempted.size < Math.max(1, accountCount)) {
 												typeof cached.refreshToken === "string" && cached.refreshToken.trim()
 													? cached.refreshToken.trim()
 													: flagged.refreshToken;
-											const resolved = resolveAccountSelection({
+										const resolved = applyAccountSelectionFallbacks(
+											resolveAccountSelection({
 												type: "success",
 												access: cached.accessToken,
 												refresh: refreshToken,
 												expires: cached.expiresAt,
-											multiAccount: true,
-										});
-										if (!resolved.primary.accountIdOverride && flagged.accountId) {
-											resolved.primary.accountIdOverride = flagged.accountId;
-											resolved.primary.accountIdSource = flagged.accountIdSource ?? "manual";
-											resolved.variantsForPersistence = [resolved.primary];
-										}
-										if (!resolved.primary.organizationIdOverride && flagged.organizationId) {
-											resolved.primary.organizationIdOverride = flagged.organizationId;
-										}
-										if (!resolved.primary.accountLabel && flagged.accountLabel) {
-											resolved.primary.accountLabel = flagged.accountLabel;
-										}
+												multiAccount: true,
+											}),
+											{
+												accountIdOverride: flagged.accountId,
+												accountIdSource: flagged.accountIdSource ?? "manual",
+												organizationIdOverride: flagged.organizationId,
+												accountLabel: flagged.accountLabel,
+											},
+										);
 										restored.push(...resolved.variantsForPersistence);
 										console.log(
 												`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED (Codex CLI cache)`,
@@ -3129,18 +3129,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 											continue;
 										}
 
-									const resolved = resolveAccountSelection(refreshResult);
-									if (!resolved.primary.accountIdOverride && flagged.accountId) {
-										resolved.primary.accountIdOverride = flagged.accountId;
-										resolved.primary.accountIdSource = flagged.accountIdSource ?? "manual";
-										resolved.variantsForPersistence = [resolved.primary];
-									}
-									if (!resolved.primary.organizationIdOverride && flagged.organizationId) {
-										resolved.primary.organizationIdOverride = flagged.organizationId;
-									}
-									if (!resolved.primary.accountLabel && flagged.accountLabel) {
-										resolved.primary.accountLabel = flagged.accountLabel;
-									}
+									const resolved = applyAccountSelectionFallbacks(
+										resolveAccountSelection(refreshResult),
+										{
+											accountIdOverride: flagged.accountId,
+											accountIdSource: flagged.accountIdSource ?? "manual",
+											organizationIdOverride: flagged.organizationId,
+											accountLabel: flagged.accountLabel,
+										},
+									);
 									restored.push(...resolved.variantsForPersistence);
 									console.log(`[${i + 1}/${flaggedStorage.accounts.length}] ${label}: RESTORED`);
 									} catch (error) {
@@ -3342,12 +3339,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 							if (useManualMode) {
 								const { pkce, state, url } = await createAuthorizationFlow();
-								return buildManualOAuthFlow(pkce, url, state, async (selection) => {
-									await persistAuthenticatedSelections(
-										selection.variantsForPersistence,
-										startFresh,
-									);
-								});
+								return buildManualOAuthFlow(pkce, url, state, startFresh);
 							}
 
 							const explicitCountProvided =
@@ -3358,12 +3350,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 								const forceNewLogin = accounts.length > 0 || refreshAccountIndex !== undefined;
 								const result = await runOAuthFlow(forceNewLogin);
 
+								let selection: AccountSelectionResult | null = null;
 								let resolved: TokenSuccessWithAccount | null = null;
-								let variantsForPersistence: TokenSuccessWithAccount[] = [];
 								if (result.type === "success") {
-									const selection = resolveAccountSelection(result);
+									selection = resolveAccountSelection(result);
 									resolved = selection.primary;
-									variantsForPersistence = selection.variantsForPersistence;
 									const email = extractAccountEmail(resolved.access, resolved.idToken);
 									const accountId = resolved.accountIdOverride ?? extractAccountId(resolved.access);
 									const label = resolved.accountLabel ?? email ?? accountId ?? "Unknown account";
@@ -3394,7 +3385,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									break;
 								}
 
-								if (!resolved) {
+								if (!selection || !resolved) {
 									continue;
 								}
 
@@ -3402,12 +3393,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								await showToast(`Account ${accounts.length} authenticated`, "success");
 
 								const isFirstAccount = accounts.length === 1;
-								const entriesToPersist =
-									variantsForPersistence.length > 0 ? variantsForPersistence : [resolved];
-								await persistAuthenticatedSelections(
-									entriesToPersist,
-									isFirstAccount && startFresh,
-								);
+								await persistResolvedAccountSelection(selection, {
+									persistSelections: persistAuthenticatedSelections,
+									replaceAll: isFirstAccount && startFresh,
+								});
 
 								if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
 									break;
@@ -3490,11 +3479,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return result;
 									}
 
-									const selection = resolveAccountSelection(result);
-									await persistAuthenticatedSelections(
-										selection.variantsForPersistence,
-										false,
-									);
+									const selection = await resolveAndPersistAccountSelection(result, {
+										persistSelections: persistAuthenticatedSelections,
+										replaceAll: false,
+									});
 									return selection.primary;
 								},
 							};
@@ -3513,12 +3501,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 
 							const { pkce, state, url } = await createAuthorizationFlow();
-							return buildManualOAuthFlow(pkce, url, state, async (selection) => {
-								await persistAuthenticatedSelections(
-									selection.variantsForPersistence,
-									false,
-								);
-							});
+							return buildManualOAuthFlow(pkce, url, state, false);
                                                 },
                                         },
                         ],

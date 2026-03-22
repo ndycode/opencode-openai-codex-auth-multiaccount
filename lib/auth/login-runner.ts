@@ -24,6 +24,19 @@ export type AccountSelectionResult = {
 	variantsForPersistence: TokenSuccessWithAccount[];
 };
 
+export type PersistAccountSelections = (
+	results: TokenSuccessWithAccount[],
+	replaceAll: boolean,
+) => Promise<void>;
+
+export type AccountSelectionFallbacks = Pick<
+	TokenSuccessWithAccount,
+	"accountIdOverride" | "accountIdSource" | "organizationIdOverride" | "accountLabel"
+>;
+
+const PERSIST_AUTHENTICATED_SELECTIONS_ERROR =
+	"Failed to persist authenticated account selections.";
+
 const createSelectionVariant = (
 	tokens: TokenSuccess,
 	candidate: {
@@ -102,6 +115,106 @@ export function resolveAccountSelection(tokens: TokenSuccess): AccountSelectionR
 		primary,
 		variantsForPersistence,
 	};
+}
+
+export function applyAccountSelectionFallbacks(
+	selection: AccountSelectionResult,
+	fallbacks: AccountSelectionFallbacks,
+): AccountSelectionResult {
+	const primary = { ...selection.primary };
+	const primaryAccountId = selection.primary.accountIdOverride?.trim();
+	const primaryOrganizationId = selection.primary.organizationIdOverride?.trim();
+	const shouldReusePrimaryVariant =
+		(primaryAccountId?.length ?? 0) > 0 || (primaryOrganizationId?.length ?? 0) > 0;
+	// Callers may deep-clone `selection.primary`, so reuse the updated primary by
+	// persisted account identity instead of relying on object aliasing.
+	let variantsForPersistence = selection.variantsForPersistence.map((variant) =>
+		variant === selection.primary ||
+		(shouldReusePrimaryVariant &&
+			(variant.accountIdOverride?.trim() ?? "") === (primaryAccountId ?? "") &&
+			(variant.organizationIdOverride?.trim() ?? "") === (primaryOrganizationId ?? ""))
+			? primary
+			: { ...variant },
+	);
+
+	const accountIdOverride = fallbacks.accountIdOverride?.trim();
+	if (!primary.accountIdOverride && accountIdOverride) {
+		primary.accountIdOverride = accountIdOverride;
+		primary.accountIdSource = fallbacks.accountIdSource ?? "manual";
+		variantsForPersistence = [primary];
+	}
+
+	const organizationIdOverride = fallbacks.organizationIdOverride?.trim();
+	if (!primary.organizationIdOverride && organizationIdOverride) {
+		primary.organizationIdOverride = organizationIdOverride;
+	}
+
+	const accountLabel = fallbacks.accountLabel?.trim();
+	if (!primary.accountLabel && accountLabel) {
+		primary.accountLabel = accountLabel;
+	}
+
+	return {
+		primary,
+		variantsForPersistence,
+	};
+}
+
+/**
+ * Persists the already-resolved selection through the caller's
+ * `persistSelections` callback. Windows filesystem safety remains delegated to
+ * that callback, so callers should use `persistAccountPool` or
+ * `withAccountStorageTransaction` to keep the rename retry and serialized
+ * read-modify-write behavior covered by `test/login-runner.test.ts`.
+ * Callback failures are rethrown with a redacted message so callers can log the
+ * wrapper safely without leaking token-file paths or account identifiers.
+ */
+export async function persistResolvedAccountSelection(
+	selection: AccountSelectionResult,
+	options?: {
+		persistSelections?: PersistAccountSelections;
+		replaceAll?: boolean;
+	},
+): Promise<AccountSelectionResult> {
+	if (!options?.persistSelections) {
+		return selection;
+	}
+
+	try {
+		await options.persistSelections(
+			selection.variantsForPersistence,
+			options.replaceAll ?? false,
+		);
+	} catch (error) {
+		throw new Error(PERSIST_AUTHENTICATED_SELECTIONS_ERROR, {
+			cause: error,
+		});
+	}
+	return selection;
+}
+
+/**
+ * Finalizes a resolved selection by delegating persistence to the caller's
+ * `persistSelections` callback. Windows lock-retry and read-modify-write
+ * serialization remain the callback's responsibility, so callers should route
+ * through `persistAccountPool` or `withAccountStorageTransaction` to preserve
+ * the guarantees covered by `test/login-runner.test.ts`.
+ * Persistence callback failures are redacted inside
+ * `persistResolvedAccountSelection()` before they propagate back to callers.
+ */
+export async function resolveAndPersistAccountSelection(
+	tokens: TokenSuccess,
+	options?: {
+		fallbacks?: AccountSelectionFallbacks;
+		persistSelections?: PersistAccountSelections;
+		replaceAll?: boolean;
+	},
+): Promise<AccountSelectionResult> {
+	let selection = resolveAccountSelection(tokens);
+	if (options?.fallbacks) {
+		selection = applyAccountSelectionFallbacks(selection, options.fallbacks);
+	}
+	return persistResolvedAccountSelection(selection, options);
 }
 
 /**
