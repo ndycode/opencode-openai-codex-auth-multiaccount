@@ -90,10 +90,10 @@ describe('Configuration Parsing', () => {
 			expect(defaultReasoning.summary).toBe('auto');
 		});
 
-		it('should use minimal effort for lightweight models (nano/mini)', () => {
+		it('should use high effort for first-class nano/mini models (resolved via alias)', () => {
 			const nanoReasoning = getReasoningConfig('gpt-5-nano', {});
 
-			expect(nanoReasoning.effort).toBe('minimal');
+			expect(nanoReasoning.effort).toBe('high');
 			expect(nanoReasoning.summary).toBe('auto');
 		});
 
@@ -167,9 +167,9 @@ describe('Configuration Parsing', () => {
 	});
 
 	describe('Model-specific behavior', () => {
-		it('should detect lightweight models correctly', () => {
+		it('should detect first-class mini model correctly (resolved via alias)', () => {
 			const miniReasoning = getReasoningConfig('gpt-5-mini', {});
-			expect(miniReasoning.effort).toBe('minimal');
+			expect(miniReasoning.effort).toBe('high');
 		});
 
 		it('should detect codex models correctly', () => {

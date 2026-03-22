@@ -38,15 +38,16 @@ describe("Model Map Module", () => {
 	      expect(MODEL_MAP["gpt-5.4-2026-03-05-high"]).toBe("gpt-5.4");
 	    });
 
-    it("contains GPT-5.4 Pro models", () => {
+    it("contains GPT-5.4 Pro models (medium/high/xhigh only)", () => {
       expect(MODEL_MAP["gpt-5.4-pro"]).toBe("gpt-5.4-pro");
-      expect(MODEL_MAP["gpt-5.4-pro-none"]).toBe("gpt-5.4-pro");
-      expect(MODEL_MAP["gpt-5.4-pro-low"]).toBe("gpt-5.4-pro");
       expect(MODEL_MAP["gpt-5.4-pro-medium"]).toBe("gpt-5.4-pro");
       expect(MODEL_MAP["gpt-5.4-pro-high"]).toBe("gpt-5.4-pro");
       expect(MODEL_MAP["gpt-5.4-pro-xhigh"]).toBe("gpt-5.4-pro");
       expect(MODEL_MAP["gpt-5.4-pro-2026-03-05"]).toBe("gpt-5.4-pro");
       expect(MODEL_MAP["gpt-5.4-pro-2026-03-05-xhigh"]).toBe("gpt-5.4-pro");
+      // none and low are not supported for Pro
+      expect(MODEL_MAP["gpt-5.4-pro-none"]).toBeUndefined();
+      expect(MODEL_MAP["gpt-5.4-pro-low"]).toBeUndefined();
     });
 
     it("contains GPT-5.4 Mini models", () => {
@@ -110,10 +111,19 @@ describe("Model Map Module", () => {
       expect(MODEL_MAP["gpt-5-codex-mini-high"]).toBe("gpt-5.1-codex-mini");
     });
 
-    it("maps legacy GPT-5 general purpose models to GPT-5.4", () => {
+    it("maps legacy GPT-5 aliases to proper canonical models", () => {
       expect(MODEL_MAP["gpt-5"]).toBe("gpt-5.4");
-      expect(MODEL_MAP["gpt-5-mini"]).toBe("gpt-5.4");
-      expect(MODEL_MAP["gpt-5-nano"]).toBe("gpt-5.4");
+      expect(MODEL_MAP["gpt-5-mini"]).toBe("gpt-5.4-mini");
+      expect(MODEL_MAP["gpt-5-nano"]).toBe("gpt-5.4-nano");
+    });
+
+    it("should map GPT-5.4 Nano model entries", () => {
+      expect(MODEL_MAP["gpt-5.4-nano"]).toBe("gpt-5.4-nano");
+      expect(MODEL_MAP["gpt-5.4-nano-none"]).toBe("gpt-5.4-nano");
+      expect(MODEL_MAP["gpt-5.4-nano-low"]).toBe("gpt-5.4-nano");
+      expect(MODEL_MAP["gpt-5.4-nano-medium"]).toBe("gpt-5.4-nano");
+      expect(MODEL_MAP["gpt-5.4-nano-high"]).toBe("gpt-5.4-nano");
+      expect(MODEL_MAP["gpt-5.4-nano-xhigh"]).toBe("gpt-5.4-nano");
     });
   });
 
@@ -125,7 +135,7 @@ describe("Model Map Module", () => {
       expect(getNormalizedModel("gpt-5.3-codex-high")).toBe("gpt-5-codex");
       expect(getNormalizedModel("gpt-5.3-codex-spark-high")).toBe("gpt-5-codex");
       expect(getNormalizedModel("gpt-5.4-high")).toBe("gpt-5.4");
-      expect(getNormalizedModel("gpt-5.4-pro-none")).toBe("gpt-5.4-pro");
+      expect(getNormalizedModel("gpt-5.4-pro-none")).toBeUndefined();
       expect(getNormalizedModel("gpt-5.4-pro-high")).toBe("gpt-5.4-pro");
       expect(getNormalizedModel("gpt-5.4-2026-03-05-medium")).toBe("gpt-5.4");
       expect(getNormalizedModel("gpt-5.4-pro-2026-03-05-medium")).toBe("gpt-5.4-pro");
@@ -170,7 +180,7 @@ describe("Model Map Module", () => {
       expect(isKnownModel("gpt-5.3-codex")).toBe(true);
       expect(isKnownModel("gpt-5.3-codex-spark")).toBe(true);
       expect(isKnownModel("gpt-5.4")).toBe(true);
-      expect(isKnownModel("gpt-5.4-pro-none")).toBe(true);
+      expect(isKnownModel("gpt-5.4-pro-none")).toBe(false);
       expect(isKnownModel("gpt-5.4-pro")).toBe(true);
       expect(isKnownModel("gpt-5.4-mini")).toBe(true);
       expect(isKnownModel("gpt-5.4-mini-high")).toBe(true);
@@ -213,6 +223,7 @@ describe("Model Map Module", () => {
         "gpt-5.4",
         "gpt-5.4-pro",
         "gpt-5.4-mini",
+        "gpt-5.4-nano",
       ]);
 
       for (const [key, value] of Object.entries(MODEL_MAP)) {
