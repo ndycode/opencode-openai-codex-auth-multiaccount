@@ -1,3 +1,8 @@
+/**
+ * Shared runtime constants and sentinel helpers only. This module is pure: it
+ * does not perform I/O, persistence, or logging, so centralizing these values
+ * does not introduce new Windows lock or token-redaction surfaces.
+ */
 export const OAUTH_CALLBACK_LOOPBACK_HOST = "127.0.0.1";
 export const OAUTH_CALLBACK_PORT = 1455;
 export const OAUTH_CALLBACK_PATH = "/auth/callback";
@@ -16,4 +21,8 @@ export function isDeactivatedWorkspaceErrorMessage(message: string | undefined):
 
 export function createUsageRequestTimeoutError(): Error {
 	return new Error(USAGE_REQUEST_TIMEOUT_MESSAGE);
+}
+
+export function isUsageRequestTimeoutMessage(message: string | undefined): boolean {
+	return message === USAGE_REQUEST_TIMEOUT_MESSAGE;
 }
