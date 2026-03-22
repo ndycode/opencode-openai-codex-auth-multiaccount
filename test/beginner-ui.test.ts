@@ -237,8 +237,8 @@ describe("formatPromptCacheKey", () => {
 		expect(formatPromptCacheKey("   ")).toBe("none");
 	});
 
-	it("keeps short values as-is", () => {
-		expect(formatPromptCacheKey("ses_1234")).toBe("ses_1234");
+	it("redacts short values too", () => {
+		expect(formatPromptCacheKey("ses_1234")).toBe("ses_1234...");
 	});
 
 	it("redacts longer values to an 8-char prefix", () => {
