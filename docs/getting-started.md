@@ -76,8 +76,9 @@ The browser-based OAuth flow uses the same local callback port as Codex CLI: `ht
 If you are on SSH, WSL, or another environment where the browser callback flow is inconvenient:
 
 1. rerun `opencode auth login`
-2. choose `ChatGPT Plus/Pro (Manual URL Paste)`
-3. paste the full redirect URL after login completes in the browser
+2. choose `ChatGPT Plus/Pro MULTI (Device Code)`
+3. open the verification link, enter the one-time code, and wait for login to finish
+4. if device code is unavailable on your auth server, fall back to `ChatGPT Plus/Pro MULTI (Manual URL Paste)`
 
 ## Add the Plugin to OpenCode
 

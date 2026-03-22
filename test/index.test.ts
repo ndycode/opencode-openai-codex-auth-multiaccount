@@ -74,6 +74,29 @@ vi.mock("../lib/auth/server.js", () => ({
 	})),
 }));
 
+vi.mock("../lib/auth/device-code.js", () => ({
+	createDeviceCodeSession: vi.fn(async () => ({
+		type: "ready" as const,
+		session: {
+			verificationUrl: "https://auth.openai.com/codex/device",
+			userCode: "ABCD-EFGH",
+			deviceAuthId: "device-auth-1",
+			intervalSeconds: 1,
+		},
+	})),
+	buildDeviceCodeInstructions: vi.fn(
+		(session: { verificationUrl: string; userCode: string }) =>
+			`Open this link and sign in: ${session.verificationUrl}\nEnter this one-time code: ${session.userCode}\nThis code expires in about 15 minutes.`,
+	),
+	completeDeviceCodeSession: vi.fn(async () => ({
+		type: "success" as const,
+		access: "device-access-token",
+		refresh: "device-refresh-token",
+		expires: Date.now() + 3600_000,
+		idToken: "device-id-token",
+	})),
+}));
+
 vi.mock("../lib/cli.js", () => ({
 	promptLoginMode: vi.fn(async () => ({ mode: "add" })),
 	promptAddAnotherAccount: vi.fn(async () => false),
@@ -554,15 +577,16 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(plugin.tool["codex-import"]).toBeDefined();
 		});
 
-		it("has two auth methods", () => {
-			expect(plugin.auth.methods).toHaveLength(2);
+		it("has three auth methods", () => {
+			expect(plugin.auth.methods).toHaveLength(3);
 			expect(plugin.auth.methods[0].label).toBe("ChatGPT Plus/Pro MULTI (Codex Subscription)");
-			expect(plugin.auth.methods[1].label).toBe("ChatGPT Plus/Pro MULTI (Manual URL Paste)");
+			expect(plugin.auth.methods[1].label).toBe("ChatGPT Plus/Pro MULTI (Device Code)");
+			expect(plugin.auth.methods[2].label).toBe("ChatGPT Plus/Pro MULTI (Manual URL Paste)");
 		});
 
 		it("rejects manual OAuth callbacks with mismatched state", async () => {
 			const authModule = await import("../lib/auth/auth.js");
-			const manualMethod = plugin.auth.methods[1] as unknown as {
+			const manualMethod = plugin.auth.methods[2] as unknown as {
 				authorize: () => Promise<{
 					validate: (input: string) => string | undefined;
 					callback: (input: string) => Promise<{ type: string; reason?: string; message?: string }>;
@@ -577,6 +601,56 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result.type).toBe("failed");
 			expect(result.reason).toBe("invalid_response");
 			expect(vi.mocked(authModule.exchangeAuthorizationCode)).not.toHaveBeenCalled();
+		});
+
+		it("suggests device code when browser callback server is unavailable", async () => {
+			const serverModule = await import("../lib/auth/server.js");
+			vi.mocked(serverModule.startLocalOAuthServer).mockResolvedValueOnce({
+				ready: false,
+				close: vi.fn(),
+				waitForCode: vi.fn(async () => null),
+				port: 1455,
+			});
+
+			const autoMethod = plugin.auth.methods[0] as unknown as {
+				authorize: (inputs?: Record<string, string>) => Promise<{
+					instructions: string;
+					callback: () => Promise<{ type: string; message?: string }>;
+				}>;
+			};
+
+			const authResult = await autoMethod.authorize({ loginMode: "add", accountCount: "1" });
+			expect(authResult.instructions).toContain("Device Code");
+			expect(authResult.instructions).toContain("Manual URL Paste");
+
+			const result = await authResult.callback();
+			expect(result.type).toBe("failed");
+			expect(result.message).toContain("Device Code");
+		});
+
+		it("completes device code login and persists the account", async () => {
+			const deviceModule = await import("../lib/auth/device-code.js");
+			const deviceMethod = plugin.auth.methods[1] as unknown as {
+				authorize: () => Promise<{
+					instructions: string;
+					callback: () => Promise<{ type: string }>;
+				}>;
+			};
+
+			const authResult = await deviceMethod.authorize();
+			expect(authResult.instructions).toContain("ABCD-EFGH");
+			expect(authResult.instructions).toContain("https://auth.openai.com/codex/device");
+
+			const result = await authResult.callback();
+			expect(result.type).toBe("success");
+			expect(vi.mocked(deviceModule.createDeviceCodeSession)).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(deviceModule.completeDeviceCodeSession)).toHaveBeenCalledTimes(1);
+			expect(mockStorage.accounts).toHaveLength(1);
+			expect(mockStorage.accounts[0]).toMatchObject({
+				refreshToken: "device-refresh-token",
+				accessToken: "device-access-token",
+				accountId: "acc-1",
+			});
 		});
 	});
 

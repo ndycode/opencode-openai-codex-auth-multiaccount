@@ -79,7 +79,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			})
 			.on("error", (err: NodeJS.ErrnoException) => {
 				logError(
-					`Failed to bind http://127.0.0.1:1455 (${err?.code}). Falling back to manual paste.`,
+					`Failed to bind http://127.0.0.1:1455 (${err?.code}). Suggest device code or manual URL paste.`,
 				);
 				resolve({
 					port: 1455,

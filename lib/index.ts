@@ -5,6 +5,8 @@ export * from "./constants.js";
 export * from "./types.js";
 export * from "./logger.js";
 export * from "./auth/auth.js";
+export * from "./auth/device-code.js";
+export * from "./auth/login-runner.js";
 export * from "./request/fetch-helpers.js";
 export * from "./request/request-transformer.js";
 export * from "./request/response-handler.js";

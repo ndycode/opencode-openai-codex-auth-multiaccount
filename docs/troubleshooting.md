@@ -182,8 +182,9 @@ Failed to access Codex API
 
 1. **Manual URL paste:**
    - Re-run `opencode auth login`
-   - Select **"ChatGPT Plus/Pro (Manual URL Paste)"**
-   - Paste the full redirect URL after login
+   - Select **"ChatGPT Plus/Pro MULTI (Device Code)"** first if you are on SSH, WSL, or a headless machine
+   - If device code is unavailable, fall back to **"ChatGPT Plus/Pro MULTI (Manual URL Paste)"**
+   - Paste the full redirect URL after login when using the manual flow
 
 2. **Check port 1455 availability:**
    ```bash
@@ -207,7 +208,7 @@ Failed to access Codex API
 **Solutions:**
 - Re-run `opencode auth login` to generate a fresh URL
 - Open the URL directly in browser (don't use a stale link)
-- For SSH/WSL/remote, use **"Manual URL Paste"** option
+- For SSH/WSL/remote, use **"Device Code"** first, then **"Manual URL Paste"** if needed
 
 </details>
 
@@ -617,7 +618,7 @@ ssh -L 1455:localhost:1455 user@remote
 
 **Docker / Containers:**
 - OAuth with localhost redirect doesn't work in containers
-- Use SSH port forwarding or manual URL flow
+- Use Device Code first, then SSH port forwarding or manual URL flow if needed
 
 </details>
 
