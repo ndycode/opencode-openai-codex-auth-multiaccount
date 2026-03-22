@@ -235,6 +235,16 @@ describe("getReasoningConfig property tests", () => {
     );
   });
 
+  it("gpt-5.4-pro upgrades none to low before downstream coercion", () => {
+    fc.assert(
+      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+        const result = getReasoningConfig(model, { reasoningEffort: "none" });
+        expect(["low", "medium"]).toContain(result.effort);
+        return true;
+      })
+    );
+  });
+
   it("gpt-5.1, gpt-5.2, and gpt-5.4 general support none effort", () => {
     fc.assert(
       fc.property(
@@ -258,9 +268,12 @@ describe("getReasoningConfig property tests", () => {
 describe("transformRequestBody property tests", () => {
   it("preserves max_output_tokens across arbitrary positive integers", async () => {
     await fc.assert(
-      fc.asyncProperty(fc.integer({ min: 1, max: 1_000_000 }), async (maxOutputTokens) => {
+      fc.asyncProperty(
+        fc.constantFrom("gpt-5", "gpt-5.4-pro", "gpt-5.1-codex"),
+        fc.integer({ min: 1, max: 1_000_000 }),
+        async (model, maxOutputTokens) => {
         const body: RequestBody = {
-          model: "gpt-5",
+          model,
           input: [],
           max_output_tokens: maxOutputTokens,
         };
