@@ -5,6 +5,7 @@ import { AUTHORIZE_URL, CLIENT_ID, exchangeAuthorizationCode } from "./auth.js";
 
 const DEFAULT_DEVICE_CODE_MAX_WAIT_MS = 15 * 60 * 1000;
 const DEFAULT_DEVICE_CODE_INTERVAL_SECONDS = 5;
+const DEVICE_CODE_LOG_BODY_LIMIT = 120;
 
 export interface DeviceCodeSession {
 	verificationUrl: string;
@@ -60,6 +61,21 @@ function getErrorMessage(status: number, bodyText: string, fallback: string): st
 		return fallback;
 	}
 	return `${fallback} (${status}): ${trimmed}`;
+}
+
+// Auth-server error bodies can echo identifiers like device_auth_id, so logs keep
+// only a short prefix while the user-facing message still gets the full response.
+function getRedactedErrorBody(bodyText: string): string {
+	const trimmed = bodyText.trim();
+	if (!trimmed) {
+		return "<empty>";
+	}
+
+	if (trimmed.length <= DEVICE_CODE_LOG_BODY_LIMIT) {
+		return trimmed;
+	}
+
+	return `${trimmed.slice(0, DEVICE_CODE_LOG_BODY_LIMIT)}...`;
 }
 
 function parseIntervalSeconds(value: unknown): number {
@@ -154,7 +170,9 @@ export async function createDeviceCodeSession(options?: {
 						bodyText,
 						"Device code login could not be started",
 					);
-			logError(`device-code usercode request failed: ${response.status} ${bodyText}`);
+			logError(
+				`device-code usercode request failed: ${response.status} ${getRedactedErrorBody(bodyText)}`,
+			);
 			return {
 				type: "failed",
 				failure: {
@@ -251,7 +269,9 @@ export async function completeDeviceCodeSession(
 			}
 
 			const bodyText = await response.text().catch(() => "");
-			logError(`device-code token poll failed: ${response.status} ${bodyText}`);
+			logError(
+				`device-code token poll failed: ${response.status} ${getRedactedErrorBody(bodyText)}`,
+			);
 			return {
 				type: "failed",
 				reason: "http_error",

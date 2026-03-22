@@ -21,6 +21,7 @@ import {
 	createDeviceCodeSession,
 } from "../lib/auth/device-code.js";
 import { exchangeAuthorizationCode } from "../lib/auth/auth.js";
+import { logError } from "../lib/logger.js";
 
 describe("device-code auth", () => {
 	beforeEach(() => {
@@ -72,6 +73,20 @@ describe("device-code auth", () => {
 		}
 	});
 
+	it("redacts auth-server bodies before logging usercode failures", async () => {
+		const sensitiveBody = `device_auth_id=secret-${"x".repeat(160)}`;
+		globalThis.fetch = vi.fn(async () => new Response(sensitiveBody, { status: 500 })) as typeof fetch;
+
+		const result = await createDeviceCodeSession();
+
+		expect(result.type).toBe("failed");
+		expect(vi.mocked(logError)).toHaveBeenCalledTimes(1);
+		const [message] = vi.mocked(logError).mock.calls[0] ?? [];
+		expect(message).toContain("device-code usercode request failed: 500");
+		expect(message).not.toContain(sensitiveBody);
+		expect(message).toContain(sensitiveBody.slice(0, 120));
+	});
+
 	it("polls until an authorization code is issued and exchanges it", async () => {
 		globalThis.fetch = vi
 			.fn()
@@ -119,5 +134,24 @@ describe("device-code auth", () => {
 			reason: "unknown",
 			message: "Device code authorization timed out after 15 minutes",
 		});
+	});
+
+	it("redacts auth-server bodies before logging poll failures", async () => {
+		const sensitiveBody = `authorization_context=secret-${"y".repeat(160)}`;
+		globalThis.fetch = vi.fn(async () => new Response(sensitiveBody, { status: 500 })) as typeof fetch;
+
+		const result = await completeDeviceCodeSession({
+			verificationUrl: "https://auth.openai.com/codex/device",
+			userCode: "ABCD-EFGH",
+			deviceAuthId: "device-auth-1",
+			intervalSeconds: 1,
+		});
+
+		expect(result.type).toBe("failed");
+		expect(vi.mocked(logError)).toHaveBeenCalledTimes(1);
+		const [message] = vi.mocked(logError).mock.calls[0] ?? [];
+		expect(message).toContain("device-code token poll failed: 500");
+		expect(message).not.toContain(sensitiveBody);
+		expect(message).toContain(sensitiveBody.slice(0, 120));
 	});
 });

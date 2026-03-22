@@ -104,6 +104,13 @@ export function resolveAccountSelection(tokens: TokenSuccess): AccountSelectionR
 	};
 }
 
+/**
+ * Persists login results through the shared storage transaction so overlapping
+ * login retries serialize their read-modify-write cycle instead of racing stale
+ * snapshots. `withAccountStorageTransaction` also routes the final rename
+ * through the Windows lock retry path in `lib/storage.ts`; see
+ * `test/login-runner.test.ts` for the concurrent persist regression coverage.
+ */
 export async function persistAccountPool(
 	results: TokenSuccessWithAccount[],
 	replaceAll: boolean = false,
