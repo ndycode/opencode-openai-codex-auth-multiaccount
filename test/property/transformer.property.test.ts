@@ -244,6 +244,16 @@ describe("getReasoningConfig property tests", () => {
 	    );
   });
 
+	  it("gpt-5.4-pro upgrades minimal to medium", () => {
+	    fc.assert(
+	      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+	        const result = getReasoningConfig(model, { reasoningEffort: "minimal" });
+	        expect(result.effort).toBe("medium");
+	        return true;
+	      })
+	    );
+	  });
+
   it("gpt-5.1, gpt-5.2, and gpt-5.4 general support none effort", () => {
     fc.assert(
       fc.property(

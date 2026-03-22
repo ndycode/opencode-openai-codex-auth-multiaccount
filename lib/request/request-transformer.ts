@@ -612,7 +612,7 @@ export function getReasoningConfig(
 	// GPT-5.4 Pro only supports medium/high/xhigh reasoning.
 	// originalRequestedEffort is a non-sensitive model setting string, not a token.
 	// Logging this coercion does not introduce new redaction or filesystem-race risk.
-	if (isGpt54Pro && effort === "low") {
+	if (isGpt54Pro && (effort === "low" || effort === "minimal")) {
 		logWarn(
 			`GPT-5.4 Pro supports medium/high/xhigh only; coercing '${originalRequestedEffort}' to 'medium'`,
 		);

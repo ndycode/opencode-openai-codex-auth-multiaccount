@@ -1518,6 +1518,19 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.effort).toBe('medium');
 		});
 
+		it('should coerce minimal to medium for gpt-5.4-pro', async () => {
+			const body: RequestBody = {
+				model: 'gpt-5.4-pro',
+				input: [],
+			};
+			const userConfig: UserConfig = {
+				global: { reasoningEffort: 'minimal' },
+				models: {},
+			};
+			const result = await transformRequestBody(body, codexInstructions, userConfig);
+			expect(result.reasoning?.effort).toBe('medium');
+		});
+
 		it('should default codex-max to high effort', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5.1-codex-max',
