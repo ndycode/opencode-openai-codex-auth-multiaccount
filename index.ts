@@ -2036,6 +2036,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							);
 							runtimeMetrics.lastRequestAt = Date.now();
 							runtimeMetrics.lastPromptCacheKey = promptCacheKey ?? null;
+							if (promptCacheKey) {
+								runtimeMetrics.promptCacheEnabledRequests++;
+							} else {
+								runtimeMetrics.promptCacheMissingRequests++;
+							}
 							const retryBudget = new RetryBudgetTracker(retryBudgetLimits);
 							const consumeRetryBudget = (
 								bucket: RetryBudgetClass,
@@ -2336,17 +2341,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 								// in-memory only and run on Node's single-threaded event loop, so no
 								// filesystem locking or token-redaction concerns are introduced here.
 								runtimeMetrics.totalRequests++;
-								if (promptCacheKey) {
-									runtimeMetrics.promptCacheEnabledRequests++;
-								} else {
-									runtimeMetrics.promptCacheMissingRequests++;
-								}
 								response = await fetch(url, {
 									...requestInit,
 									headers,
 									signal: fetchController.signal,
 								});
 							} catch (networkError) {
+								if (abortSignal?.aborted && fetchController.signal.aborted) {
+									accountManager.refundToken(account, modelFamily, model);
+									if (networkError instanceof Error) {
+										throw networkError;
+									}
+									throw new Error(String(networkError));
+								}
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
 								if (
