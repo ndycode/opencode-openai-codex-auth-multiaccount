@@ -206,9 +206,44 @@ describe("login-runner selection finalization", () => {
 			throw persistError;
 		});
 
+		const result = persistResolvedAccountSelection(selection, { persistSelections });
 		await expect(
-			persistResolvedAccountSelection(selection, { persistSelections }),
-		).rejects.toThrow("persist failed");
+			result,
+		).rejects.toThrow("Failed to persist authenticated account selections.");
+		await expect(
+			result,
+		).rejects.not.toThrow("persist failed");
+		const wrapped = await result.catch((error) => error as Error & { cause?: unknown });
+
+		expect(wrapped.cause).toBe(persistError);
+		expect(wrapped.message).not.toContain("persist failed");
+		expect(
+			wrapped.message,
+		).toBe("Failed to persist authenticated account selections.");
+		expect(persistSelections).toHaveBeenCalledTimes(1);
+	});
+
+	it("redacts sensitive persistence callback failure details", async () => {
+		const selection = resolveAccountSelection({
+			type: "success",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			idToken: "id-token",
+		});
+		const persistSelections = vi.fn(async () => {
+			throw new Error(
+				"EPERM: rename C:\\Users\\neil\\.opencode\\secrets\\token-file.json for acct-123",
+			);
+		});
+
+		const wrapped = await persistResolvedAccountSelection(selection, {
+			persistSelections,
+		}).catch((error) => error as Error & { cause?: unknown });
+
+		expect(wrapped.message).toBe("Failed to persist authenticated account selections.");
+		expect(wrapped.message).not.toContain("token-file");
+		expect(wrapped.message).not.toContain("acct-123");
 		expect(persistSelections).toHaveBeenCalledTimes(1);
 	});
 });

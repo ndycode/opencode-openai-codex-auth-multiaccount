@@ -34,6 +34,9 @@ export type AccountSelectionFallbacks = Pick<
 	"accountIdOverride" | "accountIdSource" | "organizationIdOverride" | "accountLabel"
 >;
 
+const PERSIST_AUTHENTICATED_SELECTIONS_ERROR =
+	"Failed to persist authenticated account selections.";
+
 const createSelectionVariant = (
 	tokens: TokenSuccess,
 	candidate: {
@@ -163,8 +166,8 @@ export function applyAccountSelectionFallbacks(
  * that callback, so callers should use `persistAccountPool` or
  * `withAccountStorageTransaction` to keep the rename retry and serialized
  * read-modify-write behavior covered by `test/login-runner.test.ts`.
- * This helper does not log token material; callers must redact any callback
- * failure details before emitting logs.
+ * Callback failures are rethrown with a redacted message so callers can log the
+ * wrapper safely without leaking token-file paths or account identifiers.
  */
 export async function persistResolvedAccountSelection(
 	selection: AccountSelectionResult,
@@ -177,10 +180,16 @@ export async function persistResolvedAccountSelection(
 		return selection;
 	}
 
-	await options.persistSelections(
-		selection.variantsForPersistence,
-		options.replaceAll ?? false,
-	);
+	try {
+		await options.persistSelections(
+			selection.variantsForPersistence,
+			options.replaceAll ?? false,
+		);
+	} catch (error) {
+		throw new Error(PERSIST_AUTHENTICATED_SELECTIONS_ERROR, {
+			cause: error,
+		});
+	}
 	return selection;
 }
 
@@ -190,8 +199,8 @@ export async function persistResolvedAccountSelection(
  * serialization remain the callback's responsibility, so callers should route
  * through `persistAccountPool` or `withAccountStorageTransaction` to preserve
  * the guarantees covered by `test/login-runner.test.ts`.
- * This helper does not log tokens or account identifiers; callers must redact
- * callback failures before logging them.
+ * Persistence callback failures are redacted inside
+ * `persistResolvedAccountSelection()` before they propagate back to callers.
  */
 export async function resolveAndPersistAccountSelection(
 	tokens: TokenSuccess,
