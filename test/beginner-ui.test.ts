@@ -4,6 +4,7 @@ import {
 	buildBeginnerDoctorFindings,
 	explainRuntimeErrorCategory,
 	formatPromptCacheKey,
+	formatPromptCacheSnapshot,
 	recommendBeginnerNextAction,
 	summarizeBeginnerAccounts,
 	type BeginnerAccountSnapshot,
@@ -225,5 +226,18 @@ describe("formatPromptCacheKey", () => {
 
 	it("redacts longer values to an 8-char prefix", () => {
 		expect(formatPromptCacheKey("ses_prompt_cache_key_123")).toBe("ses_prom...");
+	});
+});
+
+describe("formatPromptCacheSnapshot", () => {
+	it("renders a redacted prompt cache snapshot string", () => {
+		const rendered = formatPromptCacheSnapshot({
+			promptCacheEnabledRequests: 4,
+			promptCacheMissingRequests: 1,
+			lastPromptCacheKey: "ses_prompt_cache_key_123",
+		});
+
+		expect(rendered).toBe("enabled=4, missing=1, lastKey=ses_prom...");
+		expect(rendered).not.toContain("ses_prompt_cache_key_123");
 	});
 });

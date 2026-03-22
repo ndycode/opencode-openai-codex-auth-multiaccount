@@ -158,7 +158,7 @@ import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyVa
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
-	formatPromptCacheKey,
+	formatPromptCacheSnapshot,
 	recommendBeginnerNextAction,
 	summarizeBeginnerAccounts,
 	type BeginnerAccountSnapshot,
@@ -2036,11 +2036,6 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							);
 							runtimeMetrics.lastRequestAt = Date.now();
 							runtimeMetrics.lastPromptCacheKey = promptCacheKey ?? null;
-							if (promptCacheKey) {
-								runtimeMetrics.promptCacheEnabledRequests += 1;
-							} else {
-								runtimeMetrics.promptCacheMissingRequests += 1;
-							}
 							const retryBudget = new RetryBudgetTracker(retryBudgetLimits);
 							const consumeRetryBudget = (
 								bucket: RetryBudgetClass,
@@ -2329,17 +2324,25 @@ while (attempted.size < Math.max(1, accountCount)) {
 									: null;
 
 								if (abortSignal?.aborted) {
-									clearTimeout(fetchTimeoutId);
-									fetchController.abort(abortSignal.reason ?? new Error("Aborted by user"));
-								} else if (abortSignal && onUserAbort) {
-									abortSignal.addEventListener("abort", onUserAbort, { once: true });
-								}
+								clearTimeout(fetchTimeoutId);
+								fetchController.abort(abortSignal.reason ?? new Error("Aborted by user"));
+							} else if (abortSignal && onUserAbort) {
+								abortSignal.addEventListener("abort", onUserAbort, { once: true });
+							}
 
-								try {
-								runtimeMetrics.totalRequests++;
-								response = await fetch(url, {
-									...requestInit,
-									headers,
+							try {
+							// Request metrics are tracked at the fetch boundary, so retries and account
+							// rotation are counted consistently. This is in-memory only: no filesystem I/O,
+							// no token persistence, and prompt-cache keys stay redacted in doctor output.
+							runtimeMetrics.totalRequests++;
+							if (promptCacheKey) {
+								runtimeMetrics.promptCacheEnabledRequests++;
+							} else {
+								runtimeMetrics.promptCacheMissingRequests++;
+							}
+							response = await fetch(url, {
+								...requestInit,
+								headers,
 									signal: fetchController.signal,
 								});
 				} catch (networkError) {
@@ -5217,9 +5220,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								formatUiKeyValue(
 									ui,
 									"Prompt cache",
-									runtime.promptCacheEnabledRequests > 0
-										? `enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${formatPromptCacheKey(runtime.lastPromptCacheKey)}`
-										: `enabled=0, missing=${runtime.promptCacheMissingRequests}, lastKey=none`,
+									formatPromptCacheSnapshot(runtime),
 									"muted",
 								),
 							);
@@ -5263,7 +5264,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							`  Runtime failures: failed=${runtime.failedRequests}, rateLimited=${runtime.rateLimitedResponses}, authRefreshFailed=${runtime.authRefreshFailures}, server=${runtime.serverErrors}, network=${runtime.networkErrors}`,
 						);
 						lines.push(
-							`  Prompt cache: enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${formatPromptCacheKey(runtime.lastPromptCacheKey)}`,
+							`  Prompt cache: ${formatPromptCacheSnapshot(runtime)}`,
 						);
 					}
 					return lines.join("\n");

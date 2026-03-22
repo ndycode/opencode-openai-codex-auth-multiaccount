@@ -57,6 +57,13 @@ export function formatPromptCacheKey(value: string | null | undefined): string {
 	return `${normalized.slice(0, 8)}...`;
 }
 
+export function formatPromptCacheSnapshot(runtime: Pick<
+	BeginnerRuntimeSnapshot,
+	"promptCacheEnabledRequests" | "promptCacheMissingRequests" | "lastPromptCacheKey"
+>): string {
+	return `enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${formatPromptCacheKey(runtime.lastPromptCacheKey)}`;
+}
+
 export function summarizeBeginnerAccounts(
 	accounts: BeginnerAccountSnapshot[],
 	now: number,
