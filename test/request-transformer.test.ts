@@ -772,7 +772,7 @@ describe('Request Transformer Module', () => {
 		});
 	});
 
-		describe('transformRequestBody', () => {
+	describe('transformRequestBody', () => {
 			const codexInstructions = 'Test Codex Instructions';
 
 			it('preserves existing prompt_cache_key passed by host (OpenCode)', async () => {
