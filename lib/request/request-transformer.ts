@@ -1087,7 +1087,9 @@ export async function transformRequestBody(
 	// This allows reasoning context to persist across turns without server-side storage
 	body.include = resolveInclude(modelConfig, body);
 
-	// Remove unsupported parameters
+	// Preserve caller-supplied max_output_tokens from the in-memory request body.
+	// No filesystem reads or token-bearing values are introduced at this stage.
+	// Remove unsupported parameters.
 	body.max_completion_tokens = undefined;
 
 	return body;
