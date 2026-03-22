@@ -547,8 +547,8 @@ export function getReasoningConfig(
 	// - OpenAI API docs: "gpt-5.1 defaults to none, supports: none, low, medium, high"
 	// - GPT-5.4 latest model docs list reasoning controls for the base model family
 	// - GPT-5.4 Mini should stay aligned with GPT-5.4 reasoning support as a first-class model
-	// - Legacy lightweight aliases like gpt-5-mini/gpt-5-nano stay distinct and do not inherit
-	//   full "none" support from their gpt-5.4 normalization target
+	// - Legacy aliases like gpt-5-mini/gpt-5-nano now resolve to first-class
+	//   GPT-5.4 Mini / GPT-5.4 Nano models, so they inherit the same "none" support
 	// - Codex CLI: ReasoningEffort enum includes None variant (codex-rs/protocol/src/openai_models.rs)
 	// - Codex CLI: docs/config.md lists "none" as valid for model_reasoning_effort
 	// - gpt-5.2 and gpt-5.4 general models support: none, low, medium, high, xhigh
@@ -565,10 +565,8 @@ export function getReasoningConfig(
 	// for better coding assistance unless user explicitly requests "none".
 	// - Canonical GPT-5 Codex defaults to high in stable Codex.
 	// - Legacy GPT-5.3/5.2 Codex aliases default to xhigh for backward compatibility.
-	// - Legacy lightweight aliases (gpt-5-mini / gpt-5-nano) intentionally keep a
-	//   minimal default based on the original alias, even though normalization maps
-	//   them to gpt-5.4 which supports higher efforts. Explicit xhigh requests are
-	//   still honored below via supportsRequestedXhigh.
+	// - Legacy gpt-5-mini / gpt-5-nano aliases now resolve to GPT-5.4 Mini / Nano,
+	//   so they inherit the same default "high" effort and direct xhigh support.
 	const defaultEffort: ReasoningConfig["effort"] = isCodexMini
 		? "medium"
 		: isGpt5Codex
@@ -583,6 +581,7 @@ export function getReasoningConfig(
 
 	// Get user-requested effort
 	let effort = userConfig.reasoningEffort || defaultEffort;
+	const originalRequestedEffort = userConfig.reasoningEffort ?? defaultEffort;
 
 	if (isCodexMini) {
 		if (effort === "minimal" || effort === "low" || effort === "none") {
@@ -597,7 +596,8 @@ export function getReasoningConfig(
 	}
 
 	// For models that don't support xhigh, downgrade to high
-	// Legacy aliases like gpt-5-mini/gpt-5-nano normalize to gpt-5.4, which supports xhigh.
+	// Legacy gpt-5-mini/gpt-5-nano aliases now normalize to GPT-5.4 Mini / Nano,
+	// both of which support xhigh directly.
 	const supportsRequestedXhigh = supportsXhigh || canonicalSupportsXhigh;
 	if (!supportsRequestedXhigh && effort === "xhigh") {
 		effort = "high";
@@ -611,7 +611,9 @@ export function getReasoningConfig(
 
 	// GPT-5.4 Pro only supports medium/high/xhigh reasoning
 	if (isGpt54Pro && effort === "low") {
-		logWarn("GPT-5.4 Pro supports medium/high/xhigh only; coercing 'low' to 'medium'");
+		logWarn(
+			`GPT-5.4 Pro supports medium/high/xhigh only; coercing '${originalRequestedEffort}' to 'medium'`,
+		);
 		effort = "medium";
 	}
 
