@@ -216,11 +216,10 @@ describe("getReasoningConfig property tests", () => {
     );
   });
 
-	  it("codex/pro models upgrade none to low", () => {
+	  it("codex models upgrade none to low", () => {
 	    fc.assert(
 	      fc.property(
 	        fc.constantFrom(
-	          "gpt-5.4-pro",
 	          "gpt-5.1-codex",
 	          "gpt-5.2-codex",
 	          "gpt-5.3-codex",
@@ -234,6 +233,26 @@ describe("getReasoningConfig property tests", () => {
       )
     );
   });
+
+	  it("gpt-5.4-pro upgrades none to medium (none→low→medium chain)", () => {
+	    fc.assert(
+	      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+	        const result = getReasoningConfig(model, { reasoningEffort: "none" });
+	        expect(result.effort).toBe("medium");
+	        return true;
+	      })
+	    );
+  });
+
+	  it("gpt-5.4-pro upgrades minimal to medium", () => {
+	    fc.assert(
+	      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+	        const result = getReasoningConfig(model, { reasoningEffort: "minimal" });
+	        expect(result.effort).toBe("medium");
+	        return true;
+	      })
+	    );
+	  });
 
   it("gpt-5.1, gpt-5.2, and gpt-5.4 general support none effort", () => {
     fc.assert(
