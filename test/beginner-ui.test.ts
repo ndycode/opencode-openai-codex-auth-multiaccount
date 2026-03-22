@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
+
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
@@ -238,11 +240,15 @@ describe("formatPromptCacheKey", () => {
 	});
 
 	it("redacts short values too", () => {
-		expect(formatPromptCacheKey("ses_1234")).toBe("ses_1234...");
+		expect(formatPromptCacheKey("ses_1234")).toBe(
+			`masked-${createHash("sha256").update("ses_1234").digest("hex").slice(0, 12)}`,
+		);
 	});
 
-	it("redacts longer values to an 8-char prefix", () => {
-		expect(formatPromptCacheKey("ses_prompt_cache_key_123")).toBe("ses_prom...");
+	it("redacts longer values to a stable masked fingerprint", () => {
+		expect(formatPromptCacheKey("ses_prompt_cache_key_123")).toBe(
+			`masked-${createHash("sha256").update("ses_prompt_cache_key_123").digest("hex").slice(0, 12)}`,
+		);
 	});
 });
 
@@ -254,7 +260,9 @@ describe("formatPromptCacheSnapshot", () => {
 			lastPromptCacheKey: "ses_prompt_cache_key_123",
 		});
 
-		expect(rendered).toBe("enabled=4, missing=1, lastKey=ses_prom...");
+		expect(rendered).toBe(
+			`enabled=4, missing=1, lastKey=masked-${createHash("sha256").update("ses_prompt_cache_key_123").digest("hex").slice(0, 12)}`,
+		);
 		expect(rendered).not.toContain("ses_prompt_cache_key_123");
 	});
 });

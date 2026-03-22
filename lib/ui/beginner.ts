@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type BeginnerDiagnosticSeverity = "ok" | "warning" | "error";
 
 export interface BeginnerAccountSnapshot {
@@ -53,7 +55,8 @@ export interface BeginnerAccountSummary {
 export function formatPromptCacheKey(value: string | null | undefined): string {
 	const normalized = value?.trim();
 	if (!normalized) return "none";
-	return `${normalized.slice(0, 8)}...`;
+	const fingerprint = createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+	return `masked-${fingerprint}`;
 }
 
 export function formatPromptCacheSnapshot(runtime: Pick<
