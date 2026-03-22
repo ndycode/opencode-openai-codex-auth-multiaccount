@@ -259,6 +259,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 	type SerializedSelectionExplainability = {
 		index: number;
+		zeroBasedIndex: number;
 		enabled: boolean;
 		isCurrentForFamily: boolean;
 		eligible: boolean;
@@ -277,6 +278,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		modelFamily: ModelFamily | null;
 		quotaKey: string | null;
 		selectedAccountIndex: number | null;
+		zeroBasedSelectedAccountIndex: number | null;
 		lastErrorCategory: string | null;
 		fallbackApplied: boolean;
 		fallbackFrom: string | null;
@@ -358,8 +360,19 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			.optional()
 			.describe('Output format: "text" (default) or "json".');
 
-	const normalizeToolOutputFormat = (format?: string): ToolOutputFormat =>
-		format === "json" ? "json" : "text";
+	const toolSensitiveJsonSchema = () =>
+		tool.schema
+			.boolean()
+			.optional()
+			.describe(
+				"Include raw account labels, emails, and account IDs in JSON output. Defaults to false.",
+			);
+
+	const normalizeToolOutputFormat = (format?: string): ToolOutputFormat => {
+		if (format === undefined) return "text";
+		if (format === "text" || format === "json") return format;
+		throw new Error(`Invalid format "${format}". Expected "text" or "json".`);
+	};
 
 	const renderJsonOutput = (payload: unknown): string =>
 		JSON.stringify(payload, null, 2);
@@ -368,7 +381,8 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		entries: AccountSelectionExplainability[],
 	): SerializedSelectionExplainability[] =>
 		entries.map((entry) => ({
-			index: entry.index,
+			index: entry.index + 1,
+			zeroBasedIndex: entry.index,
 			enabled: entry.enabled,
 			isCurrentForFamily: entry.isCurrentForFamily,
 			eligible: entry.eligible,
@@ -393,6 +407,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		} = {},
 	): RoutingVisibilitySnapshot => {
 		const snapshot = runtimeMetrics.lastSelectionSnapshot;
+		const rawSelectedAccountIndex =
+			options.selectedAccountIndex ??
+			snapshot?.selectedAccountIndex ??
+			runtimeMetrics.lastSelectedAccountIndex;
 		return {
 			requestedModel: snapshot?.requestedModel ?? null,
 			effectiveModel:
@@ -400,9 +418,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			modelFamily: options.modelFamily ?? snapshot?.family ?? null,
 			quotaKey: options.quotaKey ?? snapshot?.quotaKey ?? runtimeMetrics.lastQuotaKey,
 			selectedAccountIndex:
-				options.selectedAccountIndex ??
-				snapshot?.selectedAccountIndex ??
-				runtimeMetrics.lastSelectedAccountIndex,
+				rawSelectedAccountIndex === null || rawSelectedAccountIndex === undefined
+					? null
+					: rawSelectedAccountIndex + 1,
+			zeroBasedSelectedAccountIndex: rawSelectedAccountIndex ?? null,
 			lastErrorCategory: runtimeMetrics.lastErrorCategory,
 			fallbackApplied: snapshot?.fallbackApplied ?? false,
 			fallbackFrom: snapshot?.fallbackFrom ?? null,
@@ -425,7 +444,33 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	const formatExplainabilitySummary = (
 		entry: SerializedSelectionExplainability,
 	): string =>
-		`Account ${entry.index + 1}: ${entry.eligible ? "eligible" : "blocked"} | health=${Math.round(entry.healthScore)} | tokens=${entry.tokensAvailable.toFixed(1)} | ${entry.reasons.join(", ")}`;
+		`Account ${entry.index}: ${entry.eligible ? "eligible" : "blocked"} | health=${Math.round(entry.healthScore)} | tokens=${entry.tokensAvailable.toFixed(1)} | ${entry.reasons.join(", ")}`;
+
+	const buildJsonAccountIdentity = (
+		index: number,
+		options: {
+			includeSensitive?: boolean;
+			account?: {
+				email?: string;
+				accountId?: string;
+				accountLabel?: string;
+				accountTags?: string[];
+				accountNote?: string;
+			};
+			label?: string;
+		} = {},
+	): Record<string, unknown> => ({
+		index: index + 1,
+		zeroBasedIndex: index,
+		...(options.includeSensitive
+			? {
+					label:
+						options.label ?? formatCommandAccountLabel(options.account, index),
+					email: options.account?.email ?? null,
+					accountId: options.account?.accountId ?? null,
+				}
+			: {}),
+	});
 
 	const appendRoutingVisibilityText = (
 		lines: string[],
@@ -441,7 +486,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			`  Selected account: ${
 				routing.selectedAccountIndex === null
 					? "-"
-					: String(routing.selectedAccountIndex + 1)
+					: String(routing.selectedAccountIndex)
 			}`,
 		);
 		lines.push(
@@ -503,7 +548,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				"Selected account",
 				routing.selectedAccountIndex === null
 					? "-"
-					: String(routing.selectedAccountIndex + 1),
+					: String(routing.selectedAccountIndex),
 				routing.selectedAccountIndex === null ? "muted" : "accent",
 			),
 		);
@@ -2749,7 +2794,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						requestedModel: blockedModel,
 						effectiveModel: blockedModel,
 						fallbackApplied: false,
-						fallbackReason: "unsupported-model-entitlement",
+						fallbackReason: "retry-unsupported-model-entitlement",
 					},
 				);
 				break;
@@ -2777,7 +2822,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				fallbackApplied = true;
 				fallbackFrom = previousModel;
 				fallbackTo = model;
-				fallbackReason = "unsupported-model-entitlement";
+				fallbackReason = "fallback-unsupported-model-entitlement";
 
 				if (transformedBody && typeof transformedBody === "object") {
 					transformedBody = { ...transformedBody, model };
@@ -2821,7 +2866,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						requestedModel: previousModel,
 						effectiveModel: model,
 						fallbackApplied: true,
-						fallbackReason: "unsupported-model-entitlement",
+						fallbackReason: "fallback-unsupported-model-entitlement",
 					},
 				);
 				await showToast(
@@ -2839,7 +2884,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				fallbackApplied = false;
 				fallbackFrom = blockedModel;
 				fallbackTo = null;
-				fallbackReason = "unsupported-model-entitlement";
+				fallbackReason = "blocked-unsupported-model-entitlement";
 				if (runtimeMetrics.lastSelectionSnapshot) {
 					runtimeMetrics.lastSelectionSnapshot = {
 						...runtimeMetrics.lastSelectionSnapshot,
@@ -2861,7 +2906,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						requestedModel: blockedModel,
 						effectiveModel: blockedModel,
 						fallbackApplied: false,
-						fallbackReason: "unsupported-model-entitlement",
+						fallbackReason: "blocked-unsupported-model-entitlement",
 					},
 				);
 				await showToast(
@@ -4126,7 +4171,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                         ],
                 },
                 tool: {
-                        "codex-list": tool({
+				"codex-list": tool({
                                 description:
                                         "List all Codex OAuth accounts and the current active index.",
                                 args: {
@@ -4135,12 +4180,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 						.optional()
 						.describe("Optional tag filter (e.g., work, personal, team-a)."),
 					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
 				},
-                                async execute({ tag, format }: { tag?: string; format?: string } = {}) {
+                                async execute({ tag, format, includeSensitive }: { tag?: string; format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
                                         const storage = await loadAccounts();
                                         const storePath = getStoragePath();
 					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const normalizedTag = tag?.trim().toLowerCase() ?? "";
 					const commandHints = [
 						"opencode auth login",
@@ -4243,11 +4290,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								if (cooldown) statuses.push("cooldown");
 								if (statuses.length === 0) statuses.push("ok");
 								return {
-									index: index + 1,
-									zeroBasedIndex: index,
-									label: formatCommandAccountLabel(account, index),
-									email: account.email ?? null,
-									accountId: account.accountId ?? null,
+									...buildJsonAccountIdentity(index, {
+										includeSensitive: includeSensitiveOutput,
+										account,
+									}),
 									enabled: account.enabled !== false,
 									isActive: index === activeIndex,
 									rateLimit: rateLimit ?? null,
@@ -4491,10 +4537,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Show detailed status of Codex accounts and rate limits.",
 				args: {
 					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
 				},
-				async execute({ format }: { format?: string } = {}) {
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
 					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
 						if (outputFormat === "json") {
@@ -4541,6 +4589,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					modelFamily: explainabilityFamily,
 					effectiveModel: explainabilityModel ?? null,
 					quotaKey: selectionQuotaKey,
+					selectedAccountIndex: activeIndex,
 					selectionExplainability: explainability,
 				});
 				const explainabilityByIndex = new Map(
@@ -4562,9 +4611,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								: explainabilityFamily,
 						},
 						accounts: storage.accounts.map((account, index) => ({
-							index: index + 1,
-							zeroBasedIndex: index,
-							label: formatCommandAccountLabel(account, index),
+							...buildJsonAccountIdentity(index, {
+								includeSensitive: includeSensitiveOutput,
+								account,
+							}),
 							enabled: account.enabled !== false,
 							isActive: index === activeIndex,
 							rateLimit: formatRateLimitEntry(account, now) ?? null,
@@ -4583,9 +4633,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 							]),
 						),
 						rateLimitsByModelFamily: storage.accounts.map((account, index) => ({
-							index: index + 1,
-							zeroBasedIndex: index,
-							label: formatCommandAccountLabel(account, index),
+							...buildJsonAccountIdentity(index, {
+								includeSensitive: includeSensitiveOutput,
+								account,
+							}),
 							families: Object.fromEntries(
 								MODEL_FAMILIES.map((family) => {
 									const resetAt = getRateLimitResetTimeForFamily(account, now, family);
@@ -4756,10 +4807,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Show live 5-hour and weekly Codex usage limits for all accounts.",
 				args: {
 					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
 				},
-				async execute({ format }: { format?: string } = {}) {
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
 					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
 						if (outputFormat === "json") {
@@ -5206,13 +5259,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 								);
 							}
 							jsonAccounts.push({
-								index: displayIndex + 1,
-								zeroBasedIndex: displayIndex,
-								label,
+								...buildJsonAccountIdentity(displayIndex, {
+									includeSensitive: includeSensitiveOutput,
+									account: effectiveDisplayAccount,
+									label,
+								}),
 								isActive,
 								sharesActiveCredential,
-								accountId: effectiveDisplayAccount.accountId ?? null,
-								email: effectiveDisplayAccount.email ?? null,
 								planType: payload.plan_type ?? null,
 								credits: credits ?? null,
 								limits,
@@ -5256,13 +5309,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 						} catch (error) {
 							const message = error instanceof Error ? error.message : String(error);
 							jsonAccounts.push({
-								index: displayIndex + 1,
-								zeroBasedIndex: displayIndex,
-								label,
+								...buildJsonAccountIdentity(displayIndex, {
+									includeSensitive: includeSensitiveOutput,
+									account: effectiveDisplayAccount,
+									label,
+								}),
 								isActive,
 								sharesActiveCredential,
-								accountId: effectiveDisplayAccount.accountId ?? null,
-								email: effectiveDisplayAccount.email ?? null,
 								error: message.slice(0, 160),
 							});
 							if (ui.v2Enabled) {
@@ -5674,7 +5727,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtime,
 					});
 					const nextAction = recommendBeginnerNextAction({ accounts: snapshots, now, runtime });
-					const routingVisibility = deep ? buildRoutingVisibilitySnapshot() : null;
+					let routingVisibility: RoutingVisibilitySnapshot | null = null;
 					const appliedFixes: string[] = [];
 					const fixErrors: string[] = [];
 
@@ -5747,6 +5800,32 @@ while (attempted.size < Math.max(1, accountCount)) {
 							cachedAccountManager = reloadedManager;
 							accountManagerPromise = Promise.resolve(reloadedManager);
 						}
+					}
+					if (deep) {
+						const managerForRouting =
+							cachedAccountManager ?? (await AccountManager.loadFromDisk());
+						const routingFamily =
+							runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
+						const routingModel =
+							runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
+							runtimeMetrics.lastSelectionSnapshot?.model ??
+							null;
+						const routingExplainability = managerForRouting.getSelectionExplainability(
+							routingFamily,
+							routingModel ?? undefined,
+							Date.now(),
+						);
+						const routingActiveIndex =
+							storage && storage.accounts.length > 0
+								? resolveActiveIndex(storage, routingFamily)
+								: null;
+						routingVisibility = buildRoutingVisibilitySnapshot({
+							modelFamily: routingFamily,
+							effectiveModel: routingModel,
+							quotaKey: routingModel ? `${routingFamily}:${routingModel}` : routingFamily,
+							selectedAccountIndex: routingActiveIndex,
+							selectionExplainability: routingExplainability,
+						});
 					}
 					if (outputFormat === "json") {
 						return renderJsonOutput({
@@ -6261,10 +6340,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 					"Show a live Codex dashboard: account eligibility, retry budgets, and refresh queue health.",
 				args: {
 					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
 				},
-				async execute({ format }: { format?: string } = {}) {
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
 					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
 						if (outputFormat === "json") {
@@ -6302,7 +6383,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const now = Date.now();
 					const refreshMetrics = getRefreshQueueMetrics();
 					const family = runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
-					const model = runtimeMetrics.lastSelectionSnapshot?.model ?? undefined;
+					const model =
+						runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
+						runtimeMetrics.lastSelectionSnapshot?.model ??
+						undefined;
 					const manager = cachedAccountManager ?? (await AccountManager.loadFromDisk());
 					const explainability = manager.getSelectionExplainability(family, model, now);
 					const selectionLabel = model ? `${family}:${model}` : family;
@@ -6310,6 +6394,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						modelFamily: family,
 						effectiveModel: model ?? null,
 						quotaKey: model ? `${family}:${model}` : family,
+						selectedAccountIndex: resolveActiveIndex(storage, family),
 						selectionExplainability: explainability,
 					});
 					const recommendedNextAction = recommendBeginnerNextAction({
@@ -6327,9 +6412,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 							refreshQueue: { ...refreshMetrics },
 							routingVisibility,
 							accountEligibility: explainability.map((entry) => ({
-								index: entry.index + 1,
-								zeroBasedIndex: entry.index,
-								label: formatCommandAccountLabel(storage.accounts[entry.index], entry.index),
+								...buildJsonAccountIdentity(entry.index, {
+									includeSensitive: includeSensitiveOutput,
+									account: storage.accounts[entry.index],
+								}),
 								eligible: entry.eligible,
 								healthScore: entry.healthScore,
 								tokensAvailable: entry.tokensAvailable,
@@ -6441,10 +6527,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 				description: "Check health of all Codex accounts by validating refresh tokens.",
 				args: {
 					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
 				},
-				async execute({ format }: { format?: string } = {}) {
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
 					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
 						if (outputFormat === "json") {
@@ -6484,18 +6572,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 				const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
 								jsonAccounts.push({
-									index: i + 1,
-									zeroBasedIndex: i,
-									label,
+									...buildJsonAccountIdentity(i, {
+										includeSensitive: includeSensitiveOutput,
+										account,
+										label,
+									}),
 									status: "healthy",
 								});
 								results.push(`  ${getStatusMarker(ui, "ok")} ${label}: Healthy`);
 								healthyCount++;
 							} else {
 								jsonAccounts.push({
-									index: i + 1,
-									zeroBasedIndex: i,
-									label,
+									...buildJsonAccountIdentity(i, {
+										includeSensitive: includeSensitiveOutput,
+										account,
+										label,
+									}),
 									status: "unhealthy",
 									error: refreshResult.message ?? refreshResult.reason,
 								});
@@ -6505,9 +6597,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 						} catch (error) {
 							const errorMsg = error instanceof Error ? error.message : String(error);
 							jsonAccounts.push({
-								index: i + 1,
-								zeroBasedIndex: i,
-								label,
+								...buildJsonAccountIdentity(i, {
+									includeSensitive: includeSensitiveOutput,
+									account,
+									label,
+								}),
 								status: "unhealthy",
 								error: errorMsg.slice(0, 120),
 							});

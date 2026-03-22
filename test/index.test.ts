@@ -473,10 +473,10 @@ type PluginType = {
 		}>;
 	};
 	tool: {
-		"codex-list": OptionalToolExecute<{ tag?: string; format?: string }>;
+		"codex-list": OptionalToolExecute<{ tag?: string; format?: string; includeSensitive?: boolean }>;
 		"codex-switch": OptionalToolExecute<{ index?: number }>;
-		"codex-status": OptionalToolExecute<{ format?: string }>;
-		"codex-limits": OptionalToolExecute<{ format?: string }>;
+		"codex-status": OptionalToolExecute<{ format?: string; includeSensitive?: boolean }>;
+		"codex-limits": OptionalToolExecute<{ format?: string; includeSensitive?: boolean }>;
 		"codex-metrics": OptionalToolExecute<{ format?: string }>;
 		"codex-help": ToolExecute<{ topic?: string }>;
 		"codex-setup": OptionalToolExecute<{ wizard?: boolean }>;
@@ -485,8 +485,8 @@ type PluginType = {
 		"codex-label": ToolExecute<{ index?: number; label: string }>;
 		"codex-tag": ToolExecute<{ index?: number; tags: string }>;
 		"codex-note": ToolExecute<{ index?: number; note: string }>;
-		"codex-dashboard": OptionalToolExecute<{ format?: string }>;
-		"codex-health": OptionalToolExecute<{ format?: string }>;
+		"codex-dashboard": OptionalToolExecute<{ format?: string; includeSensitive?: boolean }>;
+		"codex-health": OptionalToolExecute<{ format?: string; includeSensitive?: boolean }>;
 		"codex-remove": OptionalToolExecute<{ index?: number }>;
 		"codex-refresh": ToolExecute;
 		"codex-export": ToolExecute<{ path?: string; force?: boolean; timestamped?: boolean }>;
@@ -673,8 +673,6 @@ describe("OpenAIOAuthPlugin", () => {
 				totalAccounts: number;
 				activeIndex: number | null;
 				accounts: Array<{
-					email: string | null;
-					accountId: string | null;
 					statuses: string[];
 					tags: string[];
 					note: string | null;
@@ -684,12 +682,42 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result.totalAccounts).toBe(1);
 			expect(result.activeIndex).toBe(1);
 			expect(result.accounts[0]).toMatchObject({
-				email: "user1@example.com",
-				accountId: "acc-1",
 				tags: ["work"],
 				note: "weekday primary",
 			});
+			expect(result.accounts[0]).not.toHaveProperty("label");
+			expect(result.accounts[0]).not.toHaveProperty("email");
+			expect(result.accounts[0]).not.toHaveProperty("accountId");
 			expect(result.accounts[0]?.statuses).toContain("active");
+		});
+
+		it("includes raw account identifiers only when explicitly requested", async () => {
+			mockStorage.accounts = [
+				{
+					refreshToken: "r1",
+					email: "user1@example.com",
+					accountId: "acc-1",
+					accountLabel: "Work",
+				},
+			];
+			const result = parseJsonOutput<{
+				accounts: Array<{
+					label: string;
+					email: string | null;
+					accountId: string | null;
+				}>;
+			}>(
+				await plugin.tool["codex-list"].execute({
+					format: "json",
+					includeSensitive: true,
+				}),
+			);
+
+			expect(result.accounts[0]).toMatchObject({
+				label: expect.stringContaining("user1@example.com"),
+				email: "user1@example.com",
+				accountId: "acc-1",
+			});
 		});
 
 		it("lists accounts with status", async () => {
@@ -815,13 +843,22 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.activeIndexByFamily = { codex: 0 };
 			const result = parseJsonOutput<{
 				totalAccounts: number;
-				accounts: Array<{ label: string; isActive: boolean }>;
-				routingVisibility: { selectionExplainability: unknown[] };
+				accounts: Array<{ isActive: boolean }>;
+				routingVisibility: {
+					selectedAccountIndex: number | null;
+					zeroBasedSelectedAccountIndex: number | null;
+					selectionExplainability: Array<{ index: number; zeroBasedIndex: number }>;
+				};
 			}>(await plugin.tool["codex-status"].execute({ format: "json" }));
 
 			expect(result.totalAccounts).toBe(1);
 			expect(result.accounts[0]?.isActive).toBe(true);
-			expect(result.routingVisibility.selectionExplainability).toHaveLength(1);
+			expect(result.routingVisibility.selectedAccountIndex).toBe(1);
+			expect(result.routingVisibility.zeroBasedSelectedAccountIndex).toBe(0);
+			expect(result.routingVisibility.selectionExplainability[0]).toMatchObject({
+				index: 1,
+				zeroBasedIndex: 0,
+			});
 		});
 	});
 
@@ -1570,12 +1607,24 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = parseJsonOutput<{
 				totalRequests: number;
 				retryProfile: string;
-				routingVisibility: { fallbackApplied: boolean };
+				routingVisibility: {
+					fallbackApplied: boolean;
+					selectedAccountIndex: number | null;
+					zeroBasedSelectedAccountIndex: number | null;
+				};
 			}>(await plugin.tool["codex-metrics"].execute({ format: "json" }));
 
 			expect(result.totalRequests).toBe(0);
 			expect(result.retryProfile).toBe("balanced");
 			expect(result.routingVisibility.fallbackApplied).toBe(false);
+			expect(result.routingVisibility.selectedAccountIndex).toBeNull();
+			expect(result.routingVisibility.zeroBasedSelectedAccountIndex).toBeNull();
+		});
+
+		it("rejects unsupported format values", async () => {
+			expect(() =>
+				plugin.tool["codex-metrics"].execute({ format: "jsno" }),
+			).toThrow('Invalid format "jsno". Expected "text" or "json".');
 		});
 	});
 
@@ -2444,34 +2493,40 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			routingVisibility: {
 				requestedModel: string | null;
 				effectiveModel: string | null;
+				selectedAccountIndex: number | null;
+				zeroBasedSelectedAccountIndex: number | null;
 				fallbackApplied: boolean;
 				fallbackFrom: string | null;
 				fallbackTo: string | null;
 				fallbackReason: string | null;
 				lastErrorCategory: string | null;
-				selectionExplainability: unknown[];
+				selectionExplainability: Array<{ index: number; zeroBasedIndex: number }>;
 			};
 		}>(await plugin.tool["codex-metrics"].execute({ format: "json" }));
 		const status = parseJsonOutput<{
 			routingVisibility: {
 				requestedModel: string | null;
 				effectiveModel: string | null;
+				selectedAccountIndex: number | null;
+				zeroBasedSelectedAccountIndex: number | null;
 				fallbackApplied: boolean;
 				fallbackFrom: string | null;
 				fallbackTo: string | null;
 				fallbackReason: string | null;
-				selectionExplainability: unknown[];
+				selectionExplainability: Array<{ index: number; zeroBasedIndex: number }>;
 			};
 		}>(await plugin.tool["codex-status"].execute({ format: "json" }));
 		const dashboard = parseJsonOutput<{
 			routingVisibility: {
 				requestedModel: string | null;
 				effectiveModel: string | null;
+				selectedAccountIndex: number | null;
+				zeroBasedSelectedAccountIndex: number | null;
 				fallbackApplied: boolean;
 				fallbackFrom: string | null;
 				fallbackTo: string | null;
 				fallbackReason: string | null;
-				selectionExplainability: unknown[];
+				selectionExplainability: Array<{ index: number; zeroBasedIndex: number }>;
 			};
 		}>(await plugin.tool["codex-dashboard"].execute({ format: "json" }));
 		const doctor = parseJsonOutput<{
@@ -2479,11 +2534,13 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				routingVisibility: {
 					requestedModel: string | null;
 					effectiveModel: string | null;
+					selectedAccountIndex: number | null;
+					zeroBasedSelectedAccountIndex: number | null;
 					fallbackApplied: boolean;
 					fallbackFrom: string | null;
 					fallbackTo: string | null;
 					fallbackReason: string | null;
-					selectionExplainability: unknown[];
+					selectionExplainability: Array<{ index: number; zeroBasedIndex: number }>;
 				};
 			} | null;
 		}>(await plugin.tool["codex-doctor"].execute({ deep: true, format: "json" }));
@@ -2494,8 +2551,10 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			fallbackApplied: true,
 			fallbackFrom: "gpt-5.4-pro",
 			fallbackTo: "gpt-5.4",
-			fallbackReason: "unsupported-model-entitlement",
+			fallbackReason: "fallback-unsupported-model-entitlement",
 			lastErrorCategory: null,
+			selectedAccountIndex: 1,
+			zeroBasedSelectedAccountIndex: 0,
 		});
 		expect(status.routingVisibility).toMatchObject({
 			requestedModel: "gpt-5.4-pro",
@@ -2503,7 +2562,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			fallbackApplied: true,
 			fallbackFrom: "gpt-5.4-pro",
 			fallbackTo: "gpt-5.4",
-			fallbackReason: "unsupported-model-entitlement",
+			fallbackReason: "fallback-unsupported-model-entitlement",
+			selectedAccountIndex: 1,
+			zeroBasedSelectedAccountIndex: 0,
 		});
 		expect(dashboard.routingVisibility).toMatchObject({
 			requestedModel: "gpt-5.4-pro",
@@ -2511,7 +2572,9 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			fallbackApplied: true,
 			fallbackFrom: "gpt-5.4-pro",
 			fallbackTo: "gpt-5.4",
-			fallbackReason: "unsupported-model-entitlement",
+			fallbackReason: "fallback-unsupported-model-entitlement",
+			selectedAccountIndex: 1,
+			zeroBasedSelectedAccountIndex: 0,
 		});
 		expect(doctor.technicalSnapshot?.routingVisibility).toMatchObject({
 			requestedModel: "gpt-5.4-pro",
@@ -2519,12 +2582,130 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			fallbackApplied: true,
 			fallbackFrom: "gpt-5.4-pro",
 			fallbackTo: "gpt-5.4",
-			fallbackReason: "unsupported-model-entitlement",
+			fallbackReason: "fallback-unsupported-model-entitlement",
+			selectedAccountIndex: 1,
+			zeroBasedSelectedAccountIndex: 0,
 		});
-		expect(metrics.routingVisibility.selectionExplainability).toHaveLength(1);
-		expect(status.routingVisibility.selectionExplainability).toHaveLength(1);
-		expect(dashboard.routingVisibility.selectionExplainability).toHaveLength(1);
-		expect(doctor.technicalSnapshot?.routingVisibility.selectionExplainability).toHaveLength(1);
+		expect(metrics.routingVisibility.selectionExplainability[0]).toMatchObject({
+			index: 1,
+			zeroBasedIndex: 0,
+		});
+		expect(status.routingVisibility.selectionExplainability[0]).toMatchObject({
+			index: 1,
+			zeroBasedIndex: 0,
+		});
+		expect(dashboard.routingVisibility.selectionExplainability[0]).toMatchObject({
+			index: 1,
+			zeroBasedIndex: 0,
+		});
+		expect(
+			doctor.technicalSnapshot?.routingVisibility.selectionExplainability[0],
+		).toMatchObject({
+			index: 1,
+			zeroBasedIndex: 0,
+		});
+	});
+
+	it("surfaces strict blocked-model routing visibility without fallback", async () => {
+		const configModule = await import("../lib/config.js");
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+
+		vi.mocked(configModule.getUnsupportedCodexPolicy).mockReturnValue("strict");
+		vi.mocked(fetchHelpers.transformRequestForCodex).mockResolvedValueOnce({
+			updatedInit: {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.4-pro" }),
+			},
+			body: { model: "gpt-5.4-pro" },
+		});
+		vi.mocked(fetchHelpers.handleErrorResponse).mockResolvedValueOnce({
+			response: new Response(
+				JSON.stringify({
+					error: {
+						code: "model_not_supported_with_chatgpt_account",
+						message:
+							"The 'gpt-5.4-pro' model is not supported when using Codex with a ChatGPT account.",
+					},
+				}),
+				{ status: 400 },
+			),
+			rateLimit: undefined,
+			errorBody: {
+				error: {
+					code: "model_not_supported_with_chatgpt_account",
+					message:
+						"The 'gpt-5.4-pro' model is not supported when using Codex with a ChatGPT account.",
+				},
+			},
+		});
+		vi.mocked(fetchHelpers.getUnsupportedCodexModelInfo).mockReturnValue({
+			isUnsupported: true,
+			unsupportedModel: "gpt-5.4-pro",
+			message:
+				"The 'gpt-5.4-pro' model is not supported when using Codex with a ChatGPT account.",
+			code: "model_not_supported_with_chatgpt_account",
+		});
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("bad", { status: 400 }));
+
+		const { plugin, sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.4-pro" }),
+		});
+
+		expect(response.status).toBe(400);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(configModule.getUnsupportedCodexPolicy).toHaveReturnedWith("strict");
+		expect(fetchHelpers.getUnsupportedCodexModelInfo).toHaveBeenCalled();
+
+		const metrics = parseJsonOutput<{
+			routingVisibility: {
+				requestedModel: string | null;
+				effectiveModel: string | null;
+				selectedAccountIndex: number | null;
+				zeroBasedSelectedAccountIndex: number | null;
+				fallbackApplied: boolean;
+				fallbackFrom: string | null;
+				fallbackTo: string | null;
+				fallbackReason: string | null;
+			};
+		}>(await plugin.tool["codex-metrics"].execute({ format: "json" }));
+		const status = parseJsonOutput<{
+			routingVisibility: {
+				requestedModel: string | null;
+				effectiveModel: string | null;
+				selectedAccountIndex: number | null;
+				zeroBasedSelectedAccountIndex: number | null;
+				fallbackApplied: boolean;
+				fallbackFrom: string | null;
+				fallbackTo: string | null;
+				fallbackReason: string | null;
+			};
+		}>(await plugin.tool["codex-status"].execute({ format: "json" }));
+
+		expect(metrics.routingVisibility).toMatchObject({
+			requestedModel: "gpt-5.4-pro",
+			effectiveModel: "gpt-5.4-pro",
+			fallbackApplied: false,
+			fallbackFrom: "gpt-5.4-pro",
+			fallbackTo: null,
+			fallbackReason: "blocked-unsupported-model-entitlement",
+			selectedAccountIndex: 1,
+			zeroBasedSelectedAccountIndex: 0,
+		});
+		expect(status.routingVisibility).toMatchObject({
+			requestedModel: "gpt-5.4-pro",
+			effectiveModel: "gpt-5.4-pro",
+			fallbackApplied: false,
+			fallbackFrom: "gpt-5.4-pro",
+			fallbackTo: null,
+			fallbackReason: "blocked-unsupported-model-entitlement",
+			selectedAccountIndex: 1,
+			zeroBasedSelectedAccountIndex: 0,
+		});
 	});
 
 	it("falls back from gpt-5.3-codex to gpt-5.2-codex when unsupported fallback is enabled", async () => {
