@@ -32,6 +32,17 @@ import {
         parseAuthorizationInput,
         REDIRECT_URI,
 } from "./lib/auth/auth.js";
+import {
+	buildDeviceCodeInstructions,
+	completeDeviceCodeSession,
+	createDeviceCodeSession,
+} from "./lib/auth/device-code.js";
+import {
+	persistAccountPool,
+	resolveAccountSelection,
+	type AccountSelectionResult,
+	type TokenSuccessWithAccount,
+} from "./lib/auth/login-runner.js";
 import { queuedRefresh, getRefreshQueueMetrics } from "./lib/refresh-queue.js";
 import { openBrowserUrl } from "./lib/auth/browser.js";
 import { startLocalOAuthServer } from "./lib/auth/server.js";
@@ -91,14 +102,12 @@ import { handleContextOverflow } from "./lib/context-overflow.js";
 import {
 	AccountManager,
 	type AccountSelectionExplainability,
-        getAccountIdCandidates,
         extractAccountEmail,
         extractAccountId,
         formatAccountLabel,
         formatCooldown,
         formatWaitTime,
         sanitizeEmail,
-        selectBestAccountCandidate,
         shouldUpdateAccountIdFromToken,
         resolveRequestAccountId,
         parseRateLimitReason,
@@ -174,7 +183,6 @@ import {
 } from "./lib/prompts/codex.js";
 import { prewarmOpenCodeCodexPrompt } from "./lib/prompts/opencode-codex.js";
 import type {
-	AccountIdSource,
 	OAuthAuthDetails,
 	RequestBody,
 	TokenResult,
@@ -605,108 +613,11 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		}
 	};
 
-		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
-		type TokenSuccessWithAccount = TokenSuccess & {
-				accountIdOverride?: string;
-				organizationIdOverride?: string;
-				accountIdSource?: AccountIdSource;
-				accountLabel?: string;
-		};
-
-		type AccountSelectionResult = {
-				primary: TokenSuccessWithAccount;
-				variantsForPersistence: TokenSuccessWithAccount[];
-		};
-
-		const createSelectionVariant = (
-				tokens: TokenSuccess,
-				candidate: {
-					accountId: string;
-					organizationId?: string;
-					source?: AccountIdSource;
-					label?: string;
-				},
-		): TokenSuccessWithAccount => ({
-				...tokens,
-				accountIdOverride: candidate.accountId,
-				organizationIdOverride: candidate.organizationId,
-				accountIdSource: candidate.source,
-				accountLabel: candidate.label,
-		});
-
-		const resolveAccountSelection = (
-				tokens: TokenSuccess,
-		): AccountSelectionResult => {
-				const override = (process.env.CODEX_AUTH_ACCOUNT_ID ?? "").trim();
-				if (override) {
-						const suffix = override.length > 6 ? override.slice(-6) : override;
-						logInfo(`Using account override from CODEX_AUTH_ACCOUNT_ID (id:${suffix}).`);
-						const primary = {
-								...tokens,
-								accountIdOverride: override,
-								accountIdSource: "manual" as const,
-								accountLabel: `Override [id:${suffix}]`,
-						};
-						return {
-								primary,
-								variantsForPersistence: [primary],
-						};
-				}
-
-				const candidates = getAccountIdCandidates(tokens.access, tokens.idToken);
-				if (candidates.length === 0) {
-						return {
-								primary: tokens,
-								variantsForPersistence: [tokens],
-						};
-				}
-
-				// Auto-select the best workspace candidate without prompting.
-				// This honors org/default/id-token signals and avoids forcing personal token IDs.
-				const choice = selectBestAccountCandidate(candidates);
-				if (!choice) {
-						return {
-								primary: tokens,
-								variantsForPersistence: [tokens],
-						};
-				}
-
-				const primary = createSelectionVariant(tokens, {
-						accountId: choice.accountId,
-						organizationId: choice.organizationId,
-						source: choice.source ?? "token",
-						label: choice.label,
-				});
-
-				const variantsForPersistence: TokenSuccessWithAccount[] = [primary];
-				for (const candidate of candidates) {
-						if (
-							candidate.accountId === primary.accountIdOverride &&
-							(candidate.organizationId ?? "") === (primary.organizationIdOverride ?? "")
-						) {
-							continue;
-						}
-						variantsForPersistence.push(
-								createSelectionVariant(tokens, {
-										accountId: candidate.accountId,
-										organizationId: candidate.organizationId,
-										source: candidate.source,
-										label: candidate.label,
-								}),
-						);
-				}
-
-				return {
-						primary,
-						variantsForPersistence,
-				};
-		};
-
 		const buildManualOAuthFlow = (
-				pkce: { verifier: string },
-				url: string,
-				expectedState: string,
-				onSuccess?: (selection: AccountSelectionResult) => Promise<void>,
+			pkce: { verifier: string },
+			url: string,
+			expectedState: string,
+			onSuccess?: (selection: AccountSelectionResult) => Promise<void>,
 		) => ({
                 url,
                 method: "code" as const,
@@ -714,13 +625,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 validate: (input: string): string | undefined => {
                         const parsed = parseAuthorizationInput(input);
                         if (!parsed.code) {
-                                return "No authorization code found. Paste the full callback URL (e.g., http://localhost:1455/auth/callback?code=...)";
+                                return "No authorization code found. Paste the full callback URL (e.g., http://localhost:1455/auth/callback?code=...). If browser callback keeps failing, retry with Device Code.";
                         }
                         if (!parsed.state) {
-                                return "Missing OAuth state. Paste the full callback URL including both code and state parameters.";
+                                return "Missing OAuth state. Paste the full callback URL including both code and state parameters. If needed, retry with Device Code.";
                         }
                         if (parsed.state !== expectedState) {
-                                return "OAuth state mismatch. Restart login and paste the callback URL generated for this login attempt.";
+                                return "OAuth state mismatch. Restart login and paste the callback URL generated for this login attempt, or retry with Device Code.";
                         }
                         return undefined;
                 },
@@ -737,15 +648,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 return {
                                         type: "failed" as const,
                                         reason: "invalid_response" as const,
-                                        message: "OAuth state mismatch. Restart login and try again.",
+                                        message: "OAuth state mismatch. Restart login and try again, or retry with Device Code.",
                                 };
                         }
 						const tokens = await exchangeAuthorizationCode(
-								parsed.code,
-								pkce.verifier,
-								REDIRECT_URI,
-						);
-						if (tokens?.type === "success") {
+				parsed.code,
+				pkce.verifier,
+				REDIRECT_URI,
+			);
+			if (tokens?.type === "success") {
 								const resolved = resolveAccountSelection(tokens);
 								if (onSuccess) {
 										await onSuccess(resolved);
@@ -758,637 +669,53 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                 },
         });
 
-	const runOAuthFlow = async (
-		forceNewLogin: boolean = false,
-	): Promise<TokenResult> => {
-		const { pkce, state, url } = await createAuthorizationFlow({ forceNewLogin });
-		logInfo(`OAuth URL: ${url}`);
+		const runOAuthFlow = async (
+			forceNewLogin: boolean = false,
+		): Promise<TokenResult> => {
+			const { pkce, state, url } = await createAuthorizationFlow({ forceNewLogin });
+			logInfo(`OAuth URL: ${url}`);
 
-                let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null = null;
-                try {
-                        serverInfo = await startLocalOAuthServer({ state });
-                } catch (err) {
-                        logDebug(`[${PLUGIN_NAME}] Failed to start OAuth server: ${(err as Error)?.message ?? String(err)}`);
-                        serverInfo = null;
-                }
-                openBrowserUrl(url);
+			let serverInfo: Awaited<ReturnType<typeof startLocalOAuthServer>> | null = null;
+			try {
+				serverInfo = await startLocalOAuthServer({ state });
+			} catch (err) {
+				logDebug(`[${PLUGIN_NAME}] Failed to start OAuth server: ${(err as Error)?.message ?? String(err)}`);
+				serverInfo = null;
+			}
+			openBrowserUrl(url);
 
-                if (!serverInfo || !serverInfo.ready) {
-                        serverInfo?.close();
-                        const message =
-                                `\n[${PLUGIN_NAME}] OAuth callback server failed to start. ` +
-                                `Please retry with "${AUTH_LABELS.OAUTH_MANUAL}".\n`;
-				logWarn(message);
-                        return { type: "failed" as const };
-                }
-
-                const result = await serverInfo.waitForCode(state);
-                serverInfo.close();
-
-		if (!result) {
-			return { type: "failed" as const, reason: "unknown" as const, message: "OAuth callback timeout or cancelled" };
-		}
-
-                return await exchangeAuthorizationCode(
-                        result.code,
-                        pkce.verifier,
-                        REDIRECT_URI,
-                );
-        };
-
-	        const persistAccountPool = async (
-	                results: TokenSuccessWithAccount[],
-	                replaceAll: boolean = false,
-	        ): Promise<void> => {
-	                if (results.length === 0) return;
-				await withAccountStorageTransaction(async (loadedStorage, persist) => {
-					const now = Date.now();
-					const stored = replaceAll ? null : loadedStorage;
-			let accounts = stored?.accounts ? [...stored.accounts] : [];
-
-					const pushIndex = (
-						map: Map<string, number[]>,
-						key: string,
-						index: number,
-					): void => {
-						const existing = map.get(key);
-						if (existing) {
-							existing.push(index);
-							return;
-						}
-						map.set(key, [index]);
-					};
-
-			const asUniqueIndex = (indices: number[] | undefined): number | undefined => {
-				if (!indices || indices.length !== 1) return undefined;
-				const [onlyIndex] = indices;
-				return typeof onlyIndex === "number" ? onlyIndex : undefined;
-			};
-
-			const pickNewestAccountIndex = (existingIndex: number, candidateIndex: number): number => {
-				const existing = accounts[existingIndex];
-				const candidate = accounts[candidateIndex];
-				if (!existing) return candidateIndex;
-				if (!candidate) return existingIndex;
-				const existingLastUsed = existing.lastUsed ?? 0;
-				const candidateLastUsed = candidate.lastUsed ?? 0;
-				if (candidateLastUsed > existingLastUsed) return candidateIndex;
-				if (candidateLastUsed < existingLastUsed) return existingIndex;
-				const existingAddedAt = existing.addedAt ?? 0;
-				const candidateAddedAt = candidate.addedAt ?? 0;
-				return candidateAddedAt >= existingAddedAt ? candidateIndex : existingIndex;
-			};
-
-			const mergeAccountRecords = (targetIndex: number, sourceIndex: number): void => {
-				const target = accounts[targetIndex];
-				const source = accounts[sourceIndex];
-				if (!target || !source) return;
-				const targetLastUsed = target.lastUsed ?? 0;
-				const sourceLastUsed = source.lastUsed ?? 0;
-				const targetAddedAt = target.addedAt ?? 0;
-				const sourceAddedAt = source.addedAt ?? 0;
-				const sourceIsNewer =
-					sourceLastUsed > targetLastUsed ||
-					(sourceLastUsed === targetLastUsed && sourceAddedAt > targetAddedAt);
-				const newer = sourceIsNewer ? source : target;
-				const older = sourceIsNewer ? target : source;
-				const mergedRateLimitResetTimes: Record<string, number> = {};
-				const rateLimitResetKeys = new Set([
-					...Object.keys(older.rateLimitResetTimes ?? {}),
-					...Object.keys(newer.rateLimitResetTimes ?? {}),
-				]);
-				for (const key of rateLimitResetKeys) {
-					const olderRaw = older.rateLimitResetTimes?.[key];
-					const newerRaw = newer.rateLimitResetTimes?.[key];
-					const olderValue =
-						typeof olderRaw === "number" && Number.isFinite(olderRaw) ? olderRaw : 0;
-					const newerValue =
-						typeof newerRaw === "number" && Number.isFinite(newerRaw) ? newerRaw : 0;
-					const resolved = Math.max(olderValue, newerValue);
-					if (resolved > 0) {
-						mergedRateLimitResetTimes[key] = resolved;
-					}
-				}
-				const mergedEnabled =
-					target.enabled === false || source.enabled === false
-						? false
-						: target.enabled ?? source.enabled;
-				const targetCoolingDownUntil =
-					typeof target.coolingDownUntil === "number" && Number.isFinite(target.coolingDownUntil)
-						? target.coolingDownUntil
-						: 0;
-				const sourceCoolingDownUntil =
-					typeof source.coolingDownUntil === "number" && Number.isFinite(source.coolingDownUntil)
-						? source.coolingDownUntil
-						: 0;
-				const mergedCoolingDownUntilValue = Math.max(
-					targetCoolingDownUntil,
-					sourceCoolingDownUntil,
-				);
-				const mergedCoolingDownUntil =
-					mergedCoolingDownUntilValue > 0 ? mergedCoolingDownUntilValue : undefined;
-				const mergedCooldownReason = (() => {
-					if (mergedCoolingDownUntilValue <= 0) {
-						return target.cooldownReason ?? source.cooldownReason;
-					}
-					if (sourceCoolingDownUntil > targetCoolingDownUntil) {
-						return source.cooldownReason ?? target.cooldownReason;
-					}
-					if (targetCoolingDownUntil > sourceCoolingDownUntil) {
-						return target.cooldownReason ?? source.cooldownReason;
-					}
-					return source.cooldownReason ?? target.cooldownReason;
-				})();
-				accounts[targetIndex] = {
-					...target,
-					accountId: target.accountId ?? source.accountId,
-					organizationId: target.organizationId ?? source.organizationId,
-					accountIdSource: target.accountIdSource ?? source.accountIdSource,
-					accountLabel: target.accountLabel ?? source.accountLabel,
-					email: target.email ?? source.email,
-					refreshToken: newer.refreshToken || older.refreshToken,
-					accessToken: newer.accessToken || older.accessToken,
-					expiresAt: newer.expiresAt ?? older.expiresAt,
-					enabled: mergedEnabled,
-					addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
-					lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
-					lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
-					rateLimitResetTimes: mergedRateLimitResetTimes,
-					coolingDownUntil: mergedCoolingDownUntil,
-					cooldownReason: mergedCooldownReason,
+			if (!serverInfo || !serverInfo.ready) {
+				serverInfo?.close();
+				const message =
+					`OAuth callback server failed to start on http://127.0.0.1:1455. ` +
+					`Retry with "${AUTH_LABELS.OAUTH_DEVICE_CODE}" or "${AUTH_LABELS.OAUTH_MANUAL}".`;
+				logWarn(`\n[${PLUGIN_NAME}] ${message}\n`);
+				return {
+					type: "failed" as const,
+					reason: "invalid_response" as const,
+					message,
 				};
-			};
-
-			const normalizeStoredAccountId = (
-				account: { accountId?: string } | undefined,
-			): string | undefined => {
-				const accountId = account?.accountId?.trim();
-				return accountId && accountId.length > 0 ? accountId : undefined;
-			};
-
-			const canCollapseWithCandidateAccountId = (
-				existing: { accountId?: string } | undefined,
-				candidateAccountId: string | undefined,
-			): boolean => {
-				const existingAccountId = normalizeStoredAccountId(existing);
-				const normalizedCandidate = candidateAccountId?.trim() || undefined;
-				if (!existingAccountId || !normalizedCandidate) {
-					return true;
-				}
-				return existingAccountId === normalizedCandidate;
-			};
-
-
-					type IdentityIndexes = {
-						byOrganizationId: Map<string, number[]>;
-						byAccountIdNoOrg: Map<string, number>;
-						byRefreshTokenNoOrg: Map<string, number[]>;
-						byEmailNoOrg: Map<string, number>;
-						byAccountIdOrgScoped: Map<string, number[]>;
-						byRefreshTokenOrgScoped: Map<string, number[]>;
-						byRefreshTokenGlobal: Map<string, number[]>;
-					};
-
-					const resolveOrganizationMatch = (
-						indexes: IdentityIndexes,
-						organizationId: string,
-						candidateAccountId: string | undefined,
-					): number | undefined => {
-						const matches = indexes.byOrganizationId.get(organizationId);
-						if (!matches || matches.length === 0) return undefined;
-
-						const candidateId = candidateAccountId?.trim() || undefined;
-						let newestNoAccountId: number | undefined;
-						let newestExactAccountId: number | undefined;
-						let newestAnyNonEmptyAccountId: number | undefined;
-						const distinctNonEmptyAccountIds = new Set<string>();
-
-						for (const index of matches) {
-							const existing = accounts[index];
-							if (!existing) continue;
-							const existingAccountId = normalizeStoredAccountId(existing);
-							if (!existingAccountId) {
-								newestNoAccountId =
-									typeof newestNoAccountId === "number"
-										? pickNewestAccountIndex(newestNoAccountId, index)
-										: index;
-								continue;
-							}
-							distinctNonEmptyAccountIds.add(existingAccountId);
-							newestAnyNonEmptyAccountId =
-								typeof newestAnyNonEmptyAccountId === "number"
-									? pickNewestAccountIndex(newestAnyNonEmptyAccountId, index)
-									: index;
-							if (candidateId && existingAccountId === candidateId) {
-								newestExactAccountId =
-									typeof newestExactAccountId === "number"
-										? pickNewestAccountIndex(newestExactAccountId, index)
-										: index;
-							}
-						}
-
-						if (candidateId) {
-							return newestExactAccountId ?? newestNoAccountId;
-						}
-						if (typeof newestNoAccountId === "number") {
-							return newestNoAccountId;
-						}
-						if (distinctNonEmptyAccountIds.size === 1) {
-							return newestAnyNonEmptyAccountId;
-						}
-						return undefined;
-					};
-
-					const resolveNoOrgRefreshMatch = (
-						indexes: IdentityIndexes,
-						refreshToken: string,
-						candidateAccountId: string | undefined,
-					): number | undefined => {
-						const candidateId = candidateAccountId?.trim() || undefined;
-						const matches = indexes.byRefreshTokenNoOrg.get(refreshToken);
-						if (!matches || matches.length === 0) return undefined;
-						let newestNoAccountId: number | undefined;
-						let newestExactAccountId: number | undefined;
-
-						for (const index of matches) {
-							const existing = accounts[index];
-							const existingAccountId = normalizeStoredAccountId(existing);
-							if (!existingAccountId) {
-								newestNoAccountId =
-									typeof newestNoAccountId === "number"
-										? pickNewestAccountIndex(newestNoAccountId, index)
-										: index;
-								continue;
-							}
-							if (candidateId && existingAccountId === candidateId) {
-								newestExactAccountId =
-									typeof newestExactAccountId === "number"
-										? pickNewestAccountIndex(newestExactAccountId, index)
-										: index;
-							}
-						}
-
-						return newestExactAccountId ?? newestNoAccountId;
-					};
-
-			const resolveUniqueOrgScopedMatch = (
-				indexes: IdentityIndexes,
-				accountId: string | undefined,
-				refreshToken: string,
-			): number | undefined => {
-				const byAccountId = accountId
-					? asUniqueIndex(indexes.byAccountIdOrgScoped.get(accountId))
-					: undefined;
-				if (byAccountId !== undefined) return byAccountId;
-
-				if (accountId) {
-					const accountMatches = indexes.byAccountIdOrgScoped.get(accountId);
-					if (accountMatches && accountMatches.length > 1) {
-						let newestRefreshMatch: number | undefined;
-						for (const index of accountMatches) {
-							const existing = accounts[index];
-							if (!existing) continue;
-							const existingRefresh = existing.refreshToken?.trim();
-							if (!existingRefresh || existingRefresh !== refreshToken) {
-								continue;
-							}
-							newestRefreshMatch =
-								typeof newestRefreshMatch === "number"
-									? pickNewestAccountIndex(newestRefreshMatch, index)
-									: index;
-						}
-						if (typeof newestRefreshMatch === "number") {
-							return newestRefreshMatch;
-						}
-					}
-				}
-
-				// Refresh-token-only fallback is allowed only when accountId is absent.
-				// This avoids collapsing distinct workspace variants that share refresh token.
-				if (accountId) return undefined;
-
-						return asUniqueIndex(indexes.byRefreshTokenOrgScoped.get(refreshToken));
-					};
-
-					const buildIdentityIndexes = (): IdentityIndexes => {
-						const byOrganizationId = new Map<string, number[]>();
-						const byAccountIdNoOrg = new Map<string, number>();
-						const byRefreshTokenNoOrg = new Map<string, number[]>();
-						const byEmailNoOrg = new Map<string, number>();
-						const byAccountIdOrgScoped = new Map<string, number[]>();
-						const byRefreshTokenOrgScoped = new Map<string, number[]>();
-						const byRefreshTokenGlobal = new Map<string, number[]>();
-
-						for (let i = 0; i < accounts.length; i += 1) {
-							const account = accounts[i];
-							if (!account) continue;
-
-							const organizationId = account.organizationId?.trim();
-							const accountId = account.accountId?.trim();
-							const refreshToken = account.refreshToken?.trim();
-							const email = account.email?.trim();
-
-							// Track all refresh-token matches. Callers can require uniqueness
-							// so org variants that share a token do not collapse accidentally.
-							if (refreshToken) {
-								pushIndex(byRefreshTokenGlobal, refreshToken, i);
-							}
-
-							if (organizationId) {
-								pushIndex(byOrganizationId, organizationId, i);
-								if (accountId) {
-									pushIndex(byAccountIdOrgScoped, accountId, i);
-								}
-								if (refreshToken) {
-									pushIndex(byRefreshTokenOrgScoped, refreshToken, i);
-								}
-								continue;
-							}
-
-							if (accountId) {
-								byAccountIdNoOrg.set(accountId, i);
-							}
-							if (refreshToken) {
-								pushIndex(byRefreshTokenNoOrg, refreshToken, i);
-							}
-							if (email) {
-								byEmailNoOrg.set(email, i);
-							}
-						}
-
-						return {
-							byOrganizationId,
-							byAccountIdNoOrg,
-							byRefreshTokenNoOrg,
-							byEmailNoOrg,
-							byAccountIdOrgScoped,
-							byRefreshTokenOrgScoped,
-							byRefreshTokenGlobal,
-						};
-					};
-
-					let identityIndexes = buildIdentityIndexes();
-
-					for (const result of results) {
-						const accountId = result.accountIdOverride ?? extractAccountId(result.access);
-						const normalizedAccountId = accountId?.trim() || undefined;
-						const organizationId = result.organizationIdOverride?.trim() || undefined;
-						const accountIdSource =
-							normalizedAccountId
-								? result.accountIdSource ??
-									(result.accountIdOverride ? "manual" : "token")
-								: undefined;
-						const accountLabel = result.accountLabel;
-						const accountEmail = sanitizeEmail(extractAccountEmail(result.access, result.idToken));
-
-						const existingIndex = (() => {
-							if (organizationId) {
-								return resolveOrganizationMatch(
-									identityIndexes,
-									organizationId,
-									normalizedAccountId,
-								);
-							}
-							if (normalizedAccountId) {
-								const byAccountId = identityIndexes.byAccountIdNoOrg.get(normalizedAccountId);
-								if (byAccountId !== undefined) {
-									return byAccountId;
-								}
-							}
-
-							const byRefreshToken = resolveNoOrgRefreshMatch(
-								identityIndexes,
-								result.refresh,
-								normalizedAccountId,
-							);
-							if (byRefreshToken !== undefined) {
-								return byRefreshToken;
-							}
-
-						if (accountEmail && !normalizedAccountId) {
-							const byEmail = identityIndexes.byEmailNoOrg.get(accountEmail);
-							if (byEmail !== undefined) {
-								return byEmail;
-							}
-						}
-
-							const orgScoped = resolveUniqueOrgScopedMatch(
-								identityIndexes,
-								normalizedAccountId,
-								result.refresh,
-							);
-							if (orgScoped !== undefined) return orgScoped;
-
-						// Absolute last resort: only collapse when refresh token maps to a
-						// single compatible account. Avoids merging distinct workspace variants.
-						const globalRefreshMatch = asUniqueIndex(
-							identityIndexes.byRefreshTokenGlobal.get(result.refresh),
-						);
-						if (globalRefreshMatch === undefined) {
-							return undefined;
-						}
-						const existing = accounts[globalRefreshMatch];
-						if (!canCollapseWithCandidateAccountId(existing, normalizedAccountId)) {
-							return undefined;
-						}
-						return globalRefreshMatch;
-					})();
-
-						if (existingIndex === undefined) {
-							accounts.push({
-								accountId: normalizedAccountId,
-								organizationId,
-								accountIdSource,
-								accountLabel,
-								email: accountEmail,
-								refreshToken: result.refresh,
-								accessToken: result.access,
-								expiresAt: result.expires,
-								addedAt: now,
-								lastUsed: now,
-							});
-							identityIndexes = buildIdentityIndexes();
-							continue;
-						}
-
-						const existing = accounts[existingIndex];
-						if (!existing) continue;
-
-						const nextEmail = accountEmail ?? existing.email;
-						const nextOrganizationId = organizationId ?? existing.organizationId;
-						const preserveOrgIdentity =
-							typeof existing.organizationId === "string" &&
-							existing.organizationId.trim().length > 0 &&
-							!organizationId;
-						const nextAccountId = preserveOrgIdentity
-							? existing.accountId ?? normalizedAccountId
-							: normalizedAccountId ?? existing.accountId;
-						const nextAccountIdSource = preserveOrgIdentity
-							? existing.accountIdSource ?? accountIdSource
-							: normalizedAccountId
-								? accountIdSource ?? existing.accountIdSource
-								: existing.accountIdSource;
-						const nextAccountLabel = preserveOrgIdentity
-							? existing.accountLabel ?? accountLabel
-							: accountLabel ?? existing.accountLabel;
-						accounts[existingIndex] = {
-							...existing,
-							accountId: nextAccountId,
-							organizationId: nextOrganizationId,
-							accountIdSource: nextAccountIdSource,
-							accountLabel: nextAccountLabel,
-							email: nextEmail,
-							refreshToken: result.refresh,
-							accessToken: result.access,
-							expiresAt: result.expires,
-							lastUsed: now,
-						};
-						identityIndexes = buildIdentityIndexes();
-					}
-
-			const pruneRefreshTokenCollisions = (): void => {
-				const indicesToRemove = new Set<number>();
-				const exactIdentityToIndex = new Map<string, number>();
-
-				const getExactIdentityKey = (
-					account: {
-						organizationId?: string;
-						accountId?: string;
-						email?: string;
-						refreshToken?: string;
-					} | undefined,
-				): string => {
-					const organizationId = account?.organizationId?.trim() ?? "";
-					const accountId = normalizeStoredAccountId(account) ?? "";
-					const email = account?.email?.trim().toLowerCase() ?? "";
-					const refreshToken = account?.refreshToken?.trim() ?? "";
-					if (organizationId || accountId) {
-						return `org:${organizationId}|account:${accountId}|refresh:${refreshToken}`;
-					}
-					return `email:${email}|refresh:${refreshToken}`;
-				};
-
-				for (let i = 0; i < accounts.length; i += 1) {
-					const account = accounts[i];
-					if (!account) continue;
-
-					const identityKey = getExactIdentityKey(account);
-					const existingIndex = exactIdentityToIndex.get(identityKey);
-					if (existingIndex === undefined) {
-						exactIdentityToIndex.set(identityKey, i);
-						continue;
-					}
-
-					const newestIndex = pickNewestAccountIndex(existingIndex, i);
-					const obsoleteIndex = newestIndex === existingIndex ? i : existingIndex;
-					mergeAccountRecords(newestIndex, obsoleteIndex);
-					indicesToRemove.add(obsoleteIndex);
-					exactIdentityToIndex.set(identityKey, newestIndex);
-				}
-
-				if (indicesToRemove.size > 0) {
-					accounts = accounts.filter((_, index) => !indicesToRemove.has(index));
-				}
-			};
-
-			const collectIdentityKeys = (
-				account: { organizationId?: string; accountId?: string; refreshToken?: string } | undefined,
-			): string[] => {
-				const keys: string[] = [];
-				const organizationId = account?.organizationId?.trim();
-				if (organizationId) keys.push(`org:${organizationId}`);
-				const accountId = account?.accountId?.trim();
-				if (accountId) keys.push(`account:${accountId}`);
-				const refreshToken = account?.refreshToken?.trim();
-				if (refreshToken) keys.push(`refresh:${refreshToken}`);
-				return keys;
-			};
-
-			const getStoredAccountAtIndex = (rawIndex: unknown) => {
-				const storedAccounts = stored?.accounts;
-				if (!storedAccounts) return undefined;
-				if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) return undefined;
-				const candidate = Math.floor(rawIndex);
-				if (candidate < 0 || candidate >= storedAccounts.length) return undefined;
-				return storedAccounts[candidate];
-			};
-
-			const storedActiveKeys = replaceAll
-				? []
-				: collectIdentityKeys(getStoredAccountAtIndex(stored?.activeIndex));
-			const storedActiveKeysByFamily: Partial<Record<ModelFamily, string[]>> = {};
-			if (!replaceAll) {
-				for (const family of MODEL_FAMILIES) {
-					const familyKeys = collectIdentityKeys(
-						getStoredAccountAtIndex(stored?.activeIndexByFamily?.[family]),
-					);
-					if (familyKeys.length > 0) {
-						storedActiveKeysByFamily[family] = familyKeys;
-					}
-				}
 			}
 
-			pruneRefreshTokenCollisions();
+			const result = await serverInfo.waitForCode(state);
+			serverInfo.close();
 
-			if (accounts.length === 0) return;
-
-			const resolveIndexByIdentityKeys = (identityKeys: string[] | undefined): number | undefined => {
-				if (!identityKeys || identityKeys.length === 0) return undefined;
-				for (const identityKey of identityKeys) {
-					const index = accounts.findIndex(
-						(account) => collectIdentityKeys(account).includes(identityKey),
-					);
-					if (index >= 0) {
-						return index;
-					}
-				}
-				return undefined;
-			};
-
-			const fallbackActiveIndex = replaceAll
-				? 0
-				: typeof stored?.activeIndex === "number" && Number.isFinite(stored.activeIndex)
-					? stored.activeIndex
-					: 0;
-			const remappedActiveIndex = replaceAll
-				? undefined
-				: resolveIndexByIdentityKeys(storedActiveKeys);
-			const activeIndex = remappedActiveIndex ?? fallbackActiveIndex;
-
-			const clampedActiveIndex = Math.max(0, Math.min(Math.floor(activeIndex), accounts.length - 1));
-			const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
-			const familiesToPersist = replaceAll
-				? []
-				: MODEL_FAMILIES.filter((family) => {
-					const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
-					return typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex);
-				});
-			for (const family of familiesToPersist) {
-				const storedFamilyIndex = stored?.activeIndexByFamily?.[family];
-				const remappedFamilyIndex = replaceAll
-					? undefined
-					: resolveIndexByIdentityKeys(storedActiveKeysByFamily[family]);
-				const rawFamilyIndex = replaceAll
-					? 0
-					: typeof remappedFamilyIndex === "number"
-						? remappedFamilyIndex
-						: typeof storedFamilyIndex === "number" && Number.isFinite(storedFamilyIndex)
-							? storedFamilyIndex
-							: clampedActiveIndex;
-				activeIndexByFamily[family] = Math.max(
-					0,
-					Math.min(Math.floor(rawFamilyIndex), accounts.length - 1),
-				);
+			if (!result) {
+				return {
+					type: "failed" as const,
+					reason: "unknown" as const,
+					message:
+						`OAuth callback timed out or was cancelled. ` +
+						`If you are on SSH, WSL, or a headless machine, retry with "${AUTH_LABELS.OAUTH_DEVICE_CODE}" or "${AUTH_LABELS.OAUTH_MANUAL}".`,
+				};
 			}
 
-					await persist({
-						version: 3,
-						accounts,
-						activeIndex: clampedActiveIndex,
-						activeIndexByFamily,
-					});
-				});
-	        };
+			return await exchangeAuthorizationCode(
+				result.code,
+				pkce.verifier,
+				REDIRECT_URI,
+			);
+		};
 
         const showToast = async (
                 message: string,
@@ -1958,6 +1285,30 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		const invalidateAccountManagerCache = (): void => {
 			cachedAccountManager = null;
 			accountManagerPromise = null;
+		};
+
+		const persistAuthenticatedSelections = async (
+			results: TokenSuccessWithAccount[],
+			replaceAll: boolean,
+		): Promise<void> => {
+			try {
+				await persistAccountPool(results, replaceAll);
+				invalidateAccountManagerCache();
+			} catch (err) {
+				const storagePath = getStoragePath();
+				const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
+				const hint =
+					err instanceof StorageError
+						? err.hint
+						: formatStorageErrorHint(err, storagePath);
+				logError(
+					`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`,
+				);
+				await showToast(hint, "error", {
+					title: "Account Persistence Failed",
+					duration: 10000,
+				});
+			}
 		};
 
         // Event handler for session recovery and account selection
@@ -3992,24 +3343,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 							if (useManualMode) {
 								const { pkce, state, url } = await createAuthorizationFlow();
 								return buildManualOAuthFlow(pkce, url, state, async (selection) => {
-									try {
-										await persistAccountPool(selection.variantsForPersistence, startFresh);
-										invalidateAccountManagerCache();
-									} catch (err) {
-										const storagePath = getStoragePath();
-										const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
-										const hint =
-											err instanceof StorageError
-												? err.hint
-												: formatStorageErrorHint(err, storagePath);
-										logError(
-											`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`,
-										);
-										await showToast(hint, "error", {
-											title: "Account Persistence Failed",
-											duration: 10000,
-										});
-									}
+									await persistAuthenticatedSelections(
+										selection.variantsForPersistence,
+										startFresh,
+									);
 								});
 							}
 
@@ -4048,7 +3385,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									if (accounts.length === 0) {
 										return {
 											url: "",
-											instructions: "Authentication failed.",
+											instructions: result.message ?? "Authentication failed.",
 											method: "auto",
 											callback: () => Promise.resolve(result),
 										};
@@ -4064,27 +3401,13 @@ while (attempted.size < Math.max(1, accountCount)) {
 								accounts.push(resolved);
 								await showToast(`Account ${accounts.length} authenticated`, "success");
 
-								try {
-									const isFirstAccount = accounts.length === 1;
-									const entriesToPersist =
-										variantsForPersistence.length > 0 ? variantsForPersistence : [resolved];
-									await persistAccountPool(entriesToPersist, isFirstAccount && startFresh);
-									invalidateAccountManagerCache();
-								} catch (err) {
-									const storagePath = getStoragePath();
-									const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
-									const hint =
-										err instanceof StorageError
-											? err.hint
-											: formatStorageErrorHint(err, storagePath);
-									logError(
-										`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`,
-									);
-									await showToast(hint, "error", {
-										title: "Account Persistence Failed",
-										duration: 10000,
-									});
-								}
+								const isFirstAccount = accounts.length === 1;
+								const entriesToPersist =
+									variantsForPersistence.length > 0 ? variantsForPersistence : [resolved];
+								await persistAuthenticatedSelections(
+									entriesToPersist,
+									isFirstAccount && startFresh,
+								);
 
 								if (accounts.length >= ACCOUNT_LIMITS.MAX_ACCOUNTS) {
 									break;
@@ -4138,6 +3461,45 @@ while (attempted.size < Math.max(1, accountCount)) {
 							};
 						},
 					},
+					{
+						label: AUTH_LABELS.OAUTH_DEVICE_CODE,
+						type: "oauth" as const,
+						authorize: async () => {
+							const devicePluginConfig = loadPluginConfig();
+							applyUiRuntimeFromConfig(devicePluginConfig);
+							const devicePerProjectAccounts = getPerProjectAccounts(devicePluginConfig);
+							setStoragePath(devicePerProjectAccounts ? process.cwd() : null);
+
+							const started = await createDeviceCodeSession();
+							if (started.type === "failed") {
+								return {
+									url: "",
+									instructions: started.failure.message ?? "Device code login could not be started.",
+									method: "auto" as const,
+									callback: () => Promise.resolve(started.failure),
+								};
+							}
+
+							return {
+								url: started.session.verificationUrl,
+								instructions: buildDeviceCodeInstructions(started.session),
+								method: "auto" as const,
+								callback: async () => {
+									const result = await completeDeviceCodeSession(started.session);
+									if (result.type !== "success") {
+										return result;
+									}
+
+									const selection = resolveAccountSelection(result);
+									await persistAuthenticatedSelections(
+										selection.variantsForPersistence,
+										false,
+									);
+									return selection.primary;
+								},
+							};
+						},
+					},
 
 				{
 					label: AUTH_LABELS.OAUTH_MANUAL,
@@ -4150,22 +3512,13 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
 							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
 
-												const { pkce, state, url } = await createAuthorizationFlow();
-												return buildManualOAuthFlow(pkce, url, state, async (selection) => {
-														try {
-																await persistAccountPool(selection.variantsForPersistence, false);
-														} catch (err) {
-                                                                        const storagePath = getStoragePath();
-                                                                        const errorCode = (err as NodeJS.ErrnoException)?.code || "UNKNOWN";
-                                                                        const hint = err instanceof StorageError ? err.hint : formatStorageErrorHint(err, storagePath);
-                                                                        logError(`[${PLUGIN_NAME}] Failed to persist account: [${errorCode}] ${(err as Error)?.message ?? String(err)}`);
-                                                                        await showToast(
-                                                                                hint,
-                                                                                "error",
-                                                                                { title: "Account Persistence Failed", duration: 10000 },
-                                                                        );
-                                                                }
-                                                        });
+							const { pkce, state, url } = await createAuthorizationFlow();
+							return buildManualOAuthFlow(pkce, url, state, async (selection) => {
+								await persistAuthenticatedSelections(
+									selection.variantsForPersistence,
+									false,
+								);
+							});
                                                 },
                                         },
                         ],
