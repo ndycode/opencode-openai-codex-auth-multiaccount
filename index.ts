@@ -4524,7 +4524,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 				const explainabilityFamily =
 					runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
 				const explainabilityModel =
-					runtimeMetrics.lastSelectionSnapshot?.model ?? undefined;
+					runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
+					runtimeMetrics.lastSelectionSnapshot?.model ??
+					undefined;
 				const managerForExplainability =
 					cachedAccountManager ?? (await AccountManager.loadFromDisk());
 				const explainability = managerForExplainability.getSelectionExplainability(

@@ -19,6 +19,10 @@ For machine-readable automation or CI checks, these read-only tools also accept 
 
 ```text
 codex-status format="json"
+codex-limits format="json"
+codex-health format="json"
+codex-next format="json"
+codex-list format="json"
 codex-dashboard format="json"
 codex-metrics format="json"
 codex-doctor deep=true format="json"
