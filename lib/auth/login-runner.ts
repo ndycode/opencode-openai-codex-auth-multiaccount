@@ -146,6 +146,15 @@ export function applyAccountSelectionFallbacks(
 	};
 }
 
+/**
+ * Persists the already-resolved selection through the caller's
+ * `persistSelections` callback. Windows filesystem safety remains delegated to
+ * that callback, so callers should use `persistAccountPool` or
+ * `withAccountStorageTransaction` to keep the rename retry and serialized
+ * read-modify-write behavior covered by `test/login-runner.test.ts`.
+ * This helper does not log token material; callers must redact any callback
+ * failure details before emitting logs.
+ */
 export async function persistResolvedAccountSelection(
 	selection: AccountSelectionResult,
 	options?: {
@@ -164,6 +173,15 @@ export async function persistResolvedAccountSelection(
 	return selection;
 }
 
+/**
+ * Finalizes a resolved selection by delegating persistence to the caller's
+ * `persistSelections` callback. Windows lock-retry and read-modify-write
+ * serialization remain the callback's responsibility, so callers should route
+ * through `persistAccountPool` or `withAccountStorageTransaction` to preserve
+ * the guarantees covered by `test/login-runner.test.ts`.
+ * This helper does not log tokens or account identifiers; callers must redact
+ * callback failures before logging them.
+ */
 export async function resolveAndPersistAccountSelection(
 	tokens: TokenSuccess,
 	options?: {

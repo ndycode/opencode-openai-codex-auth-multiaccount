@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	applyAccountSelectionFallbacks,
 	persistAccountPool,
+	persistResolvedAccountSelection,
 	resolveAccountSelection,
 	resolveAndPersistAccountSelection,
 	type TokenSuccessWithAccount,
@@ -149,5 +150,36 @@ describe("login-runner selection finalization", () => {
 		expect(result.primary.accountLabel).toBe("Flagged label");
 		expect(persistSelections).toHaveBeenCalledTimes(1);
 		expect(persistSelections).toHaveBeenCalledWith(result.variantsForPersistence, true);
+	});
+
+	it("returns the selection unchanged when no persist callback is provided", async () => {
+		const selection = resolveAccountSelection({
+			type: "success",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			idToken: "id-token",
+		});
+
+		await expect(persistResolvedAccountSelection(selection)).resolves.toBe(selection);
+	});
+
+	it("propagates persist callback failures", async () => {
+		const selection = resolveAccountSelection({
+			type: "success",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: Date.now() + 60_000,
+			idToken: "id-token",
+		});
+		const persistError = new Error("persist failed");
+		const persistSelections = vi.fn(async () => {
+			throw persistError;
+		});
+
+		await expect(
+			persistResolvedAccountSelection(selection, { persistSelections }),
+		).rejects.toThrow("persist failed");
+		expect(persistSelections).toHaveBeenCalledTimes(1);
 	});
 });
