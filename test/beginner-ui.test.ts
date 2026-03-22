@@ -154,6 +154,23 @@ describe("buildBeginnerDoctorFindings", () => {
 
 		expect(findings.some((f) => f.code === "prompt-cache-inconsistent")).toBe(true);
 	});
+
+	it("does not flag cache issues when no requests have been made", () => {
+		const findings = buildBeginnerDoctorFindings({
+			accounts: [buildAccount()],
+			now,
+			runtime: {
+				...healthyRuntime,
+				totalRequests: 0,
+				promptCacheEnabledRequests: 0,
+				promptCacheMissingRequests: 3,
+				lastPromptCacheKey: null,
+			},
+		});
+
+		expect(findings.some((f) => f.code === "prompt-cache-missing")).toBe(false);
+		expect(findings.some((f) => f.code === "prompt-cache-inconsistent")).toBe(false);
+	});
 });
 
 describe("recommendBeginnerNextAction", () => {

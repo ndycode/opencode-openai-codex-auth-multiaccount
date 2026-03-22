@@ -2331,21 +2331,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 							}
 
 							try {
-							// Request metrics are tracked at the fetch boundary, so retries and account
-							// rotation are counted consistently. This is in-memory only: no filesystem I/O,
-							// no token persistence, and prompt-cache keys stay redacted in doctor output.
-							runtimeMetrics.totalRequests++;
-							if (promptCacheKey) {
-								runtimeMetrics.promptCacheEnabledRequests++;
-							} else {
-								runtimeMetrics.promptCacheMissingRequests++;
-							}
-							response = await fetch(url, {
-								...requestInit,
-								headers,
+								// Request metrics are tracked at the fetch boundary, so retries and
+								// account rotation are counted consistently. These increments are
+								// in-memory only and run on Node's single-threaded event loop, so no
+								// filesystem locking or token-redaction concerns are introduced here.
+								runtimeMetrics.totalRequests++;
+								if (promptCacheKey) {
+									runtimeMetrics.promptCacheEnabledRequests++;
+								} else {
+									runtimeMetrics.promptCacheMissingRequests++;
+								}
+								response = await fetch(url, {
+									...requestInit,
+									headers,
 									signal: fetchController.signal,
 								});
-				} catch (networkError) {
+							} catch (networkError) {
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
 								if (
@@ -2378,21 +2379,21 @@ while (attempted.size < Math.max(1, accountCount)) {
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
 								break;
-								} finally {
-									clearTimeout(fetchTimeoutId);
-									if (abortSignal && onUserAbort) {
-										abortSignal.removeEventListener("abort", onUserAbort);
-									}
+							} finally {
+								clearTimeout(fetchTimeoutId);
+								if (abortSignal && onUserAbort) {
+									abortSignal.removeEventListener("abort", onUserAbort);
 								}
-											const fetchLatencyMs = Math.round(performance.now() - fetchStart);
+							}
+							const fetchLatencyMs = Math.round(performance.now() - fetchStart);
 
-											logRequest(LOG_STAGES.RESPONSE, {
-												status: response.status,
-												ok: response.ok,
-												statusText: response.statusText,
-												latencyMs: fetchLatencyMs,
-												headers: Object.fromEntries(response.headers.entries()),
-											});
+							logRequest(LOG_STAGES.RESPONSE, {
+								status: response.status,
+								ok: response.ok,
+								statusText: response.statusText,
+								latencyMs: fetchLatencyMs,
+								headers: Object.fromEntries(response.headers.entries()),
+							});
 
 								if (!response.ok) {
 									const contextOverflowResult = await handleContextOverflow(response, model);
