@@ -244,9 +244,47 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		timestamp: number;
 		family: ModelFamily;
 		model: string | null;
+		requestedModel: string | null;
+		effectiveModel: string | null;
 		selectedAccountIndex: number | null;
 		quotaKey: string;
 		explainability: AccountSelectionExplainability[];
+		fallbackApplied: boolean;
+		fallbackFrom: string | null;
+		fallbackTo: string | null;
+		fallbackReason: string | null;
+	};
+
+	type ToolOutputFormat = "text" | "json";
+
+	type SerializedSelectionExplainability = {
+		index: number;
+		zeroBasedIndex: number;
+		enabled: boolean;
+		isCurrentForFamily: boolean;
+		eligible: boolean;
+		reasons: string[];
+		healthScore: number;
+		tokensAvailable: number;
+		rateLimitedUntil: number | null;
+		coolingDownUntil: number | null;
+		cooldownReason: string | null;
+		lastUsed: number;
+	};
+
+	type RoutingVisibilitySnapshot = {
+		requestedModel: string | null;
+		effectiveModel: string | null;
+		modelFamily: ModelFamily | null;
+		quotaKey: string | null;
+		selectedAccountIndex: number | null;
+		zeroBasedSelectedAccountIndex: number | null;
+		lastErrorCategory: string | null;
+		fallbackApplied: boolean;
+		fallbackFrom: string | null;
+		fallbackTo: string | null;
+		fallbackReason: string | null;
+		selectionExplainability: SerializedSelectionExplainability[];
 	};
 
 	const createRetryBudgetUsage = (): Record<RetryBudgetClass, number> => ({
@@ -314,6 +352,257 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastSelectedAccountIndex: null,
 		lastQuotaKey: null,
 		lastSelectionSnapshot: null,
+	};
+
+	const toolOutputFormatSchema = () =>
+		tool.schema
+			.string()
+			.optional()
+			.describe('Output format: "text" (default) or "json".');
+
+	const toolSensitiveJsonSchema = () =>
+		tool.schema
+			.boolean()
+			.optional()
+			.describe(
+				"Include raw account labels, emails, and account IDs in JSON output. Defaults to false.",
+			);
+
+	const normalizeToolOutputFormat = (format?: string): ToolOutputFormat => {
+		if (format === undefined) return "text";
+		if (format === "text" || format === "json") return format;
+		throw new Error(`Invalid format "${format}". Expected "text" or "json".`);
+	};
+
+	const renderJsonOutput = (payload: unknown): string =>
+		JSON.stringify(payload, null, 2);
+
+	const serializeSelectionExplainability = (
+		entries: AccountSelectionExplainability[],
+	): SerializedSelectionExplainability[] =>
+		entries.map((entry) => ({
+			index: entry.index + 1,
+			zeroBasedIndex: entry.index,
+			enabled: entry.enabled,
+			isCurrentForFamily: entry.isCurrentForFamily,
+			eligible: entry.eligible,
+			reasons: [...entry.reasons],
+			healthScore: entry.healthScore,
+			tokensAvailable: entry.tokensAvailable,
+			rateLimitedUntil:
+				typeof entry.rateLimitedUntil === "number" ? entry.rateLimitedUntil : null,
+			coolingDownUntil:
+				typeof entry.coolingDownUntil === "number" ? entry.coolingDownUntil : null,
+			cooldownReason: entry.cooldownReason ?? null,
+			lastUsed: entry.lastUsed,
+		}));
+
+	const buildRoutingVisibilitySnapshot = (
+		options: {
+			modelFamily?: ModelFamily | null;
+			effectiveModel?: string | null;
+			quotaKey?: string | null;
+			selectedAccountIndex?: number | null;
+			selectionExplainability?: AccountSelectionExplainability[];
+		} = {},
+	): RoutingVisibilitySnapshot => {
+		const snapshot = runtimeMetrics.lastSelectionSnapshot;
+		const rawSelectedAccountIndex =
+			options.selectedAccountIndex ??
+			snapshot?.selectedAccountIndex ??
+			runtimeMetrics.lastSelectedAccountIndex;
+		return {
+			requestedModel: snapshot?.requestedModel ?? null,
+			effectiveModel:
+				options.effectiveModel ?? snapshot?.effectiveModel ?? snapshot?.model ?? null,
+			modelFamily: options.modelFamily ?? snapshot?.family ?? null,
+			quotaKey: options.quotaKey ?? snapshot?.quotaKey ?? runtimeMetrics.lastQuotaKey,
+			selectedAccountIndex:
+				rawSelectedAccountIndex === null || rawSelectedAccountIndex === undefined
+					? null
+					: rawSelectedAccountIndex + 1,
+			zeroBasedSelectedAccountIndex: rawSelectedAccountIndex ?? null,
+			lastErrorCategory: runtimeMetrics.lastErrorCategory,
+			fallbackApplied: snapshot?.fallbackApplied ?? false,
+			fallbackFrom: snapshot?.fallbackFrom ?? null,
+			fallbackTo: snapshot?.fallbackTo ?? null,
+			fallbackReason: snapshot?.fallbackReason ?? null,
+			selectionExplainability: serializeSelectionExplainability(
+				options.selectionExplainability ?? snapshot?.explainability ?? [],
+			),
+		};
+	};
+
+	const formatRoutingValue = (
+		value: string | number | boolean | null | undefined,
+	): string => {
+		if (typeof value === "boolean") return value ? "yes" : "no";
+		if (value === null || value === undefined || value === "") return "-";
+		return String(value);
+	};
+
+	const formatExplainabilitySummary = (
+		entry: SerializedSelectionExplainability,
+	): string =>
+		`Account ${entry.index}: ${entry.eligible ? "eligible" : "blocked"} | health=${Math.round(entry.healthScore)} | tokens=${entry.tokensAvailable.toFixed(1)} | ${entry.reasons.join(", ")}`;
+
+	const buildJsonAccountIdentity = (
+		index: number,
+		options: {
+			includeSensitive?: boolean;
+			account?: {
+				email?: string;
+				accountId?: string;
+				accountLabel?: string;
+				accountTags?: string[];
+				accountNote?: string;
+			};
+			label?: string;
+		} = {},
+	): Record<string, unknown> => ({
+		index: index + 1,
+		zeroBasedIndex: index,
+		...(options.includeSensitive
+			? {
+					label:
+						options.label ?? formatCommandAccountLabel(options.account, index),
+					email: options.account?.email ?? null,
+					accountId: options.account?.accountId ?? null,
+				}
+			: {}),
+	});
+
+	const appendRoutingVisibilityText = (
+		lines: string[],
+		routing: RoutingVisibilitySnapshot,
+		options: { includeExplainability?: boolean } = {},
+	): void => {
+		lines.push("Routing visibility:");
+		lines.push(`  Requested model: ${formatRoutingValue(routing.requestedModel)}`);
+		lines.push(`  Effective model: ${formatRoutingValue(routing.effectiveModel)}`);
+		lines.push(`  Model family: ${formatRoutingValue(routing.modelFamily)}`);
+		lines.push(`  Quota key: ${formatRoutingValue(routing.quotaKey)}`);
+		lines.push(
+			`  Selected account: ${
+				routing.selectedAccountIndex === null
+					? "-"
+					: String(routing.selectedAccountIndex)
+			}`,
+		);
+		lines.push(
+			`  Last error category: ${formatRoutingValue(routing.lastErrorCategory)}`,
+		);
+		lines.push(`  Fallback applied: ${formatRoutingValue(routing.fallbackApplied)}`);
+		lines.push(`  Fallback from: ${formatRoutingValue(routing.fallbackFrom)}`);
+		lines.push(`  Fallback to: ${formatRoutingValue(routing.fallbackTo)}`);
+		lines.push(`  Fallback reason: ${formatRoutingValue(routing.fallbackReason)}`);
+		if (options.includeExplainability) {
+			lines.push("  Selection explainability:");
+			if (routing.selectionExplainability.length === 0) {
+				lines.push("    - none");
+			} else {
+				for (const entry of routing.selectionExplainability) {
+					lines.push(`    - ${formatExplainabilitySummary(entry)}`);
+				}
+			}
+		}
+	};
+
+	const appendRoutingVisibilityUi = (
+		ui: UiRuntimeOptions,
+		lines: string[],
+		routing: RoutingVisibilitySnapshot,
+		options: { includeExplainability?: boolean } = {},
+	): void => {
+		lines.push(...formatUiSection(ui, "Routing visibility"));
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Requested model",
+				formatRoutingValue(routing.requestedModel),
+				"muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Effective model",
+				formatRoutingValue(routing.effectiveModel),
+				"muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Model family",
+				formatRoutingValue(routing.modelFamily),
+				"muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(ui, "Quota key", formatRoutingValue(routing.quotaKey), "muted"),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Selected account",
+				routing.selectedAccountIndex === null
+					? "-"
+					: String(routing.selectedAccountIndex),
+				routing.selectedAccountIndex === null ? "muted" : "accent",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Last error category",
+				formatRoutingValue(routing.lastErrorCategory),
+				routing.lastErrorCategory ? "warning" : "muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Fallback applied",
+				formatRoutingValue(routing.fallbackApplied),
+				routing.fallbackApplied ? "accent" : "muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Fallback from",
+				formatRoutingValue(routing.fallbackFrom),
+				"muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Fallback to",
+				formatRoutingValue(routing.fallbackTo),
+				"muted",
+			),
+		);
+		lines.push(
+			formatUiKeyValue(
+				ui,
+				"Fallback reason",
+				formatRoutingValue(routing.fallbackReason),
+				routing.fallbackReason ? "warning" : "muted",
+			),
+		);
+		if (options.includeExplainability) {
+			lines.push("");
+			lines.push(...formatUiSection(ui, "Selection explainability"));
+			if (routing.selectionExplainability.length === 0) {
+				lines.push(formatUiItem(ui, "none", "muted"));
+			} else {
+				for (const entry of routing.selectionExplainability) {
+					lines.push(formatUiItem(ui, formatExplainabilitySummary(entry)));
+				}
+			}
+		}
 	};
 
 		type TokenSuccess = Extract<TokenResult, { type: "success" }>;
@@ -2025,8 +2314,13 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										let transformedBody: RequestBody | undefined = transformation?.body;
 										const promptCacheKey = transformedBody?.prompt_cache_key;
 										let model = transformedBody?.model;
+										const requestedModel = model ?? null;
 										let modelFamily = model ? getModelFamily(model) : "gpt-5.4";
 										let quotaKey = model ? `${modelFamily}:${model}` : modelFamily;
+										let fallbackApplied = false;
+										let fallbackFrom: string | null = null;
+										let fallbackTo: string | null = null;
+										let fallbackReason: string | null = null;
 						const threadIdCandidate =
 							(process.env.CODEX_THREAD_ID ?? promptCacheKey ?? "")
 								.toString()
@@ -2142,9 +2436,15 @@ while (attempted.size < Math.max(1, accountCount)) {
 					timestamp: Date.now(),
 					family: modelFamily,
 					model: model ?? null,
+					requestedModel,
+					effectiveModel: model ?? null,
 					selectedAccountIndex: null,
 					quotaKey,
 					explainability: selectionExplainability,
+					fallbackApplied,
+					fallbackFrom,
+					fallbackTo,
+					fallbackReason,
 				};
 				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model, { pidOffsetEnabled });
 				if (!account || attempted.has(account.index)) {
@@ -2156,7 +2456,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 							if (runtimeMetrics.lastSelectionSnapshot) {
 								runtimeMetrics.lastSelectionSnapshot = {
 									...runtimeMetrics.lastSelectionSnapshot,
+									requestedModel,
+									effectiveModel: model ?? null,
 									selectedAccountIndex: account.index,
+									quotaKey,
+									fallbackApplied,
+									fallbackFrom,
+									fallbackTo,
+									fallbackReason,
 								};
 							}
 							// Log account selection for debugging rotation
@@ -2487,7 +2794,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						requestedModel: blockedModel,
 						effectiveModel: blockedModel,
 						fallbackApplied: false,
-						fallbackReason: "unsupported-model-entitlement",
+						fallbackReason: "retry-unsupported-model-entitlement",
 					},
 				);
 				break;
@@ -2512,6 +2819,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 				model = fallbackModel;
 				modelFamily = getModelFamily(model);
 				quotaKey = `${modelFamily}:${model}`;
+				fallbackApplied = true;
+				fallbackFrom = previousModel;
+				fallbackTo = model;
+				fallbackReason = "fallback-unsupported-model-entitlement";
 
 				if (transformedBody && typeof transformedBody === "object") {
 					transformedBody = { ...transformedBody, model };
@@ -2532,6 +2843,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 					...(requestInit ?? {}),
 					body: JSON.stringify(transformedBody),
 				};
+				if (runtimeMetrics.lastSelectionSnapshot) {
+					runtimeMetrics.lastSelectionSnapshot = {
+						...runtimeMetrics.lastSelectionSnapshot,
+						family: modelFamily,
+						model: model ?? null,
+						requestedModel,
+						effectiveModel: model ?? null,
+						quotaKey,
+						fallbackApplied,
+						fallbackFrom,
+						fallbackTo,
+						fallbackReason,
+					};
+				}
 				runtimeMetrics.lastError = `Model fallback: ${previousModel} -> ${model}`;
 				runtimeMetrics.lastErrorCategory = "model-fallback";
 				logWarn(
@@ -2541,7 +2866,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						requestedModel: previousModel,
 						effectiveModel: model,
 						fallbackApplied: true,
-						fallbackReason: "unsupported-model-entitlement",
+						fallbackReason: "fallback-unsupported-model-entitlement",
 					},
 				);
 				await showToast(
@@ -2556,6 +2881,22 @@ while (attempted.size < Math.max(1, accountCount)) {
 			if (unsupportedModelInfo.isUnsupported && !fallbackOnUnsupportedCodexModel) {
 				const blockedModel =
 					unsupportedModelInfo.unsupportedModel ?? model ?? "requested model";
+				fallbackApplied = false;
+				fallbackFrom = blockedModel;
+				fallbackTo = null;
+				fallbackReason = "blocked-unsupported-model-entitlement";
+				if (runtimeMetrics.lastSelectionSnapshot) {
+					runtimeMetrics.lastSelectionSnapshot = {
+						...runtimeMetrics.lastSelectionSnapshot,
+						requestedModel,
+						effectiveModel: model ?? null,
+						quotaKey,
+						fallbackApplied,
+						fallbackFrom,
+						fallbackTo,
+						fallbackReason,
+					};
+				}
 				runtimeMetrics.lastError = `Unsupported model (strict): ${blockedModel}`;
 				runtimeMetrics.lastErrorCategory = "unsupported-model";
 				logWarn(
@@ -2565,7 +2906,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						requestedModel: blockedModel,
 						effectiveModel: blockedModel,
 						fallbackApplied: false,
-						fallbackReason: "unsupported-model-entitlement",
+						fallbackReason: "blocked-unsupported-model-entitlement",
 					},
 				);
 				await showToast(
@@ -3830,7 +4171,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                         ],
                 },
                 tool: {
-                        "codex-list": tool({
+				"codex-list": tool({
                                 description:
                                         "List all Codex OAuth accounts and the current active index.",
                                 args: {
@@ -3838,14 +4179,43 @@ while (attempted.size < Math.max(1, accountCount)) {
 						.string()
 						.optional()
 						.describe("Optional tag filter (e.g., work, personal, team-a)."),
+					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
 				},
-                                async execute({ tag }: { tag?: string } = {}) {
+                                async execute({ tag, format, includeSensitive }: { tag?: string; format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
                                         const storage = await loadAccounts();
                                         const storePath = getStoragePath();
+					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const normalizedTag = tag?.trim().toLowerCase() ?? "";
+					const commandHints = [
+						"opencode auth login",
+						"codex-status",
+						"codex-dashboard",
+						"codex-metrics",
+						"codex-doctor",
+						"codex-setup",
+						"codex-next",
+						"codex-label",
+						"codex-tag",
+						"codex-note",
+						"codex-help",
+					];
 
                                         if (!storage || storage.accounts.length === 0) {
+						if (outputFormat === "json") {
+							return renderJsonOutput({
+								message: "No Codex accounts configured. Run: opencode auth login",
+								storagePath: storePath,
+								filterTag: normalizedTag || null,
+								totalAccounts: 0,
+								totalStoredAccounts: 0,
+								activeIndex: null,
+								accounts: [],
+								commands: commandHints,
+							});
+						}
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Codex accounts"),
@@ -3881,6 +4251,18 @@ while (attempted.size < Math.max(1, accountCount)) {
 							return tags.includes(normalizedTag);
 						});
 					if (normalizedTag && filteredEntries.length === 0) {
+						if (outputFormat === "json") {
+							return renderJsonOutput({
+								message: `No accounts found for tag: ${normalizedTag}`,
+								storagePath: storePath,
+								filterTag: normalizedTag,
+								totalAccounts: 0,
+								totalStoredAccounts: storage.accounts.length,
+								activeIndex: activeIndex + 1,
+								accounts: [],
+								commands: commandHints,
+							});
+						}
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Codex accounts"),
@@ -3890,6 +4272,39 @@ while (attempted.size < Math.max(1, accountCount)) {
 							].join("\n");
 						}
 						return `No accounts found for tag: ${normalizedTag}\n\nUse codex-tag index=2 tags="work,team-a" to add tags.`;
+					}
+					if (outputFormat === "json") {
+						return renderJsonOutput({
+							totalAccounts: filteredEntries.length,
+							totalStoredAccounts: storage.accounts.length,
+							activeIndex: activeIndex + 1,
+							filterTag: normalizedTag || null,
+							storagePath: storePath,
+							accounts: filteredEntries.map(({ account, index }) => {
+								const rateLimit = formatRateLimitEntry(account, now);
+								const cooldown = formatCooldown(account, now);
+								const statuses: string[] = [];
+								if (index === activeIndex) statuses.push("active");
+								if (account.enabled === false) statuses.push("disabled");
+								if (rateLimit) statuses.push("rate-limited");
+								if (cooldown) statuses.push("cooldown");
+								if (statuses.length === 0) statuses.push("ok");
+								return {
+									...buildJsonAccountIdentity(index, {
+										includeSensitive: includeSensitiveOutput,
+										account,
+									}),
+									enabled: account.enabled !== false,
+									isActive: index === activeIndex,
+									rateLimit: rateLimit ?? null,
+									cooldown: cooldown ?? null,
+									tags: Array.isArray(account.accountTags) ? [...account.accountTags] : [],
+									note: account.accountNote ?? null,
+									statuses,
+								};
+							}),
+							commands: commandHints,
+						});
 					}
 					if (ui.v2Enabled) {
 						const lines: string[] = [
@@ -4120,11 +4535,27 @@ while (attempted.size < Math.max(1, accountCount)) {
                         }),
 			"codex-status": tool({
 				description: "Show detailed status of Codex accounts and rate limits.",
-				args: {},
-				async execute() {
+				args: {
+					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
+				},
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (outputFormat === "json") {
+							return renderJsonOutput({
+								message: "No Codex accounts configured. Run: opencode auth login",
+								totalAccounts: 0,
+								accounts: [],
+								activeIndexByFamily: {},
+								rateLimitsByModelFamily: [],
+								routingVisibility: buildRoutingVisibilitySnapshot(),
+								recommendedNextAction: "Run opencode auth login",
+							});
+						}
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Account status"),
@@ -4141,7 +4572,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 				const explainabilityFamily =
 					runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
 				const explainabilityModel =
-					runtimeMetrics.lastSelectionSnapshot?.model ?? undefined;
+					runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
+					runtimeMetrics.lastSelectionSnapshot?.model ??
+					undefined;
 				const managerForExplainability =
 					cachedAccountManager ?? (await AccountManager.loadFromDisk());
 				const explainability = managerForExplainability.getSelectionExplainability(
@@ -4149,9 +4582,80 @@ while (attempted.size < Math.max(1, accountCount)) {
 					explainabilityModel,
 					now,
 				);
+				const selectionQuotaKey = explainabilityModel
+					? `${explainabilityFamily}:${explainabilityModel}`
+					: explainabilityFamily;
+				const routingVisibility = buildRoutingVisibilitySnapshot({
+					modelFamily: explainabilityFamily,
+					effectiveModel: explainabilityModel ?? null,
+					quotaKey: selectionQuotaKey,
+					selectedAccountIndex: activeIndex,
+					selectionExplainability: explainability,
+				});
 				const explainabilityByIndex = new Map(
 					explainability.map((entry) => [entry.index, entry]),
 				);
+				const recommendedNextAction = recommendBeginnerNextAction({
+					accounts: toBeginnerAccountSnapshots(storage, activeIndex, now),
+					now,
+					runtime: getBeginnerRuntimeSnapshot(),
+				});
+				if (outputFormat === "json") {
+					return renderJsonOutput({
+						totalAccounts: storage.accounts.length,
+						selectionView: {
+							modelFamily: explainabilityFamily,
+							effectiveModel: explainabilityModel ?? null,
+							label: explainabilityModel
+								? `${explainabilityFamily}:${explainabilityModel}`
+								: explainabilityFamily,
+						},
+						accounts: storage.accounts.map((account, index) => ({
+							...buildJsonAccountIdentity(index, {
+								includeSensitive: includeSensitiveOutput,
+								account,
+							}),
+							enabled: account.enabled !== false,
+							isActive: index === activeIndex,
+							rateLimit: formatRateLimitEntry(account, now) ?? null,
+							cooldown: formatCooldown(account, now) ?? null,
+							lastUsedAgeMs:
+								typeof account.lastUsed === "number" && account.lastUsed > 0
+									? Math.max(0, now - account.lastUsed)
+									: null,
+						})),
+						activeIndexByFamily: Object.fromEntries(
+							MODEL_FAMILIES.map((family) => [
+								family,
+								typeof storage.activeIndexByFamily?.[family] === "number"
+									? (storage.activeIndexByFamily?.[family] ?? 0) + 1
+									: null,
+							]),
+						),
+						rateLimitsByModelFamily: storage.accounts.map((account, index) => ({
+							...buildJsonAccountIdentity(index, {
+								includeSensitive: includeSensitiveOutput,
+								account,
+							}),
+							families: Object.fromEntries(
+								MODEL_FAMILIES.map((family) => {
+									const resetAt = getRateLimitResetTimeForFamily(account, now, family);
+									return [
+										family,
+										typeof resetAt === "number"
+											? {
+													resetAtMs: resetAt,
+													wait: formatWaitTime(resetAt - now),
+												}
+											: null,
+									];
+								}),
+							),
+						})),
+						routingVisibility,
+						recommendedNextAction,
+					});
+				}
 				if (ui.v2Enabled) {
 					const lines: string[] = [
 						...formatUiHeader(ui, "Account status"),
@@ -4205,6 +4709,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 					});
 
 					lines.push("");
+					appendRoutingVisibilityUi(ui, lines, routingVisibility);
+
+					lines.push("");
 					lines.push(...formatUiSection(ui, "Selection explainability"));
 					for (const entry of explainability) {
 						const state = entry.eligible ? "eligible" : "blocked";
@@ -4217,14 +4724,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						);
 					}
 
-					const nextAction = recommendBeginnerNextAction({
-						accounts: toBeginnerAccountSnapshots(storage, activeIndex, now),
-						now,
-						runtime: getBeginnerRuntimeSnapshot(),
-					});
 					lines.push("");
 					lines.push(...formatUiSection(ui, "Recommended next step"));
-					lines.push(formatUiItem(ui, nextAction, "accent"));
+					lines.push(formatUiItem(ui, recommendedNextAction, "accent"));
 
 					return lines.join("\n");
 				}
@@ -4276,8 +4778,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 														if (typeof resetAt !== "number") return `${family}=ok`;
 														return `${family}=${formatWaitTime(resetAt - now)}`;
 												});
-												lines.push(`  Account ${index + 1}: ${statuses.join(" | ")}`);
-										});
+										lines.push(`  Account ${index + 1}: ${statuses.join(" | ")}`);
+								});
+
+										lines.push("");
+										appendRoutingVisibilityText(lines, routingVisibility);
 
 										lines.push("");
 										lines.push(
@@ -4293,24 +4798,32 @@ while (attempted.size < Math.max(1, accountCount)) {
 										}
 
 										lines.push("");
-										lines.push(
-											`Recommended next step: ${recommendBeginnerNextAction({
-												accounts: toBeginnerAccountSnapshots(storage, activeIndex, now),
-												now,
-												runtime: getBeginnerRuntimeSnapshot(),
-											})}`,
-										);
+										lines.push(`Recommended next step: ${recommendedNextAction}`);
 
 								return lines.join("\n");
 							},
 						}),
 			"codex-limits": tool({
 				description: "Show live 5-hour and weekly Codex usage limits for all accounts.",
-				args: {},
-				async execute() {
+				args: {
+					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
+				},
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (outputFormat === "json") {
+							return renderJsonOutput({
+								message: "No Codex accounts configured. Run: opencode auth login",
+								totalAccounts: 0,
+								uniqueCredentialCount: 0,
+								activeIndex: null,
+								accounts: [],
+							});
+						}
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Codex limits"),
@@ -4426,6 +4939,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 						if (reset) return `resets ${reset}`;
 						return "unavailable";
 					};
+
+					const toLimitPayload = (name: string, window: LimitWindow) => ({
+						name,
+						windowMinutes: window.windowMinutes ?? null,
+						usedPercent:
+							typeof window.usedPercent === "number" ? window.usedPercent : null,
+						leftPercent:
+							typeof window.usedPercent === "number"
+								? Math.max(0, Math.min(100, Math.round(100 - window.usedPercent)))
+								: null,
+						resetAtMs: window.resetAtMs ?? null,
+						summary: formatLimitSummary(window),
+					});
 
 					const formatCredits = (credits: UsageCredits): string | undefined => {
 						if (!credits) return undefined;
@@ -4628,6 +5154,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							? storage.accounts[activeIndex]?.refreshToken?.trim() || undefined
 							: undefined;
 					let storageChanged = false;
+					const jsonAccounts: Array<Record<string, unknown>> = [];
 
 					for (const i of uniqueIndices) {
 						const account = storage.accounts[i];
@@ -4711,6 +5238,38 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const additionalLimits = (payload.additional_rate_limits ?? []).filter(
 								(entry) => entry.limit_name !== "code_review_rate_limit",
 							);
+							const limits = [
+								toLimitPayload(formatLimitTitle(primary.windowMinutes), primary),
+								toLimitPayload(formatLimitTitle(secondary.windowMinutes), secondary),
+							];
+							if (
+								codeReview.windowMinutes ||
+								typeof codeReview.usedPercent === "number" ||
+								codeReview.resetAtMs
+							) {
+								limits.push(toLimitPayload("Code review", codeReview));
+							}
+							for (const limit of additionalLimits) {
+								const extraWindow = mapWindow(limit.rate_limit?.primary_window ?? null);
+								limits.push(
+									toLimitPayload(
+										formatExtraName(limit.limit_name ?? limit.metered_feature),
+										extraWindow,
+									),
+								);
+							}
+							jsonAccounts.push({
+								...buildJsonAccountIdentity(displayIndex, {
+									includeSensitive: includeSensitiveOutput,
+									account: effectiveDisplayAccount,
+									label,
+								}),
+								isActive,
+								sharesActiveCredential,
+								planType: payload.plan_type ?? null,
+								credits: credits ?? null,
+								limits,
+							});
 
 							if (ui.v2Enabled) {
 								lines.push(formatUiItem(ui, `${label}${activeSuffix}`));
@@ -4749,6 +5308,16 @@ while (attempted.size < Math.max(1, accountCount)) {
 							}
 						} catch (error) {
 							const message = error instanceof Error ? error.message : String(error);
+							jsonAccounts.push({
+								...buildJsonAccountIdentity(displayIndex, {
+									includeSensitive: includeSensitiveOutput,
+									account: effectiveDisplayAccount,
+									label,
+								}),
+								isActive,
+								sharesActiveCredential,
+								error: message.slice(0, 160),
+							});
 							if (ui.v2Enabled) {
 								lines.push(formatUiItem(ui, `${label}${activeSuffix}`));
 								lines.push(`  ${formatUiKeyValue(ui, "Error", message.slice(0, 160), "danger")}`);
@@ -4764,6 +5333,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 					if (storageChanged) {
 						invalidateAccountManagerCache();
 					}
+					if (outputFormat === "json") {
+						return renderJsonOutput({
+							totalAccounts: storage.accounts.length,
+							uniqueCredentialCount: uniqueIndices.length,
+							activeIndex: activeIndex + 1,
+							accounts: jsonAccounts,
+						});
+					}
 
 					while (lines.length > 0 && lines[lines.length - 1] === "") {
 						lines.pop();
@@ -4774,9 +5351,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 			}),
 			"codex-metrics": tool({
 				description: "Show runtime request metrics for this plugin process.",
-				args: {},
-				execute() {
+				args: {
+					format: toolOutputFormatSchema(),
+				},
+				execute({ format }: { format?: string } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
 					const now = Date.now();
 					const uptimeMs = Math.max(0, now - runtimeMetrics.startedAt);
 					const total = runtimeMetrics.totalRequests;
@@ -4791,6 +5371,51 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtimeMetrics.lastRequestAt !== null
 							? `${formatWaitTime(now - runtimeMetrics.lastRequestAt)} ago`
 							: "never";
+					const routingVisibility = buildRoutingVisibilitySnapshot();
+					if (outputFormat === "json") {
+						return Promise.resolve(
+							renderJsonOutput({
+								uptimeMs,
+								totalRequests: total,
+								successfulResponses: successful,
+								failedResponses: runtimeMetrics.failedRequests,
+								successRatePercent: Number(successRate),
+								averageSuccessfulLatencyMs: avgLatencyMs,
+								rateLimitedResponses: runtimeMetrics.rateLimitedResponses,
+								serverErrors: runtimeMetrics.serverErrors,
+								networkErrors: runtimeMetrics.networkErrors,
+								authRefreshFailures: runtimeMetrics.authRefreshFailures,
+								accountRotations: runtimeMetrics.accountRotations,
+								emptyResponseRetries: runtimeMetrics.emptyResponseRetries,
+								retryProfile: runtimeMetrics.retryProfile,
+								beginnerSafeMode: beginnerSafeModeEnabled,
+								retryBudgetExhaustions: runtimeMetrics.retryBudgetExhaustions,
+								retryBudgetUsage: { ...runtimeMetrics.retryBudgetUsage },
+								retryBudgetLimits: { ...runtimeMetrics.retryBudgetLimits },
+								refreshQueue: { ...refreshMetrics },
+								lastRequestAt: runtimeMetrics.lastRequestAt,
+								lastRequestAgeMs:
+									runtimeMetrics.lastRequestAt !== null
+										? Math.max(0, now - runtimeMetrics.lastRequestAt)
+										: null,
+								lastError: runtimeMetrics.lastError,
+								lastErrorCategory: runtimeMetrics.lastErrorCategory,
+								lastSelectedAccountIndex:
+									runtimeMetrics.lastSelectedAccountIndex === null
+										? null
+										: runtimeMetrics.lastSelectedAccountIndex + 1,
+								lastQuotaKey: runtimeMetrics.lastQuotaKey,
+								lastBudgetExhaustion:
+									runtimeMetrics.lastRetryBudgetExhaustedClass === null
+										? null
+										: {
+												budgetClass: runtimeMetrics.lastRetryBudgetExhaustedClass,
+												reason: runtimeMetrics.lastRetryBudgetReason,
+											},
+								routingVisibility,
+							}),
+						);
+					}
 
 						const lines = [
 							"Codex Plugin Metrics:",
@@ -4845,6 +5470,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 									: ""),
 						);
 					}
+					lines.push("");
+					appendRoutingVisibilityText(lines, routingVisibility, {
+						includeExplainability: true,
+					});
 
 					if (ui.v2Enabled) {
 						const styled: string[] = [
@@ -4917,6 +5546,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								),
 							);
 						}
+						styled.push("");
+						appendRoutingVisibilityUi(ui, styled, routingVisibility, {
+							includeExplainability: true,
+						});
 						return Promise.resolve(styled.join("\n"));
 					}
 
@@ -5072,9 +5705,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 						.boolean()
 						.optional()
 						.describe("Apply safe automated fixes (refresh tokens and switch to healthiest eligible account)."),
+					format: toolOutputFormatSchema(),
 				},
-				async execute({ deep, fix }: { deep?: boolean; fix?: boolean } = {}) {
+				async execute({ deep, fix, format }: { deep?: boolean; fix?: boolean; format?: string } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
 					const storage = await loadAccounts();
 					const now = Date.now();
 					const activeIndex =
@@ -5092,6 +5727,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtime,
 					});
 					const nextAction = recommendBeginnerNextAction({ accounts: snapshots, now, runtime });
+					let routingVisibility: RoutingVisibilitySnapshot | null = null;
 					const appliedFixes: string[] = [];
 					const fixErrors: string[] = [];
 
@@ -5165,6 +5801,76 @@ while (attempted.size < Math.max(1, accountCount)) {
 							accountManagerPromise = Promise.resolve(reloadedManager);
 						}
 					}
+					if (deep) {
+						const managerForRouting =
+							cachedAccountManager ?? (await AccountManager.loadFromDisk());
+						const routingFamily =
+							runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
+						const routingModel =
+							runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
+							runtimeMetrics.lastSelectionSnapshot?.model ??
+							null;
+						const routingExplainability = managerForRouting.getSelectionExplainability(
+							routingFamily,
+							routingModel ?? undefined,
+							Date.now(),
+						);
+						const routingActiveIndex =
+							storage && storage.accounts.length > 0
+								? resolveActiveIndex(storage, routingFamily)
+								: null;
+						routingVisibility = buildRoutingVisibilitySnapshot({
+							modelFamily: routingFamily,
+							effectiveModel: routingModel,
+							quotaKey: routingModel ? `${routingFamily}:${routingModel}` : routingFamily,
+							selectedAccountIndex: routingActiveIndex,
+							selectionExplainability: routingExplainability,
+						});
+					}
+					if (outputFormat === "json") {
+						return renderJsonOutput({
+							summary: {
+								totalAccounts: summary.total,
+								healthyAccounts: summary.healthy,
+								blockedAccounts: summary.blocked,
+								failureRatePercent:
+									runtime.totalRequests > 0
+										? Math.round((runtime.failedRequests / runtime.totalRequests) * 100)
+										: 0,
+							},
+							findings: findings.map((finding) => ({
+								severity: finding.severity,
+								summary: finding.summary,
+								action: finding.action,
+							})),
+							recommendedNextAction: nextAction,
+							autoFix: fix
+								? {
+										appliedFixes,
+										errors: fixErrors,
+									}
+								: null,
+							technicalSnapshot: deep
+								? {
+										storagePath: getStoragePath(),
+										runtimeFailures: {
+											failedRequests: runtime.failedRequests,
+											rateLimitedResponses: runtime.rateLimitedResponses,
+											authRefreshFailures: runtime.authRefreshFailures,
+											serverErrors: runtime.serverErrors,
+											networkErrors: runtime.networkErrors,
+										},
+										promptCache: {
+											enabledRequests: runtime.promptCacheEnabledRequests,
+											missingRequests: runtime.promptCacheMissingRequests,
+											lastPromptCacheKey: runtime.lastPromptCacheKey,
+											summary: formatPromptCacheSnapshot(runtime),
+										},
+										routingVisibility,
+									}
+								: null,
+						});
+					}
 
 					if (ui.v2Enabled) {
 						const lines: string[] = [
@@ -5232,6 +5938,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 									"muted",
 								),
 							);
+							if (routingVisibility) {
+								lines.push("");
+								appendRoutingVisibilityUi(ui, lines, routingVisibility, {
+									includeExplainability: true,
+								});
+							}
 						}
 
 						return lines.join("\n");
@@ -5274,15 +5986,23 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push(
 							`  Prompt cache: ${formatPromptCacheSnapshot(runtime)}`,
 						);
+						if (routingVisibility) {
+							appendRoutingVisibilityText(lines, routingVisibility, {
+								includeExplainability: true,
+							});
+						}
 					}
 					return lines.join("\n");
 				},
 			}),
 			"codex-next": tool({
 				description: "Show the single most recommended next action for beginners.",
-				args: {},
-				async execute() {
+				args: {
+					format: toolOutputFormatSchema(),
+				},
+				async execute({ format }: { format?: string } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
 					const storage = await loadAccounts();
 					const now = Date.now();
 					const activeIndex =
@@ -5297,6 +6017,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 						now,
 						runtime: getBeginnerRuntimeSnapshot(),
 					});
+					if (outputFormat === "json") {
+						return renderJsonOutput({
+							recommendedNextAction: action,
+							totalAccounts: snapshots.length,
+							activeIndex:
+								storage && storage.accounts.length > 0 ? activeIndex + 1 : null,
+						});
+					}
 					if (ui.v2Enabled) {
 						return [
 							...formatUiHeader(ui, "Recommended next action"),
@@ -5610,11 +6338,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 			"codex-dashboard": tool({
 				description:
 					"Show a live Codex dashboard: account eligibility, retry budgets, and refresh queue health.",
-				args: {},
-				async execute() {
+				args: {
+					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
+				},
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (outputFormat === "json") {
+							return renderJsonOutput({
+								message: "No Codex accounts configured. Run: opencode auth login",
+								accountCount: 0,
+								selectionLens: null,
+								retryProfile: runtimeMetrics.retryProfile,
+								beginnerSafeMode: beginnerSafeModeEnabled,
+								retryBudgetUsage: { ...runtimeMetrics.retryBudgetUsage },
+								refreshQueue: { ...getRefreshQueueMetrics() },
+								routingVisibility: buildRoutingVisibilitySnapshot(),
+								accountEligibility: [],
+								recommendedNextAction: "Run opencode auth login",
+								lastError:
+									runtimeMetrics.lastError === null
+										? null
+										: {
+												message: runtimeMetrics.lastError,
+												category: runtimeMetrics.lastErrorCategory,
+											},
+							});
+						}
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Codex dashboard"),
@@ -5629,10 +6383,54 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const now = Date.now();
 					const refreshMetrics = getRefreshQueueMetrics();
 					const family = runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
-					const model = runtimeMetrics.lastSelectionSnapshot?.model ?? undefined;
+					const model =
+						runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
+						runtimeMetrics.lastSelectionSnapshot?.model ??
+						undefined;
 					const manager = cachedAccountManager ?? (await AccountManager.loadFromDisk());
 					const explainability = manager.getSelectionExplainability(family, model, now);
 					const selectionLabel = model ? `${family}:${model}` : family;
+					const routingVisibility = buildRoutingVisibilitySnapshot({
+						modelFamily: family,
+						effectiveModel: model ?? null,
+						quotaKey: model ? `${family}:${model}` : family,
+						selectedAccountIndex: resolveActiveIndex(storage, family),
+						selectionExplainability: explainability,
+					});
+					const recommendedNextAction = recommendBeginnerNextAction({
+						accounts: toBeginnerAccountSnapshots(storage, resolveActiveIndex(storage, "codex"), now),
+						now,
+						runtime: getBeginnerRuntimeSnapshot(),
+					});
+					if (outputFormat === "json") {
+						return renderJsonOutput({
+							accountCount: storage.accounts.length,
+							selectionLens: selectionLabel,
+							retryProfile: runtimeMetrics.retryProfile,
+							beginnerSafeMode: beginnerSafeModeEnabled,
+							retryBudgetUsage: { ...runtimeMetrics.retryBudgetUsage },
+							refreshQueue: { ...refreshMetrics },
+							routingVisibility,
+							accountEligibility: explainability.map((entry) => ({
+								...buildJsonAccountIdentity(entry.index, {
+									includeSensitive: includeSensitiveOutput,
+									account: storage.accounts[entry.index],
+								}),
+								eligible: entry.eligible,
+								healthScore: entry.healthScore,
+								tokensAvailable: entry.tokensAvailable,
+								reasons: [...entry.reasons],
+							})),
+							recommendedNextAction,
+							lastError:
+								runtimeMetrics.lastError === null
+									? null
+									: {
+											message: runtimeMetrics.lastError,
+											category: runtimeMetrics.lastErrorCategory,
+										},
+						});
+					}
 
 					if (ui.v2Enabled) {
 						const lines: string[] = [
@@ -5654,8 +6452,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 								"muted",
 							),
 							"",
-							...formatUiSection(ui, "Account eligibility"),
 						];
+						appendRoutingVisibilityUi(ui, lines, routingVisibility);
+						lines.push("");
+						lines.push(
+							...formatUiSection(ui, "Account eligibility"),
+						);
 
 						for (const entry of explainability) {
 							const label = formatCommandAccountLabel(storage.accounts[entry.index], entry.index);
@@ -5670,17 +6472,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 						lines.push("");
 						lines.push(...formatUiSection(ui, "Recommended next step"));
-						lines.push(
-							formatUiItem(
-								ui,
-								recommendBeginnerNextAction({
-									accounts: toBeginnerAccountSnapshots(storage, resolveActiveIndex(storage, "codex"), now),
-									now,
-									runtime: getBeginnerRuntimeSnapshot(),
-								}),
-								"accent",
-							),
-						);
+						lines.push(formatUiItem(ui, recommendedNextAction, "accent"));
 
 						if (runtimeMetrics.lastError) {
 							lines.push("");
@@ -5704,9 +6496,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 						`Beginner safe mode: ${beginnerSafeModeEnabled ? "on" : "off"}`,
 						`Retry usage: auth=${runtimeMetrics.retryBudgetUsage.authRefresh}, network=${runtimeMetrics.retryBudgetUsage.network}, server=${runtimeMetrics.retryBudgetUsage.server}, short429=${runtimeMetrics.retryBudgetUsage.rateLimitShort}, global429=${runtimeMetrics.retryBudgetUsage.rateLimitGlobal}, empty=${runtimeMetrics.retryBudgetUsage.emptyResponse}`,
 						`Refresh queue: pending=${refreshMetrics.pending}, success=${refreshMetrics.succeeded}, failed=${refreshMetrics.failed}`,
-						"",
-						"Account eligibility:",
 					];
+					lines.push("");
+					appendRoutingVisibilityText(lines, routingVisibility);
+					lines.push("");
+					lines.push("Account eligibility:");
 
 					for (const entry of explainability) {
 						const label = formatCommandAccountLabel(storage.accounts[entry.index], entry.index);
@@ -5716,13 +6510,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					lines.push("");
-					lines.push(
-						`Recommended next step: ${recommendBeginnerNextAction({
-							accounts: toBeginnerAccountSnapshots(storage, resolveActiveIndex(storage, "codex"), now),
-							now,
-							runtime: getBeginnerRuntimeSnapshot(),
-						})}`,
-					);
+					lines.push(`Recommended next step: ${recommendedNextAction}`);
 
 					if (runtimeMetrics.lastError) {
 						lines.push("");
@@ -5737,11 +6525,25 @@ while (attempted.size < Math.max(1, accountCount)) {
 			}),
 				"codex-health": tool({
 				description: "Check health of all Codex accounts by validating refresh tokens.",
-				args: {},
-				async execute() {
+				args: {
+					format: toolOutputFormatSchema(),
+					includeSensitive: toolSensitiveJsonSchema(),
+				},
+				async execute({ format, includeSensitive }: { format?: string; includeSensitive?: boolean } = {}) {
 					const ui = resolveUiRuntime();
+					const outputFormat = normalizeToolOutputFormat(format);
+					const includeSensitiveOutput = includeSensitive === true;
 					const storage = await loadAccounts();
 					if (!storage || storage.accounts.length === 0) {
+						if (outputFormat === "json") {
+							return renderJsonOutput({
+								message: "No Codex accounts configured. Run: opencode auth login",
+								totalAccounts: 0,
+								healthyCount: 0,
+								unhealthyCount: 0,
+								accounts: [],
+							});
+						}
 						if (ui.v2Enabled) {
 							return [
 								...formatUiHeader(ui, "Health check"),
@@ -5756,6 +6558,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					const results: string[] = ui.v2Enabled
 						? []
 						: [`Health Check (${storage.accounts.length} accounts):`, ""];
+					const jsonAccounts: Array<Record<string, unknown>> = [];
 
 					let healthyCount = 0;
 					let unhealthyCount = 0;
@@ -5768,14 +6571,40 @@ while (attempted.size < Math.max(1, accountCount)) {
 						try {
 				const refreshResult = await queuedRefresh(account.refreshToken);
 							if (refreshResult.type === "success") {
+								jsonAccounts.push({
+									...buildJsonAccountIdentity(i, {
+										includeSensitive: includeSensitiveOutput,
+										account,
+										label,
+									}),
+									status: "healthy",
+								});
 								results.push(`  ${getStatusMarker(ui, "ok")} ${label}: Healthy`);
 								healthyCount++;
 							} else {
+								jsonAccounts.push({
+									...buildJsonAccountIdentity(i, {
+										includeSensitive: includeSensitiveOutput,
+										account,
+										label,
+									}),
+									status: "unhealthy",
+									error: refreshResult.message ?? refreshResult.reason,
+								});
 								results.push(`  ${getStatusMarker(ui, "error")} ${label}: Token refresh failed`);
 								unhealthyCount++;
 							}
 						} catch (error) {
 							const errorMsg = error instanceof Error ? error.message : String(error);
+							jsonAccounts.push({
+								...buildJsonAccountIdentity(i, {
+									includeSensitive: includeSensitiveOutput,
+									account,
+									label,
+								}),
+								status: "unhealthy",
+								error: errorMsg.slice(0, 120),
+							});
 							results.push(`  ${getStatusMarker(ui, "error")} ${label}: Error - ${errorMsg.slice(0, 120)}`);
 							unhealthyCount++;
 						}
@@ -5783,6 +6612,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 					results.push("");
 					results.push(`Summary: ${healthyCount} healthy, ${unhealthyCount} unhealthy`);
+					if (outputFormat === "json") {
+						return renderJsonOutput({
+							totalAccounts: storage.accounts.length,
+							healthyCount,
+							unhealthyCount,
+							accounts: jsonAccounts,
+						});
+					}
 
 					if (ui.v2Enabled) {
 						return [
