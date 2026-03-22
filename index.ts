@@ -158,6 +158,7 @@ import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyVa
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
+	formatPromptCacheSnapshot,
 	recommendBeginnerNextAction,
 	summarizeBeginnerAccounts,
 	type BeginnerAccountSnapshot,
@@ -278,6 +279,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastRequestAt: number | null;
 		lastError: string | null;
 		lastErrorCategory: string | null;
+		promptCacheEnabledRequests: number;
+		promptCacheMissingRequests: number;
+		lastPromptCacheKey: string | null;
 		lastSelectedAccountIndex: number | null;
 		lastQuotaKey: string | null;
 		lastSelectionSnapshot: SelectionSnapshot | null;
@@ -304,6 +308,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 		lastRequestAt: null,
 		lastError: null,
 		lastErrorCategory: null,
+		promptCacheEnabledRequests: 0,
+		promptCacheMissingRequests: 0,
+		lastPromptCacheKey: null,
 		lastSelectedAccountIndex: null,
 		lastQuotaKey: null,
 		lastSelectionSnapshot: null,
@@ -1373,6 +1380,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			serverErrors: runtimeMetrics.serverErrors,
 			networkErrors: runtimeMetrics.networkErrors,
 			lastErrorCategory: runtimeMetrics.lastErrorCategory,
+			promptCacheEnabledRequests: runtimeMetrics.promptCacheEnabledRequests,
+			promptCacheMissingRequests: runtimeMetrics.promptCacheMissingRequests,
+			lastPromptCacheKey: runtimeMetrics.lastPromptCacheKey,
 		});
 
 		const formatDoctorSeverity = (
@@ -2025,6 +2035,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								threadIdCandidate ? `${threadIdCandidate}:${Date.now()}` : undefined,
 							);
 							runtimeMetrics.lastRequestAt = Date.now();
+							runtimeMetrics.lastPromptCacheKey = promptCacheKey ?? null;
+							if (promptCacheKey) {
+								runtimeMetrics.promptCacheEnabledRequests++;
+							} else {
+								runtimeMetrics.promptCacheMissingRequests++;
+							}
 							const retryBudget = new RetryBudgetTracker(retryBudgetLimits);
 							const consumeRetryBudget = (
 								bucket: RetryBudgetClass,
@@ -2313,20 +2329,31 @@ while (attempted.size < Math.max(1, accountCount)) {
 									: null;
 
 								if (abortSignal?.aborted) {
-									clearTimeout(fetchTimeoutId);
-									fetchController.abort(abortSignal.reason ?? new Error("Aborted by user"));
-								} else if (abortSignal && onUserAbort) {
-									abortSignal.addEventListener("abort", onUserAbort, { once: true });
-								}
+								clearTimeout(fetchTimeoutId);
+								fetchController.abort(abortSignal.reason ?? new Error("Aborted by user"));
+							} else if (abortSignal && onUserAbort) {
+								abortSignal.addEventListener("abort", onUserAbort, { once: true });
+							}
 
-								try {
+							try {
+								// Request metrics are tracked at the fetch boundary, so retries and
+								// account rotation are counted consistently. These increments are
+								// in-memory only and run on Node's single-threaded event loop, so no
+								// filesystem locking or token-redaction concerns are introduced here.
 								runtimeMetrics.totalRequests++;
 								response = await fetch(url, {
 									...requestInit,
 									headers,
 									signal: fetchController.signal,
 								});
-				} catch (networkError) {
+							} catch (networkError) {
+								if (abortSignal?.aborted && fetchController.signal.aborted) {
+									accountManager.refundToken(account, modelFamily, model);
+									if (networkError instanceof Error) {
+										throw networkError;
+									}
+									throw new Error(String(networkError));
+								}
 								const errorMsg = networkError instanceof Error ? networkError.message : String(networkError);
 								logWarn(`Network error for account ${account.index + 1}: ${errorMsg}`);
 								if (
@@ -2359,21 +2386,21 @@ while (attempted.size < Math.max(1, accountCount)) {
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
 								break;
-								} finally {
-									clearTimeout(fetchTimeoutId);
-									if (abortSignal && onUserAbort) {
-										abortSignal.removeEventListener("abort", onUserAbort);
-									}
+							} finally {
+								clearTimeout(fetchTimeoutId);
+								if (abortSignal && onUserAbort) {
+									abortSignal.removeEventListener("abort", onUserAbort);
 								}
-											const fetchLatencyMs = Math.round(performance.now() - fetchStart);
+							}
+							const fetchLatencyMs = Math.round(performance.now() - fetchStart);
 
-											logRequest(LOG_STAGES.RESPONSE, {
-												status: response.status,
-												ok: response.ok,
-												statusText: response.statusText,
-												latencyMs: fetchLatencyMs,
-												headers: Object.fromEntries(response.headers.entries()),
-											});
+							logRequest(LOG_STAGES.RESPONSE, {
+								status: response.status,
+								ok: response.ok,
+								statusText: response.statusText,
+								latencyMs: fetchLatencyMs,
+								headers: Object.fromEntries(response.headers.entries()),
+							});
 
 								if (!response.ok) {
 									const contextOverflowResult = await handleContextOverflow(response, model);
@@ -5197,6 +5224,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 									"muted",
 								),
 							);
+							lines.push(
+								formatUiKeyValue(
+									ui,
+									"Prompt cache",
+									formatPromptCacheSnapshot(runtime),
+									"muted",
+								),
+							);
 						}
 
 						return lines.join("\n");
@@ -5235,6 +5270,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 						lines.push(`  Storage: ${getStoragePath()}`);
 						lines.push(
 							`  Runtime failures: failed=${runtime.failedRequests}, rateLimited=${runtime.rateLimitedResponses}, authRefreshFailed=${runtime.authRefreshFailures}, server=${runtime.serverErrors}, network=${runtime.networkErrors}`,
+						);
+						lines.push(
+							`  Prompt cache: ${formatPromptCacheSnapshot(runtime)}`,
 						);
 					}
 					return lines.join("\n");

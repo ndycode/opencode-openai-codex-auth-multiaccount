@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
+
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
 	explainRuntimeErrorCategory,
+	formatPromptCacheKey,
+	formatPromptCacheSnapshot,
 	recommendBeginnerNextAction,
 	summarizeBeginnerAccounts,
 	type BeginnerAccountSnapshot,
@@ -19,6 +23,9 @@ const healthyRuntime: BeginnerRuntimeSnapshot = {
 	serverErrors: 0,
 	networkErrors: 0,
 	lastErrorCategory: null,
+	promptCacheEnabledRequests: 12,
+	promptCacheMissingRequests: 0,
+	lastPromptCacheKey: "ses_prompt_cache",
 };
 
 function buildAccount(
@@ -117,6 +124,55 @@ describe("buildBeginnerDoctorFindings", () => {
 		expect(findings.some((f) => f.code === "auth-refresh-failures")).toBe(true);
 		expect(findings.some((f) => f.code === "recent-error-category")).toBe(true);
 	});
+
+	it("flags missing prompt cache keys when recent requests never supplied one", () => {
+		const findings = buildBeginnerDoctorFindings({
+			accounts: [buildAccount()],
+			now,
+			runtime: {
+				...healthyRuntime,
+				totalRequests: 5,
+				promptCacheEnabledRequests: 0,
+				promptCacheMissingRequests: 5,
+				lastPromptCacheKey: null,
+			},
+		});
+
+		expect(findings.some((f) => f.code === "prompt-cache-missing")).toBe(true);
+	});
+
+	it("flags inconsistent prompt cache usage when only some requests had keys", () => {
+		const findings = buildBeginnerDoctorFindings({
+			accounts: [buildAccount()],
+			now,
+			runtime: {
+				...healthyRuntime,
+				totalRequests: 6,
+				promptCacheEnabledRequests: 4,
+				promptCacheMissingRequests: 2,
+				lastPromptCacheKey: null,
+			},
+		});
+
+		expect(findings.some((f) => f.code === "prompt-cache-inconsistent")).toBe(true);
+	});
+
+	it("does not flag cache issues when no requests have been made", () => {
+		const findings = buildBeginnerDoctorFindings({
+			accounts: [buildAccount()],
+			now,
+			runtime: {
+				...healthyRuntime,
+				totalRequests: 0,
+				promptCacheEnabledRequests: 0,
+				promptCacheMissingRequests: 3,
+				lastPromptCacheKey: null,
+			},
+		});
+
+		expect(findings.some((f) => f.code === "prompt-cache-missing")).toBe(false);
+		expect(findings.some((f) => f.code === "prompt-cache-inconsistent")).toBe(false);
+	});
 });
 
 describe("recommendBeginnerNextAction", () => {
@@ -173,5 +229,40 @@ describe("explainRuntimeErrorCategory", () => {
 		const hint = explainRuntimeErrorCategory("mystery");
 		expect(hint).toContain("mystery");
 		expect(hint).toContain("codex-doctor");
+	});
+});
+
+describe("formatPromptCacheKey", () => {
+	it("returns none for empty values", () => {
+		expect(formatPromptCacheKey(null)).toBe("none");
+		expect(formatPromptCacheKey(undefined)).toBe("none");
+		expect(formatPromptCacheKey("   ")).toBe("none");
+	});
+
+	it("redacts short values too", () => {
+		expect(formatPromptCacheKey("ses_1234")).toBe(
+			`masked-${createHash("sha256").update("ses_1234").digest("hex").slice(0, 12)}`,
+		);
+	});
+
+	it("redacts longer values to a stable masked fingerprint", () => {
+		expect(formatPromptCacheKey("ses_prompt_cache_key_123")).toBe(
+			`masked-${createHash("sha256").update("ses_prompt_cache_key_123").digest("hex").slice(0, 12)}`,
+		);
+	});
+});
+
+describe("formatPromptCacheSnapshot", () => {
+	it("renders a redacted prompt cache snapshot string", () => {
+		const rendered = formatPromptCacheSnapshot({
+			promptCacheEnabledRequests: 4,
+			promptCacheMissingRequests: 1,
+			lastPromptCacheKey: "ses_prompt_cache_key_123",
+		});
+
+		expect(rendered).toBe(
+			`enabled=4, missing=1, lastKey=masked-${createHash("sha256").update("ses_prompt_cache_key_123").digest("hex").slice(0, 12)}`,
+		);
+		expect(rendered).not.toContain("ses_prompt_cache_key_123");
 	});
 });
