@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { promises as fs, existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { 
+import {
   deduplicateAccounts,
   deduplicateAccountsByEmail,
   normalizeAccountStorage, 
@@ -24,11 +24,6 @@ import {
   withAccountStorageTransaction,
   withFlaggedAccountStorageTransaction,
 } from "../lib/storage.js";
-
-// Mocking the behavior we're about to implement for TDD
-// Since the functions aren't in lib/storage.ts yet, we'll need to mock them or 
-// accept that this test won't even compile/run until we add them.
-// But Task 0 says: "Tests should fail initially (RED phase)"
 
 describe("storage", () => {
   describe("getWorkspaceIdentityKey", () => {
@@ -141,56 +136,43 @@ describe("storage", () => {
     });
 
     it("should export accounts to a file", async () => {
-      // @ts-ignore - exportAccounts doesn't exist yet
-      const { exportAccounts } = await import("../lib/storage.js");
-      
       const storage = {
         version: 3,
         activeIndex: 0,
         accounts: [{ accountId: "test", refreshToken: "ref", addedAt: 1, lastUsed: 2 }]
       };
-      // @ts-ignore
       await saveAccounts(storage);
-      
-      // @ts-ignore
+
       await exportAccounts(exportPath);
-      
+
       expect(existsSync(exportPath)).toBe(true);
       const exported = JSON.parse(await fs.readFile(exportPath, "utf-8"));
       expect(exported.accounts[0].accountId).toBe("test");
     });
 
     it("should fail export if file exists and force is false", async () => {
-      // @ts-ignore
-      const { exportAccounts } = await import("../lib/storage.js");
       await fs.writeFile(exportPath, "exists");
-      
-      // @ts-ignore
+
       await expect(exportAccounts(exportPath, false)).rejects.toThrow(/already exists/);
     });
 
     it("should import accounts from a file and merge", async () => {
-      // @ts-ignore
-      const { importAccounts } = await import("../lib/storage.js");
-      
       const existing = {
         version: 3,
         activeIndex: 0,
         accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }]
       };
-      // @ts-ignore
       await saveAccounts(existing);
-      
+
       const toImport = {
         version: 3,
         activeIndex: 0,
         accounts: [{ accountId: "new", refreshToken: "ref2", addedAt: 3, lastUsed: 4 }]
       };
       await fs.writeFile(exportPath, JSON.stringify(toImport));
-      
-      // @ts-ignore
+
       await importAccounts(exportPath);
-      
+
       const loaded = await loadAccounts();
       expect(loaded?.accounts).toHaveLength(2);
       expect(loaded?.accounts.map(a => a.accountId)).toContain("new");
@@ -625,9 +607,6 @@ describe("storage", () => {
     });
 
     it("should enforce MAX_ACCOUNTS during import", async () => {
-       // @ts-ignore
-      const { importAccounts } = await import("../lib/storage.js");
-      
       const manyAccounts = Array.from({ length: 21 }, (_, i) => ({
         accountId: `acct${i}`,
         refreshToken: `ref${i}`,
@@ -641,31 +620,26 @@ describe("storage", () => {
         accounts: manyAccounts
       };
       await fs.writeFile(exportPath, JSON.stringify(toImport));
-      
-      // @ts-ignore
+
       await expect(importAccounts(exportPath)).rejects.toThrow(/exceed maximum/);
     });
 
     it("should fail export when no accounts exist", async () => {
-      const { exportAccounts } = await import("../lib/storage.js");
       setStoragePathDirect(testStoragePath);
       await expect(exportAccounts(exportPath)).rejects.toThrow(/No accounts to export/);
     });
 
     it("should fail import when file does not exist", async () => {
-      const { importAccounts } = await import("../lib/storage.js");
       const nonexistentPath = join(testWorkDir, "nonexistent-file.json");
       await expect(importAccounts(nonexistentPath)).rejects.toThrow(/Import file not found/);
     });
 
     it("should fail import when file contains invalid JSON", async () => {
-      const { importAccounts } = await import("../lib/storage.js");
       await fs.writeFile(exportPath, "not valid json {[");
       await expect(importAccounts(exportPath)).rejects.toThrow(/Invalid JSON/);
     });
 
     it("should fail import when file contains invalid format", async () => {
-      const { importAccounts } = await import("../lib/storage.js");
       await fs.writeFile(exportPath, JSON.stringify({ invalid: "format" }));
       await expect(importAccounts(exportPath)).rejects.toThrow(/Invalid account storage format/);
     });

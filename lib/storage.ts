@@ -84,6 +84,12 @@ export interface ImportAccountsResult {
 	backupError?: string;
 }
 
+export interface ImportPreviewResult {
+	imported: number;
+	total: number;
+	skipped: number;
+}
+
 /**
  * Custom error class for storage operations with platform-aware hints.
  */
@@ -1199,31 +1205,44 @@ async function readAndNormalizeImportFile(filePath: string): Promise<{
 	return { resolvedPath, normalized };
 }
 
+function analyzeImportedAccounts(
+	existingAccounts: AccountMetadataV3[],
+	importedAccounts: AccountStorageV3["accounts"],
+): ImportPreviewResult & { accounts: AccountMetadataV3[] } {
+	const merged = [...existingAccounts, ...importedAccounts];
+
+	if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+		const deduped = deduplicateAccountsForStorage(merged);
+		if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
+			throw new Error(
+				`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
+			);
+		}
+	}
+
+	const accounts = deduplicateAccountsForStorage(merged);
+	const imported = Math.max(0, accounts.length - existingAccounts.length);
+	const skipped = Math.max(0, importedAccounts.length - imported);
+	return {
+		accounts,
+		imported,
+		total: accounts.length,
+		skipped,
+	};
+}
+
 export async function previewImportAccounts(
 	filePath: string,
-): Promise<{ imported: number; total: number; skipped: number }> {
+): Promise<ImportPreviewResult> {
 	const { normalized } = await readAndNormalizeImportFile(filePath);
 
 	return withAccountStorageTransaction((existing) => {
 		const existingAccounts = existing?.accounts ?? [];
-		const merged = [...existingAccounts, ...normalized.accounts];
-
-		if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-			const deduped = deduplicateAccountsForStorage(merged);
-			if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-				throw new Error(
-					`Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`,
-				);
-			}
-		}
-
-		const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
-		const imported = deduplicatedAccounts.length - existingAccounts.length;
-		const skipped = normalized.accounts.length - imported;
+		const analysis = analyzeImportedAccounts(existingAccounts, normalized.accounts);
 		return Promise.resolve({
-			imported,
-			total: deduplicatedAccounts.length,
-			skipped,
+			imported: analysis.imported,
+			total: analysis.total,
+			skipped: analysis.skipped,
 		});
 	});
 }
@@ -1312,18 +1331,8 @@ export async function importAccounts(
         }
       }
 
-      const merged = [...existingAccounts, ...normalized.accounts];
-
-      if (merged.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-        const deduped = deduplicateAccountsForStorage(merged);
-        if (deduped.length > ACCOUNT_LIMITS.MAX_ACCOUNTS) {
-          throw new Error(
-            `Import would exceed maximum of ${ACCOUNT_LIMITS.MAX_ACCOUNTS} accounts (would have ${deduped.length})`
-          );
-        }
-      }
-
-      const deduplicatedAccounts = deduplicateAccountsForStorage(merged);
+      const analysis = analyzeImportedAccounts(existingAccounts, normalized.accounts);
+      const deduplicatedAccounts = analysis.accounts;
 
       const mappedActiveIndex = (() => {
         if (deduplicatedAccounts.length === 0) return 0;
@@ -1359,12 +1368,10 @@ export async function importAccounts(
 
       await persist(newStorage);
 
-      const imported = deduplicatedAccounts.length - existingAccounts.length;
-      const skipped = normalized.accounts.length - imported;
       return {
-        imported,
-        total: deduplicatedAccounts.length,
-        skipped,
+        imported: analysis.imported,
+        total: analysis.total,
+        skipped: analysis.skipped,
         backupStatus,
         backupPath,
         backupError,
