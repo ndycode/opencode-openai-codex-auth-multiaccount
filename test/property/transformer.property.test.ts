@@ -235,8 +235,13 @@ describe("getReasoningConfig property tests", () => {
   });
 
 	  it("gpt-5.4-pro upgrades none to medium (none→low→medium chain)", () => {
-	    const result = getReasoningConfig("gpt-5.4-pro", { reasoningEffort: "none" });
-	    expect(result.effort).toBe("medium");
+	    fc.assert(
+	      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+	        const result = getReasoningConfig(model, { reasoningEffort: "none" });
+	        expect(result.effort).toBe("medium");
+	        return true;
+	      })
+	    );
   });
 
   it("gpt-5.1, gpt-5.2, and gpt-5.4 general support none effort", () => {
