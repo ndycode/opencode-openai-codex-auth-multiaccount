@@ -13,6 +13,16 @@ describe("cleanupToolDefinitions", () => {
     expect(cleanupToolDefinitions(tools)).toEqual(tools);
   });
 
+  it("preserves built-in Responses tools unchanged", () => {
+    const tools = [
+      { type: "web_search_preview", search_context_size: "medium" },
+      { type: "file_search", vector_store_ids: ["vs_123"] },
+      { type: "computer_use_preview", environment: "browser" },
+    ];
+
+    expect(cleanupToolDefinitions(tools)).toEqual(tools);
+  });
+
   it("filters required array to only existing properties", () => {
     const tools = [{
       type: "function",

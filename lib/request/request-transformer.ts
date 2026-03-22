@@ -426,6 +426,14 @@ function extractRuntimeToolNames(tools: unknown): string[] {
 	for (const tool of tools) {
 		if (!tool || typeof tool !== "object") continue;
 
+		// Pure in-memory name extraction only: no filesystem I/O, token access,
+		// or logging side effects are introduced by recognizing built-in tool types.
+		const toolType = (tool as { type?: unknown }).type;
+		if (typeof toolType === "string" && toolType.trim() && toolType !== "function") {
+			names.push(toolType);
+			continue;
+		}
+
 		const directName = (tool as { name?: unknown }).name;
 		if (typeof directName === "string" && directName.trim()) {
 			names.push(directName);
