@@ -4,6 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OAuthServerInfo } from "../types.js";
 import { logError, logWarn } from "../logger.js";
+import {
+	OAUTH_CALLBACK_BIND_URL,
+	OAUTH_CALLBACK_LOOPBACK_HOST,
+	OAUTH_CALLBACK_PATH,
+	OAUTH_CALLBACK_PORT,
+} from "../runtime-contracts.js";
 
 // Resolve path to oauth-success.html (one level up from auth/ subfolder)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +25,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 	const server = http.createServer((req, res) => {
 		try {
 			const url = new URL(req.url || "", "http://localhost");
-			if (url.pathname !== "/auth/callback") {
+			if (url.pathname !== OAUTH_CALLBACK_PATH) {
 				res.statusCode = 404;
 				res.end("Not found");
 				return;
@@ -53,9 +59,9 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 
 	return new Promise((resolve) => {
 		server
-			.listen(1455, "127.0.0.1", () => {
+			.listen(OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_LOOPBACK_HOST, () => {
 				resolve({
-					port: 1455,
+					port: OAUTH_CALLBACK_PORT,
 					ready: true,
 					close: () => {
 						pollAborted = true;
@@ -79,10 +85,10 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			})
 			.on("error", (err: NodeJS.ErrnoException) => {
 				logError(
-					`Failed to bind http://127.0.0.1:1455 (${err?.code}). Suggest device code or manual URL paste.`,
+					`Failed to bind ${OAUTH_CALLBACK_BIND_URL} (${err?.code}). Suggest device code or manual URL paste.`,
 				);
 				resolve({
-					port: 1455,
+					port: OAUTH_CALLBACK_PORT,
 					ready: false,
 				close: () => {
 					pollAborted = true;
