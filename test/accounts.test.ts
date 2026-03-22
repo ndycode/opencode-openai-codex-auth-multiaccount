@@ -894,6 +894,14 @@ describe("AccountManager", () => {
   });
 
   describe("getMinWaitTimeForFamily", () => {
+    beforeEach(() => {
+      resetTrackers();
+    });
+
+    afterEach(() => {
+      resetTrackers();
+    });
+
     it("returns 0 when accounts are available", () => {
       const now = Date.now();
       const stored = {
@@ -954,6 +962,92 @@ describe("AccountManager", () => {
       const waitTime = manager.getMinWaitTimeForFamily("codex", "gpt-5.2");
       expect(waitTime).toBeGreaterThan(0);
       expect(waitTime).toBeLessThanOrEqual(45000);
+    });
+
+    it("considers local token bucket recovery time", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          {
+            refreshToken: "token-1",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      getTokenTracker().drain(0, "codex", 50);
+
+      const waitTime = manager.getMinWaitTimeForFamily("codex");
+      expect(waitTime).toBeGreaterThan(0);
+      expect(waitTime).toBeLessThanOrEqual(10000);
+    });
+
+    it("uses the earliest account availability when blockers differ per account", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          {
+            refreshToken: "token-1",
+            addedAt: now,
+            lastUsed: now,
+            rateLimitResetTimes: { codex: now + 60000 },
+          },
+          {
+            refreshToken: "token-2",
+            addedAt: now,
+            lastUsed: now,
+            coolingDownUntil: now + 30000,
+            cooldownReason: "manual",
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      getTokenTracker().drain(0, "codex", 50);
+
+      const waitTime = manager.getMinWaitTimeForFamily("codex");
+      expect(waitTime).toBeGreaterThan(20000);
+      expect(waitTime).toBeLessThanOrEqual(30000);
+    });
+
+    it("returns Infinity when token refill is disabled", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          {
+            refreshToken: "token-1",
+            addedAt: now,
+            lastUsed: now,
+          },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      const tracker = getTokenTracker() as unknown as {
+        config: { tokensPerMinute: number };
+        drain: (accountIndex: number, quotaKey?: string, drainAmount?: number) => void;
+      };
+      const originalTokensPerMinute = tracker.config.tokensPerMinute;
+      try {
+        tracker.config.tokensPerMinute = 0;
+        tracker.drain(0, "codex", 50);
+
+        const waitTime = manager.getMinWaitTimeForFamily("codex");
+        expect(waitTime).toBe(Number.POSITIVE_INFINITY);
+      } finally {
+        tracker.config.tokensPerMinute = originalTokensPerMinute;
+      }
     });
   });
 
@@ -2041,6 +2135,66 @@ describe("AccountManager", () => {
       const selected = manager.getCurrentOrNextForFamilyHybrid("codex");
       expect(selected).not.toBeNull();
       expect(selected?.index).toBe(0);
+    });
+
+    it("request selector skips attempted current account and picks the next eligible account", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now - 10000 },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      const selected = manager.getNextRequestEligibleForFamilyHybrid("codex", undefined, {
+        attemptedAccountKeys: new Set([manager.getRequestAttemptKey(manager.getAccountsSnapshot()[0]!)]),
+      });
+
+      expect(selected).not.toBeNull();
+      expect(selected?.index).toBe(1);
+    });
+
+    it("request selector treats token-bucket-empty current account as ineligible", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+          { refreshToken: "token-2", addedAt: now, lastUsed: now - 10000 },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      getTokenTracker().drain(0, "codex", 50);
+
+      const selected = manager.getNextRequestEligibleForFamilyHybrid("codex");
+      expect(selected).not.toBeNull();
+      expect(selected?.index).toBe(1);
+    });
+
+    it("request selector returns null instead of falling back to unavailable accounts", () => {
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        activeIndexByFamily: { codex: 0 },
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored as never);
+      const account0 = manager.setActiveIndex(0)!;
+      manager.markRateLimited(account0, 60000, "codex");
+
+      const selected = manager.getNextRequestEligibleForFamilyHybrid("codex");
+      expect(selected).toBeNull();
     });
 
     it("reports selection explainability with eligibility reasons", () => {

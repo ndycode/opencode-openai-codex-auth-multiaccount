@@ -121,6 +121,20 @@ export class HealthScoreTracker {
     this.entries.delete(key);
   }
 
+  reindexAfterRemoval(removedIndex: number): void {
+    const nextEntries = new Map<string, HealthEntry>();
+    for (const [key, entry] of this.entries) {
+      const [indexText, ...quotaParts] = key.split(":");
+      const index = Number.parseInt(indexText ?? "", 10);
+      if (!Number.isFinite(index)) continue;
+      if (index === removedIndex) continue;
+      const nextIndex = index > removedIndex ? index - 1 : index;
+      const nextKey = quotaParts.length > 0 ? `${nextIndex}:${quotaParts.join(":")}` : `${nextIndex}`;
+      nextEntries.set(nextKey, entry);
+    }
+    this.entries = nextEntries;
+  }
+
   clear(): void {
     this.entries.clear();
   }
@@ -178,6 +192,18 @@ export class TokenBucketTracker {
     const entry = this.buckets.get(key);
     if (!entry) return this.config.maxTokens;
     return this.refillTokens(entry);
+  }
+
+  getWaitTimeUntilTokenAvailable(accountIndex: number, quotaKey?: string): number {
+    const key = this.getKey(accountIndex, quotaKey);
+    const entry = this.buckets.get(key);
+    const currentTokens = entry ? this.refillTokens(entry) : this.config.maxTokens;
+    if (currentTokens >= 1) return 0;
+    if (this.config.tokensPerMinute <= 0) return Number.POSITIVE_INFINITY;
+
+    const tokensNeeded = 1 - currentTokens;
+    const minutesUntilAvailable = tokensNeeded / this.config.tokensPerMinute;
+    return Math.max(0, Math.ceil(minutesUntilAvailable * 60_000));
   }
 
   /**
@@ -255,6 +281,20 @@ export class TokenBucketTracker {
     this.buckets.delete(key);
   }
 
+  reindexAfterRemoval(removedIndex: number): void {
+    const nextBuckets = new Map<string, TokenBucketEntry>();
+    for (const [key, entry] of this.buckets) {
+      const [indexText, ...quotaParts] = key.split(":");
+      const index = Number.parseInt(indexText ?? "", 10);
+      if (!Number.isFinite(index)) continue;
+      if (index === removedIndex) continue;
+      const nextIndex = index > removedIndex ? index - 1 : index;
+      const nextKey = quotaParts.length > 0 ? `${nextIndex}:${quotaParts.join(":")}` : `${nextIndex}`;
+      nextBuckets.set(nextKey, entry);
+    }
+    this.buckets = nextBuckets;
+  }
+
   clear(): void {
     this.buckets.clear();
   }
@@ -296,6 +336,11 @@ export const DEFAULT_HYBRID_SELECTION_CONFIG: HybridSelectionConfig = {
  * - freshness: Hours since last used (higher = more fresh for rotation)
  */
 export interface HybridSelectionOptions {
+  pidOffsetEnabled?: boolean;
+}
+
+export interface RequestHybridSelectionOptions {
+  attemptedAccountKeys?: ReadonlySet<string>;
   pidOffsetEnabled?: boolean;
 }
 
@@ -436,4 +481,9 @@ export function getTokenTracker(config?: Partial<TokenBucketConfig>): TokenBucke
 export function resetTrackers(): void {
   healthTrackerInstance?.clear();
   tokenTrackerInstance?.clear();
+}
+
+export function reindexTrackersAfterRemoval(removedIndex: number): void {
+  healthTrackerInstance?.reindexAfterRemoval(removedIndex);
+  tokenTrackerInstance?.reindexAfterRemoval(removedIndex);
 }

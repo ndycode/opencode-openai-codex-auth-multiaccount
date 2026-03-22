@@ -4,6 +4,12 @@ import { join } from "node:path";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { AccountManager } from "../lib/accounts.js";
 import {
+  getTokenTracker,
+  getHealthTracker,
+  DEFAULT_TOKEN_BUCKET_CONFIG,
+  DEFAULT_HEALTH_SCORE_CONFIG,
+} from "../lib/rotation.js";
+import {
   deduplicateAccounts,
   deduplicateAccountsByEmail,
   setStoragePathDirect,
@@ -154,6 +160,44 @@ describe("Multi-Account Rotation Integration", () => {
 
       const account1 = manager.getCurrentOrNextForFamily(family);
       expect(account1?.index).toBe(1);
+    });
+
+    it("request selector skips attempted accounts and returns the next eligible account", () => {
+      const family: ModelFamily = "codex";
+      const attemptedKey = manager.getRequestAttemptKey(manager.getAccountsSnapshot()[0]!);
+
+      const selected = manager.getNextRequestEligibleForFamilyHybrid(family, undefined, {
+        attemptedAccountKeys: new Set([attemptedKey]),
+      });
+
+      expect(selected?.index).toBe(1);
+    });
+
+    it("clears token tracker state after account removal renumbers indices", () => {
+      getTokenTracker().drain(0, "codex", 50);
+      getHealthTracker().recordFailure(0, "codex");
+      const firstAccount = manager.setActiveIndex(0);
+      expect(firstAccount).not.toBeNull();
+      manager.removeAccount(firstAccount!);
+      expect(getTokenTracker().getTokens(0, "codex")).toBe(DEFAULT_TOKEN_BUCKET_CONFIG.maxTokens);
+      expect(getHealthTracker().getScore(0, "codex")).toBe(DEFAULT_HEALTH_SCORE_CONFIG.maxScore);
+    });
+
+    it("keeps a held survivor reference aligned with reindexed token buckets after removal", () => {
+      const family: ModelFamily = "codex";
+      const firstAccount = manager.getCurrentOrNextForFamily(family);
+      const survivor = manager.getCurrentOrNextForFamily(family);
+
+      expect(firstAccount?.index).toBe(0);
+      expect(survivor?.index).toBe(1);
+
+      getTokenTracker().drain(1, "codex", DEFAULT_TOKEN_BUCKET_CONFIG.maxTokens - 1);
+      manager.removeAccount(firstAccount!);
+
+      expect(survivor?.index).toBe(0);
+      expect(manager.consumeToken(survivor!, family)).toBe(true);
+      expect(getTokenTracker().getTokens(0, "codex")).toBe(0);
+      expect(getTokenTracker().getTokens(1, "codex")).toBe(DEFAULT_TOKEN_BUCKET_CONFIG.maxTokens);
     });
 
     it("returns null when all accounts are rate-limited", () => {

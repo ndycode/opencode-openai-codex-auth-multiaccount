@@ -2414,16 +2414,16 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 						}
 					};
 
-							let allRateLimitedRetries = 0;
-							let emptyResponseRetries = 0;
-							const attemptedUnsupportedFallbackModels = new Set<string>();
+								let allRateLimitedRetries = 0;
+								let emptyResponseRetries = 0;
+								const attemptedUnsupportedFallbackModels = new Set<string>();
 							if (model) {
 								attemptedUnsupportedFallbackModels.add(model);
 							}
 
 							while (true) {
 										let accountCount = accountManager.getAccountCount();
-										const attempted = new Set<number>();
+										const attempted = new Set<string>();
 										let restartAccountTraversalWithFallback = false;
 
 while (attempted.size < Math.max(1, accountCount)) {
@@ -2446,11 +2446,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 					fallbackTo,
 					fallbackReason,
 				};
-				const account = accountManager.getCurrentOrNextForFamilyHybrid(modelFamily, model, { pidOffsetEnabled });
-				if (!account || attempted.has(account.index)) {
+				const account = accountManager.getNextRequestEligibleForFamilyHybrid(modelFamily, model, {
+					attemptedAccountKeys: attempted,
+					pidOffsetEnabled,
+				});
+				if (!account) {
 					break;
 				}
-							attempted.add(account.index);
+							attempted.add(accountManager.getRequestAttemptKey(account));
 							runtimeMetrics.lastSelectedAccountIndex = account.index;
 							runtimeMetrics.lastQuotaKey = quotaKey;
 							if (runtimeMetrics.lastSelectionSnapshot) {
@@ -2608,7 +2611,6 @@ while (attempted.size < Math.max(1, accountCount)) {
 								// Consume a token before making the request for proactive rate limiting
 								const tokenConsumed = accountManager.consumeToken(account, modelFamily, model);
 								if (!tokenConsumed) {
-									accountManager.recordRateLimit(account, modelFamily, model);
 									runtimeMetrics.accountRotations++;
 									runtimeMetrics.lastError =
 										`Local token bucket depleted for account ${account.index + 1} (${modelFamily}${model ? `:${model}` : ""})`;
@@ -2616,7 +2618,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									logWarn(
 										`Skipping account ${account.index + 1}: local token bucket depleted for ${modelFamily}${model ? `:${model}` : ""}`,
 									);
-									break;
+									continue;
 								}
 
 							while (true) {
@@ -3083,10 +3085,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 										const waitMs = accountManager.getMinWaitTimeForFamily(modelFamily, model);
 										const count = accountManager.getAccountCount();
+										const hasFiniteWait = Number.isFinite(waitMs);
 
 								if (
 									retryAllAccountsRateLimited &&
 									count > 0 &&
+									hasFiniteWait &&
 									waitMs > 0 &&
 									(retryAllAccountsMaxWaitMs === 0 ||
 										waitMs <= retryAllAccountsMaxWaitMs) &&
@@ -3102,12 +3106,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 									continue;
 								}
 
-								const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
+								const waitLabel =
+									waitMs > 0
+										? hasFiniteWait
+											? formatWaitTime(waitMs)
+											: "an indefinite wait"
+										: "a bit";
 								const message =
 									count === 0
 										? "No Codex accounts configured. Run `opencode auth login`."
 										: waitMs > 0
-											? `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`
+											? hasFiniteWait
+												? `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`
+												: `All ${count} account(s) are rate-limited indefinitely. Re-enable token refill or add another account with \`opencode auth login\`.`
 											: `All ${count} account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.lastError = message;
