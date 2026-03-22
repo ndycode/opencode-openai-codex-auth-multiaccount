@@ -158,6 +158,7 @@ import { paintUiText, formatUiBadge, formatUiHeader, formatUiItem, formatUiKeyVa
 import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
+	formatPromptCacheKey,
 	recommendBeginnerNextAction,
 	summarizeBeginnerAccounts,
 	type BeginnerAccountSnapshot,
@@ -5217,7 +5218,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 									ui,
 									"Prompt cache",
 									runtime.promptCacheEnabledRequests > 0
-										? `enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${runtime.lastPromptCacheKey ?? "none"}`
+										? `enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${formatPromptCacheKey(runtime.lastPromptCacheKey)}`
 										: `enabled=0, missing=${runtime.promptCacheMissingRequests}, lastKey=none`,
 									"muted",
 								),
@@ -5262,7 +5263,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							`  Runtime failures: failed=${runtime.failedRequests}, rateLimited=${runtime.rateLimitedResponses}, authRefreshFailed=${runtime.authRefreshFailures}, server=${runtime.serverErrors}, network=${runtime.networkErrors}`,
 						);
 						lines.push(
-							`  Prompt cache: enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${runtime.lastPromptCacheKey ?? "none"}`,
+							`  Prompt cache: enabled=${runtime.promptCacheEnabledRequests}, missing=${runtime.promptCacheMissingRequests}, lastKey=${formatPromptCacheKey(runtime.lastPromptCacheKey)}`,
 						);
 					}
 					return lines.join("\n");
