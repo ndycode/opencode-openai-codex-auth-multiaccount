@@ -4,8 +4,9 @@ import {
   normalizeModel,
   filterInput,
   getReasoningConfig,
+  transformRequestBody,
 } from "../../lib/request/request-transformer.js";
-import type { InputItem } from "../../lib/types.js";
+import type { InputItem, RequestBody } from "../../lib/types.js";
 import { arbModel, arbMessageRole } from "./helpers.js";
 
 describe("normalizeModel property tests", () => {
@@ -216,44 +217,43 @@ describe("getReasoningConfig property tests", () => {
     );
   });
 
-	  it("codex models upgrade none to low", () => {
-	    fc.assert(
-	      fc.property(
-	        fc.constantFrom(
-	          "gpt-5.1-codex",
-	          "gpt-5.2-codex",
-	          "gpt-5.3-codex",
-	          "gpt-5.1-codex-max",
-	        ),
-	        (model) => {
-	          const result = getReasoningConfig(model, { reasoningEffort: "none" });
-	          expect(result.effort).toBe("low");
+  it("codex models upgrade none to low", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(
+          "gpt-5.1-codex",
+          "gpt-5.2-codex",
+          "gpt-5.3-codex",
+          "gpt-5.1-codex-max",
+        ),
+        (model) => {
+          const result = getReasoningConfig(model, { reasoningEffort: "none" });
+          expect(result.effort).toBe("low");
           return true;
         }
       )
     );
   });
 
-	  it("gpt-5.4-pro upgrades none to medium (none→low→medium chain)", () => {
-	    fc.assert(
-	      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
-	        const result = getReasoningConfig(model, { reasoningEffort: "none" });
-	        expect(result.effort).toBe("medium");
-	        return true;
-	      })
-	    );
+  it("gpt-5.4-pro upgrades none to medium (none→low→medium chain)", () => {
+    fc.assert(
+      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+        const result = getReasoningConfig(model, { reasoningEffort: "none" });
+        expect(result.effort).toBe("medium");
+        return true;
+      })
+    );
   });
 
-	  it("gpt-5.4-pro upgrades minimal to medium", () => {
-	    fc.assert(
-	      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
-	        const result = getReasoningConfig(model, { reasoningEffort: "minimal" });
-	        expect(result.effort).toBe("medium");
-	        return true;
-	      })
-	    );
-	  });
-
+  it("gpt-5.4-pro upgrades minimal to medium", () => {
+    fc.assert(
+      fc.property(fc.constant("gpt-5.4-pro"), (model) => {
+        const result = getReasoningConfig(model, { reasoningEffort: "minimal" });
+        expect(result.effort).toBe("medium");
+        return true;
+      })
+    );
+  });
   it("gpt-5.1, gpt-5.2, and gpt-5.4 general support none effort", () => {
     fc.assert(
       fc.property(
@@ -271,5 +271,27 @@ describe("getReasoningConfig property tests", () => {
     const result = getReasoningConfig(undefined);
     expect(result.effort).toBeDefined();
     expect(result.summary).toBeDefined();
+  });
+});
+
+describe("transformRequestBody property tests", () => {
+  it("preserves max_output_tokens across arbitrary positive integers", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom("gpt-5", "gpt-5.4-pro", "gpt-5.1-codex"),
+        fc.integer({ min: 1, max: 1_000_000 }),
+        async (model, maxOutputTokens) => {
+          const body: RequestBody = {
+            model,
+            input: [],
+            max_output_tokens: maxOutputTokens,
+          };
+
+          const result = await transformRequestBody(body, "Test Codex Instructions");
+          expect(result.max_output_tokens).toBe(maxOutputTokens);
+          expect(result.max_completion_tokens).toBeUndefined();
+          return true;
+        })
+    );
   });
 });
