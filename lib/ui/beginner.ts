@@ -50,6 +50,13 @@ export interface BeginnerAccountSummary {
 	unlabeled: number;
 }
 
+export function formatPromptCacheKey(value: string | null | undefined): string {
+	const normalized = value?.trim();
+	if (!normalized) return "none";
+	if (normalized.length <= 8) return normalized;
+	return `${normalized.slice(0, 8)}...`;
+}
+
 export function summarizeBeginnerAccounts(
 	accounts: BeginnerAccountSnapshot[],
 	now: number,

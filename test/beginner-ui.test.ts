@@ -3,6 +3,7 @@ import {
 	buildBeginnerChecklist,
 	buildBeginnerDoctorFindings,
 	explainRuntimeErrorCategory,
+	formatPromptCacheKey,
 	recommendBeginnerNextAction,
 	summarizeBeginnerAccounts,
 	type BeginnerAccountSnapshot,
@@ -208,5 +209,21 @@ describe("explainRuntimeErrorCategory", () => {
 		const hint = explainRuntimeErrorCategory("mystery");
 		expect(hint).toContain("mystery");
 		expect(hint).toContain("codex-doctor");
+	});
+});
+
+describe("formatPromptCacheKey", () => {
+	it("returns none for empty values", () => {
+		expect(formatPromptCacheKey(null)).toBe("none");
+		expect(formatPromptCacheKey(undefined)).toBe("none");
+		expect(formatPromptCacheKey("   ")).toBe("none");
+	});
+
+	it("keeps short values as-is", () => {
+		expect(formatPromptCacheKey("ses_1234")).toBe("ses_1234");
+	});
+
+	it("redacts longer values to an 8-char prefix", () => {
+		expect(formatPromptCacheKey("ses_prompt_cache_key_123")).toBe("ses_prom...");
 	});
 });
