@@ -150,6 +150,12 @@ import {
 	shouldRefreshToken,
 	transformRequestForCodex,
 } from "./lib/request/fetch-helpers.js";
+import {
+	createDeactivatedWorkspaceError,
+	createUsageRequestTimeoutError,
+	DEACTIVATED_WORKSPACE_ERROR_CODE,
+	isDeactivatedWorkspaceErrorMessage,
+} from "./lib/runtime-contracts.js";
 import { applyFastSessionDefaults } from "./lib/request/request-transformer.js";
 import {
 	getRateLimitBackoff,
@@ -2091,7 +2097,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						...account,
 						flaggedAt: Date.now(),
 						flaggedReason: "workspace-deactivated",
-						lastError: "deactivated_workspace",
+						lastError: DEACTIVATED_WORKSPACE_ERROR_CODE,
 					};
 					await withFlaggedAccountStorageTransaction(async (current, persist) => {
 						const nextStorage: typeof current = {
@@ -2769,7 +2775,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 													? (errorBody as { error?: { message?: string } }).error?.message
 													: bodyText) || `HTTP ${response.status}`;
 											if (isDeactivatedWorkspaceError(errorBody, response.status)) {
-												throw new Error("deactivated_workspace");
+												throw createDeactivatedWorkspaceError();
 											}
 											throw new Error(message);
 										}
@@ -2777,7 +2783,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										lastError = new Error("Codex response did not include quota headers");
 									} catch (error) {
 										lastError = error instanceof Error ? error : new Error(String(error));
-										if (lastError.message === "deactivated_workspace") {
+										if (isDeactivatedWorkspaceErrorMessage(lastError.message)) {
 											throw lastError;
 										}
 									}
@@ -3003,7 +3009,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 										} catch (error) {
 											errors += 1;
 											const message = error instanceof Error ? error.message : String(error);
-											if (message === "deactivated_workspace") {
+											if (isDeactivatedWorkspaceErrorMessage(message)) {
 												const flaggedRecord: FlaggedAccountMetadataV1 = {
 													...account,
 													flaggedAt: Date.now(),
@@ -4448,19 +4454,19 @@ while (attempted.size < Math.max(1, accountCount)) {
 									bodyText = (await response.text()).slice(0, usageErrorBodyMaxChars);
 								} catch (error) {
 									if (isAbortError(error) || controller.signal.aborted) {
-										throw new Error("Usage request timed out");
+										throw createUsageRequestTimeoutError();
 									}
 									throw error;
 								}
 								if (controller.signal.aborted) {
-									throw new Error("Usage request timed out");
+									throw createUsageRequestTimeoutError();
 								}
 								throw new Error(sanitizeUsageErrorMessage(response.status, bodyText));
 							}
 							return (await response.json()) as UsagePayload;
 						} catch (error) {
 							if (isAbortError(error)) {
-								throw new Error("Usage request timed out");
+								throw createUsageRequestTimeoutError();
 							}
 							throw error;
 						} finally {

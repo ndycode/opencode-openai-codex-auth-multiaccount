@@ -11,6 +11,7 @@ import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
+import { DEACTIVATED_WORKSPACE_ERROR_CODE } from "../runtime-contracts.js";
 import { isRecord } from "../utils.js";
 import {
         CODEX_BASE_URL,
@@ -279,8 +280,6 @@ export interface ErrorDiagnostics {
 	httpStatus?: number;
 }
 
-const DEACTIVATED_WORKSPACE_CODE = "deactivated_workspace";
-
 function getStructuredErrorCode(errorBody: unknown): string | undefined {
 	if (!isRecord(errorBody)) return undefined;
 
@@ -305,7 +304,7 @@ function getStructuredErrorCode(errorBody: unknown): string | undefined {
 export function isDeactivatedWorkspaceError(errorBody: unknown, status?: number): boolean {
 	if (status !== undefined && status !== 402) return false;
 	const code = getStructuredErrorCode(errorBody);
-	return code === DEACTIVATED_WORKSPACE_CODE;
+	return code === DEACTIVATED_WORKSPACE_ERROR_CODE;
 }
 
 /**
@@ -765,7 +764,7 @@ function normalizeErrorPayload(
 				message:
 					"The selected ChatGPT workspace is deactivated. This workspace entry should be removed from rotation or re-authorized before retrying.",
 				type: "workspace_deactivated",
-				code: DEACTIVATED_WORKSPACE_CODE,
+				code: DEACTIVATED_WORKSPACE_ERROR_CODE,
 			},
 		};
 		if (diagnostics && Object.keys(diagnostics).length > 0) {
