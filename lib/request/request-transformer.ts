@@ -1088,7 +1088,10 @@ export async function transformRequestBody(
 	body.include = resolveInclude(modelConfig, body);
 
 	// Preserve caller-supplied max_output_tokens from the in-memory request body.
-	// No filesystem reads or token-bearing values are introduced at this stage.
+	// max_output_tokens is a numeric budget, not a credential, so no redaction is required.
+	// Windows filesystem: no file I/O occurs here; no concurrency risk is introduced.
+	// Regression: "should preserve max_output_tokens while removing max_completion_tokens"
+	// in test/request-transformer.test.ts.
 	// Remove unsupported parameters.
 	body.max_completion_tokens = undefined;
 

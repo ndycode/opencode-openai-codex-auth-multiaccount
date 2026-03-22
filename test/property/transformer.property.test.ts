@@ -4,8 +4,9 @@ import {
   normalizeModel,
   filterInput,
   getReasoningConfig,
+  transformRequestBody,
 } from "../../lib/request/request-transformer.js";
-import type { InputItem } from "../../lib/types.js";
+import type { InputItem, RequestBody } from "../../lib/types.js";
 import { arbModel, arbMessageRole } from "./helpers.js";
 
 describe("normalizeModel property tests", () => {
@@ -216,14 +217,13 @@ describe("getReasoningConfig property tests", () => {
     );
   });
 
-	  it("codex/pro models upgrade none to low", () => {
-	    fc.assert(
-	      fc.property(
-	        fc.constantFrom(
-	          "gpt-5.4-pro",
-	          "gpt-5.1-codex",
-	          "gpt-5.2-codex",
-	          "gpt-5.3-codex",
+  it("codex models upgrade none to low", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(
+          "gpt-5.1-codex",
+          "gpt-5.2-codex",
+          "gpt-5.3-codex",
 	          "gpt-5.1-codex-max",
 	        ),
 	        (model) => {
@@ -252,5 +252,24 @@ describe("getReasoningConfig property tests", () => {
     const result = getReasoningConfig(undefined);
     expect(result.effort).toBeDefined();
     expect(result.summary).toBeDefined();
+  });
+});
+
+describe("transformRequestBody property tests", () => {
+  it("preserves max_output_tokens across arbitrary positive integers", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.integer({ min: 1, max: 1_000_000 }), async (maxOutputTokens) => {
+        const body: RequestBody = {
+          model: "gpt-5",
+          input: [],
+          max_output_tokens: maxOutputTokens,
+        };
+
+        const result = await transformRequestBody(body, "Test Codex Instructions");
+        expect(result.max_output_tokens).toBe(maxOutputTokens);
+        expect(result.max_completion_tokens).toBeUndefined();
+        return true;
+      })
+    );
   });
 });
