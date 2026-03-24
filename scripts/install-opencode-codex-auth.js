@@ -117,9 +117,9 @@ function mergeFullTemplate(modernTemplate, legacyTemplate) {
 	return {
 		...modernTemplate,
 		provider: {
-			...modernTemplate.provider,
+			...(modernTemplate.provider ?? {}),
 			openai: {
-				...modernTemplate.provider.openai,
+				...(modernTemplate.provider?.openai ?? {}),
 				models: {
 					...modernModels,
 					...legacyModels,
