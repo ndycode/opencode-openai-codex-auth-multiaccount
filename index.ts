@@ -1782,9 +1782,10 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 							}
 
 							while (true) {
-										let accountCount = accountManager.getAccountCount();
-										const attempted = new Set<number>();
-										let restartAccountTraversalWithFallback = false;
+						let accountCount = accountManager.getAccountCount();
+						const attempted = new Set<number>();
+						let restartAccountTraversalWithFallback = false;
+						let restartAccountTraversalAfterWorkspaceDeactivation = false;
 
 while (attempted.size < Math.max(1, accountCount)) {
 				const selectionExplainability = accountManager.getSelectionExplainability(
@@ -2082,10 +2083,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 										});
 
 			const workspaceDeactivated = isDeactivatedWorkspaceError(errorBody, response.status);
-			if (workspaceDeactivated) {
-				const accountLabel = formatAccountLabel(account, account.index);
-				accountManager.refundToken(account, modelFamily, model);
-				accountManager.recordFailure(account, modelFamily, model);
+				if (workspaceDeactivated) {
+					const accountLabel = formatAccountLabel(account, account.index);
+					accountManager.refundToken(account, modelFamily, model);
+					accountManager.recordFailure(account, modelFamily, model);
 				account.lastSwitchReason = "rotation";
 				runtimeMetrics.failedRequests++;
 				runtimeMetrics.accountRotations++;
@@ -2113,26 +2114,37 @@ while (attempted.size < Math.max(1, accountCount)) {
 					);
 				}
 
-				if (accountManager.removeAccount(account)) {
-					accountManager.saveToDiskDebounced();
-					attempted.clear();
-					accountCount = accountManager.getAccountCount();
-					await showToast(
-						`Workspace deactivated. Removed ${accountLabel} from rotation and switching accounts.`,
-						"warning",
-						{ duration: toastDurationMs },
+					// Keep deactivated workspace cleanup aligned with the existing
+					// refresh-token removal path. saveToDiskDebounced reuses the
+					// storage temp-file + EPERM/EBUSY retry path covered in
+					// test/storage.test.ts, and surfaced persistence failures stay
+					// sanitized by the redaction checks in test/login-runner.test.ts.
+					const removedCount = accountManager.removeAccountsWithSameRefreshToken(account);
+					if (removedCount > 0) {
+						accountManager.saveToDiskDebounced();
+						restartAccountTraversalAfterWorkspaceDeactivation = true;
+						const removalMessage = removedCount > 1
+							? `Workspace deactivated. Removed ${removedCount} related entries from rotation and switching accounts.`
+							: `Workspace deactivated. Removed ${accountLabel} from rotation and switching accounts.`;
+						await showToast(
+							removalMessage,
+							"warning",
+							{ duration: toastDurationMs },
+						);
+						break;
+					}
+
+					logWarn(
+						`[${PLUGIN_NAME}] Expected grouped account removal after workspace deactivation, but removed ${removedCount}.`,
 					);
+					accountManager.markAccountCoolingDown(
+						account,
+						ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+						"auth-failure",
+					);
+					accountManager.saveToDiskDebounced();
 					break;
 				}
-
-				accountManager.markAccountCoolingDown(
-					account,
-					ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
-					"auth-failure",
-				);
-				accountManager.saveToDiskDebounced();
-				break;
-			}
 
 			const unsupportedModelInfo = getUnsupportedCodexModelInfo(errorBody);
 			const hasRemainingAccounts = attempted.size < Math.max(1, accountCount);
@@ -2432,14 +2444,20 @@ while (attempted.size < Math.max(1, accountCount)) {
 					runtimeMetrics.lastErrorCategory = null;
 						return successResponse;
 																								}
-										if (restartAccountTraversalWithFallback) {
-											break;
-										}
-										}
+						if (restartAccountTraversalWithFallback) {
+							break;
+						}
+						if (restartAccountTraversalAfterWorkspaceDeactivation) {
+							break;
+						}
+						}
 
-										if (restartAccountTraversalWithFallback) {
-											continue;
-										}
+						if (restartAccountTraversalWithFallback) {
+							continue;
+						}
+						if (restartAccountTraversalAfterWorkspaceDeactivation) {
+							continue;
+						}
 
 										const waitMs = accountManager.getMinWaitTimeForFamily(modelFamily, model);
 										const count = accountManager.getAccountCount();
