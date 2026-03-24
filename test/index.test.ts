@@ -3187,7 +3187,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				const headers = new Headers(init?.headers);
 				const accessToken = headers.get("x-test-access-token");
 				if (accessToken === "access-org-dead") {
-					return new Response(JSON.stringify({ error: { code: "deactivated_workspace", message: "workspace dead" } }), {
+					return new Response(JSON.stringify({ detail: { code: "deactivated_workspace", message: "workspace dead" } }), {
 						status: 402,
 					});
 				}
@@ -4267,7 +4267,7 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			const headers = new Headers(init?.headers);
 			const accessToken = headers.get("x-test-access-token");
 			if (accessToken === "access-dead") {
-				return new Response(JSON.stringify({ error: { code: "deactivated_workspace", message: "workspace dead" } }), {
+				return new Response(JSON.stringify({ detail: { code: "deactivated_workspace", message: "workspace dead" } }), {
 					status: 402,
 					headers: { "content-type": "application/json" },
 				});
