@@ -95,4 +95,57 @@ describe("install-opencode-codex-auth script", () => {
 			]),
 		);
 	});
+
+	it("keeps cache files when --no-cache-clear is set but still unpins the cached package entry", async () => {
+		vi.resetModules();
+		tempHome = await createTempHome();
+		const { runInstaller } = await import("../scripts/install-opencode-codex-auth.js");
+		const configDir = join(tempHome, ".config", "opencode");
+		const configPath = join(configDir, "opencode.json");
+		const cacheDir = join(tempHome, ".cache", "opencode");
+		const cacheNodeModules = join(cacheDir, "node_modules", "oc-chatgpt-multi-auth");
+		const cacheBunLock = join(cacheDir, "bun.lock");
+		const cachePackageJson = join(cacheDir, "package.json");
+
+		await mkdir(configDir, { recursive: true });
+		await mkdir(cacheNodeModules, { recursive: true });
+		await writeFile(configPath, JSON.stringify({ plugin: [] }, null, 2), "utf-8");
+		await writeFile(cacheBunLock, "lockfile", "utf-8");
+		await writeFile(
+			cachePackageJson,
+			JSON.stringify(
+				{
+					dependencies: {
+						"oc-chatgpt-multi-auth": "file:../pinned-plugin.tgz",
+						other: "^1.0.0",
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		await expect(
+			runInstaller(["--no-cache-clear"], {
+				env: {
+					...process.env,
+					HOME: tempHome,
+					USERPROFILE: tempHome,
+				},
+			}),
+		).resolves.toMatchObject({
+			action: "install",
+			configMode: "full",
+			exitCode: 0,
+		});
+
+		await expect(readFile(cacheBunLock, "utf-8")).resolves.toBe("lockfile");
+		await expect(readdir(cacheNodeModules)).resolves.toEqual([]);
+		const cachePackage = JSON.parse(await readFile(cachePackageJson, "utf-8")) as {
+			dependencies: Record<string, string>;
+		};
+		expect(cachePackage.dependencies["oc-chatgpt-multi-auth"]).toBeUndefined();
+		expect(cachePackage.dependencies.other).toBe("^1.0.0");
+	});
 });

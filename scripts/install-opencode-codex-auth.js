@@ -233,6 +233,7 @@ async function removePluginFromCachePackage(paths, dryRun) {
 async function clearCache(paths, dryRun, skipCacheClear) {
 	if (skipCacheClear) {
 		log("Skipping cache clear (--no-cache-clear).");
+		await removePluginFromCachePackage(paths, dryRun);
 		return;
 	}
 
