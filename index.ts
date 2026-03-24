@@ -2137,6 +2137,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 					logWarn(
 						`[${PLUGIN_NAME}] Expected grouped account removal after workspace deactivation, but removed ${removedCount}.`,
 					);
+					accountManager.markAccountCoolingDown(
+						account,
+						ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
+						"auth-failure",
+					);
+					accountManager.saveToDiskDebounced();
 					break;
 				}
 
