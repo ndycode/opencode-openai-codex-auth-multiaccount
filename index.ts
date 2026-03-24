@@ -2114,26 +2114,29 @@ while (attempted.size < Math.max(1, accountCount)) {
 					);
 				}
 
-					if (accountManager.removeAccount(account)) {
+					// Keep deactivated workspace cleanup aligned with the existing
+					// refresh-token removal path. saveToDiskDebounced reuses the
+					// storage temp-file + EPERM/EBUSY retry path covered in
+					// test/storage.test.ts, and surfaced persistence failures stay
+					// sanitized by the redaction checks in test/login-runner.test.ts.
+					const removedCount = accountManager.removeAccountsWithSameRefreshToken(account);
+					if (removedCount > 0) {
 						accountManager.saveToDiskDebounced();
-						attempted.clear();
-						accountCount = accountManager.getAccountCount();
 						restartAccountTraversalAfterWorkspaceDeactivation = true;
+						const removalMessage = removedCount > 1
+							? `Workspace deactivated. Removed ${removedCount} related entries from rotation and switching accounts.`
+							: `Workspace deactivated. Removed ${accountLabel} from rotation and switching accounts.`;
 						await showToast(
-							`Workspace deactivated. Removed ${accountLabel} from rotation and switching accounts.`,
+							removalMessage,
 							"warning",
 							{ duration: toastDurationMs },
 						);
 						break;
 					}
 
-					accountManager.markAccountCoolingDown(
-						account,
-						ACCOUNT_LIMITS.AUTH_FAILURE_COOLDOWN_MS,
-						"auth-failure",
+					logWarn(
+						`[${PLUGIN_NAME}] Expected grouped account removal after workspace deactivation, but removed ${removedCount}.`,
 					);
-					accountManager.saveToDiskDebounced();
-					restartAccountTraversalAfterWorkspaceDeactivation = true;
 					break;
 				}
 

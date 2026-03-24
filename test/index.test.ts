@@ -3089,7 +3089,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 			expect(response.status).toBe(200);
 		});
 
-		it("removes only the deactivated workspace and fails over to a healthy sibling workspace", async () => {
+		it("removes all entries sharing the deactivated refresh token and fails over to a healthy account", async () => {
 			const fetchHelpers = await import("../lib/request/fetch-helpers.js");
 			const storageModule = await import("../lib/storage.js");
 			const accountsModule = await import("../lib/accounts.js");
@@ -3104,17 +3104,26 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				email: "same@example.com",
 				refreshToken: "shared-refresh",
 			};
-			const liveWorkspace = {
+			const duplicateWorkspace = {
 				index: 1,
+				accountId: "org-dead-duplicate",
+				organizationId: "org-dead-duplicate",
+				accountIdSource: "org",
+				accountLabel: "Duplicate dead workspace",
+				email: "same@example.com",
+				refreshToken: "shared-refresh",
+			};
+			const healthyFallback = {
+				index: 2,
 				accountId: "org-live",
 				organizationId: "org-live",
 				accountIdSource: "org",
 				accountLabel: "Live workspace",
-				email: "same@example.com",
-				refreshToken: "shared-refresh",
+				email: "live@example.com",
+				refreshToken: "healthy-refresh",
 			};
 
-			const accounts = [deadWorkspace, liveWorkspace];
+			const accounts = [deadWorkspace, duplicateWorkspace, healthyFallback];
 			const removeAccount = vi.fn((target: typeof deadWorkspace) => {
 				const idx = accounts.findIndex((account) => account.accountId === target.accountId);
 				if (idx < 0) return false;
@@ -3124,7 +3133,15 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				});
 				return true;
 			});
-			const removeAccountsWithSameRefreshToken = vi.fn(() => 0);
+			const removeAccountsWithSameRefreshToken = vi.fn((target: typeof deadWorkspace) => {
+				const nextAccounts = accounts.filter((account) => account.refreshToken !== target.refreshToken);
+				const removedCount = accounts.length - nextAccounts.length;
+				accounts.splice(0, accounts.length, ...nextAccounts);
+				accounts.forEach((account, index) => {
+					account.index = index;
+				});
+				return removedCount;
+			});
 
 			const customManager = {
 				getAccountCount: () => accounts.length,
@@ -3187,7 +3204,10 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				const headers = new Headers(init?.headers);
 				const accessToken = headers.get("x-test-access-token");
 				if (accessToken === "access-org-dead") {
-					return new Response(JSON.stringify({ detail: { code: "deactivated_workspace", message: "workspace dead" } }), {
+					return new Response(JSON.stringify({
+						error: { code: "deactivated_workspace", message: "workspace dead" },
+						detail: { code: "deactivated_workspace", message: "workspace dead" },
+					}), {
 						status: 402,
 					});
 				}
@@ -3202,8 +3222,8 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 
 			expect(response.status).toBe(200);
 			expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-			expect(removeAccount).toHaveBeenCalledTimes(1);
-			expect(removeAccountsWithSameRefreshToken).not.toHaveBeenCalled();
+			expect(removeAccount).not.toHaveBeenCalled();
+			expect(removeAccountsWithSameRefreshToken).toHaveBeenCalledTimes(1);
 			expect(accounts.map((account) => account.accountId)).toEqual(["org-live"]);
 			expect(vi.mocked(storageModule.withFlaggedAccountStorageTransaction)).toHaveBeenCalledTimes(1);
 			expect(mockFlaggedStorage.accounts).toEqual(
@@ -4267,7 +4287,10 @@ describe("OpenAIOAuthPlugin persistAccountPool", () => {
 			const headers = new Headers(init?.headers);
 			const accessToken = headers.get("x-test-access-token");
 			if (accessToken === "access-dead") {
-				return new Response(JSON.stringify({ detail: { code: "deactivated_workspace", message: "workspace dead" } }), {
+				return new Response(JSON.stringify({
+					error: { code: "deactivated_workspace", message: "workspace dead" },
+					detail: { code: "deactivated_workspace", message: "workspace dead" },
+				}), {
 					status: 402,
 					headers: { "content-type": "application/json" },
 				});
