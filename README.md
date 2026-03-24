@@ -35,6 +35,10 @@ What the installer does:
 - normalizes the plugin entry to `"oc-chatgpt-multi-auth"`
 - clears the cached plugin copy so OpenCode reinstalls the latest package
 
+By default, the installer now writes a full catalog config that includes both:
+- modern base model entries such as `gpt-5.4` for `--variant` workflows
+- explicit preset entries such as `gpt-5.4-high` so the shipped catalog is visible directly in model pickers
+
 ## Example Usage
 
 ```bash
@@ -96,10 +100,10 @@ See [Architecture](docs/development/ARCHITECTURE.md) for implementation details.
 
 Use the quick-start path above for the fastest setup. For full setup, local development installs, legacy OpenCode support, and verification steps, see [Getting Started](docs/getting-started.md).
 
-If you are on OpenCode `v1.0.209` or earlier, use:
+If you prefer the compact variant-only config on OpenCode `v1.0.210+`, use:
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest --legacy
+npx -y oc-chatgpt-multi-auth@latest --modern
 ```
 
 ## Configuration

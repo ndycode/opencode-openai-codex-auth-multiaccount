@@ -29,7 +29,17 @@ opencode run "Explain this repository" --model=openai/gpt-5.4 --variant=medium
 
 The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, normalizes the plugin entry to `oc-chatgpt-multi-auth`, and clears the cached plugin copy so OpenCode reinstalls the latest package.
 
-If you are on OpenCode `v1.0.209` or earlier, use:
+By default, the installer writes a full catalog config so you get both:
+- modern base model entries such as `gpt-5.4` for `--variant` workflows
+- explicit preset entries such as `gpt-5.4-high` so the full shipped catalog is visible directly in pickers
+
+If you prefer the compact variant-only config on OpenCode `v1.0.210+`, use:
+
+```bash
+npx -y oc-chatgpt-multi-auth@latest --modern
+```
+
+If you explicitly want the older explicit-only layout, use:
 
 ```bash
 npx -y oc-chatgpt-multi-auth@latest --legacy
