@@ -1,6 +1,6 @@
 {
   "name": "oc-chatgpt-multi-auth",
-  "version": "5.4.7",
+  "version": "5.4.8",
   "description": "OpenCode plugin for using ChatGPT Plus/Pro in GPT-5 and Codex workflows with OAuth login, multi-account rotation, and guided setup",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

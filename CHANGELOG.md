@@ -26,6 +26,24 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
 
+## [5.4.8] - 2026-03-24
+
+### added
+
+- **json codex-ops automation surfaces**: read-only Codex ops now support `format="json"` and expose routing visibility across status, metrics, dashboard, and doctor flows.
+- **device-code login flow**: added a first-party ChatGPT device-code auth path for SSH, WSL, and other headless environments.
+
+### changed
+
+- **login finalization parity**: regular OAuth, manual fallback, and device-code flows now share the same account-selection and persistence helpers.
+- **runtime contract parity hardening**: centralized timeout, deactivated-workspace, and OAuth callback constants with dedicated runtime/doc parity coverage.
+- **dependency audit cleanup**: refreshed the shipped dependency tree with updated `hono` and pinned audit overrides for deterministic audit resolution.
+
+### fixed
+
+- **storage import contract drift**: preview and apply import flows now share one analysis path, keeping deduplication and count reporting aligned while preserving redacted backup failure reporting.
+- **deactivated workspace rotation**: grouped refresh-token variants are removed together, traversal restarts onto healthy accounts, and the zero-removal fallback cools down the affected account safely.
+
 ## [5.4.3] - 2026-03-06
 
 ### added
