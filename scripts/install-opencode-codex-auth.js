@@ -172,11 +172,16 @@ async function clearCache() {
 }
 
 async function main() {
-	if (!existsSync(modernTemplatePath)) {
-		throw new Error(`Config template not found at ${modernTemplatePath}`);
-	}
-	if (!existsSync(legacyTemplatePath)) {
-		throw new Error(`Config template not found at ${legacyTemplatePath}`);
+	const requiredTemplatePaths = configMode === "modern"
+		? [modernTemplatePath]
+		: configMode === "legacy"
+			? [legacyTemplatePath]
+			: [modernTemplatePath, legacyTemplatePath];
+
+	for (const templatePath of requiredTemplatePaths) {
+		if (!existsSync(templatePath)) {
+			throw new Error(`Config template not found at ${templatePath}`);
+		}
 	}
 
 	const template = await loadTemplate(configMode);

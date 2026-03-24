@@ -46,8 +46,8 @@ controls how much thinking the model does.
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-the shipped config templates include 9 base model families and 34 shipped presets overall (34 modern variants or 34 legacy explicit entries). on OpenCode `v1.0.210+`, those 34 presets intentionally appear as 9 base model entries plus `--variant` values. `gpt-5.4-pro` ships in the templates but may still be entitlement-gated at runtime, while `gpt-5.3-codex-spark` remains a manual add-on for entitled workspaces only.
-for context sizing, shipped templates use:
+The shipped config templates include 9 base model families and 34 shipped presets overall (34 modern variants or 34 legacy explicit entries). On OpenCode `v1.0.210+`, those 34 presets intentionally appear as 9 base model entries plus `--variant` values. `gpt-5.4-pro` ships in the templates but may still be entitlement-gated at runtime, while `gpt-5.3-codex-spark` remains a manual add-on for entitled workspaces only.
+For context sizing, shipped templates use:
 - `gpt-5.4` and `gpt-5.4-pro`: `context=1050000`, `output=128000`
 - `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, and `gpt-5.1-codex-mini`: `context=400000`, `output=128000`
 - `gpt-5.1`: `context=272000`, `output=128000`

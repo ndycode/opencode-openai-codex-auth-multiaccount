@@ -70,6 +70,7 @@ It currently ships:
 - 34 total variants
 - `gpt-5.4` and `gpt-5.4-pro` at 1,050,000 context / 128,000 output
 - `gpt-5.4-mini`, `gpt-5.4-nano`, and Codex families at 400,000 context / 128,000 output
+- `gpt-5.1` at 272,000 context / 128,000 output
 - `store: false` plus `include: ["reasoning.encrypted_content"]`
 
 ### Full installer mode
@@ -121,7 +122,7 @@ opencode run "task" --model=openai/gpt-5.4 --variant=high
 
 It currently ships:
 
-- 26 explicit model entries
+- 34 explicit model entries
 - separate model IDs such as `gpt-5.4-high` and `gpt-5.4-mini-xhigh`
 - the same OpenAI provider defaults (`store: false`, `reasoning.encrypted_content`)
 
