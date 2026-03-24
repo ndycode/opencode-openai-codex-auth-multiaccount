@@ -9,6 +9,8 @@ This directory contains the official OpenCode config templates for the ChatGPT C
 | [`opencode-modern.json`](./opencode-modern.json) | **v1.0.210+** | Variant-based config: 9 base models with 34 total presets |
 | [`opencode-legacy.json`](./opencode-legacy.json) | **v1.0.209 and below** | Legacy explicit entries: 34 individual model definitions |
 
+The installer currently uses a merged full-catalog mode by default so users get both the modern base entries and the explicit preset entries without having to hand-edit `opencode.json`.
+
 ## Quick pick
 
 If your OpenCode version is v1.0.210 or newer:

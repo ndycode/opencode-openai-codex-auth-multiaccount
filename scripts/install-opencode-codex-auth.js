@@ -9,35 +9,39 @@ import { homedir } from "node:os";
 const PLUGIN_NAME = "oc-chatgpt-multi-auth";
 
 const args = new Set(process.argv.slice(2));
+const requestedModern = args.has("--modern");
+const requestedLegacy = args.has("--legacy");
+
+if (requestedModern && requestedLegacy) {
+	console.error("Choose only one of --modern or --legacy.");
+	process.exit(1);
+}
+
+const configMode = requestedModern ? "modern" : requestedLegacy ? "legacy" : "full";
 
 if (args.has("--help") || args.has("-h")) {
 	console.log(`Usage: ${PLUGIN_NAME} [--modern|--legacy] [--dry-run] [--no-cache-clear]\n\n` +
 		"Default behavior:\n" +
 		"  - Installs/updates global config at ~/.config/opencode/opencode.json\n" +
-		"  - Uses modern config (9 base models + 34 presets via --variant) by default\n" +
+		"  - Uses full catalog config by default (9 base models + 34 explicit presets)\n" +
 		"  - Ensures plugin is unpinned (latest)\n" +
 		"  - Clears OpenCode plugin cache\n\n" +
 		"Options:\n" +
-		"  --modern           Force modern config (default)\n" +
-		"  --legacy           Use legacy config (older OpenCode versions)\n" +
+		"  --modern           Force compact modern config (9 base models + --variant presets)\n" +
+		"  --legacy           Force explicit legacy config (34 preset model entries)\n" +
 		"  --dry-run          Show actions without writing\n" +
 		"  --no-cache-clear   Skip clearing OpenCode cache\n"
 	);
 	process.exit(0);
 }
 
-const useLegacy = args.has("--legacy");
-const useModern = args.has("--modern") || !useLegacy;
 const dryRun = args.has("--dry-run");
 const skipCacheClear = args.has("--no-cache-clear");
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
-const templatePath = join(
-	repoRoot,
-	"config",
-	useLegacy ? "opencode-legacy.json" : "opencode-modern.json"
-);
+const modernTemplatePath = join(repoRoot, "config", "opencode-modern.json");
+const legacyTemplatePath = join(repoRoot, "config", "opencode-legacy.json");
 
 const configDir = join(homedir(), ".config", "opencode");
 const configPath = join(configDir, "opencode.json");
@@ -66,6 +70,34 @@ function formatJson(obj) {
 async function readJson(filePath) {
 	const content = await readFile(filePath, "utf-8");
 	return JSON.parse(content);
+}
+
+async function loadTemplate(mode) {
+	if (mode === "modern") {
+		return readJson(modernTemplatePath);
+	}
+	if (mode === "legacy") {
+		return readJson(legacyTemplatePath);
+	}
+
+	const [modernTemplate, legacyTemplate] = await Promise.all([
+		readJson(modernTemplatePath),
+		readJson(legacyTemplatePath),
+	]);
+
+	return {
+		...modernTemplate,
+		provider: {
+			...modernTemplate.provider,
+			openai: {
+				...modernTemplate.provider.openai,
+				models: {
+					...modernTemplate.provider.openai.models,
+					...legacyTemplate.provider.openai.models,
+				},
+			},
+		},
+	};
 }
 
 async function backupConfig(sourcePath) {
@@ -140,11 +172,14 @@ async function clearCache() {
 }
 
 async function main() {
-	if (!existsSync(templatePath)) {
-		throw new Error(`Config template not found at ${templatePath}`);
+	if (!existsSync(modernTemplatePath)) {
+		throw new Error(`Config template not found at ${modernTemplatePath}`);
+	}
+	if (!existsSync(legacyTemplatePath)) {
+		throw new Error(`Config template not found at ${legacyTemplatePath}`);
 	}
 
-	const template = await readJson(templatePath);
+	const template = await loadTemplate(configMode);
 	template.plugin = [PLUGIN_NAME];
 
 	let nextConfig = template;
@@ -171,22 +206,25 @@ async function main() {
 	}
 
 	if (dryRun) {
-		log(`[dry-run] Would write ${configPath} using ${useLegacy ? "legacy" : "modern"} config`);
+		log(`[dry-run] Would write ${configPath} using ${configMode} config`);
 	} else {
 		await mkdir(configDir, { recursive: true });
 		await writeFile(configPath, formatJson(nextConfig), "utf-8");
-		log(`Wrote ${configPath} (${useLegacy ? "legacy" : "modern"} config)`);
+		log(`Wrote ${configPath} (${configMode} config)`);
 	}
 
 	await clearCache();
 
 	log("\nDone. Restart OpenCode to (re)install the plugin.");
 	log("Example: opencode");
-	if (useModern) {
+	if (configMode === "modern") {
 		log("Note: Modern config intentionally shows 9 base model entries; use --variant to access all 34 shipped presets.");
 	}
-	if (useLegacy) {
-		log("Note: Legacy config requires OpenCode v1.0.209 or older.");
+	if (configMode === "legacy") {
+		log("Note: Legacy config writes 34 explicit preset entries and is also safe for older OpenCode versions.");
+	}
+	if (configMode === "full") {
+		log("Note: Full config installs both modern base models and explicit preset entries so the full shipped catalog is visible by default.");
 	}
 }
 
