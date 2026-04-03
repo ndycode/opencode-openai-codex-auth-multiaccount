@@ -7,7 +7,7 @@ import {
 } from "../accounts.js";
 import { logInfo } from "../logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "../prompts/codex.js";
-import { withAccountStorageTransaction } from "../storage.js";
+import { withAccountStorageTransaction, type StorageContext } from "../storage.js";
 import type { AccountIdSource, TokenResult } from "../types.js";
 
 type TokenSuccess = Extract<TokenResult, { type: "success" }>;
@@ -227,6 +227,7 @@ export async function resolveAndPersistAccountSelection(
 export async function persistAccountPool(
 	results: TokenSuccessWithAccount[],
 	replaceAll: boolean = false,
+	storageContext?: StorageContext,
 ): Promise<void> {
 	if (results.length === 0) return;
 
@@ -808,5 +809,5 @@ export async function persistAccountPool(
 			activeIndex: clampedActiveIndex,
 			activeIndexByFamily,
 		});
-	});
+	}, storageContext);
 }

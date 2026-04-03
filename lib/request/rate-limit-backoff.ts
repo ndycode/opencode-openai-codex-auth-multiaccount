@@ -46,13 +46,13 @@ function pruneStaleRateLimitState(): void {
  * Compute rate-limit backoff for an account+quota key.
  */
 export function getRateLimitBackoff(
-	accountIndex: number,
+	accountKey: string | number,
 	quotaKey: string,
 	serverRetryAfterMs: number | null | undefined,
 ): RateLimitBackoffResult {
 	pruneStaleRateLimitState();
 	const now = Date.now();
-	const stateKey = `${accountIndex}:${quotaKey}`;
+	const stateKey = `${accountKey}:${quotaKey}`;
 	const previous = rateLimitStateByAccountQuota.get(stateKey);
 
 	const baseDelay = normalizeDelayMs(serverRetryAfterMs, 1000);
@@ -88,8 +88,8 @@ export function getRateLimitBackoff(
 	};
 }
 
-export function resetRateLimitBackoff(accountIndex: number, quotaKey: string): void {
-	rateLimitStateByAccountQuota.delete(`${accountIndex}:${quotaKey}`);
+export function resetRateLimitBackoff(accountKey: string | number, quotaKey: string): void {
+	rateLimitStateByAccountQuota.delete(`${accountKey}:${quotaKey}`);
 }
 
 export function clearRateLimitBackoffState(): void {
@@ -114,12 +114,12 @@ export function calculateBackoffMs(
 }
 
 export function getRateLimitBackoffWithReason(
-	accountIndex: number,
+	accountKey: string | number,
 	quotaKey: string,
 	serverRetryAfterMs: number | null | undefined,
 	reason: RateLimitReason = "unknown",
 ): RateLimitBackoffResult {
-	const result = getRateLimitBackoff(accountIndex, quotaKey, serverRetryAfterMs);
+	const result = getRateLimitBackoff(accountKey, quotaKey, serverRetryAfterMs);
 	const adjustedDelay = calculateBackoffMs(result.delayMs, result.attempt, reason);
 	return {
 		...result,

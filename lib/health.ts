@@ -25,6 +25,7 @@ export interface PluginHealth {
 export function getAccountHealth(
 	accounts: Array<{
 		index: number;
+		accountKey?: string;
 		email?: string;
 		accountId?: string;
 		health: number;
@@ -36,7 +37,7 @@ export function getAccountHealth(
 	now = Date.now(),
 ): PluginHealth {
 	const accountHealths: AccountHealth[] = accounts.map((acc) => {
-		const circuitKey = `account:${acc.accountId ?? acc.index}`;
+		const circuitKey = `account:${acc.accountId ?? acc.accountKey ?? acc.index}`;
 		const circuit = getCircuitBreaker(circuitKey);
 
 		return {
