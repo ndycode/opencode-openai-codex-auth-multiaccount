@@ -54,6 +54,7 @@ export function getTopCandidates(
 
 		accountsWithMetrics.push({
 			index: account.index,
+			accountKey: account.runtimeKey,
 			isAvailable,
 			lastUsed: account.lastUsed,
 			account,
@@ -65,8 +66,8 @@ export function getTopCandidates(
 
 	const now = Date.now();
 	const scored = available.map((a) => {
-		const health = healthTracker.getScore(a.index, quotaKey);
-		const tokens = tokenTracker.getTokens(a.index, quotaKey);
+		const health = healthTracker.getScore(a.accountKey, quotaKey);
+		const tokens = tokenTracker.getTokens(a.accountKey, quotaKey);
 		const hoursSinceUsed = (now - a.lastUsed) / (1000 * 60 * 60);
 		const score = health * 2 + tokens * 5 + hoursSinceUsed * 2.0;
 		return { ...a, score };

@@ -324,8 +324,8 @@ describe("selectHybridAccount", () => {
 
 	it("returns least-recently-used account when all accounts unavailable (fallback)", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: false, lastUsed: 100 },
-			{ index: 1, isAvailable: false, lastUsed: 50 },
+			{ index: 0, accountKey: "acct-0", isAvailable: false, lastUsed: 100 },
+			{ index: 1, accountKey: "acct-1", isAvailable: false, lastUsed: 50 },
 		];
 		const result = selectHybridAccount(accounts, healthTracker, tokenTracker);
 		// When all accounts unavailable, returns the least-recently-used one as fallback
@@ -334,7 +334,7 @@ describe("selectHybridAccount", () => {
 
 	it("returns the only available account", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: true, lastUsed: 0 },
+			{ index: 0, accountKey: "acct-0", isAvailable: true, lastUsed: 0 },
 		];
 		const result = selectHybridAccount(accounts, healthTracker, tokenTracker);
 		expect(result?.index).toBe(0);
@@ -342,10 +342,10 @@ describe("selectHybridAccount", () => {
 
 	it("prefers healthier accounts", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: true, lastUsed: Date.now() },
-			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+			{ index: 0, accountKey: "acct-0", isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, accountKey: "acct-1", isAvailable: true, lastUsed: Date.now() },
 		];
-		healthTracker.recordFailure(0);
+		healthTracker.recordFailure("acct-0");
 
 		const result = selectHybridAccount(accounts, healthTracker, tokenTracker);
 		expect(result?.index).toBe(1);
@@ -353,10 +353,10 @@ describe("selectHybridAccount", () => {
 
 	it("prefers accounts with more tokens", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: true, lastUsed: Date.now() },
-			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+			{ index: 0, accountKey: "acct-0", isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, accountKey: "acct-1", isAvailable: true, lastUsed: Date.now() },
 		];
-		tokenTracker.drain(0, undefined, 40);
+		tokenTracker.drain("acct-0", undefined, 40);
 
 		const result = selectHybridAccount(accounts, healthTracker, tokenTracker);
 		expect(result?.index).toBe(1);
@@ -364,9 +364,10 @@ describe("selectHybridAccount", () => {
 
 	it("considers freshness in selection", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: true, lastUsed: Date.now() },
+			{ index: 0, accountKey: "acct-0", isAvailable: true, lastUsed: Date.now() },
 			{
 				index: 1,
+				accountKey: "acct-1",
 				isAvailable: true,
 				lastUsed: Date.now() - 1000 * 60 * 60 * 24,
 			},
@@ -378,8 +379,8 @@ describe("selectHybridAccount", () => {
 
 	it("pidOffsetEnabled false does not change selection", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: true, lastUsed: Date.now() },
-			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+			{ index: 0, accountKey: "acct-0", isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, accountKey: "acct-1", isAvailable: true, lastUsed: Date.now() },
 		];
 
 		const result1 = selectHybridAccount(accounts, healthTracker, tokenTracker, undefined, undefined, { pidOffsetEnabled: false });
@@ -390,8 +391,8 @@ describe("selectHybridAccount", () => {
 
 	it("pidOffsetEnabled true adds deterministic offset based on process.pid", () => {
 		const accounts: AccountWithMetrics[] = [
-			{ index: 0, isAvailable: true, lastUsed: Date.now() },
-			{ index: 1, isAvailable: true, lastUsed: Date.now() },
+			{ index: 0, accountKey: "acct-0", isAvailable: true, lastUsed: Date.now() },
+			{ index: 1, accountKey: "acct-1", isAvailable: true, lastUsed: Date.now() },
 		];
 
 		const result = selectHybridAccount(accounts, healthTracker, tokenTracker, undefined, undefined, { pidOffsetEnabled: true });

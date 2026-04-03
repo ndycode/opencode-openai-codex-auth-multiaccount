@@ -105,6 +105,26 @@ function formatJson(obj) {
 	return `${JSON.stringify(obj, null, 2)}\n`;
 }
 
+function isPlainObject(value) {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeOpenAiConfig(existingOpenAi, templateOpenAi) {
+	const existingConfig = isPlainObject(existingOpenAi) ? existingOpenAi : {};
+	const templateConfig = isPlainObject(templateOpenAi) ? templateOpenAi : {};
+	const existingModels = isPlainObject(existingConfig.models) ? existingConfig.models : {};
+	const templateModels = isPlainObject(templateConfig.models) ? templateConfig.models : {};
+
+	return {
+		...existingConfig,
+		...templateConfig,
+		models: {
+			...existingModels,
+			...templateModels,
+		},
+	};
+}
+
 function mergeFullTemplate(modernTemplate, legacyTemplate) {
 	const modernModels = modernTemplate.provider?.openai?.models ?? {};
 	const legacyModels = legacyTemplate.provider?.openai?.models ?? {};
@@ -319,14 +339,14 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 			const provider = (existing.provider && typeof existing.provider === "object")
 				? { ...existing.provider }
 				: {};
-			provider.openai = template.provider.openai;
+			provider.openai = mergeOpenAiConfig(provider.openai, template.provider.openai);
 			merged.provider = provider;
 			nextConfig = merged;
 		} catch (error) {
-			// Only log the filesystem/parser message. Never echo config bodies because
-			// opencode.json may carry provider credentials or tokens.
-			log(`Warning: Could not parse existing config (${formatErrorForLog(error)}). Replacing with template.`);
-			nextConfig = template;
+			throw new Error(
+				`Could not parse existing config safely (${formatErrorForLog(error)}). ` +
+				`Restore from the backup if needed and fix ${paths.configPath} before rerunning.`,
+			);
 		}
 	} else {
 		log("No existing config found. Creating new global config.");

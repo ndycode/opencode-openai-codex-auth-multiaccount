@@ -56,8 +56,8 @@ export class HealthScoreTracker {
     this.config = { ...DEFAULT_HEALTH_SCORE_CONFIG, ...config };
   }
 
-  private getKey(accountIndex: number, quotaKey?: string): string {
-    return quotaKey ? `${accountIndex}:${quotaKey}` : `${accountIndex}`;
+  private getKey(accountKey: string | number, quotaKey?: string): string {
+    return quotaKey ? `${accountKey}:${quotaKey}` : `${accountKey}`;
   }
 
   private applyPassiveRecovery(entry: HealthEntry): number {
@@ -67,21 +67,21 @@ export class HealthScoreTracker {
     return Math.min(entry.score + recovery, this.config.maxScore);
   }
 
-  getScore(accountIndex: number, quotaKey?: string): number {
-    const key = this.getKey(accountIndex, quotaKey);
+  getScore(accountKey: string | number, quotaKey?: string): number {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.entries.get(key);
     if (!entry) return this.config.maxScore;
     return this.applyPassiveRecovery(entry);
   }
 
-  getConsecutiveFailures(accountIndex: number, quotaKey?: string): number {
-    const key = this.getKey(accountIndex, quotaKey);
+  getConsecutiveFailures(accountKey: string | number, quotaKey?: string): number {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.entries.get(key);
     return entry?.consecutiveFailures ?? 0;
   }
 
-  recordSuccess(accountIndex: number, quotaKey?: string): void {
-    const key = this.getKey(accountIndex, quotaKey);
+  recordSuccess(accountKey: string | number, quotaKey?: string): void {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.entries.get(key);
     const baseScore = entry ? this.applyPassiveRecovery(entry) : this.config.maxScore;
     const newScore = Math.min(baseScore + this.config.successDelta, this.config.maxScore);
@@ -92,8 +92,8 @@ export class HealthScoreTracker {
     });
   }
 
-  recordRateLimit(accountIndex: number, quotaKey?: string): void {
-    const key = this.getKey(accountIndex, quotaKey);
+  recordRateLimit(accountKey: string | number, quotaKey?: string): void {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.entries.get(key);
     const baseScore = entry ? this.applyPassiveRecovery(entry) : this.config.maxScore;
     const newScore = Math.max(baseScore + this.config.rateLimitDelta, this.config.minScore);
@@ -104,8 +104,8 @@ export class HealthScoreTracker {
     });
   }
 
-  recordFailure(accountIndex: number, quotaKey?: string): void {
-    const key = this.getKey(accountIndex, quotaKey);
+  recordFailure(accountKey: string | number, quotaKey?: string): void {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.entries.get(key);
     const baseScore = entry ? this.applyPassiveRecovery(entry) : this.config.maxScore;
     const newScore = Math.max(baseScore + this.config.failureDelta, this.config.minScore);
@@ -116,8 +116,8 @@ export class HealthScoreTracker {
     });
   }
 
-  reset(accountIndex: number, quotaKey?: string): void {
-    const key = this.getKey(accountIndex, quotaKey);
+  reset(accountKey: string | number, quotaKey?: string): void {
+    const key = this.getKey(accountKey, quotaKey);
     this.entries.delete(key);
   }
 
@@ -162,8 +162,8 @@ export class TokenBucketTracker {
     this.config = { ...DEFAULT_TOKEN_BUCKET_CONFIG, ...config };
   }
 
-  private getKey(accountIndex: number, quotaKey?: string): string {
-    return quotaKey ? `${accountIndex}:${quotaKey}` : `${accountIndex}`;
+  private getKey(accountKey: string | number, quotaKey?: string): string {
+    return quotaKey ? `${accountKey}:${quotaKey}` : `${accountKey}`;
   }
 
   private refillTokens(entry: TokenBucketEntry): number {
@@ -173,8 +173,8 @@ export class TokenBucketTracker {
     return Math.min(entry.tokens + tokensToAdd, this.config.maxTokens);
   }
 
-  getTokens(accountIndex: number, quotaKey?: string): number {
-    const key = this.getKey(accountIndex, quotaKey);
+  getTokens(accountKey: string | number, quotaKey?: string): number {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.buckets.get(key);
     if (!entry) return this.config.maxTokens;
     return this.refillTokens(entry);
@@ -183,8 +183,8 @@ export class TokenBucketTracker {
   /**
    * Attempt to consume a token. Returns true if successful, false if bucket is empty.
    */
-  tryConsume(accountIndex: number, quotaKey?: string): boolean {
-    const key = this.getKey(accountIndex, quotaKey);
+  tryConsume(accountKey: string | number, quotaKey?: string): boolean {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.buckets.get(key);
     const currentTokens = entry ? this.refillTokens(entry) : this.config.maxTokens;
 
@@ -212,8 +212,8 @@ export class TokenBucketTracker {
    * Use this when a request fails due to network errors (not rate limits).
    * @returns true if refund was successful, false if no valid consumption found
    */
-  refundToken(accountIndex: number, quotaKey?: string): boolean {
-    const key = this.getKey(accountIndex, quotaKey);
+  refundToken(accountKey: string | number, quotaKey?: string): boolean {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.buckets.get(key);
     if (!entry || entry.consumptions.length === 0) return false;
 
@@ -239,8 +239,8 @@ export class TokenBucketTracker {
   /**
    * Drain tokens on rate limit to prevent immediate retries.
    */
-  drain(accountIndex: number, quotaKey?: string, drainAmount: number = 10): void {
-    const key = this.getKey(accountIndex, quotaKey);
+  drain(accountKey: string | number, quotaKey?: string, drainAmount: number = 10): void {
+    const key = this.getKey(accountKey, quotaKey);
     const entry = this.buckets.get(key);
     const currentTokens = entry ? this.refillTokens(entry) : this.config.maxTokens;
     this.buckets.set(key, {
@@ -250,8 +250,8 @@ export class TokenBucketTracker {
     });
   }
 
-  reset(accountIndex: number, quotaKey?: string): void {
-    const key = this.getKey(accountIndex, quotaKey);
+  reset(accountKey: string | number, quotaKey?: string): void {
+    const key = this.getKey(accountKey, quotaKey);
     this.buckets.delete(key);
   }
 
@@ -266,6 +266,7 @@ export class TokenBucketTracker {
 
 export interface AccountWithMetrics {
   index: number;
+  accountKey: string;
   isAvailable: boolean;
   lastUsed: number;
 }
@@ -334,8 +335,8 @@ export function selectHybridAccount(
   const pidBonus = options.pidOffsetEnabled ? (process.pid % 100) * 0.01 : 0;
 
   for (const account of available) {
-    const health = healthTracker.getScore(account.index, quotaKey);
-    const tokens = tokenTracker.getTokens(account.index, quotaKey);
+    const health = healthTracker.getScore(account.accountKey, quotaKey);
+    const tokens = tokenTracker.getTokens(account.accountKey, quotaKey);
     const hoursSinceUsed = (now - account.lastUsed) / (1000 * 60 * 60);
 
     let score =
@@ -355,8 +356,8 @@ export function selectHybridAccount(
   }
 
   if (bestAccount && available.length > 1) {
-    const health = healthTracker.getScore(bestAccount.index, quotaKey);
-    const tokens = tokenTracker.getTokens(bestAccount.index, quotaKey);
+    const health = healthTracker.getScore(bestAccount.accountKey, quotaKey);
+    const tokens = tokenTracker.getTokens(bestAccount.accountKey, quotaKey);
     log.debug("Selected account", {
       index: bestAccount.index,
       health: Math.round(health),

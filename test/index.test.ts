@@ -300,6 +300,7 @@ const mockSaveFlaggedAccounts = vi.fn(async (nextStorage: typeof mockFlaggedStor
 vi.mock("../lib/storage.js", async () => {
 	const actual = await vi.importActual<typeof import("../lib/storage.js")>("../lib/storage.js");
 
+	const lookupCodexCliTokensByEmail = vi.fn(async () => null);
 	return {
 	getStoragePath: () => "/mock/path/accounts.json",
 	loadAccounts: vi.fn(async () => cloneMockStorage()),
@@ -458,6 +459,8 @@ vi.mock("../lib/accounts.js", () => {
 		}
 	}
 
+	const lookupCodexCliTokensByEmail = vi.fn(async () => null);
+
 	return {
 		AccountManager: MockAccountManager,
 		getAccountIdCandidates: vi.fn(() => [
@@ -478,7 +481,10 @@ vi.mock("../lib/accounts.js", () => {
 		sanitizeEmail: (email: string) => email,
 		shouldUpdateAccountIdFromToken: vi.fn(() => true),
 		parseRateLimitReason: () => "unknown",
-		lookupCodexCliTokensByEmail: vi.fn(async () => null),
+		lookupCodexCliTokensByEmail,
+		lookupCodexCliTokensForAccount: vi.fn(async (params: { email?: string }) =>
+			lookupCodexCliTokensByEmail(params.email),
+		),
 	};
 });
 
@@ -721,6 +727,44 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result.apiKey).toBeDefined();
 			expect(result.baseURL).toBeDefined();
 			expect(result.fetch).toBeDefined();
+		});
+
+		it("rebuilds and persists a warm cache when later oauth fallback is missing", async () => {
+			const accountsModule = await import("../lib/accounts.js");
+			const firstSave = vi.fn(async () => {});
+			const mergedSave = vi.fn(async () => {});
+			const firstManager = {
+				getAccountCount: () => 1,
+				hasRefreshToken: () => false,
+				saveToDisk: firstSave,
+			} as unknown as InstanceType<typeof accountsModule.AccountManager>;
+			const mergedManager = {
+				getAccountCount: () => 1,
+				hasRefreshToken: (refreshToken: string) => refreshToken === "warm-refresh",
+				saveToDisk: mergedSave,
+			} as unknown as InstanceType<typeof accountsModule.AccountManager>;
+
+			const loadSpy = vi
+				.spyOn(accountsModule.AccountManager, "loadFromDisk")
+				.mockResolvedValueOnce(firstManager)
+				.mockResolvedValueOnce(mergedManager);
+
+			await plugin.auth.loader(async () => ({ type: "apikey" as const, key: "test" }), {});
+
+			const result = await plugin.auth.loader(
+				async () => ({
+					type: "oauth" as const,
+					access: "warm-access",
+					refresh: "warm-refresh",
+					expires: Date.now() + 60_000,
+				}),
+				{},
+			);
+
+			expect(result.fetch).toBeDefined();
+			expect(loadSpy).toHaveBeenCalledTimes(2);
+			expect(firstSave).not.toHaveBeenCalled();
+			expect(mergedSave).toHaveBeenCalledTimes(1);
 		});
 	});
 

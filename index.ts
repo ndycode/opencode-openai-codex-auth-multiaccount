@@ -26,6 +26,7 @@
 import { tool } from "@opencode-ai/plugin/tool";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 import type { Auth } from "@opencode-ai/sdk";
+import { join } from "node:path";
 import {
         createAuthorizationFlow,
         exchangeAuthorizationCode,
@@ -109,34 +110,39 @@ import {
         extractAccountId,
         formatAccountLabel,
         formatCooldown,
-        formatWaitTime,
-        sanitizeEmail,
-        shouldUpdateAccountIdFromToken,
-        resolveRequestAccountId,
-        parseRateLimitReason,
-	lookupCodexCliTokensByEmail,
+		formatWaitTime,
+		sanitizeEmail,
+		shouldUpdateAccountIdFromToken,
+		resolveRequestAccountId,
+		parseRateLimitReason,
+		lookupCodexCliTokensForAccount,
 } from "./lib/accounts.js";
 import {
-	getStoragePath,
-	loadAccounts,
-	saveAccounts,
-	withAccountStorageTransaction,
-	clearAccounts,
-	setStoragePath,
-	exportAccounts,
-	importAccounts,
-	previewImportAccounts,
-	createTimestampedBackupPath,
-	loadFlaggedAccounts,
-	saveFlaggedAccounts,
-	withFlaggedAccountStorageTransaction,
-	clearFlaggedAccounts,
+	getStoragePath as getStoragePathFromStorage,
+	loadAccounts as loadAccountsFromStorage,
+	saveAccounts as saveAccountsFromStorage,
+	withAccountStorageTransaction as withAccountStorageTransactionFromStorage,
+	clearAccounts as clearAccountsFromStorage,
+	exportAccounts as exportAccountsFromStorage,
+	importAccounts as importAccountsFromStorage,
+	previewImportAccounts as previewImportAccountsFromStorage,
+	createTimestampedBackupPath as createTimestampedBackupPathFromStorage,
+	loadFlaggedAccounts as loadFlaggedAccountsFromStorage,
+	saveFlaggedAccounts as saveFlaggedAccountsFromStorage,
+	withFlaggedAccountStorageTransaction as withFlaggedAccountStorageTransactionFromStorage,
+	clearFlaggedAccounts as clearFlaggedAccountsFromStorage,
 	getWorkspaceIdentityKey,
 	StorageError,
 	formatStorageErrorHint,
 	type AccountStorageV3,
 	type FlaggedAccountMetadataV1,
+	type StorageContext,
 } from "./lib/storage.js";
+import {
+	findProjectRoot,
+	getProjectConfigDir,
+	getProjectGlobalConfigDir,
+} from "./lib/storage/paths.js";
 import {
 	createCodexHeaders,
 	extractRequestUrl,
@@ -252,10 +258,105 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 	let cachedAccountManager: AccountManager | null = null;
 	let accountManagerPromise: Promise<AccountManager> | null = null;
 	let loaderMutex: Promise<void> | null = null;
+	let activeStorageContext: StorageContext | undefined;
 	let startupPrewarmTriggered = false;
 	let startupPreflightShown = false;
 	let beginnerSafeModeEnabled = false;
 	const MIN_BACKOFF_MS = 100;
+
+	const setActiveStorageContext = (projectPath: string | null): StorageContext => {
+		const projectRoot = projectPath ? findProjectRoot(projectPath) : null;
+		const context: StorageContext = projectRoot
+			? {
+				projectRoot,
+				storagePath: join(getProjectGlobalConfigDir(projectRoot), "openai-codex-accounts.json"),
+				legacyProjectStoragePath: join(getProjectConfigDir(projectRoot), "openai-codex-accounts.json"),
+			}
+			: {
+				storagePath: null,
+				legacyProjectStoragePath: null,
+				projectRoot: null,
+			};
+		activeStorageContext = context;
+		return context;
+	};
+
+	const hasScopedStorageContext = (): boolean =>
+		Boolean(
+			activeStorageContext?.storagePath ||
+			activeStorageContext?.legacyProjectStoragePath ||
+			activeStorageContext?.projectRoot,
+		);
+
+	const getStoragePath = (): string =>
+		hasScopedStorageContext()
+			? getStoragePathFromStorage(activeStorageContext)
+			: getStoragePathFromStorage();
+	const loadAccounts = (): Promise<AccountStorageV3 | null> =>
+		hasScopedStorageContext()
+			? loadAccountsFromStorage(activeStorageContext)
+			: loadAccountsFromStorage();
+	const saveAccounts = (storage: AccountStorageV3): Promise<void> =>
+		hasScopedStorageContext()
+			? saveAccountsFromStorage(storage, activeStorageContext)
+			: saveAccountsFromStorage(storage);
+	const withAccountStorageTransaction = <T,>(
+		handler: (
+			current: AccountStorageV3 | null,
+			persist: (storage: AccountStorageV3) => Promise<void>,
+		) => Promise<T>,
+	): Promise<T> =>
+		hasScopedStorageContext()
+			? withAccountStorageTransactionFromStorage(handler, activeStorageContext)
+			: withAccountStorageTransactionFromStorage(handler);
+	const clearAccounts = (): Promise<void> =>
+		hasScopedStorageContext()
+			? clearAccountsFromStorage(activeStorageContext)
+			: clearAccountsFromStorage();
+	const exportAccounts = (filePath: string, force = true): Promise<void> =>
+		hasScopedStorageContext()
+			? exportAccountsFromStorage(filePath, force, activeStorageContext)
+			: exportAccountsFromStorage(filePath, force);
+	const importAccounts = (filePath: string, options?: Parameters<typeof importAccountsFromStorage>[1]) =>
+		hasScopedStorageContext()
+			? importAccountsFromStorage(filePath, options, activeStorageContext)
+			: importAccountsFromStorage(filePath, options);
+	const previewImportAccounts = (filePath: string) =>
+		hasScopedStorageContext()
+			? previewImportAccountsFromStorage(filePath, activeStorageContext)
+			: previewImportAccountsFromStorage(filePath);
+	const createTimestampedBackupPath = (prefix?: string): string => {
+		if (hasScopedStorageContext()) {
+			return createTimestampedBackupPathFromStorage(prefix, activeStorageContext);
+		}
+		if (prefix === undefined) {
+			return createTimestampedBackupPathFromStorage();
+		}
+		return createTimestampedBackupPathFromStorage(prefix);
+	};
+	const loadFlaggedAccounts = () =>
+		hasScopedStorageContext()
+			? loadFlaggedAccountsFromStorage(activeStorageContext)
+			: loadFlaggedAccountsFromStorage();
+	const saveFlaggedAccounts = (storage: { version: 1; accounts: FlaggedAccountMetadataV1[] }) =>
+		hasScopedStorageContext()
+			? saveFlaggedAccountsFromStorage(storage, activeStorageContext)
+			: saveFlaggedAccountsFromStorage(storage);
+	const withFlaggedAccountStorageTransaction = <T,>(
+		handler: (
+			current: { version: 1; accounts: FlaggedAccountMetadataV1[] },
+			persist: (storage: { version: 1; accounts: FlaggedAccountMetadataV1[] }) => Promise<void>,
+		) => Promise<T>,
+	): Promise<T> =>
+		hasScopedStorageContext()
+			? withFlaggedAccountStorageTransactionFromStorage(handler, activeStorageContext)
+			: withFlaggedAccountStorageTransactionFromStorage(handler);
+	const clearFlaggedAccounts = (): Promise<void> =>
+		hasScopedStorageContext()
+			? clearFlaggedAccountsFromStorage(activeStorageContext)
+			: clearFlaggedAccountsFromStorage();
+	const loadAccountManager = async (authFallback?: OAuthAuthDetails): Promise<AccountManager> =>
+		AccountManager.loadFromDisk(authFallback, activeStorageContext);
 
 	type SelectionSnapshot = {
 		timestamp: number;
@@ -1301,7 +1402,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 			replaceAll: boolean,
 		): Promise<void> => {
 			try {
-				await persistAccountPool(results, replaceAll);
+				await persistAccountPool(results, replaceAll, activeStorageContext);
 				invalidateAccountManagerCache();
 			} catch (err) {
 				const storagePath = getStoragePath();
@@ -1360,7 +1461,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
                                 // Reload manager from disk so we don't overwrite newer rotated
                                 // refresh tokens with stale in-memory state.
                                 if (cachedAccountManager) {
-                                        const reloadedManager = await AccountManager.loadFromDisk();
+                                        const reloadedManager = await loadAccountManager();
                                         cachedAccountManager = reloadedManager;
                                         accountManagerPromise = Promise.resolve(reloadedManager);
                                 }
@@ -1399,7 +1500,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				const pluginConfig = loadPluginConfig();
 				applyUiRuntimeFromConfig(pluginConfig);
 				const perProjectAccounts = getPerProjectAccounts(pluginConfig);
-				setStoragePath(perProjectAccounts ? process.cwd() : null);
+				const storageContext = setActiveStorageContext(perProjectAccounts ? process.cwd() : null);
 				const authFallback = auth.type === "oauth" ? (auth as OAuthAuthDetails) : undefined;
 
 				// Prefer multi-account auth metadata when available, but still handle
@@ -1429,7 +1530,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 				});
 				try {
 					if (!accountManagerPromise) {
-						accountManagerPromise = AccountManager.loadFromDisk(authFallback);
+						accountManagerPromise = AccountManager.loadFromDisk(authFallback, storageContext);
 					}
 					let accountManager = await accountManagerPromise;
 					cachedAccountManager = accountManager;
@@ -1437,8 +1538,12 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					const needsPersist =
 						refreshToken &&
 						!accountManager.hasRefreshToken(refreshToken);
-					if (needsPersist) {
-						await accountManager.saveToDisk();
+					if (needsPersist && authFallback) {
+						const mergedManager = await loadAccountManager(authFallback);
+						await mergedManager.saveToDisk();
+						accountManager = mergedManager;
+						cachedAccountManager = mergedManager;
+						accountManagerPromise = Promise.resolve(mergedManager);
 					}
 
 					if (accountManager.getAccountCount() === 0) {
@@ -1943,7 +2048,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 											if (
 												accountCount > 1 &&
 												accountManager.shouldShowAccountToast(
-													account.index,
+													account.runtimeKey,
 													rateLimitToastDebounceMs,
 												)
 											) {
@@ -1952,7 +2057,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 													`Using ${accountLabel} (${account.index + 1}/${accountCount})`,
 													"info",
 												);
-												accountManager.markToastShown(account.index);
+												accountManager.markToastShown(account.runtimeKey);
 											}
 
 								const headers = createCodexHeaders(
@@ -2323,9 +2428,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 					if (rateLimit) {
 																														runtimeMetrics.rateLimitedResponses++;
 																														const { attempt, delayMs } = getRateLimitBackoff(
-																															account.index,
-																															quotaKey,
-																															rateLimit.retryAfterMs,
+													account.runtimeKey,
+													quotaKey,
+													rateLimit.retryAfterMs,
 																														);
 																														const waitLabel = formatWaitTime(delayMs);
 
@@ -2392,7 +2497,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 																													return errorResponse;
 																											}
 
-					resetRateLimitBackoff(account.index, quotaKey);
+					resetRateLimitBackoff(account.runtimeKey, quotaKey);
 					runtimeMetrics.cumulativeLatencyMs += fetchLatencyMs;
 					const successResponse = await handleSuccessResponse(response, isStreaming, {
 						streamStallTimeoutMs,
@@ -2515,7 +2620,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const authPluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(authPluginConfig);
 							const authPerProjectAccounts = getPerProjectAccounts(authPluginConfig);
-							setStoragePath(authPerProjectAccounts ? process.cwd() : null);
+							setActiveStorageContext(authPerProjectAccounts ? process.cwd() : null);
 
 							const accounts: TokenSuccessWithAccount[] = [];
 							const noBrowser =
@@ -2883,7 +2988,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 										// If Codex CLI has a valid cached access token for this email, use it
 										// instead of forcing a refresh.
 										if (!accessToken) {
-											const cached = await lookupCodexCliTokensByEmail(account.email);
+									const cached = await lookupCodexCliTokensForAccount({
+										email: account.email,
+										refreshToken: account.refreshToken,
+										accountId: account.accountId,
+									});
 											if (
 												cached &&
 												(typeof cached.expiresAt !== "number" ||
@@ -3110,7 +3219,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 										continue;
 									}
 									try {
-										const cached = await lookupCodexCliTokensByEmail(flagged.email);
+								const cached = await lookupCodexCliTokensForAccount({
+									email: flagged.email,
+									refreshToken: flagged.refreshToken,
+									accountId: flagged.accountId,
+								});
 										const now = Date.now();
 										if (
 											cached &&
@@ -3177,7 +3290,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								if (restored.length > 0) {
-									await persistAccountPool(restored, false);
+							await persistAccountPool(restored, false, activeStorageContext);
 									invalidateAccountManagerCache();
 								}
 
@@ -3481,7 +3594,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 							const devicePluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(devicePluginConfig);
 							const devicePerProjectAccounts = getPerProjectAccounts(devicePluginConfig);
-							setStoragePath(devicePerProjectAccounts ? process.cwd() : null);
+							setActiveStorageContext(devicePerProjectAccounts ? process.cwd() : null);
 
 							const started = await createDeviceCodeSession();
 							if (started.type === "failed") {
@@ -3522,7 +3635,7 @@ while (attempted.size < Math.max(1, accountCount)) {
                                                         const manualPluginConfig = loadPluginConfig();
 							applyUiRuntimeFromConfig(manualPluginConfig);
                                                         const manualPerProjectAccounts = getPerProjectAccounts(manualPluginConfig);
-							setStoragePath(manualPerProjectAccounts ? process.cwd() : null);
+							setActiveStorageContext(manualPerProjectAccounts ? process.cwd() : null);
 
 							const { pkce, state, url } = await createAuthorizationFlow();
 							return buildManualOAuthFlow(pkce, url, state, false);
@@ -3877,7 +3990,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
                                         if (cachedAccountManager) {
-						const reloadedManager = await AccountManager.loadFromDisk();
+						const reloadedManager = await loadAccountManager();
 						cachedAccountManager = reloadedManager;
 						accountManagerPromise = Promise.resolve(reloadedManager);
                                         }
@@ -3936,7 +4049,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					runtimeMetrics.lastSelectionSnapshot?.model ??
 					undefined;
 				const managerForExplainability =
-					cachedAccountManager ?? (await AccountManager.loadFromDisk());
+					cachedAccountManager ?? (await loadAccountManager());
 				const explainability = managerForExplainability.getSelectionExplainability(
 					explainabilityFamily,
 					explainabilityModel,
@@ -5124,7 +5237,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						}
 
 						try {
-							const managerForFix = await AccountManager.loadFromDisk();
+						const managerForFix = await loadAccountManager();
 							const explainability = managerForFix.getSelectionExplainability("codex", undefined, Date.now());
 							const eligible = explainability
 								.filter((entry) => entry.eligible)
@@ -5156,14 +5269,14 @@ while (attempted.size < Math.max(1, accountCount)) {
 						}
 
 						if (cachedAccountManager) {
-							const reloadedManager = await AccountManager.loadFromDisk();
+							const reloadedManager = await loadAccountManager();
 							cachedAccountManager = reloadedManager;
 							accountManagerPromise = Promise.resolve(reloadedManager);
 						}
 					}
 					if (deep) {
 						const managerForRouting =
-							cachedAccountManager ?? (await AccountManager.loadFromDisk());
+							cachedAccountManager ?? (await loadAccountManager());
 						const routingFamily =
 							runtimeMetrics.lastSelectionSnapshot?.family ?? "codex";
 						const routingModel =
@@ -5504,7 +5617,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					if (cachedAccountManager) {
-						const reloadedManager = await AccountManager.loadFromDisk();
+						const reloadedManager = await loadAccountManager();
 						cachedAccountManager = reloadedManager;
 						accountManagerPromise = Promise.resolve(reloadedManager);
 					}
@@ -5605,7 +5718,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					if (cachedAccountManager) {
-						const reloadedManager = await AccountManager.loadFromDisk();
+						const reloadedManager = await loadAccountManager();
 						cachedAccountManager = reloadedManager;
 						accountManagerPromise = Promise.resolve(reloadedManager);
 					}
@@ -5683,7 +5796,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					if (cachedAccountManager) {
-						const reloadedManager = await AccountManager.loadFromDisk();
+						const reloadedManager = await loadAccountManager();
 						cachedAccountManager = reloadedManager;
 						accountManagerPromise = Promise.resolve(reloadedManager);
 					}
@@ -5747,7 +5860,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtimeMetrics.lastSelectionSnapshot?.effectiveModel ??
 						runtimeMetrics.lastSelectionSnapshot?.model ??
 						undefined;
-					const manager = cachedAccountManager ?? (await AccountManager.loadFromDisk());
+					const manager = cachedAccountManager ?? (await loadAccountManager());
 					const explainability = manager.getSelectionExplainability(family, model, now);
 					const selectionLabel = model ? `${family}:${model}` : family;
 					const routingVisibility = buildRoutingVisibilitySnapshot({
@@ -6109,7 +6222,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 				}
 
 					if (cachedAccountManager) {
-						const reloadedManager = await AccountManager.loadFromDisk();
+						const reloadedManager = await loadAccountManager();
 						cachedAccountManager = reloadedManager;
 						accountManagerPromise = Promise.resolve(reloadedManager);
 					}
@@ -6204,7 +6317,7 @@ while (attempted.size < Math.max(1, accountCount)) {
 
 				await saveAccounts(storage);
 				if (cachedAccountManager) {
-					const reloadedManager = await AccountManager.loadFromDisk();
+					const reloadedManager = await loadAccountManager();
 					cachedAccountManager = reloadedManager;
 					accountManagerPromise = Promise.resolve(reloadedManager);
 				}

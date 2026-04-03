@@ -628,6 +628,30 @@ describe("AccountManager", () => {
       expect(manager.getAccountsSnapshot()[0]?.accountId).toBe("workspace-a");
       expect(manager.getActiveIndex()).toBe(0);
     });
+
+		it("does not transfer tracker state after account reindexing", () => {
+			resetTrackers();
+			const now = Date.now();
+			const stored = {
+				version: 3 as const,
+				activeIndex: 0,
+				accounts: [
+					{ refreshToken: "token-1", addedAt: now, lastUsed: now },
+					{ refreshToken: "token-2", addedAt: now, lastUsed: now },
+				],
+			};
+
+			const manager = new AccountManager(undefined, stored);
+			const firstAccount = manager.setActiveIndex(0)!;
+			const secondAccount = manager.getAccountsSnapshot()[1]!;
+
+			manager.recordFailure(firstAccount, "codex", "gpt-5.1");
+			expect(getHealthTracker().getScore(firstAccount.runtimeKey, "codex:gpt-5.1")).toBeLessThan(100);
+
+			manager.removeAccount(firstAccount);
+
+			expect(getHealthTracker().getScore(secondAccount.runtimeKey, "codex:gpt-5.1")).toBe(100);
+		});
   });
 
   describe("hasRefreshToken", () => {
@@ -1816,7 +1840,7 @@ describe("AccountManager", () => {
 
       manager.recordSuccess(account, "codex", "gpt-5.1");
       
-      const score = healthTracker.getScore(account.index, "codex:gpt-5.1");
+		const score = healthTracker.getScore(account.runtimeKey, "codex:gpt-5.1");
       expect(score).toBe(100);
     });
 
@@ -1836,7 +1860,7 @@ describe("AccountManager", () => {
 
       manager.recordSuccess(account, "codex", null);
       
-      const score = healthTracker.getScore(account.index, "codex");
+		const score = healthTracker.getScore(account.runtimeKey, "codex");
       expect(score).toBe(100);
     });
 
@@ -1857,8 +1881,8 @@ describe("AccountManager", () => {
 
       manager.recordRateLimit(account, "codex", "gpt-5.1");
       
-      const score = healthTracker.getScore(account.index, "codex:gpt-5.1");
-      const tokens = tokenTracker.getTokens(account.index, "codex:gpt-5.1");
+		const score = healthTracker.getScore(account.runtimeKey, "codex:gpt-5.1");
+		const tokens = tokenTracker.getTokens(account.runtimeKey, "codex:gpt-5.1");
       expect(score).toBeLessThan(100);
       expect(tokens).toBeLessThan(50);
     });
@@ -1879,7 +1903,7 @@ describe("AccountManager", () => {
 
       manager.recordRateLimit(account, "gpt-5.2");
       
-      const score = healthTracker.getScore(account.index, "gpt-5.2");
+		const score = healthTracker.getScore(account.runtimeKey, "gpt-5.2");
       expect(score).toBeLessThan(100);
     });
 
@@ -1899,7 +1923,7 @@ describe("AccountManager", () => {
 
       manager.recordFailure(account, "codex", "gpt-5.2");
       
-      const score = healthTracker.getScore(account.index, "codex:gpt-5.2");
+		const score = healthTracker.getScore(account.runtimeKey, "codex:gpt-5.2");
       expect(score).toBeLessThan(100);
     });
 
@@ -1919,7 +1943,7 @@ describe("AccountManager", () => {
 
       manager.recordFailure(account, "gpt-5.1", null);
       
-      const score = healthTracker.getScore(account.index, "gpt-5.1");
+		const score = healthTracker.getScore(account.runtimeKey, "gpt-5.1");
       expect(score).toBeLessThan(100);
     });
 
@@ -1937,9 +1961,9 @@ describe("AccountManager", () => {
       const account = manager.getCurrentAccount()!;
       const tokenTracker = getTokenTracker();
 
-      const initialTokens = tokenTracker.getTokens(account.index, "codex:gpt-5.1");
-      const result = manager.consumeToken(account, "codex", "gpt-5.1");
-      const afterTokens = tokenTracker.getTokens(account.index, "codex:gpt-5.1");
+		const initialTokens = tokenTracker.getTokens(account.runtimeKey, "codex:gpt-5.1");
+		const result = manager.consumeToken(account, "codex", "gpt-5.1");
+		const afterTokens = tokenTracker.getTokens(account.runtimeKey, "codex:gpt-5.1");
 
       expect(result).toBe(true);
       expect(afterTokens).toBeLessThan(initialTokens);
@@ -2060,7 +2084,8 @@ describe("AccountManager", () => {
       const manager = new AccountManager(undefined, stored as never);
       const rateLimited = manager.setActiveIndex(1)!;
       manager.markRateLimited(rateLimited, 60_000, "codex");
-      getTokenTracker().drain(2, "codex", 100);
+		const accountWithDrainedTokens = manager.getAccountsSnapshot()[2]!;
+		getTokenTracker().drain(accountWithDrainedTokens.runtimeKey, "codex", 100);
 
       const explainability = manager.getSelectionExplainability("codex", undefined, now);
       const byIndex = new Map(explainability.map((entry) => [entry.index, entry]));

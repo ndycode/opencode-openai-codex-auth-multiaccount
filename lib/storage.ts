@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { promises as fs, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
@@ -237,12 +238,13 @@ type AccountLike = {
   lastUsed?: number;
 };
 
-async function ensureGitignore(storagePath: string): Promise<void> {
-  if (!currentStoragePath) return;
+async function ensureGitignore(storagePath: string, context?: StorageContext): Promise<void> {
+  const activeContext = getEffectiveStorageContext(context);
+  if (!activeContext.storagePath) return;
 
   const configDir = dirname(storagePath);
   const inferredProjectRoot = dirname(configDir);
-  const candidateRoots = [currentProjectRoot, inferredProjectRoot].filter(
+  const candidateRoots = [activeContext.projectRoot, inferredProjectRoot].filter(
     (root): root is string => typeof root === "string" && root.length > 0,
   );
   const projectRoot = candidateRoots.find((root) => existsSync(join(root, ".git")));
@@ -271,94 +273,152 @@ let currentStoragePath: string | null = null;
 let currentLegacyProjectStoragePath: string | null = null;
 let currentProjectRoot: string | null = null;
 
-export function setStoragePath(projectPath: string | null): void {
+export interface StorageContext {
+  storagePath: string | null;
+  legacyProjectStoragePath: string | null;
+  projectRoot: string | null;
+}
+
+const storageContext = new AsyncLocalStorage<StorageContext>();
+
+function createStorageContext(projectPath: string | null): StorageContext {
   if (!projectPath) {
-    currentStoragePath = null;
-    currentLegacyProjectStoragePath = null;
-    currentProjectRoot = null;
-    return;
+    return {
+      storagePath: null,
+      legacyProjectStoragePath: null,
+      projectRoot: null,
+    };
   }
-  
+
   const projectRoot = findProjectRoot(projectPath);
-  if (projectRoot) {
-    currentProjectRoot = projectRoot;
-    currentStoragePath = join(getProjectGlobalConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
-    currentLegacyProjectStoragePath = join(getProjectConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
-  } else {
-    currentStoragePath = null;
-    currentLegacyProjectStoragePath = null;
-    currentProjectRoot = null;
+  if (!projectRoot) {
+    return {
+      storagePath: null,
+      legacyProjectStoragePath: null,
+      projectRoot: null,
+    };
   }
+
+  return {
+    projectRoot,
+    storagePath: join(getProjectGlobalConfigDir(projectRoot), ACCOUNTS_FILE_NAME),
+    legacyProjectStoragePath: join(getProjectConfigDir(projectRoot), ACCOUNTS_FILE_NAME),
+  };
+}
+
+function createDirectStorageContext(path: string | null): StorageContext {
+  return {
+    storagePath: path,
+    legacyProjectStoragePath: null,
+    projectRoot: null,
+  };
+}
+
+function getEffectiveStorageContext(context?: StorageContext): StorageContext {
+  if (context) return context;
+  const scopedContext = storageContext.getStore();
+  if (scopedContext) return scopedContext;
+  return {
+    storagePath: currentStoragePath,
+    legacyProjectStoragePath: currentLegacyProjectStoragePath,
+    projectRoot: currentProjectRoot,
+  };
+}
+
+export function resolveStorageContext(projectPath: string | null): StorageContext {
+  return createStorageContext(projectPath);
+}
+
+export function resolveStorageContextDirect(path: string | null): StorageContext {
+  return createDirectStorageContext(path);
+}
+
+export async function withStorageContext<T>(
+  context: StorageContext,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return await storageContext.run(context, fn);
+}
+
+export function setStoragePath(projectPath: string | null): void {
+  const context = createStorageContext(projectPath);
+  currentStoragePath = context.storagePath;
+  currentLegacyProjectStoragePath = context.legacyProjectStoragePath;
+  currentProjectRoot = context.projectRoot;
 }
 
 export function setStoragePathDirect(path: string | null): void {
-  currentStoragePath = path;
-  currentLegacyProjectStoragePath = null;
-  currentProjectRoot = null;
+  const context = createDirectStorageContext(path);
+  currentStoragePath = context.storagePath;
+  currentLegacyProjectStoragePath = context.legacyProjectStoragePath;
+  currentProjectRoot = context.projectRoot;
 }
 
 /**
  * Returns the file path for the account storage JSON file.
  * @returns Absolute path to the accounts.json file
  */
-export function getStoragePath(): string {
-  if (currentStoragePath) {
-    return currentStoragePath;
+export function getStoragePath(context?: StorageContext): string {
+  const activeContext = getEffectiveStorageContext(context);
+  if (activeContext.storagePath) {
+    return activeContext.storagePath;
   }
   return join(getConfigDir(), ACCOUNTS_FILE_NAME);
 }
 
-export function getFlaggedAccountsPath(): string {
-	return join(dirname(getStoragePath()), FLAGGED_ACCOUNTS_FILE_NAME);
+export function getFlaggedAccountsPath(context?: StorageContext): string {
+	return join(dirname(getStoragePath(context)), FLAGGED_ACCOUNTS_FILE_NAME);
 }
 
-function getLegacyFlaggedAccountsPath(): string {
-	return join(dirname(getStoragePath()), LEGACY_FLAGGED_ACCOUNTS_FILE_NAME);
+function getLegacyFlaggedAccountsPath(context?: StorageContext): string {
+	return join(dirname(getStoragePath(context)), LEGACY_FLAGGED_ACCOUNTS_FILE_NAME);
 }
 
 async function migrateLegacyProjectStorageIfNeeded(
   persist: (storage: AccountStorageV3) => Promise<void> = saveAccounts,
+  context?: StorageContext,
 ): Promise<AccountStorageV3 | null> {
+  const activeContext = getEffectiveStorageContext(context);
   if (
-    !currentStoragePath ||
-    !currentLegacyProjectStoragePath ||
-    currentLegacyProjectStoragePath === currentStoragePath ||
-    !existsSync(currentLegacyProjectStoragePath)
+    !activeContext.storagePath ||
+    !activeContext.legacyProjectStoragePath ||
+    activeContext.legacyProjectStoragePath === activeContext.storagePath ||
+    !existsSync(activeContext.legacyProjectStoragePath)
   ) {
     return null;
   }
 
   try {
-    const legacyContent = await fs.readFile(currentLegacyProjectStoragePath, "utf-8");
+    const legacyContent = await fs.readFile(activeContext.legacyProjectStoragePath, "utf-8");
     const legacyData = JSON.parse(legacyContent) as unknown;
     const normalized = normalizeAccountStorage(legacyData);
     if (!normalized) return null;
 
     await persist(normalized);
     try {
-      await fs.unlink(currentLegacyProjectStoragePath);
+      await fs.unlink(activeContext.legacyProjectStoragePath);
       log.info("Removed legacy project account storage file after migration", {
-        path: currentLegacyProjectStoragePath,
+        path: activeContext.legacyProjectStoragePath,
       });
     } catch (unlinkError) {
       const code = (unlinkError as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
         log.warn("Failed to remove legacy project account storage file after migration", {
-          path: currentLegacyProjectStoragePath,
+          path: activeContext.legacyProjectStoragePath,
           error: String(unlinkError),
         });
       }
     }
     log.info("Migrated legacy project account storage", {
-      from: currentLegacyProjectStoragePath,
-      to: currentStoragePath,
+      from: activeContext.legacyProjectStoragePath,
+      to: activeContext.storagePath,
       accounts: normalized.accounts.length,
     });
     return normalized;
   } catch (error) {
     log.warn("Failed to migrate legacy project account storage", {
-      from: currentLegacyProjectStoragePath,
-      to: currentStoragePath,
+      from: activeContext.legacyProjectStoragePath,
+      to: activeContext.storagePath,
       error: String(error),
     });
     return null;
@@ -697,8 +757,11 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
  * Automatically migrates v1 storage to v3 format if needed.
  * @returns AccountStorageV3 if file exists and is valid, null otherwise
  */
-export async function loadAccounts(): Promise<AccountStorageV3 | null> {
-  return withStorageLock(async () => loadAccountsInternal(saveAccountsUnlocked));
+export async function loadAccounts(context?: StorageContext): Promise<AccountStorageV3 | null> {
+  return withStorageLock(async () => {
+    const persist = (storage: AccountStorageV3) => saveAccountsUnlocked(storage, context);
+    return await loadAccountsInternal(persist, context);
+  });
 }
 
 /**
@@ -711,21 +774,23 @@ function getGlobalAccountsStoragePath(): string {
 /**
  * Returns true when project-scoped storage is active and a global fallback is meaningful.
  */
-function shouldUseProjectGlobalFallback(): boolean {
-  return Boolean(currentStoragePath && currentProjectRoot);
+function shouldUseProjectGlobalFallback(context?: StorageContext): boolean {
+  const activeContext = getEffectiveStorageContext(context);
+  return Boolean(activeContext.storagePath && activeContext.projectRoot);
 }
 
 /**
  * Loads account data from global storage as a fallback when project storage is missing.
  * Returns null for missing/unusable global storage and never throws to callers.
  */
-async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
-  if (!shouldUseProjectGlobalFallback() || !currentStoragePath) {
+async function loadGlobalAccountsFallback(context?: StorageContext): Promise<AccountStorageV3 | null> {
+  const activeContext = getEffectiveStorageContext(context);
+  if (!shouldUseProjectGlobalFallback(activeContext) || !activeContext.storagePath) {
     return null;
   }
 
   const globalStoragePath = getGlobalAccountsStoragePath();
-  if (globalStoragePath === currentStoragePath) {
+  if (globalStoragePath === activeContext.storagePath) {
     return null;
   }
 
@@ -746,7 +811,7 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
 
     log.info("Loaded global account storage as project fallback", {
       from: globalStoragePath,
-      to: currentStoragePath,
+      to: activeContext.storagePath,
       accounts: normalized.accounts.length,
     });
     return normalized;
@@ -755,7 +820,7 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
     if (code !== "ENOENT") {
       log.warn("Failed to load global fallback account storage", {
         from: globalStoragePath,
-        to: currentStoragePath,
+        to: activeContext.storagePath,
         error: String(error),
       });
     }
@@ -769,9 +834,10 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
  */
 async function loadAccountsInternal(
   persistMigration: ((storage: AccountStorageV3) => Promise<void>) | null,
+  context?: StorageContext,
 ): Promise<AccountStorageV3 | null> {
   try {
-    const path = getStoragePath();
+    const path = getStoragePath(context);
     const content = await fs.readFile(path, "utf-8");
     const data = JSON.parse(content) as unknown;
 
@@ -799,14 +865,14 @@ async function loadAccountsInternal(
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       const migrated = persistMigration
-        ? await migrateLegacyProjectStorageIfNeeded(persistMigration)
+        ? await migrateLegacyProjectStorageIfNeeded(persistMigration, context)
         : null;
       if (migrated) return migrated;
-      const globalFallback = await loadGlobalAccountsFallback();
+      const globalFallback = await loadGlobalAccountsFallback(context);
       if (!globalFallback) return null;
 
       if (persistMigration) {
-        const seedPath = getStoragePath();
+        const seedPath = getStoragePath(context);
         try {
           await fs.access(seedPath);
           return globalFallback;
@@ -847,14 +913,17 @@ async function loadAccountsInternal(
  * Writes account storage without acquiring the outer storage mutex.
  * Callers must already be inside withStorageLock when using this helper directly.
  */
-async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
-  const path = getStoragePath();
+async function saveAccountsUnlocked(
+  storage: AccountStorageV3,
+  context?: StorageContext,
+): Promise<void> {
+  const path = getStoragePath(context);
   const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
   const tempPath = `${path}.${uniqueSuffix}.tmp`;
 
   try {
     await fs.mkdir(dirname(path), { recursive: true });
-    await ensureGitignore(path);
+    await ensureGitignore(path, context);
 
     // Normalize before persisting so every write path enforces dedup semantics
     // (exact identity dedupe plus legacy email dedupe for identity-less records).
@@ -906,10 +975,12 @@ export async function withAccountStorageTransaction<T>(
     current: AccountStorageV3 | null,
     persist: (storage: AccountStorageV3) => Promise<void>,
   ) => Promise<T>,
+  context?: StorageContext,
 ): Promise<T> {
   return withStorageLock(async () => {
-    const current = await loadAccountsInternal(saveAccountsUnlocked);
-    return handler(current, saveAccountsUnlocked);
+    const persist = (storage: AccountStorageV3) => saveAccountsUnlocked(storage, context);
+    const current = await loadAccountsInternal(persist, context);
+    return handler(current, persist);
   });
 }
 
@@ -920,9 +991,9 @@ export async function withAccountStorageTransaction<T>(
  * @param storage - Account storage data to save
  * @throws StorageError with platform-aware hints on failure
  */
-export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
+export async function saveAccounts(storage: AccountStorageV3, context?: StorageContext): Promise<void> {
   return withStorageLock(async () => {
-    await saveAccountsUnlocked(storage);
+    await saveAccountsUnlocked(storage, context);
   });
 }
 
@@ -930,10 +1001,10 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
  * Deletes the account storage file from disk.
  * Silently ignores if file doesn't exist.
  */
-export async function clearAccounts(): Promise<void> {
+export async function clearAccounts(context?: StorageContext): Promise<void> {
   return withStorageLock(async () => {
     try {
-      const path = getStoragePath();
+      const path = getStoragePath(context);
       await fs.unlink(path);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -1041,8 +1112,9 @@ function normalizeFlaggedStorage(data: unknown): FlaggedAccountStorageV1 {
 
 async function loadFlaggedAccountsUnlocked(
 	saveUnlocked: (storage: FlaggedAccountStorageV1) => Promise<void>,
+  context?: StorageContext,
 ): Promise<FlaggedAccountStorageV1> {
-	const path = getFlaggedAccountsPath();
+	const path = getFlaggedAccountsPath(context);
 	const empty: FlaggedAccountStorageV1 = { version: 1, accounts: [] };
 
 	try {
@@ -1057,7 +1129,7 @@ async function loadFlaggedAccountsUnlocked(
 		}
 	}
 
-	const legacyPath = getLegacyFlaggedAccountsPath();
+	const legacyPath = getLegacyFlaggedAccountsPath(context);
 	if (!existsSync(legacyPath)) {
 		return empty;
 	}
@@ -1090,12 +1162,19 @@ async function loadFlaggedAccountsUnlocked(
 	}
 }
 
-export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {
-	return withStorageLock(async () => loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked));
+export async function loadFlaggedAccounts(context?: StorageContext): Promise<FlaggedAccountStorageV1> {
+	return withStorageLock(async () => {
+		const persist = (storage: FlaggedAccountStorageV1) =>
+			saveFlaggedAccountsUnlocked(storage, context);
+		return await loadFlaggedAccountsUnlocked(persist, context);
+	});
 }
 
-async function saveFlaggedAccountsUnlocked(storage: FlaggedAccountStorageV1): Promise<void> {
-	const path = getFlaggedAccountsPath();
+async function saveFlaggedAccountsUnlocked(
+	storage: FlaggedAccountStorageV1,
+  context?: StorageContext,
+): Promise<void> {
+	const path = getFlaggedAccountsPath(context);
 	const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
 	const tempPath = `${path}.${uniqueSuffix}.tmp`;
 
@@ -1124,23 +1203,29 @@ export async function withFlaggedAccountStorageTransaction<T>(
 		current: FlaggedAccountStorageV1,
 		persist: (storage: FlaggedAccountStorageV1) => Promise<void>,
 	) => Promise<T>,
+  context?: StorageContext,
 ): Promise<T> {
 	return withStorageLock(async () => {
-		const current = await loadFlaggedAccountsUnlocked(saveFlaggedAccountsUnlocked);
-		return handler(current, saveFlaggedAccountsUnlocked);
+		const persist = (storage: FlaggedAccountStorageV1) =>
+			saveFlaggedAccountsUnlocked(storage, context);
+		const current = await loadFlaggedAccountsUnlocked(persist, context);
+		return handler(current, persist);
 	});
 }
 
-export async function saveFlaggedAccounts(storage: FlaggedAccountStorageV1): Promise<void> {
+export async function saveFlaggedAccounts(
+	storage: FlaggedAccountStorageV1,
+  context?: StorageContext,
+): Promise<void> {
 	return withStorageLock(async () => {
-		await saveFlaggedAccountsUnlocked(storage);
+		await saveFlaggedAccountsUnlocked(storage, context);
 	});
 }
 
-export async function clearFlaggedAccounts(): Promise<void> {
+export async function clearFlaggedAccounts(context?: StorageContext): Promise<void> {
 	return withStorageLock(async () => {
 		try {
-			await fs.unlink(getFlaggedAccountsPath());
+			await fs.unlink(getFlaggedAccountsPath(context));
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code !== "ENOENT") {
@@ -1170,8 +1255,8 @@ function sanitizeBackupPrefix(prefix: string): string {
 	return safe.length > 0 ? safe : "codex-backup";
 }
 
-export function createTimestampedBackupPath(prefix = "codex-backup"): string {
-	const storagePath = getStoragePath();
+export function createTimestampedBackupPath(prefix = "codex-backup", context?: StorageContext): string {
+	const storagePath = getStoragePath(context);
 	const backupDir = join(dirname(storagePath), "backups");
 	const safePrefix = sanitizeBackupPrefix(prefix);
 	const nonce = randomBytes(3).toString("hex");
@@ -1236,6 +1321,7 @@ function analyzeImportedAccounts(
 
 export async function previewImportAccounts(
 	filePath: string,
+  context?: StorageContext,
 ): Promise<ImportPreviewResult> {
 	const { normalized } = await readAndNormalizeImportFile(filePath);
 
@@ -1247,7 +1333,7 @@ export async function previewImportAccounts(
 			total: analysis.total,
 			skipped: analysis.skipped,
 		});
-	});
+	}, context);
 }
 
 /**
@@ -1256,14 +1342,18 @@ export async function previewImportAccounts(
  * @param force - If true, overwrite existing file (default: true)
  * @throws Error if file exists and force is false, or if no accounts to export
  */
-export async function exportAccounts(filePath: string, force = true): Promise<void> {
+export async function exportAccounts(
+  filePath: string,
+  force = true,
+  context?: StorageContext,
+): Promise<void> {
   const resolvedPath = resolvePath(filePath);
   
   if (!force && existsSync(resolvedPath)) {
     throw new Error(`File already exists: ${resolvedPath}`);
   }
   
-  const storage = await withAccountStorageTransaction((current) => Promise.resolve(current));
+  const storage = await withAccountStorageTransaction((current) => Promise.resolve(current), context);
   if (!storage || storage.accounts.length === 0) {
     throw new Error("No accounts to export");
   }
@@ -1285,6 +1375,7 @@ export async function exportAccounts(filePath: string, force = true): Promise<vo
 export async function importAccounts(
 	filePath: string,
 	options: ImportAccountsOptions = {},
+  context?: StorageContext,
 ): Promise<ImportAccountsResult> {
   const { resolvedPath, normalized } = await readAndNormalizeImportFile(filePath);
   const backupMode = options.backupMode ?? "none";
@@ -1318,7 +1409,7 @@ export async function importAccounts(
       let backupError: string | undefined;
       let backupLogError: string | undefined;
       if (backupMode !== "none" && existingAccounts.length > 0) {
-        backupPath = createTimestampedBackupPath(backupPrefix);
+        backupPath = createTimestampedBackupPath(backupPrefix, context);
         try {
           await writePreImportBackupFile(backupPath, existingStorage);
           backupStatus = "created";
@@ -1388,7 +1479,7 @@ export async function importAccounts(
         backupPath,
         backupError,
       };
-    });
+    }, context);
 
   log.info("Imported accounts", {
     path: resolvedPath,

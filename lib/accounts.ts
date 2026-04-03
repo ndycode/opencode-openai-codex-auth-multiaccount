@@ -4,11 +4,13 @@ import { join } from "node:path";
 import type { Auth } from "@opencode-ai/sdk";
 import { createLogger } from "./logger.js";
 import {
+	getWorkspaceIdentityKey,
 	loadAccounts,
 	saveAccounts,
 	type AccountStorageV3,
 	type CooldownReason,
 	type RateLimitStateV3,
+	type StorageContext,
 } from "./storage.js";
 import type { AccountIdSource, OAuthAuthDetails } from "./types.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
@@ -72,9 +74,15 @@ export type CodexCliTokenCacheEntry = {
 	accountId?: string;
 };
 
+type CodexCliTokenCacheSnapshot = {
+	byEmail: Map<string, CodexCliTokenCacheEntry[]>;
+	byRefreshToken: Map<string, CodexCliTokenCacheEntry>;
+	byAccountId: Map<string, CodexCliTokenCacheEntry[]>;
+};
+
 const CODEX_CLI_ACCOUNTS_PATH = join(homedir(), ".codex", "accounts.json");
 const CODEX_CLI_CACHE_TTL_MS = 5_000;
-let codexCliTokenCache: Map<string, CodexCliTokenCacheEntry> | null = null;
+let codexCliTokenCache: CodexCliTokenCacheSnapshot | null = null;
 let codexCliTokenCacheLoadedAt = 0;
 
 function extractExpiresAtFromAccessToken(accessToken: string): number | undefined {
@@ -87,7 +95,23 @@ function extractExpiresAtFromAccessToken(accessToken: string): number | undefine
 	return undefined;
 }
 
-async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEntry> | null> {
+function pushCacheEntry(map: Map<string, CodexCliTokenCacheEntry[]>, key: string | undefined, entry: CodexCliTokenCacheEntry): void {
+	if (!key) return;
+	const existing = map.get(key);
+	if (existing) {
+		existing.push(entry);
+		return;
+	}
+	map.set(key, [entry]);
+}
+
+function pickUniqueEntry(entries: CodexCliTokenCacheEntry[] | undefined): CodexCliTokenCacheEntry | null {
+	if (!entries || entries.length !== 1) return null;
+	const [entry] = entries;
+	return entry ? { ...entry } : null;
+}
+
+async function getCodexCliTokenCache(): Promise<CodexCliTokenCacheSnapshot | null> {
 	const syncEnabled = process.env.CODEX_AUTH_SYNC_CODEX_CLI !== "0";
 	const skip =
 		!syncEnabled ||
@@ -114,12 +138,15 @@ async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEn
 			return null;
 		}
 
-		const next = new Map<string, CodexCliTokenCacheEntry>();
+		const next: CodexCliTokenCacheSnapshot = {
+			byEmail: new Map(),
+			byRefreshToken: new Map(),
+			byAccountId: new Map(),
+		};
 		for (const entry of parsed.accounts) {
 			if (!isRecord(entry)) continue;
 
 			const email = sanitizeEmail(typeof entry.email === "string" ? entry.email : undefined);
-			if (!email) continue;
 
 			const accountId =
 				typeof entry.accountId === "string" && entry.accountId.trim() ? entry.accountId.trim() : undefined;
@@ -137,12 +164,18 @@ async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEn
 
 			if (!accessToken) continue;
 
-			next.set(email, {
+			const cacheEntry: CodexCliTokenCacheEntry = {
 				accessToken,
 				expiresAt: extractExpiresAtFromAccessToken(accessToken),
 				refreshToken,
 				accountId,
-			});
+			};
+
+			pushCacheEntry(next.byEmail, email, cacheEntry);
+			pushCacheEntry(next.byAccountId, accountId, cacheEntry);
+			if (refreshToken) {
+				next.byRefreshToken.set(refreshToken, cacheEntry);
+			}
 		}
 
 		codexCliTokenCache = next;
@@ -160,8 +193,38 @@ export async function lookupCodexCliTokensByEmail(
 	const normalized = sanitizeEmail(email);
 	if (!normalized) return null;
 	const cache = await getCodexCliTokenCache();
-	const cached = cache?.get(normalized);
-	return cached ? { ...cached } : null;
+	return pickUniqueEntry(cache?.byEmail.get(normalized));
+}
+
+export async function lookupCodexCliTokensForAccount(params: {
+	email?: string;
+	refreshToken?: string;
+	accountId?: string;
+}): Promise<CodexCliTokenCacheEntry | null> {
+	const cache = await getCodexCliTokenCache();
+	if (!cache) return null;
+
+	const refreshToken =
+		typeof params.refreshToken === "string" && params.refreshToken.trim()
+			? params.refreshToken.trim()
+			: undefined;
+	if (refreshToken) {
+		const byRefreshToken = cache.byRefreshToken.get(refreshToken);
+		if (byRefreshToken) return { ...byRefreshToken };
+	}
+
+	const normalizedAccountId =
+		typeof params.accountId === "string" && params.accountId.trim()
+			? params.accountId.trim()
+			: undefined;
+	if (normalizedAccountId) {
+		const byAccountId = pickUniqueEntry(cache.byAccountId.get(normalizedAccountId));
+		if (byAccountId) return byAccountId;
+	}
+
+	const normalizedEmail = sanitizeEmail(params.email);
+	if (!normalizedEmail) return null;
+	return pickUniqueEntry(cache.byEmail.get(normalizedEmail));
 }
 
 function initFamilyState(defaultValue: number): Record<ModelFamily, number> {
@@ -170,8 +233,16 @@ function initFamilyState(defaultValue: number): Record<ModelFamily, number> {
 	) as Record<ModelFamily, number>;
 }
 
+function createRuntimeAccountKey(
+	account: Pick<ManagedAccount, "organizationId" | "accountId" | "refreshToken">,
+	index: number,
+): string {
+	return `${getWorkspaceIdentityKey(account)}|slot:${index}`;
+}
+
 export interface ManagedAccount {
 	index: number;
+	runtimeKey: string;
 	accountId?: string;
 	organizationId?: string;
 	accountIdSource?: AccountIdSource;
@@ -210,15 +281,19 @@ export class AccountManager {
 	private accounts: ManagedAccount[] = [];
 	private cursorByFamily: Record<ModelFamily, number> = initFamilyState(0);
 	private currentAccountIndexByFamily: Record<ModelFamily, number> = initFamilyState(-1);
-	private lastToastAccountIndex = -1;
+	private lastToastAccountKey: string | null = null;
 	private lastToastTime = 0;
 	private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingSave: Promise<void> | null = null;
 	private authFailuresByRefreshToken: Map<string, number> = new Map();
+	private readonly storageContext?: StorageContext;
 
-	static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
-		const stored = await loadAccounts();
-		const manager = new AccountManager(authFallback, stored);
+	static async loadFromDisk(
+		authFallback?: OAuthAuthDetails,
+		storageContext?: StorageContext,
+	): Promise<AccountManager> {
+		const stored = await loadAccounts(storageContext);
+		const manager = new AccountManager(authFallback, stored, storageContext);
 		await manager.hydrateFromCodexCli();
 		return manager;
 	}
@@ -229,7 +304,7 @@ export class AccountManager {
 
 	private async hydrateFromCodexCli(): Promise<void> {
 		const cache = await getCodexCliTokenCache();
-		if (!cache || cache.size === 0) return;
+		if (!cache || (cache.byEmail.size === 0 && cache.byRefreshToken.size === 0)) return;
 
 		const now = nowMs();
 		let changed = false;
@@ -238,7 +313,11 @@ export class AccountManager {
 			const email = sanitizeEmail(account.email);
 			if (!email) continue;
 
-			const cached = cache.get(email);
+			const cached = await lookupCodexCliTokensForAccount({
+				email,
+				refreshToken: account.refreshToken,
+				accountId: account.accountId,
+			});
 			if (!cached) continue;
 
 			if (typeof cached.expiresAt === "number" && cached.expiresAt <= now) {
@@ -275,7 +354,12 @@ export class AccountManager {
 		}
 	}
 
-	constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
+	constructor(
+		authFallback?: OAuthAuthDetails,
+		stored?: AccountStorageV3 | null,
+		storageContext?: StorageContext,
+	) {
+		this.storageContext = storageContext;
 		const fallbackAccountId = extractAccountId(authFallback?.access);
 		const fallbackAccountEmail = sanitizeEmail(extractAccountEmail(authFallback?.access));
 
@@ -298,6 +382,14 @@ export class AccountManager {
  
 					return {
 						index,
+						runtimeKey: createRuntimeAccountKey(
+							{
+								organizationId: account.organizationId,
+								accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
+								refreshToken,
+							},
+							index,
+						),
 						accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
 						organizationId: account.organizationId,
 						accountIdSource: account.accountIdSource,
@@ -334,6 +426,14 @@ export class AccountManager {
 				const now = nowMs();
 				this.accounts.push({
 					index: this.accounts.length,
+					runtimeKey: createRuntimeAccountKey(
+						{
+							organizationId: undefined,
+							accountId: fallbackAccountId,
+							refreshToken: authFallback.refresh,
+						},
+						this.accounts.length,
+					),
 					accountId: fallbackAccountId,
 					organizationId: undefined,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
@@ -367,6 +467,14 @@ export class AccountManager {
 			this.accounts = [
 				{
 					index: 0,
+					runtimeKey: createRuntimeAccountKey(
+						{
+							organizationId: undefined,
+							accountId: fallbackAccountId,
+							refreshToken: authFallback.refresh,
+						},
+						0,
+					),
 					accountId: fallbackAccountId,
 					organizationId: undefined,
 					accountIdSource: fallbackAccountId ? "token" : undefined,
@@ -454,7 +562,7 @@ export class AccountManager {
 				);
 			}
 
-			const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
+			const tokensAvailable = tokenTracker.getTokens(account.runtimeKey, quotaKey);
 			if (tokensAvailable < 1) reasons.push("token-bucket-empty");
 
 			const eligible =
@@ -470,7 +578,7 @@ export class AccountManager {
 				isCurrentForFamily: currentIndex === account.index,
 				eligible,
 				reasons,
-				healthScore: healthTracker.getScore(account.index, quotaKey),
+				healthScore: healthTracker.getScore(account.runtimeKey, quotaKey),
 				tokensAvailable,
 				rateLimitedUntil,
 				coolingDownUntil,
@@ -604,6 +712,7 @@ export class AccountManager {
 					!isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
 				return {
 					index: account.index,
+					accountKey: account.runtimeKey,
 					isAvailable,
 					lastUsed: account.lastUsed,
 				};
@@ -625,27 +734,27 @@ export class AccountManager {
 	recordSuccess(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
 		const quotaKey = model ? `${family}:${model}` : family;
 		const healthTracker = getHealthTracker();
-		healthTracker.recordSuccess(account.index, quotaKey);
+		healthTracker.recordSuccess(account.runtimeKey, quotaKey);
 	}
 
 	recordRateLimit(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
 		const quotaKey = model ? `${family}:${model}` : family;
 		const healthTracker = getHealthTracker();
 		const tokenTracker = getTokenTracker();
-		healthTracker.recordRateLimit(account.index, quotaKey);
-		tokenTracker.drain(account.index, quotaKey);
+		healthTracker.recordRateLimit(account.runtimeKey, quotaKey);
+		tokenTracker.drain(account.runtimeKey, quotaKey);
 	}
 
 	recordFailure(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
 		const quotaKey = model ? `${family}:${model}` : family;
 		const healthTracker = getHealthTracker();
-		healthTracker.recordFailure(account.index, quotaKey);
+		healthTracker.recordFailure(account.runtimeKey, quotaKey);
 	}
 
 	consumeToken(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
 		const quotaKey = model ? `${family}:${model}` : family;
 		const tokenTracker = getTokenTracker();
-		return tokenTracker.tryConsume(account.index, quotaKey);
+		return tokenTracker.tryConsume(account.runtimeKey, quotaKey);
 	}
 
 	/**
@@ -656,7 +765,7 @@ export class AccountManager {
 	refundToken(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
 		const quotaKey = model ? `${family}:${model}` : family;
 		const tokenTracker = getTokenTracker();
-		return tokenTracker.refundToken(account.index, quotaKey);
+		return tokenTracker.refundToken(account.runtimeKey, quotaKey);
 	}
 
 	markSwitched(account: ManagedAccount, reason: "rate-limit" | "initial" | "rotation", family: ModelFamily): void {
@@ -744,16 +853,17 @@ export class AccountManager {
 		this.authFailuresByRefreshToken.delete(account.refreshToken);
 	}
 
-	shouldShowAccountToast(accountIndex: number, debounceMs = 30000): boolean {
+	shouldShowAccountToast(accountRef: string | number, debounceMs = 30000): boolean {
+		const accountKey = String(accountRef);
 		const now = nowMs();
-		if (accountIndex === this.lastToastAccountIndex && now - this.lastToastTime < debounceMs) {
+		if (accountKey === this.lastToastAccountKey && now - this.lastToastTime < debounceMs) {
 			return false;
 		}
 		return true;
 	}
 
-	markToastShown(accountIndex: number): void {
-		this.lastToastAccountIndex = accountIndex;
+	markToastShown(accountRef: string | number): void {
+		this.lastToastAccountKey = String(accountRef);
 		this.lastToastTime = nowMs();
 	}
 
@@ -939,7 +1049,7 @@ export class AccountManager {
 			activeIndexByFamily,
 		};
 
-		await saveAccounts(storage);
+		await saveAccounts(storage, this.storageContext);
 	}
 
 	saveToDiskDebounced(delayMs = 500): void {
