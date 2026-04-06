@@ -1,7 +1,7 @@
 {
-  "name": "oc-chatgpt-multi-auth",
-  "version": "5.4.9",
-  "description": "OpenCode plugin for using ChatGPT Plus/Pro in GPT-5 and Codex workflows with OAuth login, multi-account rotation, and guided setup",
+  "name": "oc-codex-multi-auth",
+  "version": "6.0.0",
+  "description": "OpenCode plugin for Codex-first GPT-5 workflows with ChatGPT Plus/Pro OAuth, multi-account rotation, and guided setup",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
@@ -9,7 +9,7 @@
   "author": "Numman Ali",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ndycode/oc-chatgpt-multi-auth.git"
+    "url": "git+https://github.com/ndycode/oc-codex-multi-auth.git"
   },
   "keywords": [
     "typescript",
@@ -29,9 +29,9 @@
     "developer-tools",
     "terminal"
   ],
-  "homepage": "https://github.com/ndycode/oc-chatgpt-multi-auth#readme",
+  "homepage": "https://github.com/ndycode/oc-codex-multi-auth#readme",
   "bugs": {
-    "url": "https://github.com/ndycode/oc-chatgpt-multi-auth/issues"
+    "url": "https://github.com/ndycode/oc-codex-multi-auth/issues"
   },
   "scripts": {
     "build": "tsc && node scripts/copy-oauth-success.js",
@@ -55,7 +55,7 @@
     "prepare": "husky"
   },
   "bin": {
-    "oc-chatgpt-multi-auth": "scripts/install-opencode-codex-auth.js"
+    "oc-codex-multi-auth": "scripts/install-oc-codex-multi-auth.js"
   },
   "files": [
     "dist/",

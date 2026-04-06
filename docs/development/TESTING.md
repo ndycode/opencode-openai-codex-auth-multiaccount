@@ -1,6 +1,6 @@
 # Testing Guide
 
-This guide describes the current validation surface for `oc-chatgpt-multi-auth` on `main`.
+This guide describes the current validation surface for `oc-codex-multi-auth` on `main`.
 
 ## Release-Grade Commands
 
@@ -46,7 +46,7 @@ When documentation changes touch setup or config guidance, verify the docs again
 
 1. Confirm commands exist in `index.ts`.
 2. Confirm config examples match `config/opencode-modern.json`, `config/opencode-legacy.json`, and `config/minimal-opencode.json`.
-3. Confirm install/update guidance matches `scripts/install-opencode-codex-auth.js`.
+3. Confirm install/update guidance matches `scripts/install-oc-codex-multi-auth.js`.
 4. Confirm repo scripts listed in docs still exist in `package.json`.
 
 Useful commands:
@@ -63,14 +63,14 @@ Use these when a change affects setup, auth flow, or account operations.
 ### Install + config smoke
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest --dry-run
+npx -y oc-codex-multi-auth@latest --dry-run
 opencode debug config
 ```
 
 Verify:
 
 - the global config path is `~/.config/opencode/opencode.json`
-- the plugin entry resolves to `oc-chatgpt-multi-auth`
+- the plugin entry resolves to `oc-codex-multi-auth`
 - the selected template contributes the expected `provider.openai` block
 
 ### Model surface smoke

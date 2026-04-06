@@ -55,7 +55,7 @@ function createStorageFromTestAccounts(accounts: typeof TEST_ACCOUNTS): AccountS
 
 const TEST_STORAGE_PATH = join(
   tmpdir(),
-  `oc-chatgpt-multi-auth-rotation-integration-${process.pid}-${Date.now()}.json`,
+  `oc-codex-multi-auth-rotation-integration-${process.pid}-${Date.now()}.json`,
 );
 
 describe("Multi-Account Rotation Integration", () => {

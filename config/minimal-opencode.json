@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["oc-chatgpt-multi-auth"],
+  "plugin": ["oc-codex-multi-auth"],
 
   "provider": {
     "openai": {

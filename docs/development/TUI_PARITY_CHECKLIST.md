@@ -1,6 +1,6 @@
 # TUI Parity Checklist (Codex Multi-Auth)
 
-Use this checklist to keep `oc-chatgpt-multi-auth` aligned with the Antigravity-style auth TUI pattern, while preserving Codex-specific logic and storage behavior.
+Use this checklist to keep `oc-codex-multi-auth` aligned with the Antigravity-style auth TUI pattern, while preserving Codex-specific logic and storage behavior.
 
 ## Scope
 

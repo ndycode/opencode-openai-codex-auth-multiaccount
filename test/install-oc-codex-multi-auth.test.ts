@@ -12,10 +12,10 @@ type OpenAiTemplate = {
 };
 
 async function createTempHome() {
-	return mkdtemp(join(tmpdir(), "oc-chatgpt-install-"));
+	return mkdtemp(join(tmpdir(), "oc-codex-install-"));
 }
 
-describe("install-opencode-codex-auth script", () => {
+describe("install-oc-codex-multi-auth script", () => {
 	let tempHome: string | null = null;
 
 	afterEach(async () => {
@@ -31,21 +31,21 @@ describe("install-opencode-codex-auth script", () => {
 		vi.resetModules();
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-		const { runInstaller } = await import("../scripts/install-opencode-codex-auth.js");
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 
 		await expect(runInstaller(["--modern", "--legacy", "--help"])).resolves.toMatchObject({
 			action: "help",
 			exitCode: 0,
 		});
 
-		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Usage: oc-chatgpt-multi-auth"));
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Usage: oc-codex-multi-auth"));
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
 	it("writes the merged full catalog and normalizes plugin entries", async () => {
 		vi.resetModules();
 		tempHome = await createTempHome();
-		const { runInstaller } = await import("../scripts/install-opencode-codex-auth.js");
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 		const configDir = join(tempHome, ".config", "opencode");
 		const configPath = join(configDir, "opencode.json");
 
@@ -91,7 +91,7 @@ describe("install-opencode-codex-auth script", () => {
 		};
 
 		expect(saved.customSetting).toBe(true);
-		expect(saved.plugin).toEqual(["existing-plugin", "oc-chatgpt-multi-auth"]);
+		expect(saved.plugin).toEqual(["existing-plugin", "oc-codex-multi-auth"]);
 		expect(saved.provider.anthropic).toEqual({ baseURL: "https://example.invalid" });
 		const modernTemplate = JSON.parse(
 			await readFile(new URL("../config/opencode-modern.json", import.meta.url), "utf-8"),
@@ -116,16 +116,18 @@ describe("install-opencode-codex-auth script", () => {
 	it("keeps cache files when --no-cache-clear is set but still unpins the cached package entry", async () => {
 		vi.resetModules();
 		tempHome = await createTempHome();
-		const { runInstaller } = await import("../scripts/install-opencode-codex-auth.js");
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 		const configDir = join(tempHome, ".config", "opencode");
 		const configPath = join(configDir, "opencode.json");
 		const cacheDir = join(tempHome, ".cache", "opencode");
-		const cacheNodeModules = join(cacheDir, "node_modules", "oc-chatgpt-multi-auth");
+		const legacyCacheNodeModules = join(cacheDir, "node_modules", "oc-chatgpt-multi-auth");
+		const cacheNodeModules = join(cacheDir, "node_modules", "oc-codex-multi-auth");
 		const cacheBunLock = join(cacheDir, "bun.lock");
 		const cachePackageJson = join(cacheDir, "package.json");
 
 		await mkdir(configDir, { recursive: true });
 		await mkdir(cacheNodeModules, { recursive: true });
+		await mkdir(legacyCacheNodeModules, { recursive: true });
 		await writeFile(configPath, JSON.stringify({ plugin: [] }, null, 2), "utf-8");
 		await writeFile(cacheBunLock, "lockfile", "utf-8");
 		await writeFile(
@@ -134,6 +136,7 @@ describe("install-opencode-codex-auth script", () => {
 				{
 					dependencies: {
 						"oc-chatgpt-multi-auth": "file:../pinned-plugin.tgz",
+						"oc-codex-multi-auth": "file:../new-plugin.tgz",
 						other: "^1.0.0",
 					},
 				},
@@ -159,16 +162,18 @@ describe("install-opencode-codex-auth script", () => {
 
 		await expect(readFile(cacheBunLock, "utf-8")).resolves.toBe("lockfile");
 		await expect(readdir(cacheNodeModules)).resolves.toEqual([]);
+		await expect(readdir(legacyCacheNodeModules)).resolves.toEqual([]);
 		const cachePackage = JSON.parse(await readFile(cachePackageJson, "utf-8")) as {
 			dependencies: Record<string, string>;
 		};
 		expect(cachePackage.dependencies["oc-chatgpt-multi-auth"]).toBeUndefined();
+		expect(cachePackage.dependencies["oc-codex-multi-auth"]).toBeUndefined();
 		expect(cachePackage.dependencies.other).toBe("^1.0.0");
 	});
 
 	it("rejects full-mode merges when modern and legacy templates overlap", async () => {
 		vi.resetModules();
-		const { __test } = await import("../scripts/install-opencode-codex-auth.js");
+		const { __test } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 
 		const modernTemplate = {
 			provider: {
@@ -210,7 +215,7 @@ describe("install-opencode-codex-auth script", () => {
 			};
 		});
 
-		const { __test } = await import("../scripts/install-opencode-codex-auth.js");
+		const { __test } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 		const backupPath = await __test.backupConfig(sourcePath, false);
 
 		expect(copyFileMock).toHaveBeenCalledTimes(2);
@@ -233,7 +238,7 @@ describe("install-opencode-codex-auth script", () => {
 			};
 		});
 
-		const { __test } = await import("../scripts/install-opencode-codex-auth.js");
+		const { __test } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 		await expect(__test.renameWithWindowsRetry("from.tmp", "to.json")).resolves.toBeUndefined();
 		expect(renameMock).toHaveBeenCalledTimes(2);
 		expect(renameMock).toHaveBeenNthCalledWith(1, "from.tmp", "to.json");

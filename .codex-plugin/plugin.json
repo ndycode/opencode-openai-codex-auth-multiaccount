@@ -1,6 +1,6 @@
 {
-  "name": "oc-chatgpt-multi-auth",
+  "name": "oc-codex-multi-auth",
   "version": "5.4.9",
-  "description": "Install and operate oc-chatgpt-multi-auth for OpenCode with ChatGPT Plus/Pro OAuth, GPT-5 and Codex model presets, and multi-account failover.",
+  "description": "Install and operate oc-codex-multi-auth for OpenCode with Codex-first GPT-5 workflows, ChatGPT Plus/Pro OAuth, and multi-account failover.",
   "skills": "./skills/"
 }

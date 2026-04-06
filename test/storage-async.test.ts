@@ -257,9 +257,9 @@ describe("Storage Module - Async Operations", () => {
   });
 
   describe("getStoragePath", () => {
-    it("returns path ending with openai-codex-accounts.json", () => {
+    it("returns path ending with oc-codex-multi-auth-accounts.json", () => {
       const path = getStoragePath();
-      expect(path).toMatch(/openai-codex-accounts\.json$/);
+      expect(path).toMatch(/oc-codex-multi-auth-accounts\.json$/);
     });
 
     it("returns path containing .opencode directory", () => {

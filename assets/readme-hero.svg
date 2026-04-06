@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="OpenCode Codex OAuth">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="oc-codex-multi-auth">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0f172a" />
@@ -20,12 +20,12 @@
     <path d="M205 80 L235 220" />
   </g>
   <text x="420" y="120" fill="#e2e8f0" font-size="42" font-family="'IBM Plex Sans','Segoe UI',Arial,sans-serif" font-weight="600">
-    OpenCode Codex OAuth
+    oc-codex-multi-auth
   </text>
   <text x="420" y="170" fill="#cbd5f5" font-size="24" font-family="'IBM Plex Sans','Segoe UI',Arial,sans-serif">
-    ChatGPT Plus/Pro auth for GPT-5.2 and Codex models
+    Codex-first ChatGPT Plus/Pro auth for OpenCode
   </text>
   <text x="420" y="220" fill="#7dd3fc" font-size="18" font-family="'IBM Plex Sans','Segoe UI',Arial,sans-serif">
-    One-command install, modern variants, full tool support
+    One-command install, account migration, modern variants
   </text>
 </svg>

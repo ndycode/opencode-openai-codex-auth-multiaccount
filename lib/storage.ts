@@ -1,7 +1,14 @@
 import { promises as fs, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { ACCOUNT_LIMITS } from "./constants.js";
+import {
+  ACCOUNT_LIMITS,
+  ACCOUNTS_FILE_NAME,
+  FLAGGED_ACCOUNTS_FILE_NAME,
+  LEGACY_ACCOUNTS_FILE_NAME,
+  LEGACY_BLOCKED_ACCOUNTS_FILE_NAME,
+  LEGACY_FLAGGED_ACCOUNTS_FILE_NAME,
+} from "./constants.js";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
 import { AnyAccountStorageSchema, getValidationErrors } from "./schemas.js";
@@ -19,10 +26,6 @@ import {
 export type { CooldownReason, RateLimitStateV3, AccountMetadataV1, AccountStorageV1, AccountMetadataV3, AccountStorageV3 };
 
 const log = createLogger("storage");
-const ACCOUNTS_FILE_NAME = "openai-codex-accounts.json";
-const FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-flagged-accounts.json";
-const LEGACY_FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-blocked-accounts.json";
-
 export interface FlaggedAccountMetadataV1 extends AccountMetadataV3 {
 	flaggedAt: number;
 	flaggedReason?: string;
@@ -283,7 +286,7 @@ export function setStoragePath(projectPath: string | null): void {
   if (projectRoot) {
     currentProjectRoot = projectRoot;
     currentStoragePath = join(getProjectGlobalConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
-    currentLegacyProjectStoragePath = join(getProjectConfigDir(projectRoot), ACCOUNTS_FILE_NAME);
+    currentLegacyProjectStoragePath = join(getProjectConfigDir(projectRoot), LEGACY_ACCOUNTS_FILE_NAME);
   } else {
     currentStoragePath = null;
     currentLegacyProjectStoragePath = null;
@@ -316,53 +319,64 @@ function getLegacyFlaggedAccountsPath(): string {
 	return join(dirname(getStoragePath()), LEGACY_FLAGGED_ACCOUNTS_FILE_NAME);
 }
 
-async function migrateLegacyProjectStorageIfNeeded(
-  persist: (storage: AccountStorageV3) => Promise<void> = saveAccounts,
+function getLegacyBlockedAccountsPath(): string {
+	return join(dirname(getStoragePath()), LEGACY_BLOCKED_ACCOUNTS_FILE_NAME);
+}
+
+async function migrateStorageFileIfNeeded(
+  legacyPath: string | null,
+  nextPath: string,
+  persist: (storage: AccountStorageV3) => Promise<void>,
+  label: string,
 ): Promise<AccountStorageV3 | null> {
-  if (
-    !currentStoragePath ||
-    !currentLegacyProjectStoragePath ||
-    currentLegacyProjectStoragePath === currentStoragePath ||
-    !existsSync(currentLegacyProjectStoragePath)
-  ) {
+  if (!legacyPath || legacyPath === nextPath || !existsSync(legacyPath)) {
     return null;
   }
 
   try {
-    const legacyContent = await fs.readFile(currentLegacyProjectStoragePath, "utf-8");
+    const legacyContent = await fs.readFile(legacyPath, "utf-8");
     const legacyData = JSON.parse(legacyContent) as unknown;
     const normalized = normalizeAccountStorage(legacyData);
     if (!normalized) return null;
 
     await persist(normalized);
     try {
-      await fs.unlink(currentLegacyProjectStoragePath);
-      log.info("Removed legacy project account storage file after migration", {
-        path: currentLegacyProjectStoragePath,
-      });
+      await fs.unlink(legacyPath);
+      log.info(`Removed legacy ${label} after migration`, { path: legacyPath });
     } catch (unlinkError) {
       const code = (unlinkError as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
-        log.warn("Failed to remove legacy project account storage file after migration", {
-          path: currentLegacyProjectStoragePath,
+        log.warn(`Failed to remove legacy ${label} after migration`, {
+          path: legacyPath,
           error: String(unlinkError),
         });
       }
     }
-    log.info("Migrated legacy project account storage", {
-      from: currentLegacyProjectStoragePath,
-      to: currentStoragePath,
+    log.info(`Migrated legacy ${label}`, {
+      from: legacyPath,
+      to: nextPath,
       accounts: normalized.accounts.length,
     });
     return normalized;
   } catch (error) {
-    log.warn("Failed to migrate legacy project account storage", {
-      from: currentLegacyProjectStoragePath,
-      to: currentStoragePath,
+    log.warn(`Failed to migrate legacy ${label}`, {
+      from: legacyPath,
+      to: nextPath,
       error: String(error),
     });
     return null;
   }
+}
+
+async function migrateLegacyProjectStorageIfNeeded(
+  persist: (storage: AccountStorageV3) => Promise<void> = saveAccounts,
+): Promise<AccountStorageV3 | null> {
+  return migrateStorageFileIfNeeded(
+    currentLegacyProjectStoragePath,
+    getStoragePath(),
+    persist,
+    "project account storage",
+  );
 }
 
 function selectNewestAccount<T extends AccountLike>(
@@ -708,6 +722,24 @@ function getGlobalAccountsStoragePath(): string {
   return join(getConfigDir(), ACCOUNTS_FILE_NAME);
 }
 
+function getLegacyGlobalAccountsStoragePath(): string {
+  return join(getConfigDir(), LEGACY_ACCOUNTS_FILE_NAME);
+}
+
+async function migrateLegacyGlobalStorageIfNeeded(): Promise<AccountStorageV3 | null> {
+  const nextPath = getGlobalAccountsStoragePath();
+  const persistGlobalStorage = async (storage: AccountStorageV3): Promise<void> => {
+    await writeAccountsToPathUnlocked(nextPath, storage);
+  };
+
+  return migrateStorageFileIfNeeded(
+    getLegacyGlobalAccountsStoragePath(),
+    nextPath,
+    persistGlobalStorage,
+    "global account storage",
+  );
+}
+
 /**
  * Returns true when project-scoped storage is active and a global fallback is meaningful.
  */
@@ -722,6 +754,11 @@ function shouldUseProjectGlobalFallback(): boolean {
 async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
   if (!shouldUseProjectGlobalFallback() || !currentStoragePath) {
     return null;
+  }
+
+  const migrated = await migrateLegacyGlobalStorageIfNeeded();
+  if (migrated) {
+    return migrated;
   }
 
   const globalStoragePath = getGlobalAccountsStoragePath();
@@ -802,6 +839,13 @@ async function loadAccountsInternal(
         ? await migrateLegacyProjectStorageIfNeeded(persistMigration)
         : null;
       if (migrated) return migrated;
+      if (!shouldUseProjectGlobalFallback()) {
+        const migratedGlobal = persistMigration
+          ? await migrateLegacyGlobalStorageIfNeeded()
+          : null;
+        if (migratedGlobal) return migratedGlobal;
+        return null;
+      }
       const globalFallback = await loadGlobalAccountsFallback();
       if (!globalFallback) return null;
 
@@ -847,8 +891,7 @@ async function loadAccountsInternal(
  * Writes account storage without acquiring the outer storage mutex.
  * Callers must already be inside withStorageLock when using this helper directly.
  */
-async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
-  const path = getStoragePath();
+async function writeAccountsToPathUnlocked(path: string, storage: AccountStorageV3): Promise<void> {
   const uniqueSuffix = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
   const tempPath = `${path}.${uniqueSuffix}.tmp`;
 
@@ -895,6 +938,10 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
       err instanceof Error ? err : undefined
     );
   }
+}
+
+async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
+  await writeAccountsToPathUnlocked(getStoragePath(), storage);
 }
 
 /**
@@ -1057,37 +1104,40 @@ async function loadFlaggedAccountsUnlocked(
 		}
 	}
 
-	const legacyPath = getLegacyFlaggedAccountsPath();
-	if (!existsSync(legacyPath)) {
-		return empty;
+	for (const legacyPath of [getLegacyFlaggedAccountsPath(), getLegacyBlockedAccountsPath()]) {
+		if (!existsSync(legacyPath)) {
+			continue;
+		}
+
+		try {
+			const legacyContent = await fs.readFile(legacyPath, "utf-8");
+			const legacyData = JSON.parse(legacyContent) as unknown;
+			const migrated = normalizeFlaggedStorage(legacyData);
+			if (migrated.accounts.length > 0) {
+				await saveUnlocked(migrated);
+			}
+			try {
+				await fs.unlink(legacyPath);
+			} catch {
+				// Best effort cleanup.
+			}
+			log.info("Migrated legacy flagged account storage", {
+				from: legacyPath,
+				to: path,
+				accounts: migrated.accounts.length,
+			});
+			return migrated;
+		} catch (error) {
+			log.error("Failed to migrate legacy flagged account storage", {
+				from: legacyPath,
+				to: path,
+				error: String(error),
+			});
+			return empty;
+		}
 	}
 
-	try {
-		const legacyContent = await fs.readFile(legacyPath, "utf-8");
-		const legacyData = JSON.parse(legacyContent) as unknown;
-		const migrated = normalizeFlaggedStorage(legacyData);
-		if (migrated.accounts.length > 0) {
-			await saveUnlocked(migrated);
-		}
-		try {
-			await fs.unlink(legacyPath);
-		} catch {
-			// Best effort cleanup.
-		}
-		log.info("Migrated legacy flagged account storage", {
-			from: legacyPath,
-			to: path,
-			accounts: migrated.accounts.length,
-		});
-		return migrated;
-	} catch (error) {
-		log.error("Failed to migrate legacy flagged account storage", {
-			from: legacyPath,
-			to: path,
-			error: String(error),
-		});
-		return empty;
-	}
+	return empty;
 }
 
 export async function loadFlaggedAccounts(): Promise<FlaggedAccountStorageV1> {

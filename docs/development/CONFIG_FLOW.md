@@ -1,6 +1,6 @@
 # OpenCode Config Flow
 
-This document describes the current config surfaces used by `oc-chatgpt-multi-auth` on `main`.
+This document describes the current config surfaces used by `oc-codex-multi-auth` on `main`.
 
 ## Primary Config Surfaces
 
@@ -45,17 +45,17 @@ That file controls plugin behavior such as retry policy, beginner safe mode, fal
 
 ## Installer Flow
 
-`scripts/install-opencode-codex-auth.js` performs these steps:
+`scripts/install-oc-codex-multi-auth.js` performs these steps:
 
 1. Load the selected template set (`full` by default, `config/opencode-modern.json` with `--modern`, `config/opencode-legacy.json` with `--legacy`).
 2. Back up an existing `~/.config/opencode/opencode.json`.
-3. Normalize the plugin list so it ends with plain `oc-chatgpt-multi-auth`.
+3. Normalize the plugin list so it ends with plain `oc-codex-multi-auth`.
 4. Replace `provider.openai` with the selected shipped template block.
 5. Clear the cached OpenCode plugin copy under `~/.cache/opencode/`.
 
 Important detail:
 
-- The installer intentionally writes the plugin entry as `oc-chatgpt-multi-auth`, not `oc-chatgpt-multi-auth@latest`.
+- The installer intentionally writes the plugin entry as `oc-codex-multi-auth`, not `oc-codex-multi-auth@latest`.
 - The default `full` install mode merges the modern base-model template with the explicit legacy preset entries so users can access `--variant` workflows and still see the full shipped preset catalog directly.
 
 ## Shipped Template Structure
@@ -86,7 +86,7 @@ Example shape:
 
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth"],
+  "plugin": ["oc-codex-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -170,8 +170,8 @@ Important runtime behavior:
 | `<project>/.opencode.json` | project-local OpenCode override |
 | `~/.opencode/openai-codex-auth-config.json` | plugin runtime config |
 | `~/.opencode/auth/openai.json` | OAuth token storage |
-| `~/.opencode/openai-codex-accounts.json` | global account storage |
-| `~/.opencode/projects/<project-key>/openai-codex-accounts.json` | per-project account storage |
+| `~/.opencode/oc-codex-multi-auth-accounts.json` | global account storage |
+| `~/.opencode/projects/<project-key>/oc-codex-multi-auth-accounts.json` | per-project account storage |
 | `~/.opencode/logs/codex-plugin/` | plugin request/debug logs |
 
 ## See Also

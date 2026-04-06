@@ -3,8 +3,21 @@
  * Centralized for easy maintenance and configuration
  */
 
+/** Published package identifier used across runtime messages and install flows */
+export const PACKAGE_NAME = "oc-codex-multi-auth";
+
+/** Previous published package identifier kept for installer and storage migration */
+export const LEGACY_PACKAGE_NAME = "oc-chatgpt-multi-auth";
+
 /** Plugin identifier for logging and error messages */
-export const PLUGIN_NAME = "openai-codex-plugin";
+export const PLUGIN_NAME = PACKAGE_NAME;
+
+/** Storage file names for active and legacy account data */
+export const ACCOUNTS_FILE_NAME = "oc-codex-multi-auth-accounts.json";
+export const LEGACY_ACCOUNTS_FILE_NAME = "openai-codex-accounts.json";
+export const FLAGGED_ACCOUNTS_FILE_NAME = "oc-codex-multi-auth-flagged-accounts.json";
+export const LEGACY_FLAGGED_ACCOUNTS_FILE_NAME = "openai-codex-flagged-accounts.json";
+export const LEGACY_BLOCKED_ACCOUNTS_FILE_NAME = "openai-codex-blocked-accounts.json";
 
 /** Base URL for ChatGPT backend API */
 export const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -74,10 +87,10 @@ export const PLATFORM_OPENERS = {
 
 /** OAuth authorization labels */
 export const AUTH_LABELS = {
-	OAUTH: "ChatGPT Plus/Pro MULTI (Codex Subscription)",
-	OAUTH_DEVICE_CODE: "ChatGPT Plus/Pro MULTI (Device Code)",
-	OAUTH_MANUAL: "ChatGPT Plus/Pro MULTI (Manual URL Paste)",
-	API_KEY: "Manually enter API Key MULTI",
+	OAUTH: "Codex OAuth (ChatGPT Plus/Pro)",
+	OAUTH_DEVICE_CODE: "Codex OAuth (Device Code)",
+	OAUTH_MANUAL: "Codex OAuth (Manual URL Paste)",
+	API_KEY: "Manual API Key (Advanced)",
 	INSTRUCTIONS:
 		"A browser window should open. If it doesn't, copy the URL and open it manually.",
 	INSTRUCTIONS_MANUAL:

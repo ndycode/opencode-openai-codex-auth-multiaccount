@@ -19,7 +19,7 @@
  *
  * @license MIT (see LICENSE file)
  * @author numman-ali
- * @repository https://github.com/ndycode/oc-chatgpt-multi-auth
+ * @repository https://github.com/ndycode/oc-codex-multi-auth
 
  */
 
@@ -240,7 +240,7 @@ function upsertFlaggedAccountRecord(
  * @example
  * ```json
  * {
- *   "plugin": ["oc-chatgpt-multi-auth"],
+ *   "plugin": ["oc-codex-multi-auth"],
 
  *   "model": "openai/gpt-5-codex"
  * }

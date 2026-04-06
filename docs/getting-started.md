@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide covers the full installation and first-run flow for `oc-chatgpt-multi-auth`.
+This guide covers the full installation and first-run flow for `oc-codex-multi-auth`.
 
 ## Before You Begin
 
@@ -22,12 +22,12 @@ This guide covers the full installation and first-run flow for `oc-chatgpt-multi
 ## Fastest Install Path
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest
+npx -y oc-codex-multi-auth@latest
 opencode auth login
 opencode run "Explain this repository" --model=openai/gpt-5.4 --variant=medium
 ```
 
-The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, normalizes the plugin entry to `oc-chatgpt-multi-auth`, and clears the cached plugin copy so OpenCode reinstalls the latest package.
+The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, normalizes the plugin entry to `oc-codex-multi-auth`, and clears the cached plugin copy so OpenCode reinstalls the latest package.
 
 By default, the installer writes a full catalog config so you get both:
 - modern base model entries such as `gpt-5.4` for `--variant` workflows
@@ -36,13 +36,13 @@ By default, the installer writes a full catalog config so you get both:
 If you prefer the compact variant-only config on OpenCode `v1.0.210+`, use:
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest --modern
+npx -y oc-codex-multi-auth@latest --modern
 ```
 
 If you explicitly want the older explicit-only layout, use:
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest --legacy
+npx -y oc-codex-multi-auth@latest --legacy
 ```
 
 ## Install from Source
@@ -50,8 +50,8 @@ npx -y oc-chatgpt-multi-auth@latest --legacy
 Use this only when you want to develop or test the plugin locally.
 
 ```bash
-git clone https://github.com/ndycode/oc-chatgpt-multi-auth.git
-cd oc-chatgpt-multi-auth
+git clone https://github.com/ndycode/oc-codex-multi-auth.git
+cd oc-codex-multi-auth
 npm ci
 npm run build
 ```
@@ -60,7 +60,7 @@ Point OpenCode at the built plugin:
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/oc-chatgpt-multi-auth/dist"]
+  "plugin": ["file:///absolute/path/to/oc-codex-multi-auth/dist"]
 }
 ```
 
@@ -77,7 +77,7 @@ opencode auth login
 Then choose:
 
 1. `OpenAI`
-2. `ChatGPT Plus/Pro (Codex Subscription)`
+2. `Codex OAuth (ChatGPT Plus/Pro)`
 
 The browser-based OAuth flow uses the same local callback port as Codex CLI: `http://127.0.0.1:1455/auth/callback`.
 
@@ -86,9 +86,9 @@ The browser-based OAuth flow uses the same local callback port as Codex CLI: `ht
 If you are on SSH, WSL, or another environment where the browser callback flow is inconvenient:
 
 1. rerun `opencode auth login`
-2. choose `ChatGPT Plus/Pro MULTI (Device Code)`
+2. choose `Codex OAuth (Device Code)`
 3. open the verification link, enter the one-time code, and wait for login to finish
-4. if device code is unavailable on your auth server, fall back to `ChatGPT Plus/Pro MULTI (Manual URL Paste)`
+4. if device code is unavailable on your auth server, fall back to `Codex OAuth (Manual URL Paste)`
 
 ## Add the Plugin to OpenCode
 
@@ -97,7 +97,7 @@ If you are not using the installer, edit `~/.config/opencode/opencode.json` manu
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["oc-chatgpt-multi-auth"]
+  "plugin": ["oc-codex-multi-auth"]
 }
 ```
 
@@ -185,7 +185,7 @@ This mode forces a more conservative retry profile and reduces the chance of lon
 From npm:
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest
+npx -y oc-codex-multi-auth@latest
 ```
 
 From a local clone:

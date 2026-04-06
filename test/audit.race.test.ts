@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 
 describe("Audit Logger - Concurrency Tests", () => {
-    const testLogDir = path.join(os.tmpdir(), "oc-chatgpt-multi-auth-test-audit-2");
+    const testLogDir = path.join(os.tmpdir(), "oc-codex-multi-auth-test-audit-2");
     
     beforeAll(() => {
         if (fs.existsSync(testLogDir)) {

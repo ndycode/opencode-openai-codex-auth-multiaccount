@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Common setup, authentication, model, and request-debugging issues for `oc-chatgpt-multi-auth`.
+Common setup, authentication, model, and request-debugging issues for `oc-codex-multi-auth`.
 
 ---
 
@@ -47,18 +47,18 @@ if (plugin.includes("opencode-openai-codex-auth") || plugin.includes("opencode-c
 
 **Resolution:**
 
-The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`, which bypasses this check.
+The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`, and now to `oc-codex-multi-auth`, which remains the supported package line.
 
 **If you were using the old package:**
 
 Update your `~/.config/opencode/opencode.json`:
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth"]
+  "plugin": ["oc-codex-multi-auth"]
 }
 ```
 
-**Tracking:** [Issue #11](https://github.com/ndycode/oc-chatgpt-multi-auth/issues/11)
+**Tracking:** [Issue #11](https://github.com/ndycode/oc-codex-multi-auth/issues/11)
 
 </details>
 
@@ -77,10 +77,10 @@ Update your `~/.config/opencode/opencode.json`:
 1. **Verify config path and plugin list**:
    - Global: `~/.config/opencode/opencode.json`
    - Project: `./.opencode.json`
-   - Entry should include: `"plugin": ["oc-chatgpt-multi-auth"]`
+   - Entry should include: `"plugin": ["oc-codex-multi-auth"]`
 2. **Confirm plugin cache location** (npm plugins are cached, not stored in `~/.opencode/plugins/`):
    ```bash
-   ls ~/.cache/opencode/node_modules/oc-chatgpt-multi-auth
+   ls ~/.cache/opencode/node_modules/oc-codex-multi-auth
    ```
 3. **Remember: request logs only appear after the first OpenAI request**:
    ```bash
@@ -88,9 +88,9 @@ Update your `~/.config/opencode/opencode.json`:
    ```
 4. **Check registry access**:
    ```bash
-   npm view oc-chatgpt-multi-auth version
+   npm view oc-codex-multi-auth version
    ```
-5. **If the plugin is present but still won’t load**, rerun `npx -y oc-chatgpt-multi-auth@latest` so the installer refreshes the config and clears OpenCode's cached plugin copy.
+5. **If the plugin is present but still won’t load**, rerun `npx -y oc-codex-multi-auth@latest` so the installer refreshes the config and clears OpenCode's cached plugin copy.
 
 </details>
 
@@ -182,8 +182,8 @@ Failed to access Codex API
 
 1. **Manual URL paste:**
    - Re-run `opencode auth login`
-   - Select **"ChatGPT Plus/Pro MULTI (Device Code)"** first if you are on SSH, WSL, or a headless machine
-   - If device code is unavailable, fall back to **"ChatGPT Plus/Pro MULTI (Manual URL Paste)"**
+   - Select **"Codex OAuth (Device Code)"** first if you are on SSH, WSL, or a headless machine
+   - If device code is unavailable, fall back to **"Codex OAuth (Manual URL Paste)"**
    - Paste the full redirect URL after login when using the manual flow
 
 2. **Check port 1455 availability:**
@@ -236,7 +236,7 @@ Failed to access Codex API
 **Cause:** The plugin is using the wrong workspace/account id (personal vs business).
 
 **Solutions:**
-1. Upgrade to the current release of `oc-chatgpt-multi-auth` (workspace routing logic was hardened for Business + Personal dual accounts in the 5.x line).
+1. Upgrade to the current release of `oc-codex-multi-auth` (workspace routing logic was hardened for Business + Personal dual accounts in the 5.x line and renamed in 6.0.0).
 2. Re-run `opencode auth login` and select the correct workspace when prompted.
 3. If running non-interactively, set `CODEX_AUTH_ACCOUNT_ID` to the workspace account id and re-login.
 4. Verify the workspace has Codex access in the ChatGPT UI.
@@ -261,9 +261,9 @@ Failed to access Codex API
    opencode auth login
    ```
 2. Check account storage health (global and project-scoped):
-   - `~/.opencode/openai-codex-accounts.json`
-   - `~/.opencode/projects/<project-key>/openai-codex-accounts.json`
-   - `~/.opencode/openai-codex-flagged-accounts.json`
+   - `~/.opencode/oc-codex-multi-auth-accounts.json`
+   - `~/.opencode/projects/<project-key>/oc-codex-multi-auth-accounts.json`
+   - `~/.opencode/oc-codex-multi-auth-flagged-accounts.json`
 3. Remove obviously stale/duplicate entries and keep only verified accounts.
 4. Re-run with logging and inspect per-account failures:
    ```bash
@@ -417,7 +417,7 @@ Items are not persisted when `store` is set to false.
 
 **Solution:**
 ```bash
-npx -y oc-chatgpt-multi-auth@latest
+npx -y oc-codex-multi-auth@latest
 opencode
 ```
 
@@ -686,7 +686,7 @@ cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '{
    - Config file (redact sensitive info)
 
 3. **Check existing issues:**
-   [GitHub Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues)
+   [GitHub Issues](https://github.com/ndycode/oc-codex-multi-auth/issues)
 
 ### Reporting Bugs
 

@@ -579,9 +579,9 @@ describe("OpenAIOAuthPlugin", () => {
 
 		it("has three auth methods", () => {
 			expect(plugin.auth.methods).toHaveLength(3);
-			expect(plugin.auth.methods[0].label).toBe("ChatGPT Plus/Pro MULTI (Codex Subscription)");
-			expect(plugin.auth.methods[1].label).toBe("ChatGPT Plus/Pro MULTI (Device Code)");
-			expect(plugin.auth.methods[2].label).toBe("ChatGPT Plus/Pro MULTI (Manual URL Paste)");
+			expect(plugin.auth.methods[0].label).toBe("Codex OAuth (ChatGPT Plus/Pro)");
+			expect(plugin.auth.methods[1].label).toBe("Codex OAuth (Device Code)");
+			expect(plugin.auth.methods[2].label).toBe("Codex OAuth (Manual URL Paste)");
 		});
 
 		it("rejects manual OAuth callbacks with mismatched state", async () => {

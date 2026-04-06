@@ -1,16 +1,16 @@
 ---
-name: oc-chatgpt-setup
-description: Install or refresh oc-chatgpt-multi-auth in OpenCode, choose the right config mode, and verify ChatGPT Plus or Pro OAuth login.
+name: oc-codex-setup
+description: Install or refresh oc-codex-multi-auth in OpenCode, choose the right config mode, and verify Codex OAuth with ChatGPT Plus or Pro access.
 ---
 
-# oc-chatgpt-setup
+# oc-codex-setup
 
-Use this skill when the user wants to install, reinstall, upgrade, or troubleshoot `oc-chatgpt-multi-auth` in OpenCode.
+Use this skill when the user wants to install, reinstall, upgrade, or troubleshoot `oc-codex-multi-auth` in OpenCode.
 
 ## Default install
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest
+npx -y oc-codex-multi-auth@latest
 ```
 
 Use this when the user wants the full catalog config, including base entries like `gpt-5.4` and preset entries like `gpt-5.4-high`.
@@ -18,7 +18,7 @@ Use this when the user wants the full catalog config, including base entries lik
 ## Modern compact install
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest --modern
+npx -y oc-codex-multi-auth@latest --modern
 ```
 
 Use this on OpenCode `v1.0.210+` when the user wants the compact variant-based config.
@@ -40,7 +40,7 @@ opencode run "Refactor the retry logic and update the tests" --model=openai/gpt-
 
 ## Troubleshooting
 
-- Confirm `"plugin": ["oc-chatgpt-multi-auth"]` is present in the OpenCode config.
+- Confirm `"plugin": ["oc-codex-multi-auth"]` is present in the OpenCode config.
 - Re-run `opencode auth login` if tokens expired or the wrong workspace was selected.
 - Inspect `~/.opencode/logs/codex-plugin/` after a failed request.
 - Set `ENABLE_PLUGIN_REQUEST_LOGGING=1` for deeper request logging.

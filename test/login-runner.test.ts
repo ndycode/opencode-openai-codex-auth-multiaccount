@@ -37,7 +37,7 @@ describe("login-runner persistAccountPool", () => {
 			tmpdir(),
 			`login-runner-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		);
-		storagePath = join(testDir, "openai-codex-accounts.json");
+		storagePath = join(testDir, "oc-codex-multi-auth-accounts.json");
 		await fs.mkdir(testDir, { recursive: true });
 		setStoragePathDirect(storagePath);
 	});

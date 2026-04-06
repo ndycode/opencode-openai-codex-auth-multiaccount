@@ -1,17 +1,20 @@
-#!/usr/bin/env node
-
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PLUGIN_NAME = "oc-chatgpt-multi-auth";
+const PACKAGE_NAME = "oc-codex-multi-auth";
+const LEGACY_PACKAGE_NAMES = ["oc-chatgpt-multi-auth"];
 const WINDOWS_RENAME_RETRY_ATTEMPTS = 5;
 const WINDOWS_RENAME_RETRY_BASE_DELAY_MS = 10;
 
+function getManagedPackageNames() {
+	return [PACKAGE_NAME, ...LEGACY_PACKAGE_NAMES];
+}
+
 function printHelp() {
-	console.log(`Usage: ${PLUGIN_NAME} [--modern|--legacy] [--dry-run] [--no-cache-clear]\n\n` +
+	console.log(`Usage: ${PACKAGE_NAME} [--modern|--legacy] [--dry-run] [--no-cache-clear]\n\n` +
 		"Default behavior:\n" +
 		"  - Installs/updates global config at ~/.config/opencode/opencode.json\n" +
 		"  - Uses full catalog config by default (9 base models + 34 explicit presets)\n" +
@@ -61,7 +64,7 @@ function buildPaths(homeDir) {
 		configDir,
 		configPath: join(configDir, "opencode.json"),
 		cacheDir,
-		cacheNodeModules: join(cacheDir, "node_modules", PLUGIN_NAME),
+		cacheNodeModulesPaths: getManagedPackageNames().map((name) => join(cacheDir, "node_modules", name)),
 		cacheBunLock: join(cacheDir, "bun.lock"),
 		cachePackageJson: join(cacheDir, "package.json"),
 		modernTemplatePath,
@@ -94,11 +97,12 @@ function parseCliArgs(argv = process.argv.slice(2)) {
 
 function normalizePluginList(list) {
 	const entries = Array.isArray(list) ? list.filter(Boolean) : [];
+	const managedNames = getManagedPackageNames();
 	const filtered = entries.filter((entry) => {
 		if (typeof entry !== "string") return true;
-		return entry !== PLUGIN_NAME && !entry.startsWith(`${PLUGIN_NAME}@`);
+		return !managedNames.some((name) => entry === name || entry.startsWith(`${name}@`));
 	});
-	return [...filtered, PLUGIN_NAME];
+	return [...filtered, PACKAGE_NAME];
 }
 
 function formatJson(obj) {
@@ -143,8 +147,6 @@ async function renameWithWindowsRetry(sourcePath, destinationPath) {
 			return;
 		} catch (error) {
 			if (isWindowsLockError(error)) {
-				// Windows desktop installs often see brief AV/indexer locks on config
-				// files, so retry the atomic rename before surfacing a hard failure.
 				lastError = error;
 				await delay(WINDOWS_RENAME_RETRY_BASE_DELAY_MS * 2 ** attempt);
 				continue;
@@ -246,9 +248,13 @@ async function removePluginFromCachePackage(paths, dryRun) {
 	let changed = false;
 	for (const section of sections) {
 		const deps = cacheData?.[section];
-		if (deps && typeof deps === "object" && PLUGIN_NAME in deps) {
-			delete deps[PLUGIN_NAME];
-			changed = true;
+		if (deps && typeof deps === "object") {
+			for (const name of getManagedPackageNames()) {
+				if (name in deps) {
+					delete deps[name];
+					changed = true;
+				}
+			}
 		}
 	}
 
@@ -257,7 +263,7 @@ async function removePluginFromCachePackage(paths, dryRun) {
 	}
 
 	if (dryRun) {
-		log(`[dry-run] Would update ${paths.cachePackageJson} to remove ${PLUGIN_NAME}`);
+		log(`[dry-run] Would update ${paths.cachePackageJson} to remove ${getManagedPackageNames().join(", ")}`);
 		return;
 	}
 
@@ -272,10 +278,14 @@ async function clearCache(paths, dryRun, skipCacheClear) {
 	}
 
 	if (dryRun) {
-		log(`[dry-run] Would remove ${paths.cacheNodeModules}`);
+		for (const cacheNodeModulesPath of paths.cacheNodeModulesPaths) {
+			log(`[dry-run] Would remove ${cacheNodeModulesPath}`);
+		}
 		log(`[dry-run] Would remove ${paths.cacheBunLock}`);
 	} else {
-		await rm(paths.cacheNodeModules, { recursive: true, force: true });
+		for (const cacheNodeModulesPath of paths.cacheNodeModulesPaths) {
+			await rm(cacheNodeModulesPath, { recursive: true, force: true });
+		}
 		await rm(paths.cacheBunLock, { force: true });
 	}
 
@@ -305,7 +315,7 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 	}
 
 	const template = await loadTemplate(configMode, paths);
-	template.plugin = [PLUGIN_NAME];
+	template.plugin = [PACKAGE_NAME];
 
 	let nextConfig = template;
 	if (existsSync(paths.configPath)) {
@@ -323,8 +333,6 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 			merged.provider = provider;
 			nextConfig = merged;
 		} catch (error) {
-			// Only log the filesystem/parser message. Never echo config bodies because
-			// opencode.json may carry provider credentials or tokens.
 			log(`Warning: Could not parse existing config (${formatErrorForLog(error)}). Replacing with template.`);
 			nextConfig = template;
 		}
@@ -335,8 +343,6 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 	if (dryRun) {
 		log(`[dry-run] Would write ${paths.configPath} using ${configMode} config`);
 	} else {
-		// Persist through a temp file plus rename so Windows AV/file locks do not
-		// leave a truncated opencode.json behind during installer updates.
 		await writeFileAtomic(paths.configPath, formatJson(nextConfig));
 		log(`Wrote ${paths.configPath} (${configMode} config)`);
 	}
@@ -373,10 +379,3 @@ export const __test = {
 	renameWithWindowsRetry,
 	resolveHomeDirectory,
 };
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	runInstaller().catch((error) => {
-		console.error(`Installer failed: ${formatErrorForLog(error)}`);
-		process.exit(1);
-	});
-}

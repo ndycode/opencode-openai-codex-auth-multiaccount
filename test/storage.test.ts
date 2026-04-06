@@ -401,6 +401,7 @@ describe("storage", () => {
     });
 
     it("preserves same refresh token across different organizationId values during import", async () => {
+      setStoragePathDirect(testStoragePath);
       await fs.writeFile(
         exportPath,
         JSON.stringify({
@@ -1573,7 +1574,7 @@ describe("storage", () => {
       let attemptCount = 0;
       const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (oldPath, newPath) => {
         const destination = String(newPath);
-        if (destination.includes("openai-codex-flagged-accounts.json")) {
+        if (destination.includes("oc-codex-multi-auth-flagged-accounts.json")) {
           attemptCount += 1;
           if (attemptCount <= 2) {
             const err = new Error("EBUSY error") as NodeJS.ErrnoException;
@@ -1631,7 +1632,7 @@ describe("storage", () => {
     it("sets project-scoped path under global .opencode when project root found", () => {
       setStoragePath(process.cwd());
       const path = getStoragePath();
-      expect(path).toContain("openai-codex-accounts.json");
+      expect(path).toContain("oc-codex-multi-auth-accounts.json");
       expect(path).toContain(".opencode");
       expect(path).toContain("projects");
     });
@@ -1650,7 +1651,7 @@ describe("storage", () => {
     it("returns global path when no custom path set", () => {
       setStoragePathDirect(null);
       const path = getStoragePath();
-      expect(path).toContain("openai-codex-accounts.json");
+      expect(path).toContain("oc-codex-multi-auth-accounts.json");
     });
   });
 
