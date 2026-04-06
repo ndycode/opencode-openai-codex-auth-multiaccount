@@ -2,7 +2,7 @@
 
 all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 
-## [unreleased]
+## [6.0.0] - 2026-04-06
 
 ### added
 
@@ -12,6 +12,7 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **backup/import safety controls**: `codex-export` now supports auto timestamped backup paths; `codex-import` adds `dryRun` preview and automatic pre-import backup on apply.
 - **beginner safe mode config**: new `beginnerSafeMode` config key and `CODEX_AUTH_BEGINNER_SAFE_MODE` env override for conservative retry behavior.
 - **startup preflight summary**: one-time startup health summary with recommended next action.
+- **breaking rebrand migration**: current runtime storage now uses package-aligned files (`oc-codex-multi-auth-accounts.json`, `oc-codex-multi-auth-flagged-accounts.json`) with automatic migration from legacy package-era and pre-package storage names on first load.
 
 ### changed
 
@@ -19,12 +20,15 @@ all notable changes to this project. dates are ISO format (YYYY-MM-DD).
 - **docs refresh for operational flows**: README + docs portal/development guides updated to reflect beginner commands, safe mode, interactive picker behavior, and backup/import safeguards.
 - **repository presentation refresh**: rewrote the README as a landing page, added a public FAQ and code of conduct, refreshed package metadata, and removed stale CI/test claims from public docs surfaces.
 - **test matrix expansion**: coverage now includes beginner UI helpers, safe-fix diagnostics edge cases, tag/note command behavior, and timestamped backup/import preview utilities.
+- **package line renamed**: the supported package, repo, plugin entry, installer surface, and docs now use `oc-codex-multi-auth` instead of `oc-chatgpt-multi-auth`.
+- **codex-first auth wording**: OAuth options, installer guidance, and onboarding docs now describe the Codex-first flow directly instead of the older MULTI-branded labels.
 
 ### fixed
 
 - **non-interactive command guidance**: optional-index commands provide explicit usage guidance when interactive menus are unavailable.
 - **doctor safe-fix edge path**: `codex-doctor fix` now reports a clear non-crashing message when no eligible account is available for auto-switch.
 - **first-time import flow**: `codex-import` no longer fails with `No accounts to export` when storage is empty; pre-import backup is skipped cleanly in zero-account setups.
+- **installer cache hygiene**: the installer now removes both the old and new package names from OpenCode cache metadata so cutover installs do not stay pinned to stale artifacts.
 
 ## [5.4.8] - 2026-03-24
 

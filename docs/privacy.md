@@ -1,6 +1,6 @@
 # Privacy & Data Handling
 
-This page explains how `oc-chatgpt-multi-auth` handles local data, upstream requests, and debugging artifacts.
+This page explains how `oc-codex-multi-auth` handles local data, upstream requests, and debugging artifacts.
 
 ## Overview
 
@@ -171,7 +171,7 @@ However, data sent to OpenAI is subject to OpenAI's privacy practices.
 
 ### Open Source
 The entire plugin source code is available at:
-- **GitHub:** [https://github.com/ndycode/oc-chatgpt-multi-auth](https://github.com/ndycode/oc-chatgpt-multi-auth)
+- **GitHub:** [https://github.com/ndycode/oc-codex-multi-auth](https://github.com/ndycode/oc-codex-multi-auth)
 
 
 You can:
@@ -191,7 +191,7 @@ You can:
 ## Questions?
 
 For privacy-related questions:
-- **Plugin-specific:** [GitHub Issues](https://github.com/ndycode/oc-chatgpt-multi-auth/issues)
+- **Plugin-specific:** [GitHub Issues](https://github.com/ndycode/oc-codex-multi-auth/issues)
 
 - **OpenAI data handling:** [OpenAI Support](https://help.openai.com/)
 - **Security concerns:** See [SECURITY.md](../SECURITY.md)

@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for contributing to `oc-chatgpt-multi-auth`.
+Thank you for contributing to `oc-codex-multi-auth`.
 
 This project accepts improvements that make the OpenCode plugin clearer, safer, easier to maintain, and more useful for personal development workflows.
 

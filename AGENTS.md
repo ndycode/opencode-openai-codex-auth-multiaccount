@@ -64,8 +64,8 @@ npm run lint        # eslint
 ## NOTES
 - OAuth callback: `http://127.0.0.1:1455/auth/callback`.
 - ChatGPT backend requires `store: false`, include `reasoning.encrypted_content`.
-- Per-project accounts: `~/.opencode/projects/<project-key>/openai-codex-accounts.json` (walks up to find project root).
-- Global accounts: `~/.opencode/openai-codex-accounts.json`.
+- Per-project accounts: `~/.opencode/projects/<project-key>/oc-codex-multi-auth-accounts.json` (walks up to find project root).
+- Global accounts: `~/.opencode/oc-codex-multi-auth-accounts.json`.
 - Prompt templates synced from Codex CLI GitHub releases with ETag caching.
 - 5xx server errors trigger account rotation and health penalty (same as network errors).
 - API deprecation/sunset headers (RFC 8594) are logged as warnings.

@@ -1,12 +1,12 @@
-# oc-chatgpt-multi-auth
+# oc-codex-multi-auth
 
-[![npm version](https://img.shields.io/npm/v/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
-[![npm downloads](https://img.shields.io/npm/dw/oc-chatgpt-multi-auth.svg)](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
+[![npm version](https://img.shields.io/npm/v/oc-codex-multi-auth.svg)](https://www.npmjs.com/package/oc-codex-multi-auth)
+[![npm downloads](https://img.shields.io/npm/dw/oc-codex-multi-auth.svg)](https://www.npmjs.com/package/oc-codex-multi-auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/Codex model presets, and multi-account failover.
 
-`oc-chatgpt-multi-auth` is an OpenCode plugin for developers who want ChatGPT-backed GPT-5 and Codex workflows in OpenCode without switching to separate Platform API credentials for personal use. It uses the same official OAuth flow as the Codex CLI, adds model templates for current GPT-5 families, and can rotate across multiple ChatGPT accounts when one account is rate-limited or unavailable.
+`oc-codex-multi-auth` is an OpenCode plugin for developers who want Codex-first GPT-5 workflows in OpenCode without switching to separate Platform API credentials for personal use. It uses the same official OAuth flow as the Codex CLI, adds model templates for current GPT-5 families, and can rotate across multiple ChatGPT accounts when one account is rate-limited or unavailable.
 
 ## What This Project Does
 
@@ -19,7 +19,7 @@ Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/C
 
 ```bash
 # 1. Install or refresh the plugin config
-npx -y oc-chatgpt-multi-auth@latest
+npx -y oc-codex-multi-auth@latest
 
 # 2. Sign in with ChatGPT Plus/Pro
 opencode auth login
@@ -32,7 +32,7 @@ What the installer does:
 
 - writes `~/.config/opencode/opencode.json`
 - backs up an existing config before changing it
-- normalizes the plugin entry to `"oc-chatgpt-multi-auth"`
+- normalizes the plugin entry to `"oc-codex-multi-auth"`
 - clears the cached plugin copy so OpenCode reinstalls the latest package
 
 By default, the installer now writes a full catalog config that includes both:
@@ -103,7 +103,7 @@ Use the quick-start path above for the fastest setup. For full setup, local deve
 If you prefer the compact variant-only config on OpenCode `v1.0.210+`, use:
 
 ```bash
-npx -y oc-chatgpt-multi-auth@latest --modern
+npx -y oc-codex-multi-auth@latest --modern
 ```
 
 ## Configuration
@@ -125,7 +125,16 @@ Start here if the plugin does not load or authenticate correctly:
 
 Common first checks:
 
-- confirm `"plugin": ["oc-chatgpt-multi-auth"]` is present in your OpenCode config
+- confirm `"plugin": ["oc-codex-multi-auth"]` is present in your OpenCode config
+
+## 6.0.0 Cutover
+
+This release intentionally breaks the old package line and moves the runtime to package-aligned storage names.
+
+- Rename the GitHub repository to `ndycode/oc-codex-multi-auth`
+- Publish `oc-codex-multi-auth@6.0.0`
+- Deprecate `oc-chatgpt-multi-auth` on npm with a pointer to the new package
+- Verify docs, badges, repo links, and OpenCode config examples all resolve to `oc-codex-multi-auth`
 - rerun `opencode auth login`
 - inspect `~/.opencode/logs/codex-plugin/` after running one request with `ENABLE_PLUGIN_REQUEST_LOGGING=1`
 
