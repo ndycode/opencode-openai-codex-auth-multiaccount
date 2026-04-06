@@ -2,7 +2,7 @@
 
 ## What is this project?
 
-`oc-chatgpt-multi-auth` is an OpenCode plugin that lets you sign in with ChatGPT Plus/Pro through OAuth and use GPT-5/Codex model presets from OpenCode.
+`oc-codex-multi-auth` is an OpenCode plugin that lets you sign in with ChatGPT Plus/Pro through OAuth and use GPT-5/Codex model presets from OpenCode.
 
 ## Who is it for?
 
@@ -41,4 +41,4 @@ Start with [Troubleshooting](troubleshooting.md), rerun `opencode auth login`, a
 
 ## I used the old package name. What changed?
 
-The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`. If you still reference the old name in your OpenCode config, replace it with `oc-chatgpt-multi-auth`.
+The package was renamed from `opencode-openai-codex-auth-multi` to `oc-chatgpt-multi-auth`, and now from `oc-chatgpt-multi-auth` to `oc-codex-multi-auth`. If you still reference either older name in your OpenCode config, replace it with `oc-codex-multi-auth`.

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Complete reference for configuring `oc-chatgpt-multi-auth`. Most of this is optional; the defaults work for most people.
+Complete reference for configuring `oc-codex-multi-auth`. Most of this is optional; the defaults work for most people.
 
 ---
 
@@ -9,7 +9,7 @@ Complete reference for configuring `oc-chatgpt-multi-auth`. Most of this is opti
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["oc-chatgpt-multi-auth"],
+  "plugin": ["oc-codex-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -256,7 +256,7 @@ same settings for all models:
 
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth"],
+  "plugin": ["oc-codex-multi-auth"],
   "provider": {
     "openai": {
       "options": {
@@ -303,7 +303,7 @@ model options override global options.
 global (`~/.config/opencode/opencode.json`):
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth"],
+  "plugin": ["oc-codex-multi-auth"],
   "provider": {
     "openai": {
       "options": { "reasoningEffort": "medium" }
@@ -335,8 +335,8 @@ result: project uses `high`, other projects use `medium`.
 | `<project>/.opencode.json` | project-specific config |
 | `~/.opencode/openai-codex-auth-config.json` | plugin config |
 | `~/.opencode/auth/openai.json` | oauth tokens |
-| `~/.opencode/openai-codex-accounts.json` | global account storage |
-| `~/.opencode/projects/<project-key>/openai-codex-accounts.json` | per-project account storage |
+| `~/.opencode/oc-codex-multi-auth-accounts.json` | global account storage |
+| `~/.opencode/projects/<project-key>/oc-codex-multi-auth-accounts.json` | per-project account storage |
 | `~/.opencode/backups/codex-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | timestamped export backup (global storage mode) |
 | `~/.opencode/projects/<project-key>/backups/codex-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | timestamped export backup (per-project storage mode) |
 | `.../backups/codex-pre-import-backup-YYYYMMDD-HHMMSSmmm-<hex>.json` | automatic snapshot created before non-dry-run imports when existing accounts are present |

@@ -1,6 +1,6 @@
 # Test Suite
 
-This directory contains the Vitest suites for `oc-chatgpt-multi-auth`.
+This directory contains the Vitest suites for `oc-codex-multi-auth`.
 
 ## Test Structure
 

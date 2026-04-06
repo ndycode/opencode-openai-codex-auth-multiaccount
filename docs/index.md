@@ -1,4 +1,4 @@
-# oc-chatgpt-multi-auth Docs
+# oc-codex-multi-auth Docs
 
 Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/Codex model presets, and multi-account failover.
 
@@ -24,4 +24,4 @@ Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/C
 - [Changelog](../CHANGELOG.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Security Policy](../SECURITY.md)
-- [npm package](https://www.npmjs.com/package/oc-chatgpt-multi-auth)
+- [npm package](https://www.npmjs.com/package/oc-codex-multi-auth)

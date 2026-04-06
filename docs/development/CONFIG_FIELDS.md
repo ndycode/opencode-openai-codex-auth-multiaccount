@@ -1,6 +1,6 @@
 # Config Fields
 
-This document summarizes the current config fields that matter for `oc-chatgpt-multi-auth`.
+This document summarizes the current config fields that matter for `oc-codex-multi-auth`.
 
 ## Top-Level Fields
 
@@ -10,7 +10,7 @@ Use the plain package name in OpenCode config:
 
 ```json
 {
-  "plugin": ["oc-chatgpt-multi-auth"]
+  "plugin": ["oc-codex-multi-auth"]
 }
 ```
 

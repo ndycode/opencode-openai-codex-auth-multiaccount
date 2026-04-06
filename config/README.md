@@ -1,6 +1,6 @@
 # Configuration
 
-This directory contains the official OpenCode config templates for the ChatGPT Codex OAuth plugin.
+This directory contains the official OpenCode config templates for `oc-codex-multi-auth`.
 
 ## Required: choose the right config file
 
