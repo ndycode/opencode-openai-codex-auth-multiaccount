@@ -1,19 +1,13 @@
 import http from "node:http";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { OAuthServerInfo } from "../types.js";
 import { logError, logWarn } from "../logger.js";
+import { oauthSuccessHtml } from "../oauth-success.js";
 import {
 	OAUTH_CALLBACK_BIND_URL,
 	OAUTH_CALLBACK_LOOPBACK_HOST,
 	OAUTH_CALLBACK_PATH,
 	OAUTH_CALLBACK_PORT,
 } from "../runtime-contracts.js";
-
-// Resolve path to oauth-success.html (one level up from auth/ subfolder)
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const successHtml = fs.readFileSync(path.join(__dirname, "..", "oauth-success.html"), "utf-8");
 
 /**
  * Start a small local HTTP server that waits for /auth/callback and returns the code
@@ -46,7 +40,7 @@ export function startLocalOAuthServer({ state }: { state: string }): Promise<OAu
 			res.setHeader("X-Frame-Options", "DENY");
 			res.setHeader("X-Content-Type-Options", "nosniff");
 			res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'none'");
-			res.end(successHtml);
+			res.end(oauthSuccessHtml);
 			(server as http.Server & { _lastCode?: string })._lastCode = code;
 	} catch (err) {
 		logError(`Request handler error: ${(err as Error)?.message ?? String(err)}`);

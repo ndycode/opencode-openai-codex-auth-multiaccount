@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+export const oauthSuccessHtml = String.raw`<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -642,7 +642,7 @@
                 if (isNearMouse) {
                     // Matrix green color when near mouse
                     const intensity = 1 - (distanceFromMouse / hoverRadius);
-                    ctx.fillStyle = `rgba(0, 255, 65, ${intensity * 0.95})`;
+                    ctx.fillStyle = \`rgba(0, 255, 65, \${intensity * 0.95})\`;
                     ctx.shadowBlur = 20 * intensity;
                     ctx.shadowColor = '#00ff41';
                 } else {
@@ -705,8 +705,9 @@
             const moveY = (e.clientY - window.innerHeight / 2) / 50;
 
             document.querySelector('.container').style.transform =
-                `translate(${moveX}px, ${moveY}px)`;
+                \`translate(\${moveX}px, \${moveY}px)\`;
         });
     </script>
 </body>
 </html>
+`;

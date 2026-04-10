@@ -43,7 +43,7 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 - Source: root `index.ts` + `lib/`; `dist/` is generated output.
 - ESLint flat config: `no-explicit-any` enforced, unused args prefixed `_`.
 - Tests relax lint rules (see `eslint.config.js`).
-- Build copies `lib/oauth-success.html` to `dist/lib/` via `scripts/copy-oauth-success.js`.
+- Build emits `dist/lib/oauth-success.html` from the TypeScript source via `scripts/copy-oauth-success.js`.
 - ESM only (`"type": "module"`), Node >= 18.
 
 ## ANTI-PATTERNS (THIS PROJECT)

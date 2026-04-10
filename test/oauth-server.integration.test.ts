@@ -30,6 +30,7 @@ describe("OAuth Server Integration", () => {
 		const response = await fetch(callbackUrl);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toContain("text/html");
+		expect(await response.text()).toContain("ACCESS GRANTED");
 
 		// Server should have captured the code
 		const result = await serverInfo.waitForCode(testState);

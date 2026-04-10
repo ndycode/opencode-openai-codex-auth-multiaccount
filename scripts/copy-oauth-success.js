@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,20 +11,30 @@ function normalizePathForCompare(path) {
 }
 
 function getDefaultPaths() {
-	const src = join(__dirname, "..", "lib", "oauth-success.html");
+	const modulePath = join(__dirname, "..", "dist", "lib", "oauth-success.js");
 	const dest = join(__dirname, "..", "dist", "lib", "oauth-success.html");
-	return { src, dest };
+	return { modulePath, dest };
+}
+
+async function loadOAuthSuccessHtml(modulePath) {
+	const moduleUrl = pathToFileURL(modulePath).href;
+	const mod = await import(moduleUrl);
+	if (typeof mod.oauthSuccessHtml !== "string") {
+		throw new TypeError(`Expected oauthSuccessHtml string export from ${modulePath}`);
+	}
+	return mod.oauthSuccessHtml;
 }
 
 export async function copyOAuthSuccessHtml(options = {}) {
 	const defaults = getDefaultPaths();
-	const src = options.src ?? defaults.src;
+	const modulePath = options.modulePath ?? defaults.modulePath;
 	const dest = options.dest ?? defaults.dest;
+	const html = options.html ?? (await loadOAuthSuccessHtml(modulePath));
 
 	await fs.mkdir(dirname(dest), { recursive: true });
-	await fs.copyFile(src, dest);
+	await fs.writeFile(dest, html, "utf-8");
 
-	return { src, dest };
+	return { modulePath, dest };
 }
 
 const isDirectRun = (() => {

@@ -1,0 +1,3 @@
+eslint.config.js linguist-detectable=false
+scripts/*.js linguist-detectable=false
+scripts/*.sh linguist-detectable=false

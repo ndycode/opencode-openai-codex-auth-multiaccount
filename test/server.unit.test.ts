@@ -27,10 +27,8 @@ vi.mock('node:http', () => {
 	};
 });
 
-vi.mock('node:fs', () => ({
-	default: {
-		readFileSync: vi.fn(() => '<html>Success</html>'),
-	},
+vi.mock('../lib/oauth-success.js', () => ({
+	oauthSuccessHtml: '<html>Success</html>',
 }));
 
 vi.mock('../lib/logger.js', () => ({
