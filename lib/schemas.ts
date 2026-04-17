@@ -425,3 +425,203 @@ export function getValidationErrors(schema: z.ZodType, data: unknown): string[] 
 		return `${path}${issue.message}`;
 	});
 }
+
+// ============================================================================
+// JWT Payload Schema (process boundary: decoded JWT from OAuth provider)
+// ============================================================================
+
+/**
+ * JWT payload schema.
+ *
+ * The JWT is produced by the OAuth provider (ChatGPT backend) and decoded on
+ * the client. Unknown claims are preserved via `catchall(z.unknown())` so we
+ * never reject a valid-but-unfamiliar token, but the claims we actually read
+ * (account id, email, organization hints) are shape-checked. A failed parse
+ * causes callers to treat the JWT as opaque (same behavior as an undecodable
+ * JWT) instead of blindly casting arbitrary JSON into our `JWTPayload` type.
+ */
+export const JWTPayloadSchema = z
+	.object({
+		"https://api.openai.com/auth": z
+			.object({
+				chatgpt_account_id: z.string().optional(),
+				organizations: z.unknown().optional(),
+				email: z.string().optional(),
+				chatgpt_user_email: z.string().optional(),
+			})
+			.catchall(z.unknown())
+			.optional(),
+		organizations: z.unknown().optional(),
+		orgs: z.unknown().optional(),
+		accounts: z.unknown().optional(),
+		workspaces: z.unknown().optional(),
+		teams: z.unknown().optional(),
+		email: z.string().optional(),
+		preferred_username: z.string().optional(),
+	})
+	.catchall(z.unknown());
+
+export type JWTPayloadFromSchema = z.infer<typeof JWTPayloadSchema>;
+
+/**
+ * Safely parse a decoded JWT payload.
+ * Returns null on failure so callers can treat the token as opaque.
+ */
+export function safeParseJWTPayload(data: unknown): JWTPayloadFromSchema | null {
+	const result = JWTPayloadSchema.safeParse(data);
+	if (!result.success) {
+		return null;
+	}
+	return result.data;
+}
+
+// ============================================================================
+// Prompt Cache Metadata Schemas (process boundary: on-disk cache files)
+// ============================================================================
+
+/**
+ * Cache metadata for Codex instructions fetched from GitHub.
+ *
+ * File lives at `~/.opencode/cache/<model>-instructions-meta.json` and is
+ * read at startup and after stale-while-revalidate refreshes. The file can be
+ * corrupted, truncated, or produced by a different plugin version, so the
+ * schema is strict: invalid files fall back to "no cached metadata" (the
+ * same state as a missing file) and force a fresh fetch.
+ */
+export const CacheMetadataSchema = z.object({
+	etag: z.string().nullable(),
+	tag: z.string(),
+	lastChecked: z.number(),
+	url: z.string(),
+});
+
+export type CacheMetadataFromSchema = z.infer<typeof CacheMetadataSchema>;
+
+export function safeParseCacheMetadata(data: unknown): CacheMetadataFromSchema | null {
+	const result = CacheMetadataSchema.safeParse(data);
+	if (!result.success) {
+		return null;
+	}
+	return result.data;
+}
+
+/**
+ * Cache metadata for the OpenCode codex prompt fetched from GitHub.
+ *
+ * File lives at `~/.opencode/cache/opencode-codex-meta.json`. Same trust
+ * considerations as `CacheMetadataSchema`; fall back to empty cache on
+ * parse failure instead of crashing the prompt fetcher.
+ */
+export const OpenCodeCodexCacheMetaSchema = z.object({
+	etag: z.string(),
+	lastFetch: z.string().optional(),
+	lastChecked: z.number(),
+	sourceUrl: z.string().optional(),
+});
+
+export type OpenCodeCodexCacheMetaFromSchema = z.infer<typeof OpenCodeCodexCacheMetaSchema>;
+
+export function safeParseOpenCodeCodexCacheMeta(
+	data: unknown,
+): OpenCodeCodexCacheMetaFromSchema | null {
+	const result = OpenCodeCodexCacheMetaSchema.safeParse(data);
+	if (!result.success) {
+		return null;
+	}
+	return result.data;
+}
+
+// ============================================================================
+// Environment Variable Schemas (process boundary: process.env)
+// ============================================================================
+
+/**
+ * Boolean env-var parser.
+ *
+ * Historical semantics (kept verbatim for backward compatibility with the
+ * pre-RC-9 `parseBooleanEnv` helper): the literal string `"1"` is truthy, any
+ * other non-empty string (including `"0"`, `"yes"`, `"true"`) is falsy, and
+ * `undefined` remains `undefined` so callers can fall back to the config
+ * file / hard-coded default. The schema does not throw on invalid input;
+ * boolean env vars are a process boundary but one where permissive parsing
+ * is the documented contract.
+ */
+export const EnvBooleanSchema = z
+	.string()
+	.optional()
+	.transform((value): boolean | undefined => {
+		if (value === undefined) return undefined;
+		return value === "1";
+	});
+
+/**
+ * Numeric env-var parser.
+ *
+ * Accepts any string that coerces to a finite JS number. Non-finite values
+ * (empty string, `"abc"`, `"NaN"`, `"Infinity"` treated as non-finite) fall
+ * back to undefined so callers can apply config-file / hard-coded defaults
+ * instead of silently using a poisoned value.
+ */
+export const EnvNumberSchema = z
+	.string()
+	.optional()
+	.transform((value): number | undefined => {
+		if (value === undefined) return undefined;
+		const trimmed = value.trim();
+		if (trimmed.length === 0) return undefined;
+		const parsed = Number(trimmed);
+		return Number.isFinite(parsed) ? parsed : undefined;
+	});
+
+/**
+ * Factory for a string-enum env-var parser.
+ *
+ * Produces a Zod schema that trims+lower-cases the raw env value and accepts
+ * it only when it is a member of `allowed`. Any other value becomes
+ * undefined so the caller falls back to the config file / default.
+ */
+export function makeEnvEnumSchema<T extends string>(
+	allowed: ReadonlySet<T> | readonly T[],
+) {
+	const set: ReadonlySet<string> =
+		allowed instanceof Set ? (allowed as ReadonlySet<string>) : new Set(allowed);
+	return z
+		.string()
+		.optional()
+		.transform((value): T | undefined => {
+			if (value === undefined) return undefined;
+			const trimmed = value.trim().toLowerCase();
+			if (trimmed.length === 0) return undefined;
+			return set.has(trimmed) ? (trimmed as T) : undefined;
+		});
+}
+
+/**
+ * Schema for `CODEX_AUTH_ACCOUNT_ID`.
+ *
+ * A manual account-id override supplied via env var. Must be a non-empty
+ * trimmed string within a sane length bound; empty / whitespace-only /
+ * absurdly-long values fall back to undefined so the rotation code picks
+ * an account from the configured pool instead of honouring a bogus override.
+ */
+const ACCOUNT_ID_OVERRIDE_MAX_LENGTH = 256;
+
+export const AccountIdOverrideSchema = z
+	.string()
+	.optional()
+	.transform((value): string | undefined => {
+		if (value === undefined) return undefined;
+		const trimmed = value.trim();
+		if (trimmed.length === 0) return undefined;
+		if (trimmed.length > ACCOUNT_ID_OVERRIDE_MAX_LENGTH) return undefined;
+		return trimmed;
+	});
+
+/**
+ * Parse an env-var value through the account-id override schema.
+ * Returns `undefined` on any validation failure.
+ */
+export function parseAccountIdOverride(value: string | undefined): string | undefined {
+	const result = AccountIdOverrideSchema.safeParse(value);
+	return result.success ? result.data : undefined;
+}
