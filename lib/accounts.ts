@@ -1,34 +1,36 @@
-import { existsSync, promises as fs } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import type { Auth } from "@opencode-ai/sdk";
-import { createLogger } from "./logger.js";
-import {
-	loadAccounts,
-	saveAccounts,
-	type AccountStorageV3,
-	type CooldownReason,
-	type RateLimitStateV3,
-} from "./storage.js";
-import type { AccountIdSource, OAuthAuthDetails } from "./types.js";
-import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
-import {
-	getHealthTracker,
-	getTokenTracker,
-	selectHybridAccount,
-	type AccountWithMetrics,
-	type HybridSelectionOptions,
-} from "./rotation.js";
-import { nowMs } from "./utils.js";
-import { decodeJWT } from "./auth/auth.js";
-import { registerCleanup, unregisterCleanup } from "./shutdown.js";
-import { CodexCliAccountsSchema } from "./schemas.js";
-
 /**
- * Upper bound the shutdown handler will wait for `flushPendingSave` so that a
- * jammed save cannot stall SIGINT/SIGTERM indefinitely.
+ * AccountManager — slim orchestrator that composes four domain services:
+ *
+ *  - {@link AccountState}       — in-memory account registry + per-family indices
+ *  - {@link AccountPersistence} — debounced disk saves, shutdown-flush lifecycle
+ *  - {@link AccountRotation}    — selection, rate-limit and cooldown management
+ *  - {@link AccountRecovery}    — auth-failure tracking, Codex CLI hydration,
+ *                                  merge-safe removal
+ *
+ * This module preserves the public API that existed before the RC-7 split so
+ * that `new AccountManager(...)` and every instance method keeps working for
+ * external callers (`index.ts`, `lib/tools/*`, `lib/parallel-probe.ts`, etc.).
  */
-const SHUTDOWN_FLUSH_TIMEOUT_MS = 5_000;
+
+import type { Auth } from "@opencode-ai/sdk";
+import { loadAccounts, type AccountStorageV3, type CooldownReason } from "./storage.js";
+import type { HybridSelectionOptions } from "./rotation.js";
+import type { OAuthAuthDetails } from "./types.js";
+import type { ModelFamily } from "./prompts/codex.js";
+import {
+	AccountPersistence,
+} from "./accounts/persistence.js";
+import { AccountRecovery } from "./accounts/recovery.js";
+import { AccountRotation } from "./accounts/rotation.js";
+import {
+	AccountState,
+	type AccountSelectionExplainability,
+	type ManagedAccount,
+} from "./accounts/state.js";
+import { formatWaitTime, type RateLimitReason } from "./accounts/rate-limits.js";
+import { nowMs } from "./utils.js";
+
+export type { AccountSelectionExplainability, ManagedAccount } from "./accounts/state.js";
 
 export {
 	extractAccountId,
@@ -56,388 +58,62 @@ export {
 	type RateLimitedEntity,
 } from "./accounts/rate-limits.js";
 
-import {
-	extractAccountId,
-	extractAccountEmail,
-	shouldUpdateAccountIdFromToken,
-	sanitizeEmail,
-} from "./auth/token-utils.js";
-import {
-	clampNonNegativeInt,
-	getQuotaKey,
-	clearExpiredRateLimits,
-	isRateLimitedForFamily,
-	formatWaitTime,
-	type RateLimitReason,
-} from "./accounts/rate-limits.js";
-
-const log = createLogger("accounts");
-
-export type CodexCliTokenCacheEntry = {
-	accessToken: string;
-	expiresAt?: number;
-	refreshToken?: string;
-	accountId?: string;
-};
-
-const CODEX_CLI_ACCOUNTS_PATH = join(homedir(), ".codex", "accounts.json");
-const CODEX_CLI_CACHE_TTL_MS = 5_000;
-let codexCliTokenCache: Map<string, CodexCliTokenCacheEntry> | null = null;
-let codexCliTokenCacheLoadedAt = 0;
-
-function extractExpiresAtFromAccessToken(accessToken: string): number | undefined {
-	const decoded = decodeJWT(accessToken);
-	const exp = decoded?.exp;
-	if (typeof exp === "number" && Number.isFinite(exp)) {
-		// JWT exp is in seconds since epoch.
-		return exp * 1000;
-	}
-	return undefined;
-}
-
-async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEntry> | null> {
-	const syncEnabled = process.env.CODEX_AUTH_SYNC_CODEX_CLI !== "0";
-	const skip =
-		!syncEnabled ||
-		process.env.VITEST_WORKER_ID !== undefined ||
-		process.env.NODE_ENV === "test";
-	if (skip) return null;
-
-	const now = nowMs();
-	if (codexCliTokenCache && now - codexCliTokenCacheLoadedAt < CODEX_CLI_CACHE_TTL_MS) {
-		return codexCliTokenCache;
-	}
-	codexCliTokenCacheLoadedAt = now;
-
-	if (!existsSync(CODEX_CLI_ACCOUNTS_PATH)) {
-		codexCliTokenCache = null;
-		return null;
-	}
-
-	try {
-		const raw = await fs.readFile(CODEX_CLI_ACCOUNTS_PATH, "utf-8");
-		const rawParsed = JSON.parse(raw) as unknown;
-
-		// Cross-process trust boundary: the Codex CLI accounts file is produced
-		// by a separate process on disk and may be stale, truncated, tampered
-		// with, or produced by a version whose shape we do not recognise. We
-		// MUST validate through the Zod schema before reading any field; a
-		// parse failure is a warn+skip, never a throw (audit top-20 #11).
-		const validation = CodexCliAccountsSchema.safeParse(rawParsed);
-		if (!validation.success) {
-			log.warn("Codex CLI accounts cache failed validation; ignoring", {
-				issues: validation.error.issues.length,
-				firstPath: validation.error.issues[0]?.path.join(".") ?? "(root)",
-			});
-			codexCliTokenCache = null;
-			return null;
-		}
-
-		const validated = validation.data;
-		const entries = Array.isArray(validated.accounts) ? validated.accounts : [];
-
-		const next = new Map<string, CodexCliTokenCacheEntry>();
-		for (const entry of entries) {
-			const email = sanitizeEmail(typeof entry.email === "string" ? entry.email : undefined);
-			if (!email) continue;
-
-			const accountId =
-				typeof entry.accountId === "string" && entry.accountId.trim()
-					? entry.accountId.trim()
-					: undefined;
-
-			const tokens = entry.auth?.tokens;
-			const accessToken =
-				typeof tokens?.access_token === "string" && tokens.access_token.trim()
-					? tokens.access_token.trim()
-					: undefined;
-			const refreshToken =
-				typeof tokens?.refresh_token === "string" && tokens.refresh_token.trim()
-					? tokens.refresh_token.trim()
-					: undefined;
-
-			if (!accessToken) continue;
-
-			next.set(email, {
-				accessToken,
-				expiresAt: extractExpiresAtFromAccessToken(accessToken),
-				refreshToken,
-				accountId,
-			});
-		}
-
-		codexCliTokenCache = next;
-		return codexCliTokenCache;
-	} catch (error) {
-		log.debug("Failed to read Codex CLI accounts cache", { error: String(error) });
-		codexCliTokenCache = null;
-		return null;
-	}
-}
-
-export async function lookupCodexCliTokensByEmail(
-	email: string | undefined,
-): Promise<CodexCliTokenCacheEntry | null> {
-	const normalized = sanitizeEmail(email);
-	if (!normalized) return null;
-	const cache = await getCodexCliTokenCache();
-	const cached = cache?.get(normalized);
-	return cached ? { ...cached } : null;
-}
-
-function initFamilyState(defaultValue: number): Record<ModelFamily, number> {
-	return Object.fromEntries(
-		MODEL_FAMILIES.map((family) => [family, defaultValue]),
-	) as Record<ModelFamily, number>;
-}
-
-export interface ManagedAccount {
-	index: number;
-	accountId?: string;
-	organizationId?: string;
-	accountIdSource?: AccountIdSource;
-	accountLabel?: string;
-	accountTags?: string[];
-	accountNote?: string;
-	email?: string;
-	refreshToken: string;
-	enabled?: boolean;
-	access?: string;
-	expires?: number;
-	addedAt: number;
-	lastUsed: number;
-	lastSwitchReason?: "rate-limit" | "initial" | "rotation";
-	lastRateLimitReason?: RateLimitReason;
-	rateLimitResetTimes: RateLimitStateV3;
-	coolingDownUntil?: number;
-	cooldownReason?: CooldownReason;
-}
-
-export interface AccountSelectionExplainability {
-	index: number;
-	enabled: boolean;
-	isCurrentForFamily: boolean;
-	eligible: boolean;
-	reasons: string[];
-	healthScore: number;
-	tokensAvailable: number;
-	rateLimitedUntil?: number;
-	coolingDownUntil?: number;
-	cooldownReason?: CooldownReason;
-	lastUsed: number;
-}
+export {
+	lookupCodexCliTokensByEmail,
+	type CodexCliTokenCacheEntry,
+} from "./accounts/recovery.js";
 
 export class AccountManager {
-	private accounts: ManagedAccount[] = [];
-	private cursorByFamily: Record<ModelFamily, number> = initFamilyState(0);
-	private currentAccountIndexByFamily: Record<ModelFamily, number> = initFamilyState(-1);
-	private lastToastAccountIndex = -1;
-	private lastToastTime = 0;
-	private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-	private pendingSave: Promise<void> | null = null;
-	private authFailuresByRefreshToken: Map<string, number> = new Map();
+	private readonly state: AccountState;
+	private readonly persistence: AccountPersistence;
+	private readonly rotation: AccountRotation;
+	private readonly recovery: AccountRecovery;
+
 	/**
-	 * Per-refresh-token promise chain used to serialize concurrent
-	 * `incrementAuthFailures` calls. Prevents lost updates when two org-variant
-	 * accounts that share a refresh token observe an auth failure at once — see
-	 * audit finding `docs/audits/03-critical-issues.md` (ledger id `47`).
+	 * Alias to `state.authFailuresByRefreshToken`. Preserved as a property on
+	 * the orchestrator so that pre-split tests and diagnostics that reach in
+	 * via `Reflect.get(manager, "authFailuresByRefreshToken")` continue to see
+	 * the live map without edits. Internal use only.
 	 */
-	private incrementAuthFailuresChain: Map<string, Promise<number>> = new Map();
-	private shutdownHandler: (() => Promise<void>) | null = null;
+	private get authFailuresByRefreshToken(): Map<string, number> {
+		return this.state.authFailuresByRefreshToken;
+	}
+
+	constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
+		this.state = new AccountState();
+		this.persistence = new AccountPersistence(this.state);
+		this.rotation = new AccountRotation(this.state);
+		this.recovery = new AccountRecovery(this.state, this.persistence);
+		this.state.initializeFromStorage(authFallback, stored);
+	}
 
 	static async loadFromDisk(authFallback?: OAuthAuthDetails): Promise<AccountManager> {
 		const stored = await loadAccounts();
 		const manager = new AccountManager(authFallback, stored);
-		await manager.hydrateFromCodexCli();
+		await manager.recovery.hydrateFromCodexCli();
 		return manager;
 	}
 
+	// ----- state delegations -----
+
 	hasRefreshToken(refreshToken: string): boolean {
-		return this.accounts.some((account) => account.refreshToken === refreshToken);
-	}
-
-	private async hydrateFromCodexCli(): Promise<void> {
-		const cache = await getCodexCliTokenCache();
-		if (!cache || cache.size === 0) return;
-
-		const now = nowMs();
-		let changed = false;
-
-		for (const account of this.accounts) {
-			const email = sanitizeEmail(account.email);
-			if (!email) continue;
-
-			const cached = cache.get(email);
-			if (!cached) continue;
-
-			if (typeof cached.expiresAt === "number" && cached.expiresAt <= now) {
-				continue;
-			}
-
-			const missingOrExpired =
-				!account.access || account.expires === undefined || account.expires <= now;
-			if (missingOrExpired) {
-				account.access = cached.accessToken;
-				if (typeof cached.expiresAt === "number") {
-					account.expires = cached.expiresAt;
-				}
-				changed = true;
-			}
-
-			if (
-				!account.accountId &&
-				cached.accountId &&
-				shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId)
-			) {
-				account.accountId = cached.accountId;
-				account.accountIdSource = account.accountIdSource ?? "token";
-				changed = true;
-			}
-		}
-
-		if (!changed) return;
-
-		try {
-			await this.saveToDisk();
-		} catch (error) {
-			log.debug("Failed to persist Codex CLI cache hydration", { error: String(error) });
-		}
-	}
-
-	constructor(authFallback?: OAuthAuthDetails, stored?: AccountStorageV3 | null) {
-		const fallbackAccountId = extractAccountId(authFallback?.access);
-		const fallbackAccountEmail = sanitizeEmail(extractAccountEmail(authFallback?.access));
-
-		if (stored && stored.accounts.length > 0) {
-			const baseNow = nowMs();
-			this.accounts = stored.accounts
-				.map((account, index): ManagedAccount | null => {
-					if (!account.refreshToken || typeof account.refreshToken !== "string") {
-						return null;
-					}
-
-					const matchesFallback =
-						!!authFallback &&
-						((fallbackAccountId && account.accountId === fallbackAccountId) ||
-							account.refreshToken === authFallback.refresh ||
-							(!!fallbackAccountEmail &&
-								sanitizeEmail(account.email) === fallbackAccountEmail));
-
-					const refreshToken = matchesFallback && authFallback ? authFallback.refresh : account.refreshToken;
- 
-					return {
-						index,
-						accountId: matchesFallback ? fallbackAccountId ?? account.accountId : account.accountId,
-						organizationId: account.organizationId,
-						accountIdSource: account.accountIdSource,
-						accountLabel: account.accountLabel,
-						accountTags: account.accountTags,
-						accountNote: account.accountNote,
-						email: matchesFallback
-							? fallbackAccountEmail ?? sanitizeEmail(account.email)
-							: sanitizeEmail(account.email),
-						refreshToken,
-						enabled: account.enabled !== false,
-						access: matchesFallback && authFallback ? authFallback.access : account.accessToken,
-						expires: matchesFallback && authFallback ? authFallback.expires : account.expiresAt,
-						addedAt: clampNonNegativeInt(account.addedAt, baseNow),
-						lastUsed: clampNonNegativeInt(account.lastUsed, 0),
-						lastSwitchReason: account.lastSwitchReason,
-						rateLimitResetTimes: account.rateLimitResetTimes ?? {},
-						coolingDownUntil: account.coolingDownUntil,
-						cooldownReason: account.cooldownReason,
-					};
-				})
-				.filter((account): account is ManagedAccount => account !== null);
-
-			const hasMatchingFallback =
-				!!authFallback &&
-				this.accounts.some(
-					(account) =>
-						account.refreshToken === authFallback.refresh ||
-						(fallbackAccountId && account.accountId === fallbackAccountId) ||
-						(!!fallbackAccountEmail && account.email === fallbackAccountEmail),
-				);
-
-			if (authFallback && !hasMatchingFallback) {
-				const now = nowMs();
-				this.accounts.push({
-					index: this.accounts.length,
-					accountId: fallbackAccountId,
-					organizationId: undefined,
-					accountIdSource: fallbackAccountId ? "token" : undefined,
-					email: fallbackAccountEmail,
-					refreshToken: authFallback.refresh,
-					enabled: true,
-					access: authFallback.access,
-					expires: authFallback.expires,
-					addedAt: now,
-					lastUsed: now,
-					lastSwitchReason: "initial",
-					rateLimitResetTimes: {},
-				});
-			}
-
-			if (this.accounts.length > 0) {
-				const defaultIndex = clampNonNegativeInt(stored.activeIndex, 0) % this.accounts.length;
-
-				for (const family of MODEL_FAMILIES) {
-					const rawIndex = stored.activeIndexByFamily?.[family];
-					const nextIndex = clampNonNegativeInt(rawIndex, defaultIndex) % this.accounts.length;
-					this.currentAccountIndexByFamily[family] = nextIndex;
-					this.cursorByFamily[family] = nextIndex;
-				}
-			}
-			return;
-		}
-
-		if (authFallback) {
-			const now = nowMs();
-			this.accounts = [
-				{
-					index: 0,
-					accountId: fallbackAccountId,
-					organizationId: undefined,
-					accountIdSource: fallbackAccountId ? "token" : undefined,
-					email: fallbackAccountEmail,
-					refreshToken: authFallback.refresh,
-					enabled: true,
-					access: authFallback.access,
-					expires: authFallback.expires,
-					addedAt: now,
-					lastUsed: 0,
-					lastSwitchReason: "initial",
-					rateLimitResetTimes: {},
-				},
-			];
-			for (const family of MODEL_FAMILIES) {
-				this.currentAccountIndexByFamily[family] = 0;
-				this.cursorByFamily[family] = 0;
-			}
-		}
+		return this.state.hasRefreshToken(refreshToken);
 	}
 
 	getAccountCount(): number {
-		return this.accounts.length;
+		return this.state.getAccountCount();
 	}
 
 	getActiveIndex(): number {
-		return this.getActiveIndexForFamily("codex");
+		return this.state.getActiveIndexForFamily("codex");
 	}
 
 	getActiveIndexForFamily(family: ModelFamily): number {
-		const index = this.currentAccountIndexByFamily[family];
-		if (index < 0 || index >= this.accounts.length) {
-			return this.accounts.length > 0 ? 0 : -1;
-		}
-		return index;
+		return this.state.getActiveIndexForFamily(family);
 	}
 
 	getAccountsSnapshot(): ManagedAccount[] {
-		return this.accounts.map((account) => ({
-			...account,
-			rateLimitResetTimes: { ...account.rateLimitResetTimes },
-		}));
+		return this.state.getAccountsSnapshot();
 	}
 
 	getSelectionExplainability(
@@ -445,256 +121,137 @@ export class AccountManager {
 		model?: string | null,
 		now = nowMs(),
 	): AccountSelectionExplainability[] {
-		const quotaKey = model ? `${family}:${model}` : family;
-		const baseQuotaKey = getQuotaKey(family);
-		const modelQuotaKey = model ? getQuotaKey(family, model) : null;
-		const currentIndex = this.currentAccountIndexByFamily[family];
-		const healthTracker = getHealthTracker();
-		const tokenTracker = getTokenTracker();
-
-		return this.accounts.map((account) => {
-			clearExpiredRateLimits(account);
-			const enabled = account.enabled !== false;
-			const reasons: string[] = [];
-			let rateLimitedUntil: number | undefined;
-			const baseRateLimit = account.rateLimitResetTimes[baseQuotaKey];
-			const modelRateLimit = modelQuotaKey ? account.rateLimitResetTimes[modelQuotaKey] : undefined;
-			if (typeof baseRateLimit === "number" && baseRateLimit > now) {
-				rateLimitedUntil = baseRateLimit;
-			}
-			if (
-				typeof modelRateLimit === "number" &&
-				modelRateLimit > now &&
-				(rateLimitedUntil === undefined || modelRateLimit > rateLimitedUntil)
-			) {
-				rateLimitedUntil = modelRateLimit;
-			}
-
-			const coolingDownUntil =
-				typeof account.coolingDownUntil === "number" && account.coolingDownUntil > now
-					? account.coolingDownUntil
-					: undefined;
-
-			if (!enabled) reasons.push("disabled");
-			if (rateLimitedUntil !== undefined) reasons.push("rate-limited");
-			if (coolingDownUntil !== undefined) {
-				reasons.push(
-					account.cooldownReason ? `cooldown:${account.cooldownReason}` : "cooldown",
-				);
-			}
-
-			const tokensAvailable = tokenTracker.getTokens(account.index, quotaKey);
-			if (tokensAvailable < 1) reasons.push("token-bucket-empty");
-
-			const eligible =
-				enabled &&
-				rateLimitedUntil === undefined &&
-				coolingDownUntil === undefined &&
-				tokensAvailable >= 1;
-			if (reasons.length === 0) reasons.push("eligible");
-
-			return {
-				index: account.index,
-				enabled,
-				isCurrentForFamily: currentIndex === account.index,
-				eligible,
-				reasons,
-				healthScore: healthTracker.getScore(account.index, quotaKey),
-				tokensAvailable,
-				rateLimitedUntil,
-				coolingDownUntil,
-				cooldownReason: coolingDownUntil !== undefined ? account.cooldownReason : undefined,
-				lastUsed: account.lastUsed,
-			};
-		});
+		return this.state.getSelectionExplainability(family, model, now);
 	}
 
 	setActiveIndex(index: number): ManagedAccount | null {
-		if (!Number.isFinite(index)) return null;
-		if (index < 0 || index >= this.accounts.length) return null;
-		const account = this.accounts[index];
-		if (!account) return null;
-		if (account.enabled === false) return null;
-
-		for (const family of MODEL_FAMILIES) {
-			this.currentAccountIndexByFamily[family] = index;
-			this.cursorByFamily[family] = index;
-		}
-
-		account.lastUsed = nowMs();
-		account.lastSwitchReason = "rotation";
-		return account;
+		return this.state.setActiveIndex(index);
 	}
 
 	getCurrentAccount(): ManagedAccount | null {
-		return this.getCurrentAccountForFamily("codex");
+		return this.state.getCurrentAccountForFamily("codex");
 	}
 
 	getCurrentAccountForFamily(family: ModelFamily): ManagedAccount | null {
-		const index = this.currentAccountIndexByFamily[family];
-		if (index < 0 || index >= this.accounts.length) {
-			return null;
-		}
-		const account = this.accounts[index];
-		if (!account || account.enabled === false) {
-			return null;
-		}
-		return account;
+		return this.state.getCurrentAccountForFamily(family);
 	}
+
+	shouldShowAccountToast(accountIndex: number, debounceMs = 30000): boolean {
+		return this.state.shouldShowAccountToast(accountIndex, debounceMs);
+	}
+
+	markToastShown(accountIndex: number): void {
+		this.state.markToastShown(accountIndex);
+	}
+
+	updateFromAuth(account: ManagedAccount, auth: OAuthAuthDetails): void {
+		this.state.updateFromAuth(account, auth);
+	}
+
+	toAuthDetails(account: ManagedAccount): Auth {
+		return this.state.toAuthDetails(account);
+	}
+
+	markSwitched(
+		account: ManagedAccount,
+		reason: "rate-limit" | "initial" | "rotation",
+		family: ModelFamily,
+	): void {
+		this.state.markSwitched(account, reason, family);
+	}
+
+	removeAccount(account: ManagedAccount): boolean {
+		return this.state.removeAccount(account);
+	}
+
+	removeAccountByIndex(index: number): boolean {
+		return this.state.removeAccountByIndex(index);
+	}
+
+	setAccountEnabled(index: number, enabled: boolean): ManagedAccount | null {
+		return this.state.setAccountEnabled(index, enabled);
+	}
+
+	isAccountCoolingDown(account: ManagedAccount): boolean {
+		return this.state.isAccountCoolingDown(account);
+	}
+
+	clearAccountCooldown(account: ManagedAccount): void {
+		this.state.clearAccountCooldown(account);
+	}
+
+	// ----- rotation delegations -----
 
 	getCurrentOrNext(): ManagedAccount | null {
-		return this.getCurrentOrNextForFamily("codex");
+		return this.rotation.getCurrentOrNextForFamily("codex");
 	}
 
-	getCurrentOrNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
-		const count = this.accounts.length;
-		if (count === 0) return null;
-
-		const cursor = this.cursorByFamily[family];
-		
-		for (let i = 0; i < count; i++) {
-			const idx = (cursor + i) % count;
-			const account = this.accounts[idx];
-			if (!account) continue;
-			if (account.enabled === false) continue;
-			
-			clearExpiredRateLimits(account);
-			if (isRateLimitedForFamily(account, family, model) || this.isAccountCoolingDown(account)) {
-				continue;
-			}
-			
-			this.cursorByFamily[family] = (idx + 1) % count;
-			this.currentAccountIndexByFamily[family] = idx;
-			account.lastUsed = nowMs();
-			return account;
-		}
-
-		return null;
+	getCurrentOrNextForFamily(
+		family: ModelFamily,
+		model?: string | null,
+	): ManagedAccount | null {
+		return this.rotation.getCurrentOrNextForFamily(family, model);
 	}
 
 	getNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
-		const count = this.accounts.length;
-		if (count === 0) return null;
-
-		const cursor = this.cursorByFamily[family];
-		
-		for (let i = 0; i < count; i++) {
-			const idx = (cursor + i) % count;
-			const account = this.accounts[idx];
-			if (!account) continue;
-			if (account.enabled === false) continue;
-			
-			clearExpiredRateLimits(account);
-			if (isRateLimitedForFamily(account, family, model) || this.isAccountCoolingDown(account)) {
-				continue;
-			}
-			
-			this.cursorByFamily[family] = (idx + 1) % count;
-			account.lastUsed = nowMs();
-			return account;
-		}
-
-		return null;
+		return this.rotation.getNextForFamily(family, model);
 	}
 
-	getCurrentOrNextForFamilyHybrid(family: ModelFamily, model?: string | null, options?: HybridSelectionOptions): ManagedAccount | null {
-		const count = this.accounts.length;
-		if (count === 0) return null;
-
-		const currentIndex = this.currentAccountIndexByFamily[family];
-		if (currentIndex >= 0 && currentIndex < count) {
-			const currentAccount = this.accounts[currentIndex];
-			if (currentAccount) {
-				if (currentAccount.enabled === false) {
-					// Fall through to hybrid selection.
-				} else {
-				clearExpiredRateLimits(currentAccount);
-				if (
-					!isRateLimitedForFamily(currentAccount, family, model) &&
-					!this.isAccountCoolingDown(currentAccount)
-				) {
-					currentAccount.lastUsed = nowMs();
-					return currentAccount;
-				}
-				}
-			}
-		}
-
-		const quotaKey = model ? `${family}:${model}` : family;
-		const healthTracker = getHealthTracker();
-		const tokenTracker = getTokenTracker();
-
-		const accountsWithMetrics: AccountWithMetrics[] = this.accounts
-			.map((account): AccountWithMetrics | null => {
-				if (!account) return null;
-				if (account.enabled === false) return null;
-				clearExpiredRateLimits(account);
-				const isAvailable =
-					!isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
-				return {
-					index: account.index,
-					isAvailable,
-					lastUsed: account.lastUsed,
-				};
-			})
-			.filter((a): a is AccountWithMetrics => a !== null);
-
-		const selected = selectHybridAccount(accountsWithMetrics, healthTracker, tokenTracker, quotaKey, {}, options);
-		if (!selected) return null;
-
-		const account = this.accounts[selected.index];
-		if (!account) return null;
-
-		this.currentAccountIndexByFamily[family] = account.index;
-		this.cursorByFamily[family] = (account.index + 1) % count;
-		account.lastUsed = nowMs();
-		return account;
+	getCurrentOrNextForFamilyHybrid(
+		family: ModelFamily,
+		model?: string | null,
+		options?: HybridSelectionOptions,
+	): ManagedAccount | null {
+		return this.rotation.getCurrentOrNextForFamilyHybrid(family, model, options);
 	}
 
-	recordSuccess(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
-		const quotaKey = model ? `${family}:${model}` : family;
-		const healthTracker = getHealthTracker();
-		healthTracker.recordSuccess(account.index, quotaKey);
+	recordSuccess(
+		account: ManagedAccount,
+		family: ModelFamily,
+		model?: string | null,
+	): void {
+		this.rotation.recordSuccess(account, family, model);
 	}
 
-	recordRateLimit(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
-		const quotaKey = model ? `${family}:${model}` : family;
-		const healthTracker = getHealthTracker();
-		const tokenTracker = getTokenTracker();
-		healthTracker.recordRateLimit(account.index, quotaKey);
-		tokenTracker.drain(account.index, quotaKey);
+	recordRateLimit(
+		account: ManagedAccount,
+		family: ModelFamily,
+		model?: string | null,
+	): void {
+		this.rotation.recordRateLimit(account, family, model);
 	}
 
-	recordFailure(account: ManagedAccount, family: ModelFamily, model?: string | null): void {
-		const quotaKey = model ? `${family}:${model}` : family;
-		const healthTracker = getHealthTracker();
-		healthTracker.recordFailure(account.index, quotaKey);
+	recordFailure(
+		account: ManagedAccount,
+		family: ModelFamily,
+		model?: string | null,
+	): void {
+		this.rotation.recordFailure(account, family, model);
 	}
 
-	consumeToken(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
-		const quotaKey = model ? `${family}:${model}` : family;
-		const tokenTracker = getTokenTracker();
-		return tokenTracker.tryConsume(account.index, quotaKey);
+	consumeToken(
+		account: ManagedAccount,
+		family: ModelFamily,
+		model?: string | null,
+	): boolean {
+		return this.rotation.consumeToken(account, family, model);
 	}
 
-	/**
-	 * Refund a token consumed within the refund window (30 seconds).
-	 * Use this when a request fails due to network errors (not rate limits).
-	 * @returns true if refund was successful, false if no valid consumption found
-	 */
-	refundToken(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
-		const quotaKey = model ? `${family}:${model}` : family;
-		const tokenTracker = getTokenTracker();
-		return tokenTracker.refundToken(account.index, quotaKey);
+	refundToken(
+		account: ManagedAccount,
+		family: ModelFamily,
+		model?: string | null,
+	): boolean {
+		return this.rotation.refundToken(account, family, model);
 	}
 
-	markSwitched(account: ManagedAccount, reason: "rate-limit" | "initial" | "rotation", family: ModelFamily): void {
-		account.lastSwitchReason = reason;
-		this.currentAccountIndexByFamily[family] = account.index;
-	}
-
-	markRateLimited(account: ManagedAccount, retryAfterMs: number, family: ModelFamily, model?: string | null): void {
-		this.markRateLimitedWithReason(account, retryAfterMs, family, "unknown", model);
+	markRateLimited(
+		account: ManagedAccount,
+		retryAfterMs: number,
+		family: ModelFamily,
+		model?: string | null,
+	): void {
+		this.rotation.markRateLimited(account, retryAfterMs, family, model);
 	}
 
 	markRateLimitedWithReason(
@@ -704,395 +261,71 @@ export class AccountManager {
 		reason: RateLimitReason,
 		model?: string | null,
 	): void {
-		const retryMs = Math.max(0, Math.floor(retryAfterMs));
-		const resetAt = nowMs() + retryMs;
-
-		const baseKey = getQuotaKey(family);
-		account.rateLimitResetTimes[baseKey] = resetAt;
-
-		if (model) {
-			const modelKey = getQuotaKey(family, model);
-			account.rateLimitResetTimes[modelKey] = resetAt;
-		}
-
-		account.lastRateLimitReason = reason;
+		this.rotation.markRateLimitedWithReason(account, retryAfterMs, family, reason, model);
 	}
 
-	markAccountCoolingDown(account: ManagedAccount, cooldownMs: number, reason: CooldownReason): void {
-		const ms = Math.max(0, Math.floor(cooldownMs));
-		account.coolingDownUntil = nowMs() + ms;
-		account.cooldownReason = reason;
+	markAccountCoolingDown(
+		account: ManagedAccount,
+		cooldownMs: number,
+		reason: CooldownReason,
+	): void {
+		this.rotation.markAccountCoolingDown(account, cooldownMs, reason);
 	}
 
-	/**
-	 * Mark every in-memory account sharing a refresh token as cooling down.
-	 * @returns Number of live accounts updated.
-	 */
 	markAccountsWithRefreshTokenCoolingDown(
 		refreshToken: string,
 		cooldownMs: number,
 		reason: CooldownReason,
 	): number {
-		const matches = this.accounts.filter((account) => account.refreshToken === refreshToken);
-		for (const account of matches) {
-			this.markAccountCoolingDown(account, cooldownMs, reason);
-		}
-		return matches.length;
-	}
-
-	isAccountCoolingDown(account: ManagedAccount): boolean {
-		if (account.coolingDownUntil === undefined) return false;
-		if (nowMs() >= account.coolingDownUntil) {
-			this.clearAccountCooldown(account);
-			return false;
-		}
-		return true;
-	}
-
-	clearAccountCooldown(account: ManagedAccount): void {
-		delete account.coolingDownUntil;
-		delete account.cooldownReason;
-	}
-
-	/**
-	 * Atomically increment the auth-failure counter for the account's refresh
-	 * token and return the post-increment value.
-	 *
-	 * The read-modify-write is serialized through a per-refresh-token promise
-	 * chain so that concurrent callers (for example, two org-variant accounts
-	 * sharing a refresh token that fail auth simultaneously) cannot lose an
-	 * increment. Without serialization both callers could read the same stale
-	 * value, both compute `+1`, and both write the same result — masking a hard
-	 * auth failure and causing the manager to keep hammering a dead token.
-	 *
-	 * Callers must `await` the returned promise before branching on the
-	 * threshold (see `index.ts` auth-refresh failure path).
-	 */
-	async incrementAuthFailures(account: ManagedAccount): Promise<number> {
-		const key = account.refreshToken;
-		const prev = this.incrementAuthFailuresChain.get(key) ?? Promise.resolve(0);
-		const next = prev.then(() => {
-			const currentFailures = this.authFailuresByRefreshToken.get(key) ?? 0;
-			const newFailures = currentFailures + 1;
-			this.authFailuresByRefreshToken.set(key, newFailures);
-			return newFailures;
-		});
-		this.incrementAuthFailuresChain.set(key, next);
-		try {
-			return await next;
-		} finally {
-			// Drop the chain entry only if no later caller has already replaced it.
-			if (this.incrementAuthFailuresChain.get(key) === next) {
-				this.incrementAuthFailuresChain.delete(key);
-			}
-		}
-	}
-
-	/**
-	 * Return the current auth-failure counter for the account's refresh token
-	 * without mutating state. Intended for tests and diagnostics.
-	 */
-	getAuthFailures(account: ManagedAccount): number {
-		return this.authFailuresByRefreshToken.get(account.refreshToken) ?? 0;
-	}
-
-	/**
-	 * Clear the authentication failure counter for the given account's refresh token.
-	 *
-	 * Notes:
-	 * - Failure counts are tracked per refresh token (not per account), so this clears
-	 *   shared failure state for all org variants that reuse the same token.
-	 * - Failure counts are in-memory only for the current AccountManager instance.
-	 */
-	clearAuthFailures(account: ManagedAccount): void {
-		this.authFailuresByRefreshToken.delete(account.refreshToken);
-	}
-
-	shouldShowAccountToast(accountIndex: number, debounceMs = 30000): boolean {
-		const now = nowMs();
-		if (accountIndex === this.lastToastAccountIndex && now - this.lastToastTime < debounceMs) {
-			return false;
-		}
-		return true;
-	}
-
-	markToastShown(accountIndex: number): void {
-		this.lastToastAccountIndex = accountIndex;
-		this.lastToastTime = nowMs();
-	}
-
-	updateFromAuth(account: ManagedAccount, auth: OAuthAuthDetails): void {
-		const previousRefreshToken = account.refreshToken;
-		account.refreshToken = auth.refresh;
-		account.access = auth.access;
-		account.expires = auth.expires;
-		if (previousRefreshToken !== account.refreshToken) {
-			this.authFailuresByRefreshToken.delete(previousRefreshToken);
-		}
-		const tokenAccountId = extractAccountId(auth.access);
-		if (
-			tokenAccountId &&
-			(shouldUpdateAccountIdFromToken(account.accountIdSource, account.accountId))
-		) {
-			account.accountId = tokenAccountId;
-			account.accountIdSource = "token";
-		}
-		account.email = sanitizeEmail(extractAccountEmail(auth.access)) ?? account.email;
-	}
-
-	toAuthDetails(account: ManagedAccount): Auth {
-		return {
-			type: "oauth",
-			access: account.access ?? "",
-			refresh: account.refreshToken,
-			expires: account.expires ?? 0,
-		};
+		return this.rotation.markAccountsWithRefreshTokenCoolingDown(
+			refreshToken,
+			cooldownMs,
+			reason,
+		);
 	}
 
 	getMinWaitTime(): number {
-		return this.getMinWaitTimeForFamily("codex");
+		return this.rotation.getMinWaitTimeForFamily("codex");
 	}
 
 	getMinWaitTimeForFamily(family: ModelFamily, model?: string | null): number {
-		const now = nowMs();
-		const enabledAccounts = this.accounts.filter((account) => account.enabled !== false);
-		const available = enabledAccounts.filter((account) => {
-			clearExpiredRateLimits(account);
-			return !isRateLimitedForFamily(account, family, model) && !this.isAccountCoolingDown(account);
-		});
-		if (available.length > 0) return 0;
-		if (enabledAccounts.length === 0) return 0;
-
-		const waitTimes: number[] = [];
-		const baseKey = getQuotaKey(family);
-		const modelKey = model ? getQuotaKey(family, model) : null;
-
-		for (const account of enabledAccounts) {
-			const baseResetAt = account.rateLimitResetTimes[baseKey];
-			if (typeof baseResetAt === "number") {
-				waitTimes.push(Math.max(0, baseResetAt - now));
-			}
-
-			if (modelKey) {
-				const modelResetAt = account.rateLimitResetTimes[modelKey];
-				if (typeof modelResetAt === "number") {
-					waitTimes.push(Math.max(0, modelResetAt - now));
-				}
-			}
-
-			if (typeof account.coolingDownUntil === "number") {
-				waitTimes.push(Math.max(0, account.coolingDownUntil - now));
-			}
-		}
-
-		return waitTimes.length > 0 ? Math.min(...waitTimes) : 0;
+		return this.rotation.getMinWaitTimeForFamily(family, model);
 	}
 
-	removeAccount(account: ManagedAccount): boolean {
-		const idx = this.accounts.indexOf(account);
-		if (idx < 0) {
-			return false;
-		}
-
-		this.accounts.splice(idx, 1);
-		this.accounts.forEach((acc, index) => {
-			acc.index = index;
-		});
-
-		if (this.accounts.length === 0) {
-			for (const family of MODEL_FAMILIES) {
-				this.cursorByFamily[family] = 0;
-				this.currentAccountIndexByFamily[family] = -1;
-			}
-			return true;
-		}
-
-		for (const family of MODEL_FAMILIES) {
-			if (this.cursorByFamily[family] > idx) {
-				this.cursorByFamily[family] = Math.max(0, this.cursorByFamily[family] - 1);
-			}
-		}
-		for (const family of MODEL_FAMILIES) {
-			this.cursorByFamily[family] = this.cursorByFamily[family] % this.accounts.length;
-		}
-
-		for (const family of MODEL_FAMILIES) {
-			if (this.currentAccountIndexByFamily[family] > idx) {
-				this.currentAccountIndexByFamily[family] -= 1;
-			}
-			if (this.currentAccountIndexByFamily[family] >= this.accounts.length) {
-				this.currentAccountIndexByFamily[family] = -1;
-			}
-		}
-
-		return true;
-	}
-
-	removeAccountByIndex(index: number): boolean {
-		if (!Number.isFinite(index)) return false;
-		if (index < 0 || index >= this.accounts.length) return false;
-		const account = this.accounts[index];
-		if (!account) return false;
-		return this.removeAccount(account);
-	}
-
-	/**
-	 * Remove all accounts that share the same refreshToken as the given account.
-	 * This is used when auth refresh fails to remove all org variants together.
-	 * @returns Number of accounts removed
-	 */
-	removeAccountsWithSameRefreshToken(account: ManagedAccount): number {
-		const refreshToken = account.refreshToken;
-		// Snapshot first because removeAccount mutates this.accounts.
-		const accountsToRemove = this.accounts.filter((acc) => acc.refreshToken === refreshToken);
-		let removedCount = 0;
-
-		for (const accountToRemove of accountsToRemove) {
-			if (this.removeAccount(accountToRemove)) {
-				removedCount++;
-			}
-		}
-
-		// Clear stale auth failure state for this refresh token
-		this.authFailuresByRefreshToken.delete(refreshToken);
-
-		return removedCount;
-	}
-
-	setAccountEnabled(index: number, enabled: boolean): ManagedAccount | null {
-		if (!Number.isFinite(index)) return null;
-		if (index < 0 || index >= this.accounts.length) return null;
-		const account = this.accounts[index];
-		if (!account) return null;
-		account.enabled = enabled;
-		return account;
-	}
+	// ----- persistence delegations -----
 
 	async saveToDisk(): Promise<void> {
-		const activeIndexByFamily: Partial<Record<ModelFamily, number>> = {};
-		for (const family of MODEL_FAMILIES) {
-			const raw = this.currentAccountIndexByFamily[family];
-			activeIndexByFamily[family] = clampNonNegativeInt(raw, 0);
-		}
-
-		const activeIndex = clampNonNegativeInt(activeIndexByFamily.codex, 0);
-
-		const storage: AccountStorageV3 = {
-			version: 3,
-			accounts: this.accounts.map((account) => ({
-				accountId: account.accountId,
-				organizationId: account.organizationId,
-				accountIdSource: account.accountIdSource,
-				accountLabel: account.accountLabel,
-				accountTags: account.accountTags,
-				accountNote: account.accountNote,
-				email: account.email,
-				refreshToken: account.refreshToken,
-				accessToken: account.access,
-				expiresAt: account.expires,
-				enabled: account.enabled === false ? false : undefined,
-				addedAt: account.addedAt,
-				lastUsed: account.lastUsed,
-				lastSwitchReason: account.lastSwitchReason,
-				rateLimitResetTimes:
-					Object.keys(account.rateLimitResetTimes).length > 0 ? account.rateLimitResetTimes : undefined,
-				coolingDownUntil: account.coolingDownUntil,
-				cooldownReason: account.cooldownReason,
-			})),
-			activeIndex,
-			activeIndexByFamily,
-		};
-
-		await saveAccounts(storage);
+		await this.persistence.saveToDisk();
 	}
 
 	saveToDiskDebounced(delayMs = 500): void {
-		this.ensureShutdownFlushRegistered();
-		if (this.saveDebounceTimer) {
-			clearTimeout(this.saveDebounceTimer);
-		}
-		this.saveDebounceTimer = setTimeout(() => {
-			this.saveDebounceTimer = null;
-			const doSave = async () => {
-				try {
-					if (this.pendingSave) {
-						await this.pendingSave;
-					}
-					this.pendingSave = this.saveToDisk().finally(() => {
-						this.pendingSave = null;
-					});
-					await this.pendingSave;
-				} catch (error) {
-					log.warn("Debounced save failed", { error: error instanceof Error ? error.message : String(error) });
-				}
-			};
-			void doSave();
-		}, delayMs);
+		this.persistence.saveToDiskDebounced(delayMs);
 	}
 
 	async flushPendingSave(): Promise<void> {
-		if (this.saveDebounceTimer) {
-			clearTimeout(this.saveDebounceTimer);
-			this.saveDebounceTimer = null;
-			await this.saveToDisk();
-		}
-		if (this.pendingSave) {
-			await this.pendingSave;
-		}
+		await this.persistence.flushPendingSave();
 	}
 
-	/**
-	 * Registers a process-shutdown cleanup that awaits any pending debounced
-	 * save. Without this, a rotation queued inside the 500ms debounce window
-	 * would be lost when SIGINT/SIGTERM fires before the timer resolves.
-	 * Registration is lazy (only when `saveToDiskDebounced` is first invoked)
-	 * so idle managers do not leak handlers into the shutdown queue.
-	 */
-	private ensureShutdownFlushRegistered(): void {
-		if (this.shutdownHandler) return;
-		const handler = async (): Promise<void> => {
-			// One-shot: clear the slot first so that if `runCleanup()` fires
-			// externally (e.g. tests reusing a manager across cycles, or any
-			// other caller that drains the global cleanup queue), a subsequent
-			// `saveToDiskDebounced()` can re-register a fresh handler. Without
-			// this the guard above returns early and the next pending save
-			// goes unprotected on shutdown.
-			this.shutdownHandler = null;
-			let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-			try {
-				await Promise.race([
-					this.flushPendingSave(),
-					new Promise<void>((_resolve, reject) => {
-						timeoutTimer = setTimeout(() => {
-							reject(
-								new Error(
-									`flushPendingSave timed out after ${SHUTDOWN_FLUSH_TIMEOUT_MS}ms`,
-								),
-							);
-						}, SHUTDOWN_FLUSH_TIMEOUT_MS);
-					}),
-				]);
-			} catch (error) {
-				log.warn("Shutdown flush failed", {
-					error: error instanceof Error ? error.message : String(error),
-				});
-			} finally {
-				if (timeoutTimer) clearTimeout(timeoutTimer);
-			}
-		};
-		this.shutdownHandler = handler;
-		registerCleanup(handler);
-	}
-
-	/**
-	 * Removes this manager's shutdown cleanup registration. Call this when
-	 * replacing an `AccountManager` instance (e.g., on cache invalidation)
-	 * to avoid unbounded growth of the global cleanup queue.
-	 */
 	disposeShutdownHandler(): void {
-		if (!this.shutdownHandler) return;
-		unregisterCleanup(this.shutdownHandler);
-		this.shutdownHandler = null;
+		this.persistence.disposeShutdownHandler();
+	}
+
+	// ----- recovery delegations -----
+
+	async incrementAuthFailures(account: ManagedAccount): Promise<number> {
+		return this.recovery.incrementAuthFailures(account);
+	}
+
+	getAuthFailures(account: ManagedAccount): number {
+		return this.recovery.getAuthFailures(account);
+	}
+
+	clearAuthFailures(account: ManagedAccount): void {
+		this.recovery.clearAuthFailures(account);
+	}
+
+	removeAccountsWithSameRefreshToken(account: ManagedAccount): number {
+		return this.recovery.removeAccountsWithSameRefreshToken(account);
 	}
 }
 
@@ -1103,7 +336,11 @@ export function formatAccountLabel(
 	const accountLabel = account?.accountLabel?.trim();
 	const email = account?.email?.trim();
 	const accountId = account?.accountId?.trim();
-	const idSuffix = accountId ? (accountId.length > 6 ? accountId.slice(-6) : accountId) : null;
+	const idSuffix = accountId
+		? accountId.length > 6
+			? accountId.slice(-6)
+			: accountId
+		: null;
 
 	if (accountLabel && email && idSuffix) {
 		return `Account ${index + 1} (${accountLabel}, ${email}, id:${idSuffix})`;
