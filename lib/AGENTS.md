@@ -11,13 +11,11 @@ lib/
 ├── accounts.ts           # multi-account pool, rotation, health scoring
 ├── accounts/
 │   └── rate-limits.ts    # rate limit tracking per account
-├── audit.ts              # rotating file audit log
 ├── auth/
 │   ├── auth.ts           # OAuth flow (PKCE, JWT decode, token refresh)
 │   ├── browser.ts        # platform-specific browser open
 │   ├── server.ts         # OAuth callback server (port 1455)
 │   └── token-utils.ts    # token validation, parsing
-├── auth-rate-limit.ts    # token bucket for auth requests
 ├── auto-update-checker.ts # npm version check
 ├── circuit-breaker.ts    # failure isolation
 ├── cli.ts                # CLI helpers

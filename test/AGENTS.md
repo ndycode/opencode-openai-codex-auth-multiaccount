@@ -10,8 +10,6 @@ The suite is extensive and evolves frequently, so use the current test tree and 
 ```
 test/
 ├── accounts.test.ts               # multi-account storage/rotation
-├── audit.test.ts                  # rotating file audit log
-├── auth-rate-limit.test.ts        # token bucket for auth
 ├── auth.test.ts                   # OAuth PKCE + JWT decoding
 ├── auto-update-checker.test.ts    # npm version check
 ├── browser.test.ts                # platform-specific browser open

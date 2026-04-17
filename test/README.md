@@ -8,8 +8,6 @@ This directory contains the Vitest suites for `oc-codex-multi-auth`.
 test/
 ├── README.md                      # This file
 ├── accounts.test.ts               # Multi-account storage/rotation tests
-├── audit.test.ts                  # Rotating file audit log tests
-├── auth-rate-limit.test.ts        # Token bucket rate limiting
 ├── auth.test.ts                   # OAuth authentication tests
 ├── auto-update-checker.test.ts    # npm version check tests
 ├── browser.test.ts                # Platform-specific browser open behavior
