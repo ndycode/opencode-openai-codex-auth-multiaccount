@@ -2375,4 +2375,95 @@ describe("storage", () => {
       unlinkSpy.mockRestore();
     });
   });
+
+  describe("forward-compat schema guard", () => {
+    const testWorkDir = join(tmpdir(), "codex-fwdcompat-test-" + Math.random().toString(36).slice(2));
+    let testStoragePath: string;
+
+    beforeEach(async () => {
+      await fs.mkdir(testWorkDir, { recursive: true });
+      testStoragePath = join(testWorkDir, "accounts.json");
+      setStoragePathDirect(testStoragePath);
+    });
+
+    afterEach(async () => {
+      setStoragePathDirect(null);
+      await fs.rm(testWorkDir, { recursive: true, force: true });
+    });
+
+    it("normalizeAccountStorage throws StorageError for version 4", () => {
+      expect(() =>
+        normalizeAccountStorage({ version: 4, accounts: [] }, "/tmp/future.json"),
+      ).toThrowError(StorageError);
+    });
+
+    it("normalizeAccountStorage StorageError carries UNSUPPORTED_SCHEMA_VERSION code and path", () => {
+      try {
+        normalizeAccountStorage({ version: 9, accounts: [] }, "/tmp/future-9.json");
+        throw new Error("expected normalizeAccountStorage to throw");
+      } catch (error) {
+        expect(error).toBeInstanceOf(StorageError);
+        const storageError = error as StorageError;
+        expect(storageError.code).toBe("UNSUPPORTED_SCHEMA_VERSION");
+        expect(storageError.path).toBe("/tmp/future-9.json");
+        expect(storageError.message).toContain("9");
+        expect(storageError.hint).toContain("v9");
+      }
+    });
+
+    it("normalizeAccountStorage uses '<unknown>' path when caller omits sourcePath", () => {
+      try {
+        normalizeAccountStorage({ version: 4, accounts: [] });
+        throw new Error("expected normalizeAccountStorage to throw");
+      } catch (error) {
+        expect(error).toBeInstanceOf(StorageError);
+        expect((error as StorageError).path).toBe("<unknown>");
+      }
+    });
+
+    it("normalizeAccountStorage still returns null for non-numeric future marker", () => {
+      expect(
+        normalizeAccountStorage({ version: "4", accounts: [] }, "/tmp/garbage.json"),
+      ).toBeNull();
+    });
+
+    it("normalizeAccountStorage does not throw for legacy version 2 (still returns null)", () => {
+      // V2 is a known unsupported legacy format; its handling is a separate
+      // migration concern and must not regress into the forward-compat path.
+      expect(
+        normalizeAccountStorage({ version: 2, accounts: [] }, "/tmp/v2.json"),
+      ).toBeNull();
+    });
+
+    it("loadAccounts throws StorageError with UNSUPPORTED_SCHEMA_VERSION on schemaVersion > 3", async () => {
+      const futureStorage = {
+        version: 4,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "t1", addedAt: Date.now(), lastUsed: Date.now() }],
+      };
+      await fs.writeFile(testStoragePath, JSON.stringify(futureStorage), "utf-8");
+
+      await expect(loadAccounts()).rejects.toBeInstanceOf(StorageError);
+      await expect(loadAccounts()).rejects.toMatchObject({
+        code: "UNSUPPORTED_SCHEMA_VERSION",
+        path: testStoragePath,
+      });
+    });
+
+    it("loadAccounts leaves the future-schema file untouched when it throws", async () => {
+      const originalContent = JSON.stringify({
+        version: 5,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "future-token", addedAt: 1, lastUsed: 1 }],
+      });
+      await fs.writeFile(testStoragePath, originalContent, "utf-8");
+
+      await expect(loadAccounts()).rejects.toBeInstanceOf(StorageError);
+
+      // The user's future-schema credentials must still be present on disk
+      // after the guard fires; silent discard was the bug being fixed.
+      const onDisk = await fs.readFile(testStoragePath, "utf-8");
+      expect(onDisk).toBe(originalContent);
+    });
+  });
 });

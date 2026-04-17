@@ -1792,6 +1792,48 @@ describe("AccountManager", () => {
     });
   });
 
+  describe("shutdown cleanup registration", () => {
+    it("registers a cleanup handler the first time saveToDiskDebounced runs", async () => {
+      const { getCleanupCount, runCleanup } = await import("../lib/shutdown.js");
+      await runCleanup();
+
+      const now = Date.now();
+      const manager = new AccountManager(undefined, {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "token-shutdown", addedAt: now, lastUsed: now }],
+      });
+
+      expect(getCleanupCount()).toBe(0);
+
+      manager.saveToDiskDebounced(10_000);
+      expect(getCleanupCount()).toBe(1);
+
+      // Repeated calls must not accumulate duplicate registrations.
+      manager.saveToDiskDebounced(10_000);
+      manager.saveToDiskDebounced(10_000);
+      expect(getCleanupCount()).toBe(1);
+
+      manager.disposeShutdownHandler();
+      expect(getCleanupCount()).toBe(0);
+    });
+
+    it("disposeShutdownHandler is a no-op when nothing was registered", async () => {
+      const { getCleanupCount, runCleanup } = await import("../lib/shutdown.js");
+      await runCleanup();
+
+      const now = Date.now();
+      const manager = new AccountManager(undefined, {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "token-idle", addedAt: now, lastUsed: now }],
+      });
+
+      expect(() => manager.disposeShutdownHandler()).not.toThrow();
+      expect(getCleanupCount()).toBe(0);
+    });
+  });
+
   describe("health and token tracking methods", () => {
     beforeEach(() => {
       resetTrackers();
