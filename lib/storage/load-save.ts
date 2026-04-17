@@ -37,8 +37,61 @@ import {
   UNKNOWN_V2_FORMAT_CODE,
   type AccountStorageV3,
 } from "./migrations.js";
+import { acquireOrDetectLock } from "./worktree-lock.js";
+import os from "node:os";
 
 const log = createLogger("storage");
+
+/**
+ * Probes the worktree lock for the currently active storage path and surfaces
+ * any foreign live lock as a non-fatal warning. The lock check is advisory:
+ * Phase 4 F2 deliberately chose warn-over-block so a user with two legitimate
+ * OpenCode sessions on the same project (separate worktrees, IDE + CLI) is
+ * never stranded. The warning still carries enough detail (pid, host, cwd)
+ * for the user to reconcile state manually if a rotation was lost to a race.
+ *
+ * Failure modes:
+ *   - Storage path is not resolvable (no project, no global dir set): skip
+ *     silently, the actual storage call will surface the real error.
+ *   - Lock file unreadable (disk full, EACCES): log at debug so it cannot
+ *     drown the normal "collision detected" warning, then continue. A broken
+ *     sidecar must never gate auth-critical reads/writes.
+ */
+async function checkWorktreeLockForCurrentStorage(
+  operation: "load" | "save",
+): Promise<void> {
+  let path: string;
+  try {
+    path = getStoragePath();
+  } catch (error) {
+    log.debug("Skipping worktree lock check: storage path unavailable", {
+      error: String(error),
+    });
+    return;
+  }
+  try {
+    const result = await acquireOrDetectLock(path);
+    if (!result.acquired && result.foreign) {
+      log.warn("Multi-worktree collision detected on account storage", {
+        operation,
+        storagePath: path,
+        foreignPid: result.foreign.pid,
+        foreignHost: result.foreign.hostname,
+        foreignCwd: result.foreign.cwd,
+        foreignLastActive: result.foreign.lastActive,
+        ourPid: process.pid,
+        ourHost: os.hostname(),
+        ourCwd: process.cwd(),
+      });
+    }
+  } catch (error) {
+    log.debug("Worktree lock probe failed", {
+      operation,
+      storagePath: path,
+      error: String(error),
+    });
+  }
+}
 
 async function ensureGitignore(storagePath: string): Promise<void> {
   if (!getCurrentStoragePath()) return;
@@ -228,6 +281,10 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
 async function loadAccountsInternal(
   persistMigration: ((storage: AccountStorageV3) => Promise<void>) | null,
 ): Promise<AccountStorageV3 | null> {
+  // Advisory: surface multi-worktree collisions before the read but never
+  // block. Must come before the try/catch so a genuine storage error still
+  // takes precedence over any lock-related log output below.
+  await checkWorktreeLockForCurrentStorage("load");
   try {
     const path = getStoragePath();
     const content = await fs.readFile(path, "utf-8");
@@ -397,6 +454,10 @@ async function writeAccountsToPathUnlocked(path: string, storage: AccountStorage
 }
 
 async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
+  // Refresh our lock (or surface a collision) on every write. This also
+  // bumps `lastActive`, which is the stale-detection timestamp read by
+  // other worktrees on their next acquire.
+  await checkWorktreeLockForCurrentStorage("save");
   await writeAccountsToPathUnlocked(getStoragePath(), storage);
 }
 
