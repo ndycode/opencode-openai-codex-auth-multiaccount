@@ -21,6 +21,10 @@ const TONE_TO_COLOR: Record<UiTextTone, keyof UiRuntimeOptions["theme"]["colors"
 
 export function paintUiText(ui: UiRuntimeOptions, text: string, tone: UiTextTone = "normal"): string {
 	if (!ui.v2Enabled) return text;
+	// `colorEnabled === false` means NO_COLOR / FORCE_COLOR=0 / no TTY;
+	// return the unstyled text so the layout (bullets, labels, spacing)
+	// is preserved but no ANSI escape sequences are emitted.
+	if (ui.colorEnabled === false) return text;
 	const colorKey = TONE_TO_COLOR[tone];
 	if (!colorKey) return text;
 	return `${ui.theme.colors[colorKey]}${text}${ui.theme.colors.reset}`;
