@@ -345,6 +345,37 @@ describe("codex-keychain rollback (F1 MEDIUM: confirm-flag clobber gate)", () =>
 		expect(archivedBody.accounts[0]!.accountId).toBe("current-live");
 	});
 
+	it("[LOW] status does not probe the keychain when CODEX_KEYCHAIN is unset", async () => {
+		// F1 post-merge LOW finding: `codex-keychain status` used to call
+		// `keychainIsAvailable()` unconditionally, which writes a throwaway
+		// probe entry to the OS keychain and can pop a first-run macOS
+		// "allow/always allow" prompt for users who never opted in. The
+		// fix gates the probe on `isKeychainOptInEnabled`. Here we flip
+		// opt-in off for the duration of the test and assert the backend
+		// never records an isAvailable call, while the status output
+		// explicitly surfaces the disabled-by-opt-in state.
+		delete process.env.CODEX_KEYCHAIN;
+
+		// Reset recorded calls on the shared mock so this assertion is
+		// independent of any earlier rollback fixtures in the describe.
+		mock.calls.length = 0;
+
+		const t = createCodexKeychainTool(buildCtx());
+		const out = (await t.execute(
+			{ command: "status" },
+			{} as never,
+		)) as string;
+
+		// No probe was issued against the mock backend.
+		const probeCalls = mock.calls.filter((c) => c.op === "isAvailable");
+		expect(probeCalls).toHaveLength(0);
+
+		// Status output reflects opt-in state, not a false "unavailable".
+		expect(out).toMatch(/CODEX_KEYCHAIN/);
+		expect(out).toMatch(/(unset|disabled)/i);
+		expect(out).toMatch(/not checked|disabled/i);
+	});
+
 	it("normal rollback (no current file present) still succeeds without confirm=true", async () => {
 		// Sanity regression: the confirm gate must NOT break the common
 		// case where clearAccounts correctly unlinks the live file before

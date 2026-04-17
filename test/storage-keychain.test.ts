@@ -27,6 +27,7 @@ import {
 	deleteFromKeychain,
 	GLOBAL_KEYCHAIN_ACCOUNT_KEY,
 	isKeychainOptInEnabled,
+	KEYCHAIN_PROBE_ACCOUNT_KEY,
 	KEYCHAIN_SERVICE_NAME,
 	keychainIsAvailable,
 	readFromKeychain,
@@ -158,6 +159,25 @@ describe("lib/storage/keychain: low-level backend", () => {
 		});
 	});
 
+	describe("[LOW] KEYCHAIN_PROBE_ACCOUNT_KEY namespacing", () => {
+		it("is service-suffixed and cannot collide with real account keys", () => {
+			// F1 post-merge LOW finding: a future refactor that drops the
+			// `accounts:` prefix on real entries must still not collide
+			// with the probe. We assert both a structural invariant (the
+			// probe key contains the service name) and a
+			// collision-impossibility invariant (no real account key the
+			// build helper could emit equals the probe key).
+			expect(KEYCHAIN_PROBE_ACCOUNT_KEY).toContain(KEYCHAIN_SERVICE_NAME);
+			expect(KEYCHAIN_PROBE_ACCOUNT_KEY).not.toBe(GLOBAL_KEYCHAIN_ACCOUNT_KEY);
+			expect(KEYCHAIN_PROBE_ACCOUNT_KEY).not.toBe(
+				buildKeychainAccountKey("some-project"),
+			);
+			// The previous probe value (`__availability_probe__`) was not
+			// service-suffixed; make sure we moved off that literal.
+			expect(KEYCHAIN_PROBE_ACCOUNT_KEY).not.toBe("__availability_probe__");
+		});
+	});
+
 	describe("read/write/delete happy path", () => {
 		it("stores and retrieves the V3 JSON blob under the project key", async () => {
 			const mock = createMockBackend();
@@ -185,21 +205,37 @@ describe("lib/storage/keychain: low-level backend", () => {
 			expect(del).toBe(false);
 		});
 
-		it("readFromKeychain returns null when backend is unavailable", async () => {
-			_setBackendForTests(null);
-			_resetBackendForTests();
-			// Force backend resolution to fail by injecting a null backend
-			// after reset. The module will try to load the real module; on
-			// CI without @napi-rs/keyring builds this would return null too.
-			// We simulate via _setBackendForTests(null)+reset so the lazy
-			// loader runs and finds nothing to memoize, then returns null.
+		it("readFromKeychain returns null when a mock backend has no entry for the key", async () => {
+			// Direct branch: backend is present, `get` returns null because
+			// nothing was ever written. This covers the common "no entry"
+			// read path through the mock. Renamed from the original
+			// "when backend is unavailable" title, which asserted this
+			// mock-returns-null case while claiming to cover the
+			// `cachedBackend === null` branch (F1 post-merge NIT finding).
 			const mock = createMockBackend();
-			mock.store.set("irrelevant", "value");
-			// For this assertion we still need a mock: a null backend would
-			// take the "unavailable" branch. Use a mock whose get returns null.
 			_setBackendForTests(mock);
 			const read = await readFromKeychain("never-written-key");
 			expect(read).toBeNull();
+		});
+
+		it("readFromKeychain returns null when the native backend cannot load", async () => {
+			// Genuinely-unavailable branch (`keychain.ts:211`: `if (!backend)
+			// return null`). Replace `@napi-rs/keyring` with an empty module
+			// via `vi.doMock` so `loadNativeBackend` sees
+			// `typeof mod.Entry !== "function"`, logs a warning, and
+			// memoizes `null`. `vi.resetModules` + dynamic import forces a
+			// fresh load of `keychain.ts` so it picks up the doMock.
+			await vi.resetModules();
+			vi.doMock("@napi-rs/keyring", () => ({}));
+			try {
+				const fresh = await import("../lib/storage/keychain.js");
+				fresh._resetBackendForTests();
+				const read = await fresh.readFromKeychain("any-key");
+				expect(read).toBeNull();
+			} finally {
+				vi.doUnmock("@napi-rs/keyring");
+				await vi.resetModules();
+			}
 		});
 	});
 
@@ -215,14 +251,32 @@ describe("lib/storage/keychain: low-level backend", () => {
 			expect(mock.store.size).toBe(0);
 		});
 
-		it("keychainIsAvailable reflects the backend probe", async () => {
+		it("keychainIsAvailable reflects the backend probe when opt-in is on", async () => {
 			const mock = createMockBackend();
 			mock.available = false;
 			_setBackendForTests(mock);
-			expect(await keychainIsAvailable()).toBe(false);
+			// Pass an explicit env so the probe gate evaluates to on
+			// regardless of the test runner's ambient CODEX_KEYCHAIN value.
+			const enabledEnv = { CODEX_KEYCHAIN: "1" } as NodeJS.ProcessEnv;
+			expect(await keychainIsAvailable(enabledEnv)).toBe(false);
 
 			mock.available = true;
-			expect(await keychainIsAvailable()).toBe(true);
+			expect(await keychainIsAvailable(enabledEnv)).toBe(true);
+		});
+
+		it("[LOW] keychainIsAvailable returns false without probing when opt-in is off", async () => {
+			// F1 post-merge LOW finding: `codex-keychain status` used to
+			// call `keychainIsAvailable()` unconditionally, which writes a
+			// throwaway entry to the OS keychain and can pop a macOS
+			// "allow/always allow" prompt for users who never set
+			// CODEX_KEYCHAIN. Gate guarantees: (a) returns false when
+			// opt-in is off, (b) never invokes the backend probe.
+			const mock = createMockBackend();
+			_setBackendForTests(mock);
+			const disabledEnv = {} as NodeJS.ProcessEnv; // CODEX_KEYCHAIN unset
+			expect(await keychainIsAvailable(disabledEnv)).toBe(false);
+			const probeCalls = mock.calls.filter((c) => c.op === "isAvailable");
+			expect(probeCalls).toHaveLength(0);
 		});
 	});
 });
@@ -439,6 +493,36 @@ describe("load-save integration with CODEX_KEYCHAIN", () => {
 		);
 		expect(deleteCalls).toHaveLength(0);
 	});
+
+	it.skipIf(process.platform === "win32")(
+		"[LOW] backup file is chmod 0o600 after migration rename (POSIX)",
+		async () => {
+			// F1 post-merge LOW finding: after the atomic-rename of the
+			// legacy on-disk JSON to `.migrated-to-keychain.<ts>`, the
+			// backup must be re-chmodded to 0o600 so any mode drift between
+			// migration and rollback cannot leave the backup group/world-
+			// readable. Windows ignores POSIX mode bits so skip there.
+			setOptIn(false);
+			await saveAccounts(makeStorage());
+			expect(existsSync(storagePath)).toBe(true);
+			// Force an artificial 0o644 on the live file so we can detect
+			// whether the post-rename chmod actually ran. If the fix is
+			// absent, the backup inherits 0o644 and this assertion fails.
+			await fs.chmod(storagePath, 0o644);
+
+			setOptIn(true);
+			await saveAccounts(makeStorage());
+
+			const entries = await fs.readdir(storageDir);
+			const backupName = entries.find((name) =>
+				name.startsWith("accounts.json.migrated-to-keychain."),
+			);
+			expect(backupName).toBeDefined();
+			const st = await fs.stat(join(storageDir, backupName!));
+			// Mask to the low 9 permission bits to ignore file-type bits.
+			expect(st.mode & 0o777).toBe(0o600);
+		},
+	);
 
 	it("[MEDIUM] clearAccounts unlinks JSON first, then keychain, in the happy path", async () => {
 		// Order check: the JSON file must be gone BEFORE the keychain
