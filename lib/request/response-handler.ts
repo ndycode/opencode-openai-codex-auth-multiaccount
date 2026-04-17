@@ -1,3 +1,4 @@
+import { RequestError } from "../errors.js";
 import { createLogger, logRequest, LOGGING_ENABLED } from "../logger.js";
 
 import type { SSEEventData } from "../types.js";
@@ -155,7 +156,9 @@ export async function convertSseToJson(
 	options?: { streamStallTimeoutMs?: number },
 ): Promise<Response> {
 	if (!response.body) {
-		throw new Error('[openai-codex-plugin] Response has no body');
+		throw new RequestError('[openai-codex-plugin] Response has no body', {
+			code: 'NO_RESPONSE_BODY',
+		});
 	}
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
@@ -172,7 +175,10 @@ export async function convertSseToJson(
 			if (done) break;
 			fullText += decoder.decode(value, { stream: true });
 			if (fullText.length > MAX_SSE_SIZE) {
-				throw new Error(`SSE response exceeds ${MAX_SSE_SIZE} bytes limit`);
+				throw new RequestError(`SSE response exceeds ${MAX_SSE_SIZE} bytes limit`, {
+					code: 'SSE_TOO_LARGE',
+					context: { maxBytes: MAX_SSE_SIZE, actualBytes: fullText.length },
+				});
 			}
 		}
 

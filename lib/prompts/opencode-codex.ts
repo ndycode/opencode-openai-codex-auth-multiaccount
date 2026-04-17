@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { PromptError } from "../errors.js";
 import { logDebug } from "../logger.js";
 
 const DEFAULT_OPENCODE_CODEX_URLS = [
@@ -181,8 +182,9 @@ async function refreshPrompt(
 		return content;
 	}
 
-	throw new Error(
+	throw new PromptError(
 		`Failed to fetch OpenCode codex prompt from all sources${lastFailure ? ` (${lastFailure})` : ""}`,
+		{ code: "FETCH_ALL_SOURCES_FAILED" },
 	);
 }
 
@@ -234,8 +236,9 @@ export async function getOpenCodeCodexPrompt(): Promise<string> {
 		if (staleContent) {
 			return staleContent;
 		}
-		throw new Error(
+		throw new PromptError(
 			`Failed to fetch OpenCode codex.txt and no cache available: ${error}`,
+			{ code: "FETCH_AND_NO_CACHE", cause: error },
 		);
 	}
 }
