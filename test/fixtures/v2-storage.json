@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "accounts": [
+    {
+      "email": "v2-user@example.com",
+      "refreshToken": "v2-refresh-token",
+      "accessToken": "v2-access-token",
+      "expiresAt": 0
+    }
+  ],
+  "activeIndex": 0
+}

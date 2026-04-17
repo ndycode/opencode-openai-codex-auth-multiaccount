@@ -11,10 +11,17 @@ import {
 } from "./constants.js";
 import { createLogger } from "./logger.js";
 import { MODEL_FAMILIES, type ModelFamily } from "./prompts/codex.js";
-import { AnyAccountStorageSchema, getValidationErrors } from "./schemas.js";
+import {
+  AnyAccountStorageSchema,
+  AccountStorageV2DetectionSchema,
+  getValidationErrors,
+} from "./schemas.js";
 import { getConfigDir, getProjectConfigDir, getProjectGlobalConfigDir, findProjectRoot, resolvePath } from "./storage/paths.js";
 import {
+  buildV2RecoveryHint,
+  buildV2RejectionMessage,
   migrateV1ToV3,
+  UNKNOWN_V2_FORMAT_CODE,
   type CooldownReason,
   type RateLimitStateV3,
   type AccountMetadataV1,
@@ -669,6 +676,22 @@ export function normalizeAccountStorage(
     );
   }
 
+  // V2 files were produced by an intermediate 4.x build whose shape was never
+  // documented and for which no forward-migrator shipped. Silently treating
+  // them as "unknown version" (the previous behaviour) meant users with a V2
+  // file had their credentials discarded without any signal. Detect V2
+  // explicitly and throw a typed StorageError so the caller can surface the
+  // recovery hint to the user. Audit top-20 #8; see
+  // `lib/storage/migrations.ts:buildV2RejectionMessage` for copy.
+  if (AccountStorageV2DetectionSchema.safeParse(data).success) {
+    throw new StorageError(
+      buildV2RejectionMessage(),
+      UNKNOWN_V2_FORMAT_CODE,
+      "",
+      buildV2RecoveryHint(""),
+    );
+  }
+
   if (data.version !== 1 && data.version !== 3) {
     log.warn("Unknown storage version, ignoring", {
       version: rawVersion,
@@ -888,6 +911,32 @@ async function loadAccountsInternal(
     // downgraded to an empty load, which would clobber the user's future-format
     // credentials on the next save.
     if (error instanceof StorageError && error.code === "UNSUPPORTED_SCHEMA_VERSION") {
+      throw error;
+    }
+    // Unknown-V2 detection must NOT be silently dropped: the catch below
+    // swallows generic errors by design (keeps an unreadable file from
+    // crashing the whole plugin), but V2 is a specific, recoverable case
+    // where the user needs to know their credentials were quarantined.
+    // Re-throw so the UI/CLI layer can render the recovery hint.
+    if (error instanceof StorageError && error.code === UNKNOWN_V2_FORMAT_CODE) {
+      // Annotate with the concrete storage path that triggered the reject
+      // so the recovery hint points at the real file.
+      const concretePath = (() => {
+        try {
+          return getStoragePath();
+        } catch {
+          return "";
+        }
+      })();
+      if (concretePath) {
+        throw new StorageError(
+          error.message,
+          UNKNOWN_V2_FORMAT_CODE,
+          concretePath,
+          buildV2RecoveryHint(concretePath),
+          error,
+        );
+      }
       throw error;
     }
     const code = (error as NodeJS.ErrnoException).code;

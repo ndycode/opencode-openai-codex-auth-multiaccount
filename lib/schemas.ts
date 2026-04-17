@@ -186,7 +186,32 @@ export const AccountStorageV1Schema = z.object({
 export type AccountStorageV1FromSchema = z.infer<typeof AccountStorageV1Schema>;
 
 /**
+ * Minimal V2 detection schema.
+ *
+ * V2 was an intermediate account-storage format used by legacy 4.x builds
+ * that never shipped a documented shape. We only validate enough to recognise
+ * `version: 2` files so the loader can surface a typed `UNKNOWN_V2_FORMAT`
+ * error instead of silently discarding credentials. Do not extend this
+ * schema without evidence of the real V2 shape.
+ */
+export const AccountStorageV2DetectionSchema = z.object({
+	version: z.literal(2),
+	// Use `.nullish()` (accepts `null` OR `undefined`) rather than `.optional()`
+	// so a malformed V2 file with `"accounts": null` still matches the V2 shape
+	// and flows to the typed UNKNOWN_V2_FORMAT rejection path instead of
+	// silently falling through to `return null` and discarding credentials.
+	accounts: z.array(z.unknown()).nullish(),
+});
+
+export type AccountStorageV2DetectionFromSchema = z.infer<
+	typeof AccountStorageV2DetectionSchema
+>;
+
+/**
  * Union of V1 and V3 storage formats for migration detection.
+ * V2 is intentionally excluded: it is detected separately and rejected with a
+ * typed StorageError so users with a V2 file are told how to recover instead
+ * of having their credentials silently discarded.
  */
 export const AnyAccountStorageSchema = z.discriminatedUnion("version", [
 	AccountStorageV1Schema,

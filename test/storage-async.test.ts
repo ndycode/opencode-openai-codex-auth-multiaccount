@@ -38,11 +38,13 @@ describe("Storage Module - Async Operations", () => {
       expect(normalizeAccountStorage([])).toBeNull();
     });
 
-    it("returns null for legacy/unrecognized versions below the forward-compat bound", () => {
-      // V2 is a known unsupported legacy format whose migration lives elsewhere,
-      // and non-numeric markers should still be tolerated as corrupt input.
-      expect(normalizeAccountStorage({ version: 2, accounts: [], activeIndex: 0 })).toBeNull();
+    it("returns null for non-numeric version markers (tolerant of corrupt input)", () => {
+      // Non-numeric version bypasses the forward-compat guard (numeric only)
+      // and the V2 detector (literal 2), falling through to the legacy
+      // unknown-version bucket. V2 has its own dedicated contract in
+      // test/storage-v2-migration.test.ts — it now throws, not returns null.
       expect(normalizeAccountStorage({ version: "99", accounts: [], activeIndex: 0 })).toBeNull();
+      expect(normalizeAccountStorage({ version: "weird", accounts: [], activeIndex: 0 })).toBeNull();
     });
 
     it("throws UNSUPPORTED_SCHEMA_VERSION for future numeric versions", () => {

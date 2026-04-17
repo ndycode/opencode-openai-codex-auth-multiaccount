@@ -8,6 +8,64 @@ import type { AccountIdSource } from "../types.js";
 
 export type CooldownReason = "auth-failure" | "network-error";
 
+/**
+ * StorageError code emitted when a `version: 2` account file is loaded.
+ *
+ * V2 is an intermediate account schema produced by legacy 4.x plugin builds
+ * that never shipped with a documented shape nor a forward-migrator to V3.
+ * The safe behaviour is to refuse to load V2 explicitly so the user's
+ * credentials are not silently discarded; callers surface this code to the
+ * user alongside a recovery hint.
+ */
+export const UNKNOWN_V2_FORMAT_CODE = "UNKNOWN_V2_FORMAT";
+
+/**
+ * Minimal detection shape for V2 account storage.
+ *
+ * The full V2 schema was never documented and no V2 migrator shipped, so this
+ * type is intentionally coarse: it only captures the fields needed to detect
+ * that a file claims `version: 2` and contains something account-shaped. Do
+ * not extend this shape without evidence of the real V2 layout - inventing
+ * fields risks producing a silently-wrong migration.
+ */
+export interface AccountStorageV2Detected {
+	version: 2;
+	accounts?: unknown[];
+}
+
+/**
+ * Diagnostic message shown when the loader refuses a V2 storage file.
+ * Pulled into a helper so storage.ts, import paths, and tests produce
+ * identical copy without drifting.
+ */
+export function buildV2RejectionMessage(): string {
+	return (
+		"Unsupported account storage schema version 2; this plugin only ships " +
+		"migrations for v1 and v3. V2 files were produced by an intermediate " +
+		"4.x build that never documented its shape, so migrating blindly would " +
+		"risk silent account corruption."
+	);
+}
+
+/**
+ * Recovery hint shown alongside the V2 rejection message.
+ * @param path - Absolute path of the offending storage file, or a placeholder
+ *   when the caller cannot determine the source (e.g. in-memory normalization).
+ */
+export function buildV2RecoveryHint(path: string): string {
+	const resolvedPath = path || "<unknown>";
+	return (
+		`The storage file at ${resolvedPath} uses account schema v2, which ` +
+		"this plugin cannot migrate automatically. To recover: " +
+		"(1) back up the file outside the .opencode directory, " +
+		"(2) remove or rename the original so the plugin can start fresh, " +
+		"(3) run `opencode auth login` to create a v3 account pool, then " +
+		"(4) if you need the old credentials, open each account manually or " +
+		"re-run login per account. If you believe this file was produced by " +
+		"the current plugin, please open an issue so V2 can be documented."
+	);
+}
+
 export interface RateLimitStateV3 {
 	[key: string]: number | undefined;
 }
