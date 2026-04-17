@@ -1,0 +1,32 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Enforce Conventional Commits 1.0.0 subject line.
+#   type(scope)!: description
+# Types align with common Conventional Commits usage and CONTRIBUTING.md.
+# Skips merge, revert, fixup!, and squash! commits so rebase / autosquash
+# flows keep working without `--no-verify`.
+
+msg_file="$1"
+first_line=$(head -n 1 "$msg_file")
+
+case "$first_line" in
+  "Merge "*|"Revert "*|"fixup! "*|"squash! "*|"amend! "*)
+    exit 0
+    ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|deps|deps-dev)(\([a-z0-9._-]+\))?!?: .{1,100}$'
+
+if ! printf '%s' "$first_line" | grep -qE "$pattern"; then
+  printf '\nCommit message does not follow Conventional Commits.\n' >&2
+  printf '\nExpected format:\n' >&2
+  printf '  type(scope): short description\n' >&2
+  printf '  type!: breaking change description\n' >&2
+  printf '\nAllowed types:\n' >&2
+  printf '  feat, fix, docs, style, refactor, perf, test, build,\n' >&2
+  printf '  ci, chore, revert, deps, deps-dev\n' >&2
+  printf '\nYour subject line was:\n' >&2
+  printf '  %s\n\n' "$first_line" >&2
+  exit 1
+fi

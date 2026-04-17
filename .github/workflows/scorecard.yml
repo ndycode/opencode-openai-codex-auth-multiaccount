@@ -1,0 +1,56 @@
+# OpenSSF Scorecard supply-chain security analysis.
+# Results upload to the Code Scanning tab + the public OpenSSF REST API.
+# Action pins follow the same SHA-pinning discipline as .github/workflows/ci.yml.
+name: Scorecard supply-chain security
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Weekly, Monday 01:30 UTC. Kept offset from other weekly jobs.
+    - cron: "30 1 * * 1"
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Declare default permissions as read-only for the workflow.
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    # Only publish scorecard results from the default branch; PRs and scheduled
+    # runs still execute so regressions surface in Code Scanning.
+    permissions:
+      # Needed to upload the SARIF results to the code-scanning dashboard.
+      security-events: write
+      # Needed for keyless signing of results via sigstore / OpenSSF publish.
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@f49aabe0b5af0936a0987cfb85d86b75731b0186 # v2.4.1
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # `publish_results` is only honored on the default branch; the action
+          # silently downgrades to `false` for PRs and forks.
+          publish_results: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a # v3
+        with:
+          sarif_file: results.sarif
