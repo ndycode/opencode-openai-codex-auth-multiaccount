@@ -7,7 +7,7 @@ import {
 	OAUTH_CALLBACK_LOOPBACK_HOST,
 	OAUTH_CALLBACK_PATH,
 	OAUTH_CALLBACK_PORT,
-} from "../runtime-contracts.js";
+} from "../oauth-constants.js";
 
 /**
  * Start a small local HTTP server that waits for /auth/callback and returns the code

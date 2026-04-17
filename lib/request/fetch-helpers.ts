@@ -11,7 +11,7 @@ import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
-import { DEACTIVATED_WORKSPACE_ERROR_CODE } from "../runtime-contracts.js";
+import { DEACTIVATED_WORKSPACE_ERROR_CODE } from "../error-sentinels.js";
 import { isRecord } from "../utils.js";
 import {
         CODEX_BASE_URL,

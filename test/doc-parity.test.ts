@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { OAUTH_CALLBACK_PATH, OAUTH_CALLBACK_PORT } from "../lib/runtime-contracts.js";
+import { OAUTH_CALLBACK_PATH, OAUTH_CALLBACK_PORT } from "../lib/oauth-constants.js";
 import { transformRequestBody } from "../lib/request/request-transformer.js";
 import type { RequestBody, UserConfig } from "../lib/types.js";
 

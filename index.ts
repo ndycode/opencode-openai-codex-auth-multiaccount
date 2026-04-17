@@ -155,7 +155,7 @@ import {
 	createUsageRequestTimeoutError,
 	DEACTIVATED_WORKSPACE_ERROR_CODE,
 	isDeactivatedWorkspaceErrorMessage,
-} from "./lib/runtime-contracts.js";
+} from "./lib/error-sentinels.js";
 import { applyFastSessionDefaults } from "./lib/request/request-transformer.js";
 import {
 	getRateLimitBackoff,

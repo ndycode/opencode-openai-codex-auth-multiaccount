@@ -6,7 +6,7 @@ import {
 	OAUTH_CALLBACK_LOOPBACK_HOST,
 	OAUTH_CALLBACK_PATH,
 	OAUTH_CALLBACK_PORT,
-} from "../runtime-contracts.js";
+} from "../oauth-constants.js";
 import { safeParseOAuthTokenResponse } from "../schemas.js";
 
 // OAuth constants (from openai/codex)
