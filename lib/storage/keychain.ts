@@ -63,6 +63,14 @@ export const KEYCHAIN_SERVICE_NAME = "oc-codex-multi-auth";
 export const GLOBAL_KEYCHAIN_ACCOUNT_KEY = "accounts:global";
 
 /**
+ * Reserved account key used exclusively by the availability probe. Kept
+ * double-underscored and service-suffixed so a future refactor that drops
+ * the `accounts:` prefix on real entries (or adds a different prefix) still
+ * cannot collide with this probe (F1 post-merge LOW finding).
+ */
+export const KEYCHAIN_PROBE_ACCOUNT_KEY = `__probe__@${KEYCHAIN_SERVICE_NAME}`;
+
+/**
  * Minimal abstraction over the native `@napi-rs/keyring` `Entry` API.
  * Declared as an interface so tests can inject a deterministic in-memory
  * backend without touching the real OS keychain.
@@ -103,62 +111,65 @@ async function loadNativeBackend(): Promise<KeychainBackend | null> {
 			return null;
 		}
 		// @napi-rs/keyring's `Entry` methods are synchronous by design (they
-		// delegate to native OS keychain calls). The async wrapper below
-		// exists so the backend interface can be mocked with in-memory
-		// Promise-returning stubs in tests without paying for an extra
-		// microtask in production. The `require-await` warnings are
-		// intentional — suppress at the method level to keep intent explicit.
+		// delegate to native OS keychain calls). The backend interface is
+		// Promise-typed so it can be mocked with in-memory Promise-returning
+		// stubs in tests, so each method returns `Promise.resolve(...)` of
+		// the native sync result. Using non-async methods keeps
+		// `@typescript-eslint/require-await` satisfied without per-method
+		// suppressions while the Promise-returning interface stays intact.
 		const backend: KeychainBackend = {
-			// eslint-disable-next-line @typescript-eslint/require-await
-			async get(service, account) {
+			get(service, account) {
 				try {
 					const entry = new mod.Entry(service, account);
 					const value = entry.getPassword();
-					return value ?? null;
+					return Promise.resolve(value ?? null);
 				} catch (err) {
 					log.warn("keychain: read failed", {
 						service,
 						account,
 						error: (err as Error).message,
 					});
-					return null;
+					return Promise.resolve(null);
 				}
 			},
-			// eslint-disable-next-line @typescript-eslint/require-await
-			async set(service, account, secret) {
+			set(service, account, secret) {
 				const entry = new mod.Entry(service, account);
 				entry.setPassword(secret);
+				return Promise.resolve();
 			},
-			// eslint-disable-next-line @typescript-eslint/require-await
-			async delete(service, account) {
+			delete(service, account) {
 				try {
 					const entry = new mod.Entry(service, account);
-					return entry.deletePassword();
+					return Promise.resolve(entry.deletePassword());
 				} catch (err) {
 					log.warn("keychain: delete failed", {
 						service,
 						account,
 						error: (err as Error).message,
 					});
-					return false;
+					return Promise.resolve(false);
 				}
 			},
-			// eslint-disable-next-line @typescript-eslint/require-await
-			async isAvailable() {
-				// Round-trip a throwaway entry under a reserved account key so
-				// we actually exercise the OS keychain rather than trusting
-				// that import succeeded. Any throw = unavailable.
-				const probeAccount = "__availability_probe__";
+			isAvailable() {
+				// Round-trip a throwaway entry under a reserved, namespaced
+				// account key so we actually exercise the OS keychain rather
+				// than trusting that import succeeded. The key is prefixed
+				// with the service name so a future refactor that drops the
+				// `accounts:` prefix on real entries cannot collide with
+				// this probe (F1 post-merge LOW finding).
 				try {
-					const entry = new mod.Entry(KEYCHAIN_SERVICE_NAME, probeAccount);
+					const entry = new mod.Entry(
+						KEYCHAIN_SERVICE_NAME,
+						KEYCHAIN_PROBE_ACCOUNT_KEY,
+					);
 					entry.setPassword("probe");
 					entry.deletePassword();
-					return true;
+					return Promise.resolve(true);
 				} catch (err) {
 					log.warn("keychain: availability probe failed", {
 						error: (err as Error).message,
 					});
-					return false;
+					return Promise.resolve(false);
 				}
 			},
 		};
@@ -265,8 +276,20 @@ export async function deleteFromKeychain(
  * to confirm the OS keychain is reachable and unlocked. Used by the
  * `codex-keychain status` tool to give the operator a clear yes/no signal
  * instead of waiting until the next real save.
+ *
+ * Gated on the opt-in flag (F1 post-merge LOW finding): with
+ * `CODEX_KEYCHAIN` unset the probe is a no-op that returns `false` without
+ * touching the OS keychain. This preserves the "unset -> zero keychain code
+ * path" invariant the feature advertises and avoids the first-run macOS
+ * "allow/always allow" prompt that `entry.setPassword` can otherwise
+ * trigger for users who run `codex-keychain status` without opting in.
+ *
+ * Pass `env` to override the opt-in lookup in tests.
  */
-export async function keychainIsAvailable(): Promise<boolean> {
+export async function keychainIsAvailable(
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+	if (!isKeychainOptInEnabled(env)) return false;
 	const backend = await getBackend();
 	if (!backend) return false;
 	return backend.isAvailable();

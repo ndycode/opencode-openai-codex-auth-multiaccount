@@ -160,18 +160,26 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 			})();
 
 			if (sub === "status") {
-				const available = await keychainIsAvailable();
+				// When opt-in is off, skip the probe entirely (F1 post-merge
+				// LOW finding). Probing under an unset `CODEX_KEYCHAIN`
+				// violates the "unset -> no keychain code path" invariant
+				// and can trigger a first-run macOS "allow/always allow"
+				// prompt for users who run `codex-keychain status` without
+				// opting in. `keychainIsAvailable` already short-circuits
+				// on the opt-in check; we surface that explicitly here so
+				// the status line reads "not checked; CODEX_KEYCHAIN unset"
+				// instead of the misleading "keychain unavailable".
+				const available = optIn ? await keychainIsAvailable() : false;
 				const keychainHasEntry = optIn
 					? (await readFromKeychain(projectKey)) !== null
 					: false;
-				const activeBackend =
-					optIn && available && keychainHasEntry
+				const activeBackend = !optIn
+					? "JSON (keychain disabled; CODEX_KEYCHAIN unset)"
+					: available && keychainHasEntry
 						? "keychain"
-						: optIn && available
+						: available
 							? "keychain (empty, JSON fallback)"
-							: optIn && !available
-								? "JSON (keychain unavailable)"
-								: "JSON";
+							: "JSON (keychain unavailable)";
 
 				const lines: string[] = [];
 				lines.push(...formatUiHeader(ui, "Codex keychain status"));
@@ -188,7 +196,7 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 					formatUiKeyValue(
 						ui,
 						"Keychain reachable",
-						available ? "yes" : "no",
+						optIn ? (available ? "yes" : "no") : "not checked (opt-in off)",
 					),
 				);
 				lines.push(
@@ -303,6 +311,20 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 				await fs.rename(mostRecent, storagePath);
 			} catch (err) {
 				return `codex-keychain rollback: failed to rename ${mostRecent} -> ${storagePath}: ${(err as Error).message}`;
+			}
+			// Re-apply 0o600 after rollback rename (F1 post-merge LOW
+			// finding). Mirror the chmod applied on the backup-write path
+			// so a restored file can never end up group/world-readable even
+			// if the backup's mode drifted between migration and rollback.
+			// Windows ignores POSIX mode bits, so skip there.
+			if (process.platform !== "win32") {
+				try {
+					await fs.chmod(storagePath, 0o600);
+				} catch {
+					/* non-fatal: file is restored, mode drift is a hardening
+					 * nicety. Swallow to avoid failing the rollback on a
+					 * permission-sensitive mount. */
+				}
 			}
 			// Best-effort keychain delete in case opt-in is still on; the
 			// storage layer will honour that on subsequent saves.

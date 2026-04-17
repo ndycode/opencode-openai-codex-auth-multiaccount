@@ -526,6 +526,22 @@ async function migrateOnDiskJsonToKeychainBackup(
   const backup = `${path}.migrated-to-keychain.${timestamp}`;
   try {
     await fs.rename(path, backup);
+    // Re-apply 0o600 after rename (F1 post-merge LOW finding). POSIX
+    // preserves mode across a rename in-place, but if the filesystem layer
+    // or a prior process ever changed the mode (cp from a world-readable
+    // source, umask drift on a foreign mount, manual `touch`) the backup
+    // could end up group/world-readable. Re-chmod is a cheap belt-and-
+    // braces guard. Windows ignores POSIX mode bits, so skip there.
+    if (process.platform !== "win32") {
+      try {
+        await fs.chmod(backup, 0o600);
+      } catch (chmodErr) {
+        log.warn("keychain: failed to chmod backup to 0o600 after rename", {
+          backup,
+          error: String(chmodErr),
+        });
+      }
+    }
     log.info("keychain: migrated on-disk JSON to keychain; original preserved for rollback", {
       from: path,
       backup,
