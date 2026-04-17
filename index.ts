@@ -155,6 +155,7 @@ import {
 	resetRateLimitBackoff,
 } from "./lib/request/rate-limit-backoff.js";
 import { isEmptyResponse } from "./lib/request/response-handler.js";
+import { getCircuitBreaker } from "./lib/circuit-breaker.js";
 import {
 	RetryBudgetTracker,
 	resolveRetryBudgetLimits,
@@ -1866,9 +1867,35 @@ while (attempted.size < Math.max(1, accountCount)) {
 									break;
 								}
 
+							// RC-8: per-(account, family) circuit-breaker key. The breaker gates
+							// upstream calls so that repeated failures short-circuit to the
+							// rotation path instead of hammering a degraded endpoint.
+							const circuitBreakerKey = `${accountId}:${modelFamily}`;
+							const circuitBreaker = getCircuitBreaker(circuitBreakerKey);
+
 							while (true) {
 								let response: Response;
 								const fetchStart = performance.now();
+
+								// RC-8: consult the breaker BEFORE firing upstream. When the gate is
+								// closed every call passes through unchanged. When the gate denies
+								// (open within cooldown, or half-open with a probe already in
+								// flight) we short-circuit to the rotation path instead of
+								// retrying here. We classify the short-circuit as `circuit-open`
+								// so observability traces and the runtime metrics agree with the
+								// `CircuitOpenError` type exported from `lib/errors.ts`.
+								const breakerCheck = circuitBreaker.canAttempt();
+								if (!breakerCheck.allowed) {
+									const shortCircuitMessage = `Circuit ${breakerCheck.state} for ${circuitBreakerKey}`;
+									logWarn(
+										`[circuit-breaker] ${shortCircuitMessage} (reason=${breakerCheck.reason ?? "denied"}). Rotating account.`,
+									);
+									accountManager.refundToken(account, modelFamily, model);
+									runtimeMetrics.accountRotations++;
+									runtimeMetrics.lastError = shortCircuitMessage;
+									runtimeMetrics.lastErrorCategory = "circuit-open";
+									break;
+								}
 
 								// Merge user AbortSignal with timeout (Node 18 compatible - no AbortSignal.any)
 								const fetchController = new AbortController();
@@ -1939,6 +1966,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 								runtimeMetrics.lastErrorCategory = "network";
 								accountManager.refundToken(account, modelFamily, model);
 								accountManager.recordFailure(account, modelFamily, model);
+								// RC-8: network failures feed the breaker so a degraded upstream
+								// trips the gate for this (account, family) key after N hits
+								// inside the failure window.
+								circuitBreaker.recordFailure();
 								break;
 							} finally {
 								clearTimeout(fetchTimeoutId);
@@ -2195,6 +2226,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 						runtimeMetrics.lastErrorCategory = "server";
 						accountManager.refundToken(account, modelFamily, model);
 						accountManager.recordFailure(account, modelFamily, model);
+						// RC-8: 5xx responses are treated the same as network failures by
+						// the breaker — they indicate an upstream fault rather than a
+						// client-side classifier decision (401/403/404/429 are handled
+						// upstream and do not feed the breaker).
+						circuitBreaker.recordFailure();
 						if (
 							!consumeRetryBudget(
 								"server",
@@ -2325,6 +2361,9 @@ while (attempted.size < Math.max(1, accountCount)) {
 					}
 
 					accountManager.recordSuccess(account, modelFamily, model);
+					// RC-8: closes a half-open gate or prunes the failure window so a
+					// sequence of successes keeps the breaker healthy.
+					circuitBreaker.recordSuccess();
 					runtimeMetrics.successfulRequests++;
 					runtimeMetrics.lastError = null;
 					runtimeMetrics.lastErrorCategory = null;

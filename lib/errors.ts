@@ -210,15 +210,39 @@ export class StorageError extends CodexError {
 }
 
 /**
+ * Options carried by {@link CircuitOpenError} when raised from the request
+ * pipeline so callers can classify the short-circuit without parsing the
+ * message string.
+ */
+export interface CircuitOpenErrorOptions {
+	/** The breaker key that denied the call, e.g. `account:modelFamily`. */
+	breakerKey?: string;
+	/** Snapshot of the breaker state at denial time (`open` | `half-open`). */
+	state?: "open" | "half-open";
+	/** Machine-readable denial reason from `CanAttemptResult`. */
+	reason?: "open" | "probe-in-flight";
+}
+
+/**
  * Error thrown when a circuit breaker is open (or half-open past its attempt
  * budget) and further calls must short-circuit instead of hitting the
  * protected dependency.
+ *
+ * When constructed from the request pipeline's gate check, {@link breakerKey},
+ * {@link state}, and {@link reason} carry the metadata needed by the rotation
+ * path to pick a different account/family without re-querying the breaker.
  */
 export class CircuitOpenError extends CodexError {
 	override readonly name = "CircuitOpenError";
+	readonly breakerKey?: string;
+	readonly state?: "open" | "half-open";
+	readonly reason?: "open" | "probe-in-flight";
 
-	constructor(message = "Circuit is open") {
+	constructor(message = "Circuit is open", options?: CircuitOpenErrorOptions) {
 		super(message, { code: ErrorCode.CIRCUIT_OPEN });
+		this.breakerKey = options?.breakerKey;
+		this.state = options?.state;
+		this.reason = options?.reason;
 	}
 }
 
