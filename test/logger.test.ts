@@ -940,5 +940,44 @@ describe('Logger Module', () => {
 			expect(out).toContain('expires_in');
 			expect(out).not.toContain('aaaa-bbbb-cccc-dddd-eeee');
 		});
+
+		// Regression: Greptile PR #112 review (P2). String.replace(string, ...)
+		// only swaps the FIRST occurrence. When the token VALUE is a substring
+		// of the preceding KEY NAME (e.g. value "access" inside key
+		// "access_token"), the old impl masked the key and leaked the value.
+		// Fix uses lastIndexOf so the trailing value always wins.
+		it('redacts token value even when value is substring of key name (access)', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = '{"access_token":"access"}';
+			const out = __testOnly.maskString(input);
+			// Key must survive intact.
+			expect(out).toContain('access_token');
+			// Raw leaked value must not appear next to the key.
+			expect(out).not.toMatch(/"access_token":\s*"access"/);
+			// Masked placeholder replaces the value (short tokens become ***MASKED***).
+			expect(out).toBe('{"access_token":"***MASKED***"}');
+		});
+
+		it('redacts token value even when value is substring of key name (refresh)', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = '{"refresh_token":"refresh"}';
+			const out = __testOnly.maskString(input);
+			expect(out).toContain('refresh_token');
+			expect(out).not.toMatch(/"refresh_token":\s*"refresh"/);
+			expect(out).toBe('{"refresh_token":"***MASKED***"}');
+		});
+
+		it('redacts long token value when value is substring of key name', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			// Long value (>12 chars) so maskToken keeps head/tail, and value
+			// contains the key fragment "access_token" inside it — worst case.
+			const longValue = 'access_token-payload-xyz987654321';
+			const input = `{"access_token":"${longValue}"}`;
+			const out = __testOnly.maskString(input);
+			expect(out).toContain('access_token":"');
+			expect(out).not.toContain(longValue);
+			// Masked head + ellipsis + tail pattern (from maskToken long branch).
+			expect(out).toMatch(/"access_token":"access...4321"/);
+		});
 	});
 });

@@ -116,7 +116,19 @@ function maskString(value: string): string {
 				if (typeof captured !== "string" || captured.length === 0) {
 					return maskToken(match);
 				}
-				return match.replace(captured, maskToken(captured));
+				// Use lastIndexOf: the captured value always sits at the end of
+				// the match, but String.prototype.replace(string, string) only
+				// replaces the FIRST occurrence. If the captured value happens
+				// to be a substring of the preceding key name (e.g. captured
+				// "access" inside '"access_token":"access"'), a first-occurrence
+				// replace would corrupt the key and leak the real value. Slicing
+				// around lastIndexOf guarantees we rewrite the value only.
+				const lastIdx = match.lastIndexOf(captured);
+				return (
+					match.slice(0, lastIdx) +
+					maskToken(captured) +
+					match.slice(lastIdx + captured.length)
+				);
 			});
 		}
 	}
