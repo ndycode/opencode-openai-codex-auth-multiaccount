@@ -2,6 +2,35 @@
  * Shared terminal theme primitives for legacy and Codex-style TUI rendering.
  */
 
+/**
+ * Resolve whether ANSI color output is permitted, honouring the widely
+ * supported `NO_COLOR` (https://no-color.org) and `FORCE_COLOR`
+ * conventions before falling back to TTY detection.
+ *
+ * Precedence:
+ *   1. `NO_COLOR` — if set to any non-empty value, colors are disabled.
+ *      An empty string is treated as "not set" (matches the spec).
+ *   2. `FORCE_COLOR` — if set to any value other than `"0"` / `"false"`,
+ *      colors are forced on even without a TTY. `"0"` or `"false"`
+ *      forces colors OFF regardless of TTY.
+ *   3. Fallback: enable colors when the stream is a TTY.
+ *
+ * The helper takes its dependencies as parameters so it is trivially
+ * testable and can be reused from non-process contexts.
+ */
+export function shouldUseColor(
+	stdout: { isTTY?: boolean } = process.stdout,
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return false;
+	const force = env.FORCE_COLOR;
+	if (force !== undefined && force !== "") {
+		if (force === "0" || force === "false") return false;
+		return true;
+	}
+	return Boolean(stdout.isTTY);
+}
+
 export type UiColorProfile = "ansi16" | "ansi256" | "truecolor";
 export type UiGlyphMode = "ascii" | "unicode" | "auto";
 

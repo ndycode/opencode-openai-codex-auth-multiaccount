@@ -208,3 +208,45 @@ export function resetAllCircuitBreakers(): void {
 export function clearCircuitBreakers(): void {
 	circuitBreakers.clear();
 }
+
+/**
+ * Aggregate state counts across all registered circuit breakers, grouped by
+ * the key prefix (substring before the first `:`). Today the only prefix is
+ * `account`, but the grouping is forward-compatible with future per-family
+ * breakers. The returned object intentionally contains NO account IDs or
+ * identifying keys — only aggregated counters — so it is safe to embed in
+ * diagnostic snapshots.
+ */
+export interface CircuitBreakerStateCounts {
+	closed: number;
+	open: number;
+	halfOpen: number;
+}
+
+export interface CircuitBreakerSummary {
+	total: CircuitBreakerStateCounts;
+	byGroup: Record<string, CircuitBreakerStateCounts>;
+}
+
+export function getCircuitBreakerSummary(): CircuitBreakerSummary {
+	const total: CircuitBreakerStateCounts = { closed: 0, open: 0, halfOpen: 0 };
+	const byGroup: Record<string, CircuitBreakerStateCounts> = {};
+	for (const [key, breaker] of circuitBreakers.entries()) {
+		const group = key.includes(":") ? key.slice(0, key.indexOf(":")) : key;
+		const bucket =
+			byGroup[group] ??
+			(byGroup[group] = { closed: 0, open: 0, halfOpen: 0 });
+		const state = breaker.getState();
+		if (state === "closed") {
+			total.closed += 1;
+			bucket.closed += 1;
+		} else if (state === "open") {
+			total.open += 1;
+			bucket.open += 1;
+		} else {
+			total.halfOpen += 1;
+			bucket.halfOpen += 1;
+		}
+	}
+	return { total, byGroup };
+}

@@ -174,7 +174,7 @@ export const REQUEST_BODY_LOGGING_ENABLED = process.env.CODEX_PLUGIN_LOG_BODIES 
 export const DEBUG_ENABLED = process.env.DEBUG_CODEX_PLUGIN === "1" || LOGGING_ENABLED;
 export const LOG_LEVEL = parseLogLevel(process.env.CODEX_PLUGIN_LOG_LEVEL);
 const CONSOLE_LOG_ENABLED = process.env.CODEX_CONSOLE_LOG === "1";
-const LOG_DIR = join(homedir(), ".opencode", "logs", "codex-plugin");
+export const LOG_DIR = join(homedir(), ".opencode", "logs", "codex-plugin");
 
 let client: LogClient | null = null;
 let currentCorrelationId: string | null = null;
@@ -448,7 +448,7 @@ export function getRequestId(): number {
 	return requestCounter;
 }
 
-export { formatDuration, maskEmail };
+export { formatDuration, maskEmail, maskString, sanitizeValue };
 
 /**
  * Test-only exports. Internal helpers surfaced here so their redaction
