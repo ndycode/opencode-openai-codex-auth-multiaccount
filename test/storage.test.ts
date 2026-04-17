@@ -1084,10 +1084,11 @@ describe("storage", () => {
 
     it("returns null for invalid version (non-V2, non-V1, non-V3)", () => {
       // V2 used to fall into this bucket and silently returned null; it is
-      // now explicitly rejected (see test/storage-v2-migration.test.ts) so
-      // this case must use a different unknown version to exercise the
-      // generic unknown-version path.
-      const result = normalizeAccountStorage({ version: 42, accounts: [] });
+      // now explicitly rejected (see test/storage-v2-migration.test.ts) and
+      // any finite number > 3 trips the forward-compat guard and throws, so
+      // this case uses version 0 which is numeric, not >3, not literal 2,
+      // and neither 1 nor 3 — exercising the generic unknown-version path.
+      const result = normalizeAccountStorage({ version: 0, accounts: [] });
       expect(result).toBeNull();
     });
 
@@ -2431,12 +2432,18 @@ describe("storage", () => {
       ).toBeNull();
     });
 
-    it("normalizeAccountStorage does not throw for legacy version 2 (still returns null)", () => {
-      // V2 is a known unsupported legacy format; its handling is a separate
-      // migration concern and must not regress into the forward-compat path.
-      expect(
-        normalizeAccountStorage({ version: 2, accounts: [] }, "/tmp/v2.json"),
-      ).toBeNull();
+    it("forward-compat guard does not claim legacy version 2 (V2 path handles it)", () => {
+      // V2 has its own dedicated rejection (see test/storage-v2-migration.test.ts)
+      // and must NOT be absorbed into the forward-compat UNSUPPORTED_SCHEMA_VERSION
+      // code path; that would leak the wrong error code to the UI.
+      let caught: unknown = null;
+      try {
+        normalizeAccountStorage({ version: 2, accounts: [] }, "/tmp/v2.json");
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(StorageError);
+      expect((caught as StorageError).code).not.toBe("UNSUPPORTED_SCHEMA_VERSION");
     });
 
     it("loadAccounts throws StorageError with UNSUPPORTED_SCHEMA_VERSION on schemaVersion > 3", async () => {

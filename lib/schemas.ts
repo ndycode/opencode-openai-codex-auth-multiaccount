@@ -196,7 +196,11 @@ export type AccountStorageV1FromSchema = z.infer<typeof AccountStorageV1Schema>;
  */
 export const AccountStorageV2DetectionSchema = z.object({
 	version: z.literal(2),
-	accounts: z.array(z.unknown()).optional(),
+	// Use `.nullish()` (accepts `null` OR `undefined`) rather than `.optional()`
+	// so a malformed V2 file with `"accounts": null` still matches the V2 shape
+	// and flows to the typed UNKNOWN_V2_FORMAT rejection path instead of
+	// silently falling through to `return null` and discarding credentials.
+	accounts: z.array(z.unknown()).nullish(),
 });
 
 export type AccountStorageV2DetectionFromSchema = z.infer<

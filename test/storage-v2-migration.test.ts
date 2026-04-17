@@ -67,9 +67,47 @@ describe("V2 storage detection (normalizeAccountStorage)", () => {
 		expect(() => normalizeAccountStorage(parsed)).toThrow(StorageError);
 	});
 
-	it("continues to return null for unknown versions other than 2 (v42, string, missing)", () => {
+	it("detects V2 and throws (not silently null) when accounts is null", () => {
+		// Regression: previously `.optional()` on the V2-detection schema
+		// rejected `accounts: null`, so a V2 file with a null accounts field
+		// fell through to the warn+return-null path and silently discarded
+		// credentials. `.nullish()` restores the V2 detection so the loader
+		// surfaces a typed UNKNOWN_V2_FORMAT error instead.
+		const malformedV2 = { version: 2, accounts: null };
+
+		expect(() => normalizeAccountStorage(malformedV2)).toThrow(StorageError);
+
+		try {
+			normalizeAccountStorage(malformedV2);
+		} catch (error) {
+			expect(error).toBeInstanceOf(StorageError);
+			const storageError = error as StorageError;
+			expect(storageError.code).toBe(UNKNOWN_V2_FORMAT_CODE);
+			expect(storageError.message).toBe(buildV2RejectionMessage());
+		}
+	});
+
+	it("detects V2 and throws when accounts is missing entirely", () => {
+		// Parallel coverage: `.nullish()` must also allow `undefined` (i.e.
+		// accounts field absent), which was the only case that worked before.
+		const malformedV2: Record<string, unknown> = { version: 2 };
+
+		expect(() => normalizeAccountStorage(malformedV2)).toThrow(StorageError);
+
+		try {
+			normalizeAccountStorage(malformedV2);
+		} catch (error) {
+			expect(error).toBeInstanceOf(StorageError);
+			expect((error as StorageError).code).toBe(UNKNOWN_V2_FORMAT_CODE);
+		}
+	});
+
+	it("continues to return null for unknown versions other than 2 (sub-bound numeric, string, missing)", () => {
+		// version 42 would now trip the forward-compat guard (>3) and throw, so
+		// we exercise the generic unknown-version bucket with version 0 — a
+		// finite number that is neither >3, literal 2, nor 1/3.
 		expect(
-			normalizeAccountStorage({ version: 42, accounts: [] }),
+			normalizeAccountStorage({ version: 0, accounts: [] }),
 		).toBeNull();
 		expect(
 			normalizeAccountStorage({ version: "two", accounts: [] }),
