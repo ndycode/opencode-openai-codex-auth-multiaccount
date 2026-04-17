@@ -10,6 +10,7 @@ import {
   deduplicateAccounts,
   deduplicateAccountsByEmail,
   getStoragePath,
+  StorageError,
   type AccountStorageV3,
 } from "../lib/storage.js";
 
@@ -37,9 +38,20 @@ describe("Storage Module - Async Operations", () => {
       expect(normalizeAccountStorage([])).toBeNull();
     });
 
-    it("returns null for unknown version", () => {
+    it("returns null for legacy/unrecognized versions below the forward-compat bound", () => {
+      // V2 is a known unsupported legacy format whose migration lives elsewhere,
+      // and non-numeric markers should still be tolerated as corrupt input.
       expect(normalizeAccountStorage({ version: 2, accounts: [], activeIndex: 0 })).toBeNull();
-      expect(normalizeAccountStorage({ version: 99, accounts: [], activeIndex: 0 })).toBeNull();
+      expect(normalizeAccountStorage({ version: "99", accounts: [], activeIndex: 0 })).toBeNull();
+    });
+
+    it("throws UNSUPPORTED_SCHEMA_VERSION for future numeric versions", () => {
+      // Silently returning null for a future schema would let a downgraded
+      // plugin wipe the user's real credentials on the next save, so the
+      // guard has to surface the failure instead.
+      expect(() =>
+        normalizeAccountStorage({ version: 99, accounts: [], activeIndex: 0 }),
+      ).toThrowError(StorageError);
     });
 
     it("returns null for invalid accounts array", () => {

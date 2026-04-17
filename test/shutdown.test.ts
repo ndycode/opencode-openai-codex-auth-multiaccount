@@ -5,6 +5,15 @@ import {
 	runCleanup,
 	getCleanupCount,
 } from "../lib/shutdown.js";
+import { AccountManager } from "../lib/accounts.js";
+
+vi.mock("../lib/storage.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../lib/storage.js")>();
+	return {
+		...actual,
+		saveAccounts: vi.fn().mockResolvedValue(undefined),
+	};
+});
 
 describe("Graceful shutdown", () => {
 	beforeEach(async () => {
@@ -172,6 +181,104 @@ describe("Graceful shutdown", () => {
 			expect(processOnceSpy.mock.calls.length).toBe(firstCallCount);
 
 			processOnceSpy.mockRestore();
+		});
+	});
+
+	describe("AccountManager integration (Phase 1 reliability)", () => {
+		beforeEach(async () => {
+			await runCleanup();
+			const { saveAccounts } = await import("../lib/storage.js");
+			vi.mocked(saveAccounts).mockClear();
+			vi.mocked(saveAccounts).mockResolvedValue();
+		});
+
+		it("shutdown flushes pending AccountManager save before exit", async () => {
+			const { saveAccounts } = await import("../lib/storage.js");
+			const mockSaveAccounts = vi.mocked(saveAccounts);
+			const now = Date.now();
+			const manager = new AccountManager(undefined, {
+				version: 3,
+				activeIndex: 0,
+				accounts: [{ refreshToken: "t1", addedAt: now, lastUsed: now }],
+			});
+
+			// Schedule a save well beyond the window of any realistic test run;
+			// if the shutdown handler is wired up, it must flush immediately.
+			manager.saveToDiskDebounced(10_000);
+			expect(mockSaveAccounts).not.toHaveBeenCalled();
+			expect(getCleanupCount()).toBeGreaterThan(0);
+
+			await runCleanup();
+
+			expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+			expect(getCleanupCount()).toBe(0);
+
+			manager.disposeShutdownHandler();
+		});
+
+		it("is a no-op when no debounced save is pending", async () => {
+			const { saveAccounts } = await import("../lib/storage.js");
+			const mockSaveAccounts = vi.mocked(saveAccounts);
+			const now = Date.now();
+			const manager = new AccountManager(undefined, {
+				version: 3,
+				activeIndex: 0,
+				accounts: [{ refreshToken: "t1", addedAt: now, lastUsed: now }],
+			});
+
+			manager.saveToDiskDebounced(10_000);
+			await manager.flushPendingSave();
+			mockSaveAccounts.mockClear();
+
+			await runCleanup();
+
+			expect(mockSaveAccounts).not.toHaveBeenCalled();
+			manager.disposeShutdownHandler();
+		});
+
+		it("disposeShutdownHandler removes the cleanup registration", async () => {
+			const { saveAccounts } = await import("../lib/storage.js");
+			const mockSaveAccounts = vi.mocked(saveAccounts);
+			const now = Date.now();
+			const manager = new AccountManager(undefined, {
+				version: 3,
+				activeIndex: 0,
+				accounts: [{ refreshToken: "t1", addedAt: now, lastUsed: now }],
+			});
+
+			manager.saveToDiskDebounced(10_000);
+			const countWithHandler = getCleanupCount();
+			expect(countWithHandler).toBeGreaterThan(0);
+
+			manager.disposeShutdownHandler();
+			expect(getCleanupCount()).toBe(countWithHandler - 1);
+
+			await runCleanup();
+			expect(mockSaveAccounts).not.toHaveBeenCalled();
+		});
+
+		it("survives a flushPendingSave rejection without blocking other cleanup", async () => {
+			const { saveAccounts } = await import("../lib/storage.js");
+			const mockSaveAccounts = vi.mocked(saveAccounts);
+			mockSaveAccounts.mockRejectedValueOnce(new Error("disk full"));
+
+			const now = Date.now();
+			const manager = new AccountManager(undefined, {
+				version: 3,
+				activeIndex: 0,
+				accounts: [{ refreshToken: "t1", addedAt: now, lastUsed: now }],
+			});
+			const secondCleanup = vi.fn();
+			registerCleanup(secondCleanup);
+
+			manager.saveToDiskDebounced(10_000);
+
+			await runCleanup();
+
+			expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+			expect(secondCleanup).toHaveBeenCalledTimes(1);
+
+			manager.disposeShutdownHandler();
 		});
 	});
 });

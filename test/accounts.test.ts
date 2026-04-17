@@ -1398,6 +1398,54 @@ describe("AccountManager", () => {
 
       expect(mockSaveAccounts).toHaveBeenCalledTimes(2);
     });
+
+    it("re-registers shutdown handler after external runCleanup cycle", async () => {
+      // Regression for Greptile P2: before the fix, the handler installed by
+      // `ensureShutdownFlushRegistered()` left `this.shutdownHandler` set
+      // after `runCleanup()` drained it externally, so the early-return
+      // guard prevented re-registration and the next pending save went
+      // unprotected against shutdown.
+      const { saveAccounts } = await import("../lib/storage.js");
+      const { runCleanup, getCleanupCount } = await import("../lib/shutdown.js");
+      const mockSaveAccounts = vi.mocked(saveAccounts);
+      mockSaveAccounts.mockClear();
+      mockSaveAccounts.mockResolvedValue();
+
+      // Drain any handlers left behind by prior tests so the call-count
+      // assertions below reflect only this test.
+      await runCleanup();
+
+      const now = Date.now();
+      const stored = {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [
+          { refreshToken: "token-1", addedAt: now, lastUsed: now },
+        ],
+      };
+
+      const manager = new AccountManager(undefined, stored);
+
+      // First cycle: schedule a debounced save then drain the cleanup
+      // queue externally (same pathway `beforeExit` uses). The handler
+      // must flush the pending save and release the `shutdownHandler`
+      // slot so the next `saveToDiskDebounced()` can re-register.
+      manager.saveToDiskDebounced(100);
+      expect(getCleanupCount()).toBe(1);
+      await runCleanup();
+      expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+      expect(getCleanupCount()).toBe(0);
+
+      // Second cycle: a fresh debounced save on the same manager must
+      // re-register, otherwise `runCleanup()` has nothing to drain and
+      // the save is silently lost under fake timers.
+      mockSaveAccounts.mockClear();
+      manager.saveToDiskDebounced(100);
+      expect(getCleanupCount()).toBe(1);
+      await runCleanup();
+      expect(mockSaveAccounts).toHaveBeenCalledTimes(1);
+      expect(getCleanupCount()).toBe(0);
+    });
   });
 
   describe("constructor edge cases", () => {
@@ -1789,6 +1837,48 @@ describe("AccountManager", () => {
       
       await manager.flushPendingSave();
       await savePromise;
+    });
+  });
+
+  describe("shutdown cleanup registration", () => {
+    it("registers a cleanup handler the first time saveToDiskDebounced runs", async () => {
+      const { getCleanupCount, runCleanup } = await import("../lib/shutdown.js");
+      await runCleanup();
+
+      const now = Date.now();
+      const manager = new AccountManager(undefined, {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "token-shutdown", addedAt: now, lastUsed: now }],
+      });
+
+      expect(getCleanupCount()).toBe(0);
+
+      manager.saveToDiskDebounced(10_000);
+      expect(getCleanupCount()).toBe(1);
+
+      // Repeated calls must not accumulate duplicate registrations.
+      manager.saveToDiskDebounced(10_000);
+      manager.saveToDiskDebounced(10_000);
+      expect(getCleanupCount()).toBe(1);
+
+      manager.disposeShutdownHandler();
+      expect(getCleanupCount()).toBe(0);
+    });
+
+    it("disposeShutdownHandler is a no-op when nothing was registered", async () => {
+      const { getCleanupCount, runCleanup } = await import("../lib/shutdown.js");
+      await runCleanup();
+
+      const now = Date.now();
+      const manager = new AccountManager(undefined, {
+        version: 3 as const,
+        activeIndex: 0,
+        accounts: [{ refreshToken: "token-idle", addedAt: now, lastUsed: now }],
+      });
+
+      expect(() => manager.disposeShutdownHandler()).not.toThrow();
+      expect(getCleanupCount()).toBe(0);
     });
   });
 

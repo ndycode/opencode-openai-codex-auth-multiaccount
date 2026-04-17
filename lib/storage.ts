@@ -345,7 +345,7 @@ async function migrateStorageFileIfNeeded(
   try {
     const legacyContent = await fs.readFile(legacyPath, "utf-8");
     const legacyData = JSON.parse(legacyContent) as unknown;
-    const normalized = normalizeAccountStorage(legacyData);
+    const normalized = normalizeAccountStorage(legacyData, legacyPath);
     if (!normalized) return null;
 
     await persist(normalized);
@@ -368,6 +368,10 @@ async function migrateStorageFileIfNeeded(
     });
     return normalized;
   } catch (error) {
+    // Forward-compat failures should not be masked as migration warnings.
+    if (error instanceof StorageError && error.code === "UNSUPPORTED_SCHEMA_VERSION") {
+      throw error;
+    }
     log.warn(`Failed to migrate legacy ${label}`, {
       from: legacyPath,
       to: nextPath,
@@ -628,17 +632,46 @@ function findAccountIndexByIdentityKeys(
  * Normalizes and validates account storage data, migrating from v1 to v3 if needed.
  * Handles deduplication, index clamping, and per-family active index mapping.
  * @param data - Raw storage data (unknown format)
+ * @param sourcePath - Optional origin path used for error diagnostics
  * @returns Normalized AccountStorageV3 or null if invalid
+ * @throws StorageError (code `UNSUPPORTED_SCHEMA_VERSION`) when `data.version`
+ *   is a finite number greater than the newest format this plugin understands.
+ *   Throwing prevents a downgraded plugin from silently discarding future
+ *   schemas that still contain valid credentials.
  */
-export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null {
+export function normalizeAccountStorage(
+  data: unknown,
+  sourcePath?: string,
+): AccountStorageV3 | null {
   if (!isRecord(data)) {
     log.warn("Invalid storage format, ignoring");
     return null;
   }
 
+  const rawVersion = (data as { version?: unknown }).version;
+
+  // Forward-compat guard: a finite version above the newest supported schema
+  // signals a file written by a newer plugin build. Returning null here would
+  // make the caller treat the data as corrupt and overwrite it with an empty
+  // or downgraded payload, permanently destroying the user's accounts.
+  if (typeof rawVersion === "number" && Number.isFinite(rawVersion) && rawVersion > 3) {
+    const resolvedPath = sourcePath ?? "<unknown>";
+    const hint =
+      `The storage file at ${resolvedPath} was written by a newer version ` +
+      `of this plugin (schema v${rawVersion}). Upgrade the plugin to a build ` +
+      `that understands schema v${rawVersion}, or back up and remove the ` +
+      `file to start fresh.`;
+    throw new StorageError(
+      `Unsupported account storage schema version ${rawVersion}; this plugin supports up to version 3.`,
+      "UNSUPPORTED_SCHEMA_VERSION",
+      resolvedPath,
+      hint,
+    );
+  }
+
   if (data.version !== 1 && data.version !== 3) {
     log.warn("Unknown storage version, ignoring", {
-      version: (data as { version?: unknown }).version,
+      version: rawVersion,
     });
     return null;
   }
@@ -719,6 +752,10 @@ export function normalizeAccountStorage(data: unknown): AccountStorageV3 | null 
  * Loads OAuth accounts from disk storage.
  * Automatically migrates v1 storage to v3 format if needed.
  * @returns AccountStorageV3 if file exists and is valid, null otherwise
+ * @throws StorageError (code `UNSUPPORTED_SCHEMA_VERSION`) when the on-disk
+ *   `version` field is greater than the newest format this plugin understands.
+ *   Surfacing the error stops a downgraded plugin from overwriting the user's
+ *   future-schema credentials with a stale or empty payload.
  */
 export async function loadAccounts(): Promise<AccountStorageV3 | null> {
   return withStorageLock(async () => loadAccountsInternal(saveAccountsUnlocked));
@@ -787,7 +824,7 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
       });
     }
 
-    const normalized = normalizeAccountStorage(data);
+    const normalized = normalizeAccountStorage(data, globalStoragePath);
     if (!normalized) return null;
 
     log.info("Loaded global account storage as project fallback", {
@@ -797,6 +834,11 @@ async function loadGlobalAccountsFallback(): Promise<AccountStorageV3 | null> {
     });
     return normalized;
   } catch (error) {
+    // Propagate forward-compat failures so the caller can surface them to the
+    // user instead of silently falling back to an empty global pool.
+    if (error instanceof StorageError && error.code === "UNSUPPORTED_SCHEMA_VERSION") {
+      throw error;
+    }
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
       log.warn("Failed to load global fallback account storage", {
@@ -826,7 +868,7 @@ async function loadAccountsInternal(
       log.warn("Account storage schema validation warnings", { errors: schemaErrors.slice(0, 5) });
     }
 
-    const normalized = normalizeAccountStorage(data);
+    const normalized = normalizeAccountStorage(data, path);
 
     const storedVersion = isRecord(data) ? (data as { version?: unknown }).version : undefined;
     if (normalized && storedVersion !== normalized.version) {
@@ -842,6 +884,12 @@ async function loadAccountsInternal(
 
     return normalized;
   } catch (error) {
+    // Forward-compat failures must reach the caller instead of being silently
+    // downgraded to an empty load, which would clobber the user's future-format
+    // credentials on the next save.
+    if (error instanceof StorageError && error.code === "UNSUPPORTED_SCHEMA_VERSION") {
+      throw error;
+    }
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       const migrated = persistMigration
@@ -1256,7 +1304,9 @@ async function readAndNormalizeImportFile(filePath: string): Promise<{
 		throw new Error(`Invalid JSON in import file: ${resolvedPath}`);
 	}
 
-	const normalized = normalizeAccountStorage(imported);
+	// Pass the resolved path so an UNSUPPORTED_SCHEMA_VERSION error includes
+	// the actual import file in its diagnostics.
+	const normalized = normalizeAccountStorage(imported, resolvedPath);
 	if (!normalized) {
 		throw new Error("Invalid account storage format");
 	}
