@@ -196,6 +196,62 @@ export const AnyAccountStorageSchema = z.discriminatedUnion("version", [
 export type AnyAccountStorageFromSchema = z.infer<typeof AnyAccountStorageSchema>;
 
 // ============================================================================
+// Codex CLI Cross-Process Account File Schema
+// ============================================================================
+
+/**
+ * Schema for a single Codex CLI account entry.
+ *
+ * This file is produced by a separate process (the Codex CLI) and lives on
+ * disk at a known path. It is a cross-trust-boundary input: the file could be
+ * stale, truncated, tampered with, or produced by a mismatched Codex CLI
+ * version. All fields are therefore `optional` at the schema level — we
+ * extract only the fields we need and let `catchall(z.unknown())` preserve
+ * any extra fields without rejection.
+ *
+ * Security note (audit top-20 #11): never trust field shapes via ad-hoc
+ * property checks before validating through this schema. The wrapper
+ * `CodexCliAccountsSchema` must be applied at the JSON-parse boundary.
+ */
+export const CodexCliAccountEntrySchema = z
+	.object({
+		email: z.string().optional(),
+		accountId: z.string().optional(),
+		auth: z
+			.object({
+				tokens: z
+					.object({
+						access_token: z.string().optional(),
+						refresh_token: z.string().optional(),
+						id_token: z.string().optional(),
+					})
+					.catchall(z.unknown())
+					.optional(),
+			})
+			.catchall(z.unknown())
+			.optional(),
+	})
+	.catchall(z.unknown());
+
+export type CodexCliAccountEntryFromSchema = z.infer<typeof CodexCliAccountEntrySchema>;
+
+/**
+ * Schema for the full Codex CLI accounts file.
+ *
+ * Applied at the JSON-parse boundary in `lib/accounts.ts:getCodexCliTokenCache`.
+ * A validation failure causes the loader to warn+skip (treat cache as empty)
+ * rather than throwing — a malformed or attacker-controlled Codex CLI file
+ * must never take down the host plugin.
+ */
+export const CodexCliAccountsSchema = z
+	.object({
+		accounts: z.array(CodexCliAccountEntrySchema).optional(),
+	})
+	.catchall(z.unknown());
+
+export type CodexCliAccountsFromSchema = z.infer<typeof CodexCliAccountsSchema>;
+
+// ============================================================================
 // Token Result Schemas
 // ============================================================================
 

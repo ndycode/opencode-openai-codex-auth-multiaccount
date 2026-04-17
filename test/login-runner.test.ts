@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	applyAccountSelectionFallbacks,
+	mergeStoredAccountPair,
 	persistAccountPool,
 	persistResolvedAccountSelection,
 	resolveAccountSelection,
@@ -245,5 +246,97 @@ describe("login-runner selection finalization", () => {
 		expect(wrapped.message).not.toContain("token-file");
 		expect(wrapped.message).not.toContain("acct-123");
 		expect(persistSelections).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("mergeStoredAccountPair (credential merge semantics)", () => {
+	// Audit top-20 #10: `||` allowed an intentionally cleared (empty-string)
+	// token on the newer record to fall back to the older record's stale token,
+	// effectively resurrecting credentials the caller had already cleared.
+	it("does not resurrect an older token when the newer record has an explicit empty-string token", () => {
+		const base = {
+			addedAt: 1_000,
+			lastUsed: 1_000,
+			rateLimitResetTimes: {},
+		};
+		const older = {
+			...base,
+			refreshToken: "older-refresh",
+			accessToken: "older-access",
+			expiresAt: 2_000,
+		};
+		const newer = {
+			...base,
+			lastUsed: 2_000,
+			refreshToken: "",
+			accessToken: "",
+			expiresAt: 3_000,
+		};
+
+		const merged = mergeStoredAccountPair(older, newer);
+
+		// Newer wins on recency. Empty strings are NOT null/undefined, so
+		// nullish-coalescing keeps them — the stale older token stays buried.
+		expect(merged.refreshToken).toBe("");
+		expect(merged.accessToken).toBe("");
+		expect(merged.expiresAt).toBe(3_000);
+	});
+
+	it("falls back to the older token when the newer token is genuinely absent (undefined)", () => {
+		const older = {
+			addedAt: 1_000,
+			lastUsed: 1_000,
+			rateLimitResetTimes: {},
+			refreshToken: "older-refresh",
+			accessToken: "older-access",
+			expiresAt: 2_000,
+		};
+		const newer = {
+			addedAt: 2_000,
+			lastUsed: 2_000,
+			rateLimitResetTimes: {},
+			// tokens undefined (not empty string)
+		};
+
+		const merged = mergeStoredAccountPair(older, newer);
+
+		expect(merged.refreshToken).toBe("older-refresh");
+		expect(merged.accessToken).toBe("older-access");
+		expect(merged.expiresAt).toBe(2_000);
+	});
+
+	it("prefers the newer record's token over the older record's token when both are non-empty", () => {
+		const older = {
+			addedAt: 1_000,
+			lastUsed: 1_000,
+			rateLimitResetTimes: {},
+			refreshToken: "older-refresh",
+		};
+		const newer = {
+			addedAt: 2_000,
+			lastUsed: 2_000,
+			rateLimitResetTimes: {},
+			refreshToken: "newer-refresh",
+		};
+
+		expect(mergeStoredAccountPair(older, newer).refreshToken).toBe("newer-refresh");
+	});
+
+	it("disables the merged record if either input had enabled:false (fail-closed)", () => {
+		const a = {
+			addedAt: 1,
+			lastUsed: 1,
+			rateLimitResetTimes: {},
+			enabled: true,
+		};
+		const b = {
+			addedAt: 2,
+			lastUsed: 2,
+			rateLimitResetTimes: {},
+			enabled: false,
+		};
+
+		expect(mergeStoredAccountPair(a, b).enabled).toBe(false);
+		expect(mergeStoredAccountPair(b, a).enabled).toBe(false);
 	});
 });

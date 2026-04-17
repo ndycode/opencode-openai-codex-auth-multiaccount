@@ -2,14 +2,21 @@ import { generatePKCE } from "@openauthjs/openauth/pkce";
 import { randomBytes } from "node:crypto";
 import type { PKCEPair, AuthorizationFlow, TokenResult, ParsedAuthInput, JWTPayload } from "../types.js";
 import { logError } from "../logger.js";
-import { OAUTH_CALLBACK_PATH, OAUTH_CALLBACK_PORT } from "../runtime-contracts.js";
+import {
+	OAUTH_CALLBACK_LOOPBACK_HOST,
+	OAUTH_CALLBACK_PATH,
+	OAUTH_CALLBACK_PORT,
+} from "../runtime-contracts.js";
 import { safeParseOAuthTokenResponse } from "../schemas.js";
 
 // OAuth constants (from openai/codex)
 export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 export const TOKEN_URL = "https://auth.openai.com/oauth/token";
-export const REDIRECT_URI = `http://localhost:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
+// RFC 8252 §7.3: the redirect URI MUST use the exact loopback IP literal that
+// the callback server binds to. Using `localhost` here would resolve via DNS
+// and could be hijacked or mismatch the bind host on dual-stack systems.
+export const REDIRECT_URI = `http://${OAUTH_CALLBACK_LOOPBACK_HOST}:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
 export const SCOPE = "openid profile email offline_access";
 
 /**

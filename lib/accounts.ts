@@ -19,9 +19,10 @@ import {
 	type AccountWithMetrics,
 	type HybridSelectionOptions,
 } from "./rotation.js";
-import { isRecord, nowMs } from "./utils.js";
+import { nowMs } from "./utils.js";
 import { decodeJWT } from "./auth/auth.js";
 import { registerCleanup, unregisterCleanup } from "./shutdown.js";
+import { CodexCliAccountsSchema } from "./schemas.js";
 
 /**
  * Upper bound the shutdown handler will wait for `flushPendingSave` so that a
@@ -115,30 +116,43 @@ async function getCodexCliTokenCache(): Promise<Map<string, CodexCliTokenCacheEn
 
 	try {
 		const raw = await fs.readFile(CODEX_CLI_ACCOUNTS_PATH, "utf-8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (!isRecord(parsed) || !Array.isArray(parsed.accounts)) {
+		const rawParsed = JSON.parse(raw) as unknown;
+
+		// Cross-process trust boundary: the Codex CLI accounts file is produced
+		// by a separate process on disk and may be stale, truncated, tampered
+		// with, or produced by a version whose shape we do not recognise. We
+		// MUST validate through the Zod schema before reading any field; a
+		// parse failure is a warn+skip, never a throw (audit top-20 #11).
+		const validation = CodexCliAccountsSchema.safeParse(rawParsed);
+		if (!validation.success) {
+			log.warn("Codex CLI accounts cache failed validation; ignoring", {
+				issues: validation.error.issues.length,
+				firstPath: validation.error.issues[0]?.path.join(".") ?? "(root)",
+			});
 			codexCliTokenCache = null;
 			return null;
 		}
 
-		const next = new Map<string, CodexCliTokenCacheEntry>();
-		for (const entry of parsed.accounts) {
-			if (!isRecord(entry)) continue;
+		const validated = validation.data;
+		const entries = Array.isArray(validated.accounts) ? validated.accounts : [];
 
+		const next = new Map<string, CodexCliTokenCacheEntry>();
+		for (const entry of entries) {
 			const email = sanitizeEmail(typeof entry.email === "string" ? entry.email : undefined);
 			if (!email) continue;
 
 			const accountId =
-				typeof entry.accountId === "string" && entry.accountId.trim() ? entry.accountId.trim() : undefined;
+				typeof entry.accountId === "string" && entry.accountId.trim()
+					? entry.accountId.trim()
+					: undefined;
 
-			const auth = entry.auth;
-			const tokens = isRecord(auth) ? auth.tokens : undefined;
+			const tokens = entry.auth?.tokens;
 			const accessToken =
-				isRecord(tokens) && typeof tokens.access_token === "string" && tokens.access_token.trim()
+				typeof tokens?.access_token === "string" && tokens.access_token.trim()
 					? tokens.access_token.trim()
 					: undefined;
 			const refreshToken =
-				isRecord(tokens) && typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()
+				typeof tokens?.refresh_token === "string" && tokens.refresh_token.trim()
 					? tokens.refresh_token.trim()
 					: undefined;
 
