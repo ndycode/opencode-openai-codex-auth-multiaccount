@@ -58,8 +58,20 @@ function normalizeSubcommand(raw: string | undefined): Subcommand {
 
 /**
  * List `<path>.migrated-to-keychain.<ts>` siblings of the current storage
- * path, sorted most-recent first by the embedded timestamp (fallback to
- * filename sort when the suffix is unparseable so we degrade gracefully).
+ * path, sorted most-recent first by `fs.stat().mtimeMs` (F1 post-merge
+ * MEDIUM finding). The previous implementation sorted the filenames
+ * lexicographically, which happens to produce the correct order when all
+ * filenames share the fixed-width ISO-8601 suffix
+ * (`YYYY-MM-DDTHH-MM-SS-mmmZ`) emitted by `migrateOnDiskJsonToKeychainBackup`
+ * in `lib/storage/load-save.ts`. Any format drift (locale epoch, test
+ * fixture with non-ISO suffix, future migration-suffix change) silently
+ * picks the alphabetically-last entry instead of the most-recent. Sorting
+ * by `mtimeMs` is format-independent and matches "most recent backup"
+ * exactly. The filename tiebreaker (rare: identical mtime) preserves the
+ * previous descending-lex behaviour so the function stays deterministic.
+ *
+ * Exported as `_findMigrationBackupsForTests` below so the sort order can
+ * be asserted without stubbing the tool closure.
  */
 async function findMigrationBackups(storagePath: string): Promise<string[]> {
 	const dir = dirname(storagePath);
@@ -72,8 +84,37 @@ async function findMigrationBackups(storagePath: string): Promise<string[]> {
 		return [];
 	}
 	const matches = entries.filter((name) => name.startsWith(prefix));
-	matches.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
-	return matches.map((name) => join(dir, name));
+	const withMtime = await Promise.all(
+		matches.map(async (name) => {
+			const full = join(dir, name);
+			let mtimeMs = Number.NEGATIVE_INFINITY;
+			try {
+				const st = await fs.stat(full);
+				mtimeMs = st.mtimeMs;
+			} catch {
+				// Stat failure: keep -Infinity so the entry sorts last.
+				// This protects against a backup that disappeared between
+				// readdir and stat (race) without crashing the tool.
+			}
+			return { full, name, mtimeMs };
+		}),
+	);
+	withMtime.sort((a, b) => {
+		if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+		return a.name < b.name ? 1 : a.name > b.name ? -1 : 0;
+	});
+	return withMtime.map((entry) => entry.full);
+}
+
+/**
+ * Test-only export for `findMigrationBackups`. Kept separate from the
+ * tool factory so the sort semantics can be asserted directly against a
+ * temp directory in `test/tools-codex-keychain.test.ts`.
+ */
+export async function _findMigrationBackupsForTests(
+	storagePath: string,
+): Promise<string[]> {
+	return findMigrationBackups(storagePath);
 }
 
 export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
@@ -84,7 +125,7 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 	const { resolveUiRuntime } = ctx;
 	return tool({
 		description:
-			"Inspect and manage the opt-in OS-keychain credential backend. Subcommands: status (default), migrate, rollback.",
+			"Inspect and manage the opt-in OS-keychain credential backend. Subcommands: status (default), migrate, rollback. Rollback requires confirm=true when a current accounts JSON file exists alongside the backup (safety gate).",
 		args: {
 			command: tool.schema
 				.string()
@@ -92,8 +133,20 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 				.describe(
 					'Subcommand: "status" (default), "migrate", or "rollback".',
 				),
+			confirm: tool.schema
+				.boolean()
+				.optional()
+				.describe(
+					"rollback only: pass true to archive any current accounts JSON as `.pre-rollback.<ts>` before restoring the backup. Without confirm=true, rollback refuses if a current file exists.",
+				),
 		},
-		async execute({ command }: { command?: string }) {
+		async execute({
+			command,
+			confirm,
+		}: {
+			command?: string;
+			confirm?: boolean;
+		}) {
 			const ui = resolveUiRuntime();
 			const sub = normalizeSubcommand(command);
 			const optIn = isKeychainOptInEnabled();
@@ -210,6 +263,42 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 			// the backup back to the canonical storage path so the next load
 			// reads from disk again. clearAccounts handles both sides.
 			await clearAccounts();
+
+			// Silent-clobber guard (F1 post-merge MEDIUM finding). On POSIX,
+			// `fs.rename(backup, storagePath)` silently overwrites an
+			// existing destination. If `clearAccounts` failed to unlink the
+			// current JSON (EACCES/EBUSY) or a race write landed a new file
+			// between clearAccounts and rename, the user's current accounts
+			// would be silently discarded with no way to recover them.
+			// Require explicit `confirm=true` before overwriting; without
+			// it, refuse and surface the offending path.
+			let currentExists = false;
+			try {
+				await fs.access(storagePath);
+				currentExists = true;
+			} catch {
+				/* canonical path is clear; safe to rename */
+			}
+			let preRollbackArchive: string | null = null;
+			if (currentExists) {
+				if (!confirm) {
+					return [
+						`codex-keychain rollback: refusing to overwrite existing accounts file at ${storagePath}.`,
+						`Backup at ${mostRecent} was not restored.`,
+						"Pass confirm=true to archive the current file as .pre-rollback.<timestamp> and proceed, or move the current file aside and re-run.",
+					].join("\n");
+				}
+				const archiveSuffix = new Date()
+					.toISOString()
+					.replace(/[:.]/g, "-");
+				preRollbackArchive = `${storagePath}.pre-rollback.${archiveSuffix}`;
+				try {
+					await fs.rename(storagePath, preRollbackArchive);
+				} catch (err) {
+					return `codex-keychain rollback: failed to archive current accounts file at ${storagePath} -> ${preRollbackArchive}: ${(err as Error).message}. Backup at ${mostRecent} was not restored.`;
+				}
+			}
+
 			try {
 				await fs.rename(mostRecent, storagePath);
 			} catch (err) {
@@ -223,7 +312,7 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 				/* already deleted by clearAccounts */
 			}
 
-			return [
+			const lines: string[] = [
 				...formatUiHeader(ui, "Codex keychain rollback"),
 				"",
 				formatUiItem(
@@ -231,11 +320,23 @@ export function createCodexKeychainTool(ctx: ToolContext): ToolDefinition {
 					`Restored ${accountCount} account(s) from backup ${mostRecent}.`,
 				),
 				formatUiKeyValue(ui, "Active file", storagePath),
+			];
+			if (preRollbackArchive) {
+				lines.push(
+					formatUiKeyValue(
+						ui,
+						"Previous file archived at",
+						preRollbackArchive,
+					),
+				);
+			}
+			lines.push(
 				formatUiItem(
 					ui,
 					"To stop using the keychain backend, unset CODEX_KEYCHAIN (or set it to any value other than \"1\") before the next save.",
 				),
-			].join("\n");
+			);
+			return lines.join("\n");
 		},
 	});
 }

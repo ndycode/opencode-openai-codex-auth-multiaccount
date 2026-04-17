@@ -500,11 +500,23 @@ async function writeAccountsToPathUnlocked(path: string, storage: AccountStorage
  * `.migrated-to-keychain.<ts>` suffix instead of deleting it. Preserving the
  * original file as a rollback artefact is load-bearing: it is the user's
  * explicit escape hatch if the keychain backend turns out to be unreliable
- * on their platform. Failure to rename is logged and swallowed because the
- * authoritative copy now lives in the keychain; a missed rename means at
- * worst a duplicate JSON file on disk.
+ * on their platform.
+ *
+ * Atomicity across a partial migration window (F1 post-merge HIGH finding):
+ * if the rename fails (EACCES, EBUSY on Windows, disk full, parent dir
+ * permission drift) the file at `path` would otherwise hold a stale-but-valid
+ * V3 blob while the keychain holds the authoritative fresh blob. This is
+ * safe while the opt-in is on (keychain wins at load time) but silently
+ * resurrects stale credentials if the user later unsets `CODEX_KEYCHAIN`.
+ * We resolve this by overwriting the file with the fresh normalized blob
+ * when the rename fails so both sides agree, at the cost of losing that
+ * one rollback artefact. This matches the "rollback invariant" documented
+ * in the F1 post-merge review (option (a)).
  */
-async function migrateOnDiskJsonToKeychainBackup(path: string): Promise<void> {
+async function migrateOnDiskJsonToKeychainBackup(
+  path: string,
+  freshStorage: AccountStorageV3,
+): Promise<void> {
   try {
     await fs.access(path);
   } catch {
@@ -519,10 +531,28 @@ async function migrateOnDiskJsonToKeychainBackup(path: string): Promise<void> {
       backup,
     });
   } catch (err) {
-    log.warn("keychain: failed to rename on-disk JSON after successful keychain write", {
-      path,
-      error: String(err),
-    });
+    log.warn(
+      "keychain: failed to rename on-disk JSON after successful keychain write; overwriting on-disk copy with fresh blob to prevent stale-rollback-on-opt-out",
+      {
+        path,
+        error: String(err),
+      },
+    );
+    try {
+      await writeAccountsToPathUnlocked(path, freshStorage);
+    } catch (writeErr) {
+      // Last-resort: on-disk refresh also failed. The keychain still
+      // holds the authoritative blob so current operation succeeds, but
+      // a subsequent opt-in toggle off would now surface the stale
+      // file. Log at error so the operator can reconcile manually.
+      log.error(
+        "keychain: failed to refresh stale on-disk JSON after rename failure; opt-in toggle off may surface stale credentials",
+        {
+          path,
+          error: String(writeErr),
+        },
+      );
+    }
   }
 }
 
@@ -542,7 +572,7 @@ async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
     const projectKey = getCurrentProjectStorageKey();
     const result = await writeToKeychain(projectKey, blob);
     if (result.ok) {
-      await migrateOnDiskJsonToKeychainBackup(getStoragePath());
+      await migrateOnDiskJsonToKeychainBackup(getStoragePath(), normalizedStorage);
       return;
     }
     log.warn("keychain: write failed; falling back to JSON for this save", {
@@ -598,14 +628,43 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
 /**
  * Deletes the account storage file from disk.
  * Silently ignores if file doesn't exist.
+ *
+ * Ordering (F1 post-merge MEDIUM finding): unlink the on-disk JSON FIRST,
+ * then delete the keychain entry. If we cleared the keychain first and the
+ * unlink failed for a non-ENOENT reason (EACCES, EBUSY, filesystem drift),
+ * a subsequent load with opt-in still on would take the "no keychain entry,
+ * fall back to JSON" branch (see `loadAccountsInternal`) and resurrect the
+ * credentials from the still-present JSON file. Callers typically run
+ * `clearAccounts` to recover from a compromised token, so a silent
+ * resurrection is a meaningful failure mode.
+ *
+ * Fail-safe invariant: if the JSON unlink fails (non-ENOENT), we skip the
+ * keychain delete and log at `error`. Both copies remain in sync so the
+ * caller can retry safely. The operation is still best-effort (never
+ * throws) to preserve the existing contract above the storage layer.
  */
 export async function clearAccounts(): Promise<void> {
   return withStorageLock(async () => {
-    // Clear the keychain entry as well when the opt-in backend is active,
-    // otherwise a subsequent load would resurrect the "deleted" accounts
-    // from the keychain copy. Failures here are non-fatal: a stale
-    // keychain entry is cleaned up on the next successful write.
-    if (isKeychainOptInEnabled()) {
+    let jsonCleared = true;
+    try {
+      const path = getStoragePath();
+      await fs.unlink(path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        jsonCleared = false;
+        log.error(
+          "Failed to clear account storage; skipping keychain delete to keep storage sides in sync. Caller should retry.",
+          { error: String(error) },
+        );
+      }
+    }
+
+    // Only delete the keychain entry after the on-disk copy is gone (or
+    // was already absent). This preserves atomicity-enough semantics: a
+    // partial failure leaves both sides present rather than clearing
+    // one side and letting a subsequent load rehydrate from the other.
+    if (jsonCleared && isKeychainOptInEnabled()) {
       try {
         const projectKey = getCurrentProjectStorageKey();
         await deleteFromKeychain(projectKey);
@@ -613,15 +672,6 @@ export async function clearAccounts(): Promise<void> {
         log.warn("keychain: delete during clearAccounts failed", {
           error: String(err),
         });
-      }
-    }
-    try {
-      const path = getStoragePath();
-      await fs.unlink(path);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") {
-        log.error("Failed to clear account storage", { error: String(error) });
       }
     }
   });

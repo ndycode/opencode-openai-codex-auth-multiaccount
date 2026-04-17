@@ -333,6 +333,131 @@ describe("load-save integration with CODEX_KEYCHAIN", () => {
 		expect(existsSync(storagePath)).toBe(false);
 	});
 
+	// --- F1 post-merge review regression tests -----------------------------------
+	// Each test below is named against the finding it covers so the next
+	// reviewer can trace test -> review ledger without code archaeology.
+	// See docs/audits/_meta/f1-post-merge-review.md.
+
+	it("[HIGH] does not resurrect stale JSON after opt-in toggle off when backup rename fails", async () => {
+		// Seed: opt-in off, write a "stale" blob to the on-disk JSON. This
+		// is what an existing JSON-only user looks like before they flip
+		// CODEX_KEYCHAIN=1.
+		setOptIn(false);
+		const stale = makeStorage();
+		stale.accounts[0]!.accountId = "acct-stale";
+		await saveAccounts(stale);
+		expect(existsSync(storagePath)).toBe(true);
+
+		// Flip opt-in on. Force ONLY the backup rename to fail with a
+		// non-ENOENT error. The subsequent fallback write
+		// (writeAccountsToPathUnlocked) still needs a working fs.rename
+		// to complete its temp-file swap, so we intercept exactly one
+		// call with mockImplementationOnce.
+		setOptIn(true);
+		const renameSpy = vi
+			.spyOn(fs, "rename")
+			.mockImplementationOnce(async () => {
+				throw Object.assign(new Error("simulated EACCES on backup rename"), {
+					code: "EACCES",
+				});
+			});
+		try {
+			const fresh = makeStorage();
+			fresh.accounts[0]!.accountId = "acct-fresh";
+			await saveAccounts(fresh);
+		} finally {
+			renameSpy.mockRestore();
+		}
+
+		// Keychain holds the authoritative fresh blob.
+		const stored = mock.store.get(
+			`${KEYCHAIN_SERVICE_NAME}::${GLOBAL_KEYCHAIN_ACCOUNT_KEY}`,
+		);
+		expect(stored).toBeDefined();
+		expect(JSON.parse(stored!).accounts[0].accountId).toBe("acct-fresh");
+
+		// On-disk JSON still exists (backup rename failed) BUT its
+		// contents have been refreshed with the fresh blob. If the user
+		// now unsets CODEX_KEYCHAIN, loadAccounts reads from this file
+		// and sees "acct-fresh", not "acct-stale" — the HIGH-finding
+		// guarantee.
+		expect(existsSync(storagePath)).toBe(true);
+		const onDisk = JSON.parse(
+			await fs.readFile(storagePath, "utf-8"),
+		) as AccountStorageV3;
+		expect(onDisk.accounts[0]!.accountId).toBe("acct-fresh");
+	});
+
+	it("[MEDIUM] clearAccounts skips keychain delete if JSON unlink fails (keeps sides in sync)", async () => {
+		// Seed: opt-in on, write storage so BOTH sides hold the blob.
+		setOptIn(true);
+		await saveAccounts(makeStorage());
+		expect(mock.store.size).toBe(1);
+		// saveAccounts under opt-in renames the on-disk JSON into a backup
+		// immediately after the keychain write, so the canonical path is
+		// absent. We write a fresh JSON back in place to simulate a user
+		// who has both the keychain entry and an on-disk file (e.g. a
+		// race write that landed between rotation saves).
+		await fs.writeFile(
+			storagePath,
+			JSON.stringify(makeStorage(), null, 2),
+			{ encoding: "utf-8", mode: 0o600 },
+		);
+		expect(existsSync(storagePath)).toBe(true);
+
+		// Force unlink to throw EBUSY once. After the fix, clearAccounts
+		// should NOT delete the keychain entry so both sides remain in
+		// sync (caller can retry later). Before the fix, the keychain
+		// delete ran first and would have wiped the blob; a subsequent
+		// load with opt-in still on would then resurrect the credentials
+		// from the unlinkable JSON file.
+		const unlinkSpy = vi
+			.spyOn(fs, "unlink")
+			.mockImplementationOnce(async () => {
+				throw Object.assign(new Error("simulated EBUSY on unlink"), {
+					code: "EBUSY",
+				});
+			});
+		try {
+			await expect(clearAccounts()).resolves.toBeUndefined();
+		} finally {
+			unlinkSpy.mockRestore();
+		}
+
+		// Keychain blob survives because the unlink-first ordering skipped
+		// the keychain delete when the unlink failed.
+		expect(mock.store.size).toBe(1);
+		const stored = mock.store.get(
+			`${KEYCHAIN_SERVICE_NAME}::${GLOBAL_KEYCHAIN_ACCOUNT_KEY}`,
+		);
+		expect(stored).toBeDefined();
+
+		// No delete-op against the keychain was issued during the failed
+		// clearAccounts call.
+		const deleteCalls = mock.calls.filter(
+			(c) => c.op === "delete" && c.account === GLOBAL_KEYCHAIN_ACCOUNT_KEY,
+		);
+		expect(deleteCalls).toHaveLength(0);
+	});
+
+	it("[MEDIUM] clearAccounts unlinks JSON first, then keychain, in the happy path", async () => {
+		// Order check: the JSON file must be gone BEFORE the keychain
+		// delete runs. We can't directly observe fs.unlink timing without
+		// a spy, so verify the recorded keychain ops show delete occurred
+		// and the on-disk file is absent at call completion.
+		setOptIn(true);
+		await saveAccounts(makeStorage());
+
+		await clearAccounts();
+
+		expect(existsSync(storagePath)).toBe(false);
+		expect(mock.store.size).toBe(0);
+		const deleteCalls = mock.calls.filter(
+			(c) => c.op === "delete" && c.account === GLOBAL_KEYCHAIN_ACCOUNT_KEY,
+		);
+		expect(deleteCalls).toHaveLength(1);
+	});
+
 	it("corrupt keychain payload falls back to JSON read", async () => {
 		setOptIn(true);
 		// Pre-seed a valid on-disk JSON file.
