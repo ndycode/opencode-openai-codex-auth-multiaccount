@@ -1037,6 +1037,13 @@ export class AccountManager {
 	private ensureShutdownFlushRegistered(): void {
 		if (this.shutdownHandler) return;
 		const handler = async (): Promise<void> => {
+			// One-shot: clear the slot first so that if `runCleanup()` fires
+			// externally (e.g. tests reusing a manager across cycles, or any
+			// other caller that drains the global cleanup queue), a subsequent
+			// `saveToDiskDebounced()` can re-register a fresh handler. Without
+			// this the guard above returns early and the next pending save
+			// goes unprotected on shutdown.
+			this.shutdownHandler = null;
 			let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 			try {
 				await Promise.race([
