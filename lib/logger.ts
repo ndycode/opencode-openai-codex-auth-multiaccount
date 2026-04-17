@@ -26,11 +26,39 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 	error: 3,
 };
 
-const TOKEN_PATTERNS = [
+/**
+ * Regexes for detecting secret-shaped strings inside free-form log text
+ * (response bodies, error messages, stack traces). Each entry is tried in
+ * order and matches are replaced via `maskToken`.
+ *
+ * Structured objects route through `SENSITIVE_KEYS` instead; these patterns
+ * are the catch-net for strings that were never decomposed into keyed fields,
+ * e.g. a raw JSON response body logged as a single string.
+ */
+const TOKEN_PATTERNS: Array<RegExp | { pattern: RegExp; group: number }> = [
+	// JWTs (id_token, OpenAI access_token on modern flows).
 	/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+	// Long lower-case hex (SHA-1/SHA-256 tokens, some API keys).
 	/[a-f0-9]{40,}/gi,
+	// Platform API keys.
 	/sk-[A-Za-z0-9]{20,}/g,
+	// Authorization headers — catches bearer + any scheme.
 	/Bearer\s+\S+/gi,
+	// Opaque OpenAI refresh / access / id tokens embedded in JSON-ish strings.
+	// Matches patterns like "refresh_token":"abc...", refresh_token: 'abc...',
+	// and refresh_token=abc... Captures the VALUE via group 1 so the key and
+	// the surrounding quotes survive the replacement. Audit top-20 #15.
+	{
+		pattern:
+			/(["']?)(?:refresh_token|access_token|id_token)\1?\s*[:=]\s*["']([^"'\s]+)["']/gi,
+		group: 2,
+	},
+	// Bare token=... / access_token=... in URL-encoded strings or query logs.
+	{
+		pattern:
+			/\b(?:refresh_token|access_token|id_token)\s*=\s*([A-Za-z0-9._\-~+/=]{8,})/gi,
+		group: 1,
+	},
 ];
 
 const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -74,10 +102,23 @@ function maskEmail(email: string): string {
 
 function maskString(value: string): string {
 	let result = value;
-	// Mask emails first (before token patterns might match parts of them)
+	// Mask emails first (before token patterns might match parts of them).
 	result = result.replace(EMAIL_PATTERN, (match) => maskEmail(match));
-	for (const pattern of TOKEN_PATTERNS) {
-		result = result.replace(pattern, (match) => maskToken(match));
+	for (const entry of TOKEN_PATTERNS) {
+		if (entry instanceof RegExp) {
+			result = result.replace(entry, (match) => maskToken(match));
+		} else {
+			const { pattern, group } = entry;
+			result = result.replace(pattern, (match: string, ...captures: unknown[]) => {
+				// captures holds (in order): ...groups, offset, fullString
+				// We only care about the captured value at index `group - 1`.
+				const captured = captures[group - 1];
+				if (typeof captured !== "string" || captured.length === 0) {
+					return maskToken(match);
+				}
+				return match.replace(captured, maskToken(captured));
+			});
+		}
 	}
 	return result;
 }
@@ -396,3 +437,14 @@ export function getRequestId(): number {
 }
 
 export { formatDuration, maskEmail };
+
+/**
+ * Test-only exports. Internal helpers surfaced here so their redaction
+ * invariants can be unit-tested directly rather than through the
+ * side-effect-heavy logDebug/logRequest code paths. Do NOT import from this
+ * namespace outside of tests.
+ */
+export const __testOnly = {
+	maskString,
+	sanitizeValue,
+};

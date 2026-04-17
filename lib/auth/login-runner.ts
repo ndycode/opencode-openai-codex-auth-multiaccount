@@ -10,6 +10,125 @@ import { MODEL_FAMILIES, type ModelFamily } from "../prompts/codex.js";
 import { withAccountStorageTransaction } from "../storage.js";
 import type { AccountIdSource, TokenResult } from "../types.js";
 
+/**
+ * Fields that identify the two account records participating in a merge.
+ * Kept permissive so callers can pass stored account records of any concrete
+ * shape without coupling this helper to the full V3 schema.
+ */
+type MergeableAccountRecord = {
+	refreshToken?: string;
+	accessToken?: string;
+	expiresAt?: number;
+	lastUsed?: number;
+	addedAt?: number;
+	enabled?: boolean;
+	accountId?: string;
+	organizationId?: string;
+	accountIdSource?: AccountIdSource;
+	accountLabel?: string;
+	email?: string;
+	lastSwitchReason?: string;
+	rateLimitResetTimes?: Record<string, number | undefined>;
+	coolingDownUntil?: number;
+	cooldownReason?: string;
+};
+
+/**
+ * Pure merge function that combines two stored account records. `target` wins
+ * for stable identity fields; token fields prefer the newer record (by
+ * lastUsed/addedAt) but use nullish-coalescing so an explicitly empty newer
+ * token does NOT silently fall back to the older value. Empty-string tokens
+ * are treated as intentional clears — never resurrected from the older record.
+ *
+ * Exposed for targeted regression tests around the credential-merge semantics.
+ */
+export function mergeStoredAccountPair<T extends MergeableAccountRecord>(
+	target: T,
+	source: T,
+): T {
+	const targetLastUsed = target.lastUsed ?? 0;
+	const sourceLastUsed = source.lastUsed ?? 0;
+	const targetAddedAt = target.addedAt ?? 0;
+	const sourceAddedAt = source.addedAt ?? 0;
+	const sourceIsNewer =
+		sourceLastUsed > targetLastUsed ||
+		(sourceLastUsed === targetLastUsed && sourceAddedAt > targetAddedAt);
+	const newer = sourceIsNewer ? source : target;
+	const older = sourceIsNewer ? target : source;
+
+	const mergedRateLimitResetTimes: Record<string, number> = {};
+	const rateLimitResetKeys = new Set([
+		...Object.keys(older.rateLimitResetTimes ?? {}),
+		...Object.keys(newer.rateLimitResetTimes ?? {}),
+	]);
+	for (const key of rateLimitResetKeys) {
+		const olderRaw = older.rateLimitResetTimes?.[key];
+		const newerRaw = newer.rateLimitResetTimes?.[key];
+		const olderValue =
+			typeof olderRaw === "number" && Number.isFinite(olderRaw) ? olderRaw : 0;
+		const newerValue =
+			typeof newerRaw === "number" && Number.isFinite(newerRaw) ? newerRaw : 0;
+		const resolved = Math.max(olderValue, newerValue);
+		if (resolved > 0) {
+			mergedRateLimitResetTimes[key] = resolved;
+		}
+	}
+
+	const mergedEnabled =
+		target.enabled === false || source.enabled === false
+			? false
+			: target.enabled ?? source.enabled;
+
+	const targetCoolingDownUntil =
+		typeof target.coolingDownUntil === "number" && Number.isFinite(target.coolingDownUntil)
+			? target.coolingDownUntil
+			: 0;
+	const sourceCoolingDownUntil =
+		typeof source.coolingDownUntil === "number" && Number.isFinite(source.coolingDownUntil)
+			? source.coolingDownUntil
+			: 0;
+	const mergedCoolingDownUntilValue = Math.max(
+		targetCoolingDownUntil,
+		sourceCoolingDownUntil,
+	);
+	const mergedCoolingDownUntil =
+		mergedCoolingDownUntilValue > 0 ? mergedCoolingDownUntilValue : undefined;
+	const mergedCooldownReason = (() => {
+		if (mergedCoolingDownUntilValue <= 0) {
+			return target.cooldownReason ?? source.cooldownReason;
+		}
+		if (sourceCoolingDownUntil > targetCoolingDownUntil) {
+			return source.cooldownReason ?? target.cooldownReason;
+		}
+		if (targetCoolingDownUntil > sourceCoolingDownUntil) {
+			return target.cooldownReason ?? source.cooldownReason;
+		}
+		return source.cooldownReason ?? target.cooldownReason;
+	})();
+
+	return {
+		...target,
+		accountId: target.accountId ?? source.accountId,
+		organizationId: target.organizationId ?? source.organizationId,
+		accountIdSource: target.accountIdSource ?? source.accountIdSource,
+		accountLabel: target.accountLabel ?? source.accountLabel,
+		email: target.email ?? source.email,
+		// CRITICAL: use `??` (nullish-coalescing), not `||`. An explicit empty-string
+		// token on `newer` represents a cleared credential — must NOT silently
+		// fall back to the older (potentially stale) token.
+		refreshToken: newer.refreshToken ?? older.refreshToken,
+		accessToken: newer.accessToken ?? older.accessToken,
+		expiresAt: newer.expiresAt ?? older.expiresAt,
+		enabled: mergedEnabled,
+		addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
+		lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
+		lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
+		rateLimitResetTimes: mergedRateLimitResetTimes,
+		coolingDownUntil: mergedCoolingDownUntil,
+		cooldownReason: mergedCooldownReason,
+	};
+}
+
 type TokenSuccess = Extract<TokenResult, { type: "success" }>;
 
 export type TokenSuccessWithAccount = TokenSuccess & {
@@ -272,80 +391,7 @@ export async function persistAccountPool(
 			const target = accounts[targetIndex];
 			const source = accounts[sourceIndex];
 			if (!target || !source) return;
-			const targetLastUsed = target.lastUsed ?? 0;
-			const sourceLastUsed = source.lastUsed ?? 0;
-			const targetAddedAt = target.addedAt ?? 0;
-			const sourceAddedAt = source.addedAt ?? 0;
-			const sourceIsNewer =
-				sourceLastUsed > targetLastUsed ||
-				(sourceLastUsed === targetLastUsed && sourceAddedAt > targetAddedAt);
-			const newer = sourceIsNewer ? source : target;
-			const older = sourceIsNewer ? target : source;
-			const mergedRateLimitResetTimes: Record<string, number> = {};
-			const rateLimitResetKeys = new Set([
-				...Object.keys(older.rateLimitResetTimes ?? {}),
-				...Object.keys(newer.rateLimitResetTimes ?? {}),
-			]);
-			for (const key of rateLimitResetKeys) {
-				const olderRaw = older.rateLimitResetTimes?.[key];
-				const newerRaw = newer.rateLimitResetTimes?.[key];
-				const olderValue =
-					typeof olderRaw === "number" && Number.isFinite(olderRaw) ? olderRaw : 0;
-				const newerValue =
-					typeof newerRaw === "number" && Number.isFinite(newerRaw) ? newerRaw : 0;
-				const resolved = Math.max(olderValue, newerValue);
-				if (resolved > 0) {
-					mergedRateLimitResetTimes[key] = resolved;
-				}
-			}
-			const mergedEnabled =
-				target.enabled === false || source.enabled === false
-					? false
-					: target.enabled ?? source.enabled;
-			const targetCoolingDownUntil =
-				typeof target.coolingDownUntil === "number" && Number.isFinite(target.coolingDownUntil)
-					? target.coolingDownUntil
-					: 0;
-			const sourceCoolingDownUntil =
-				typeof source.coolingDownUntil === "number" && Number.isFinite(source.coolingDownUntil)
-					? source.coolingDownUntil
-					: 0;
-			const mergedCoolingDownUntilValue = Math.max(
-				targetCoolingDownUntil,
-				sourceCoolingDownUntil,
-			);
-			const mergedCoolingDownUntil =
-				mergedCoolingDownUntilValue > 0 ? mergedCoolingDownUntilValue : undefined;
-			const mergedCooldownReason = (() => {
-				if (mergedCoolingDownUntilValue <= 0) {
-					return target.cooldownReason ?? source.cooldownReason;
-				}
-				if (sourceCoolingDownUntil > targetCoolingDownUntil) {
-					return source.cooldownReason ?? target.cooldownReason;
-				}
-				if (targetCoolingDownUntil > sourceCoolingDownUntil) {
-					return target.cooldownReason ?? source.cooldownReason;
-				}
-				return source.cooldownReason ?? target.cooldownReason;
-			})();
-			accounts[targetIndex] = {
-				...target,
-				accountId: target.accountId ?? source.accountId,
-				organizationId: target.organizationId ?? source.organizationId,
-				accountIdSource: target.accountIdSource ?? source.accountIdSource,
-				accountLabel: target.accountLabel ?? source.accountLabel,
-				email: target.email ?? source.email,
-				refreshToken: newer.refreshToken || older.refreshToken,
-				accessToken: newer.accessToken || older.accessToken,
-				expiresAt: newer.expiresAt ?? older.expiresAt,
-				enabled: mergedEnabled,
-				addedAt: Math.max(target.addedAt ?? 0, source.addedAt ?? 0),
-				lastUsed: Math.max(target.lastUsed ?? 0, source.lastUsed ?? 0),
-				lastSwitchReason: target.lastSwitchReason ?? source.lastSwitchReason,
-				rateLimitResetTimes: mergedRateLimitResetTimes,
-				coolingDownUntil: mergedCoolingDownUntil,
-				cooldownReason: mergedCooldownReason,
-			};
+			accounts[targetIndex] = mergeStoredAccountPair(target, source);
 		};
 
 		const normalizeStoredAccountId = (

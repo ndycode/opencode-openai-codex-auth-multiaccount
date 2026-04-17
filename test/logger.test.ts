@@ -895,4 +895,50 @@ describe('Logger Module', () => {
 			expect(id1).toBe(id2);
 		});
 	});
+
+	// Audit top-20 #15: OpenAI opaque refresh/access/id tokens embedded in
+	// logged JSON response bodies were leaking because the hex-40, JWT, and
+	// sk- regexes did not catch them. Extended TOKEN_PATTERNS catches them
+	// via keyed extraction.
+	describe('maskString redacts OpenAI opaque tokens in free-form JSON', () => {
+		it('redacts refresh_token values in JSON strings', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = '{"refresh_token":"abcdefghij-opaque-token-12345"}';
+			const out = __testOnly.maskString(input);
+			expect(out).not.toContain('abcdefghij-opaque-token-12345');
+			// Key name preserved; only the value is masked.
+			expect(out).toContain('refresh_token');
+		});
+
+		it('redacts access_token values in JSON strings', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = '{"access_token": "opaque-access-ABCDEFGH123456"}';
+			const out = __testOnly.maskString(input);
+			expect(out).not.toContain('opaque-access-ABCDEFGH123456');
+			expect(out).toContain('access_token');
+		});
+
+		it('redacts id_token values in JSON strings', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = '{"id_token":"some-opaque-id-token-value-1234"}';
+			const out = __testOnly.maskString(input);
+			expect(out).not.toContain('some-opaque-id-token-value-1234');
+		});
+
+		it('redacts refresh_token in query-string / URL-encoded form', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = 'POST /token refresh_token=raw-opaque-token-XYZ789';
+			const out = __testOnly.maskString(input);
+			expect(out).not.toContain('raw-opaque-token-XYZ789');
+		});
+
+		it('preserves non-token JSON structure while redacting only the token value', async () => {
+			const { __testOnly } = await import('../lib/logger.js');
+			const input = '{"token_type":"Bearer","expires_in":3600,"refresh_token":"aaaa-bbbb-cccc-dddd-eeee"}';
+			const out = __testOnly.maskString(input);
+			expect(out).toContain('token_type');
+			expect(out).toContain('expires_in');
+			expect(out).not.toContain('aaaa-bbbb-cccc-dddd-eeee');
+		});
+	});
 });
