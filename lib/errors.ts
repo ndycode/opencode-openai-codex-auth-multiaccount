@@ -1,10 +1,29 @@
 /**
  * Typed error hierarchy for the Codex plugin.
- * Provides structured error types with codes, causes, and context.
+ *
+ * Single source of truth for all domain error classes. `CodexError` plays the
+ * role of `BaseError`: every subclass inherits `code: string`, `cause?: unknown`,
+ * optional `context`, stack capture, and a stable `name`.
+ *
+ * Consolidated in RC-3 (docs/audits/07-refactoring-plan.md#rc-3):
+ * - `StorageError` moved here from `lib/storage/errors.ts` (that path stays as
+ *   a thin re-export so existing imports keep working).
+ * - `CircuitOpenError` moved here from `lib/circuit-breaker.ts` (same re-export
+ *   compatibility pattern).
+ * - New domain classes added: `RecoveryError`, `PromptError`, `RequestError`,
+ *   `ConfigError` — used by the throw-site port.
+ *
+ * All ad-hoc `throw new Error(...)` sites in `lib/**` should throw one of the
+ * classes in this file so callers can switch on `err.code` or `instanceof`
+ * instead of parsing message strings.
  */
 
 /**
  * Error codes for categorizing errors.
+ *
+ * These are the default codes attached to each domain class when no explicit
+ * `code` is passed. Sub-codes (e.g. `LOAD_FAILED`, `PARSE_JSON_FAILED`) flow
+ * through the `options.code` field and remain free-form strings.
  */
 export const ErrorCode = {
 	NETWORK_ERROR: "CODEX_NETWORK_ERROR",
@@ -13,6 +32,12 @@ export const ErrorCode = {
 	VALIDATION_ERROR: "CODEX_VALIDATION_ERROR",
 	RATE_LIMIT: "CODEX_RATE_LIMIT",
 	TIMEOUT: "CODEX_TIMEOUT",
+	STORAGE_ERROR: "CODEX_STORAGE_ERROR",
+	CIRCUIT_OPEN: "CODEX_CIRCUIT_OPEN",
+	RECOVERY_ERROR: "CODEX_RECOVERY_ERROR",
+	PROMPT_ERROR: "CODEX_PROMPT_ERROR",
+	REQUEST_ERROR: "CODEX_REQUEST_ERROR",
+	CONFIG_ERROR: "CODEX_CONFIG_ERROR",
 } as const;
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -162,5 +187,97 @@ export class CodexRateLimitError extends CodexError {
 		super(message, { ...options, code: options?.code ?? ErrorCode.RATE_LIMIT });
 		this.retryAfterMs = options?.retryAfterMs;
 		this.accountId = options?.accountId;
+	}
+}
+
+/**
+ * Error for storage/persistence failures.
+ *
+ * Positional constructor kept for backward compatibility with existing call
+ * sites and test assertions (the class was previously defined in
+ * `lib/storage/errors.ts` with this exact signature).
+ */
+export class StorageError extends CodexError {
+	override readonly name = "StorageError";
+	readonly path: string;
+	readonly hint: string;
+
+	constructor(message: string, code: string, path: string, hint: string, cause?: Error) {
+		super(message, { code, cause });
+		this.path = path;
+		this.hint = hint;
+	}
+}
+
+/**
+ * Error thrown when a circuit breaker is open (or half-open past its attempt
+ * budget) and further calls must short-circuit instead of hitting the
+ * protected dependency.
+ */
+export class CircuitOpenError extends CodexError {
+	override readonly name = "CircuitOpenError";
+
+	constructor(message = "Circuit is open") {
+		super(message, { code: ErrorCode.CIRCUIT_OPEN });
+	}
+}
+
+/**
+ * Error for session recovery failures (conversation state persistence, id
+ * validation, part/message storage integrity).
+ */
+export class RecoveryError extends CodexError {
+	override readonly name = "RecoveryError";
+
+	constructor(message: string, options?: CodexErrorOptions) {
+		super(message, {
+			...options,
+			code: options?.code ?? ErrorCode.RECOVERY_ERROR,
+		});
+	}
+}
+
+/**
+ * Error for prompt template fetching or cache failures (GitHub ETag cache,
+ * release tag resolution, upstream prompt source fetches).
+ */
+export class PromptError extends CodexError {
+	override readonly name = "PromptError";
+
+	constructor(message: string, options?: CodexErrorOptions) {
+		super(message, {
+			...options,
+			code: options?.code ?? ErrorCode.PROMPT_ERROR,
+		});
+	}
+}
+
+/**
+ * Error for request/response pipeline failures that are not auth, network,
+ * or rate-limit related (SSE stream shape, missing body, size limits).
+ */
+export class RequestError extends CodexError {
+	override readonly name = "RequestError";
+
+	constructor(message: string, options?: CodexErrorOptions) {
+		super(message, {
+			...options,
+			code: options?.code ?? ErrorCode.REQUEST_ERROR,
+		});
+	}
+}
+
+/**
+ * Error for configuration/environment failures (missing TTY, malformed CLI
+ * input, bad format flags, missing required options).
+ */
+export class ConfigError extends CodexError {
+	override readonly name = "ConfigError";
+
+	constructor(message: string, options?: CodexErrorOptions) {
+		super(message, {
+			...options,
+			code: options?.code ?? ErrorCode.CONFIG_ERROR,
+		});
 	}
 }

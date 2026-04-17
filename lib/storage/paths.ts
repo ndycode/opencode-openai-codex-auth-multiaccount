@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { StorageError } from "../errors.js";
 
 const PROJECT_MARKERS = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml", ".opencode"];
 const PROJECTS_DIR = "projects";
@@ -103,7 +104,12 @@ export function resolvePath(filePath: string): string {
 		!isWithinDirectory(cwd, resolved) &&
 		!isWithinDirectory(tmp, resolved)
 	) {
-		throw new Error(`Access denied: path must be within home directory, project directory, or temp directory`);
+		throw new StorageError(
+			`Access denied: path must be within home directory, project directory, or temp directory`,
+			"PATH_ACCESS_DENIED",
+			resolved,
+			"The requested path is outside the allowed roots (home, project, temp). Pick a path inside one of those directories.",
+		);
 	}
 
 	return resolved;

@@ -6,6 +6,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { RecoveryError } from "../errors.js";
 import { MESSAGE_STORAGE, PART_STORAGE, THINKING_TYPES, META_TYPES } from "./constants.js";
 import type { StoredMessageMeta, StoredPart, StoredTextPart } from "./types.js";
 
@@ -13,7 +14,10 @@ const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 function validatePathId(id: string, name: string): void {
   if (!SAFE_ID_PATTERN.test(id)) {
-    throw new Error(`Invalid ${name}: contains unsafe characters`);
+    throw new RecoveryError(`Invalid ${name}: contains unsafe characters`, {
+      code: "INVALID_ID",
+      context: { field: name },
+    });
   }
 }
 

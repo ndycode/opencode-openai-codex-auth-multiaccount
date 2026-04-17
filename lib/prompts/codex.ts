@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PromptError } from "../errors.js";
 import type { CacheMetadata, GitHubRelease } from "../types.js";
 import { logWarn, logError, logDebug } from "../logger.js";
 
@@ -183,8 +184,12 @@ async function getLatestReleaseTag(): Promise<string> {
 
 	const htmlResponse = await fetch(GITHUB_HTML_RELEASES);
 	if (!htmlResponse.ok) {
-		throw new Error(
+		throw new PromptError(
 			`Failed to fetch latest release: ${htmlResponse.status}`,
+			{
+				code: "RELEASE_FETCH_FAILED",
+				context: { status: htmlResponse.status, url: GITHUB_HTML_RELEASES },
+			},
 		);
 	}
 
@@ -212,7 +217,9 @@ async function getLatestReleaseTag(): Promise<string> {
 		return tag;
 	}
 
-	throw new Error("Failed to determine latest release tag from GitHub");
+	throw new PromptError("Failed to determine latest release tag from GitHub", {
+		code: "RELEASE_TAG_UNKNOWN",
+	});
 }
 
 /**
@@ -360,7 +367,10 @@ async function fetchAndPersistInstructions(
 	}
 
 	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}`);
+		throw new PromptError(`HTTP ${response.status}`, {
+			code: "HTTP_ERROR",
+			context: { status: response.status },
+		});
 	}
 
 	const instructions = await response.text();

@@ -1,3 +1,7 @@
+import { CircuitOpenError } from "./errors.js";
+
+export { CircuitOpenError };
+
 export interface CircuitBreakerConfig {
 	failureThreshold: number;
 	failureWindowMs: number;
@@ -13,13 +17,6 @@ export const DEFAULT_CIRCUIT_BREAKER_CONFIG: CircuitBreakerConfig = {
 };
 
 export type CircuitState = "closed" | "open" | "half-open";
-
-export class CircuitOpenError extends Error {
-	constructor(message = "Circuit is open") {
-		super(message);
-		this.name = "CircuitOpenError";
-	}
-}
 
 export class CircuitBreaker {
 	private state: CircuitState = "closed";

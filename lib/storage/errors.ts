@@ -1,26 +1,16 @@
 /**
- * Storage error types and platform-aware error hint formatting.
+ * Storage-domain error re-export + platform-aware error hint formatting.
  *
- * Split out of `lib/storage.ts` in RC-2 so every storage submodule can import
- * the typed error without pulling in load/save/normalize transitively.
+ * RC-3 consolidation: `StorageError` now lives in `lib/errors.ts` alongside the
+ * rest of the typed error hierarchy. This module re-exports it so every
+ * existing import path (`./errors.js` from storage submodules,
+ * `lib/storage.ts` public re-export) continues to work without changes.
+ *
+ * `formatStorageErrorHint` stays here because it is storage-specific presentation
+ * and has no place in the generic error-class module.
  */
 
-/**
- * Custom error class for storage operations with platform-aware hints.
- */
-export class StorageError extends Error {
-  readonly code: string;
-  readonly path: string;
-  readonly hint: string;
-
-  constructor(message: string, code: string, path: string, hint: string, cause?: Error) {
-    super(message, { cause });
-    this.name = "StorageError";
-    this.code = code;
-    this.path = path;
-    this.hint = hint;
-  }
-}
+export { StorageError } from "../errors.js";
 
 /**
  * Generate platform-aware troubleshooting hint based on error code.

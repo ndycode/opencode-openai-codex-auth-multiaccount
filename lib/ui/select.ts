@@ -1,3 +1,4 @@
+import { CodexValidationError, ConfigError } from "../errors.js";
 import { ANSI, isTTY, parseKey } from "./ansi.js";
 import type { UiTheme } from "./theme.js";
 
@@ -88,17 +89,25 @@ function codexColorCode(theme: UiTheme, color: MenuItem["color"]): string {
 
 export async function select<T>(items: MenuItem<T>[], options: SelectOptions): Promise<T | null> {
 	if (!isTTY()) {
-		throw new Error("Interactive select requires a TTY terminal");
+		throw new ConfigError("Interactive select requires a TTY terminal", {
+			code: "TTY_REQUIRED",
+		});
 	}
 	if (items.length === 0) {
-		throw new Error("No menu items provided");
+		throw new CodexValidationError("No menu items provided", {
+			code: "NO_MENU_ITEMS",
+			field: "items",
+		});
 	}
 
 	const isSelectable = (item: MenuItem<T>) =>
 		!item.disabled && !item.separator && item.kind !== "heading";
 	const selectable = items.filter(isSelectable);
 	if (selectable.length === 0) {
-		throw new Error("All menu items are disabled");
+		throw new CodexValidationError("All menu items are disabled", {
+			code: "ALL_ITEMS_DISABLED",
+			field: "items",
+		});
 	}
 	if (selectable.length === 1) {
 		return selectable[0]?.value ?? null;
