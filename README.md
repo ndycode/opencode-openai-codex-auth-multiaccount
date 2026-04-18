@@ -8,7 +8,6 @@ Badges: CI + OpenSSF Scorecard will turn green once Phase 3 Batch A (CI workflow
 [![npm downloads](https://img.shields.io/npm/dw/oc-codex-multi-auth.svg)](https://www.npmjs.com/package/oc-codex-multi-auth)
 [![Node.js Version](https://img.shields.io/node/v/oc-codex-multi-auth.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/ndycode/oc-codex-multi-auth/badge)](https://securityscorecards.dev/viewer/?uri=github.com/ndycode/oc-codex-multi-auth)
 
 Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/Codex model presets, and multi-account failover.
 
