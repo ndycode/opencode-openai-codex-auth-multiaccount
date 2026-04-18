@@ -205,7 +205,7 @@ function mergeFullTemplate(modernTemplate, legacyTemplate) {
 
 async function readJson(filePath) {
 	const content = await readFile(filePath, "utf-8");
-	return JSON.parse(content);
+	return JSON.parse(content.charCodeAt(0) === 0xfeff ? content.slice(1) : content);
 }
 
 async function renameWithWindowsRetry(sourcePath, destinationPath) {

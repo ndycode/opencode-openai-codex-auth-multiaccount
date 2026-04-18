@@ -117,6 +117,111 @@ describe("install-oc-codex-multi-auth script", () => {
 		);
 	});
 
+	it("parses BOM-prefixed existing config and preserves custom keys on merge", async () => {
+		vi.resetModules();
+		tempHome = await createTempHome();
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
+		const configDir = join(tempHome, ".config", "opencode");
+		const configPath = join(configDir, "opencode.json");
+
+		await mkdir(configDir, { recursive: true });
+		const existing = {
+			plugin: ["some-other-plugin"],
+			provider: {
+				openai: {
+					myCustomKey: "preserve-me",
+					models: {
+						"user-only-model": { name: "User Only Model" },
+					},
+				},
+			},
+		};
+		await writeFile(configPath, `\uFEFF${JSON.stringify(existing, null, 2)}`, "utf-8");
+
+		await expect(
+			runInstaller(["--no-cache-clear"], {
+				env: {
+					...process.env,
+					HOME: tempHome,
+					USERPROFILE: tempHome,
+				},
+			}),
+		).resolves.toMatchObject({
+			action: "install",
+			exitCode: 0,
+		});
+
+		const saved = JSON.parse(await readFile(configPath, "utf-8")) as {
+			plugin: string[];
+			provider: {
+				openai: {
+					myCustomKey?: string;
+					models: Record<string, unknown>;
+				};
+			};
+		};
+
+		expect(saved.plugin).toEqual(expect.arrayContaining(["some-other-plugin", "oc-codex-multi-auth"]));
+		expect(saved.provider.openai.myCustomKey).toBe("preserve-me");
+		expect(saved.provider.openai.models["user-only-model"]).toBeDefined();
+		expect(saved.provider.openai.models["gpt-5.4"]).toBeDefined();
+	});
+
+	it("parses BOM-less existing config and preserves custom keys on merge", async () => {
+		vi.resetModules();
+		tempHome = await createTempHome();
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
+		const configDir = join(tempHome, ".config", "opencode");
+		const configPath = join(configDir, "opencode.json");
+
+		await mkdir(configDir, { recursive: true });
+		await writeFile(
+			configPath,
+			JSON.stringify(
+				{
+					plugin: ["some-other-plugin"],
+					provider: {
+						openai: {
+							myCustomKey: "preserve-me",
+							models: {
+								"user-only-model": { name: "User Only Model" },
+							},
+						},
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		await expect(
+			runInstaller(["--no-cache-clear"], {
+				env: {
+					...process.env,
+					HOME: tempHome,
+					USERPROFILE: tempHome,
+				},
+			}),
+		).resolves.toMatchObject({
+			action: "install",
+			exitCode: 0,
+		});
+
+		const saved = JSON.parse(await readFile(configPath, "utf-8")) as {
+			provider: {
+				openai: {
+					myCustomKey?: string;
+					models: Record<string, unknown>;
+				};
+			};
+		};
+
+		expect(saved.provider.openai.myCustomKey).toBe("preserve-me");
+		expect(saved.provider.openai.models["user-only-model"]).toBeDefined();
+		expect(saved.provider.openai.models["gpt-5.4"]).toBeDefined();
+	});
+
 	it("deep-merges provider.openai preserving user customizations while overwriting managed keys", async () => {
 		vi.resetModules();
 		tempHome = await createTempHome();
