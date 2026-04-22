@@ -100,6 +100,16 @@ describe("Model Map Module", () => {
       expect(MODEL_MAP["gpt-5.1-chat-latest"]).toBe("gpt-5.1");
     });
 
+    it("keeps the broader official codex family addressable", () => {
+      expect(MODEL_MAP["gpt-5-codex"]).toBe("gpt-5-codex");
+      expect(MODEL_MAP["gpt-5.1-codex"]).toBe("gpt-5-codex");
+      expect(MODEL_MAP["gpt-5.1-codex-max"]).toBe("gpt-5.1-codex-max");
+      expect(MODEL_MAP["gpt-5.1-codex-mini"]).toBe("gpt-5.1-codex-mini");
+      expect(MODEL_MAP["gpt-5.2-codex"]).toBe("gpt-5-codex");
+      expect(MODEL_MAP["gpt-5.3-codex"]).toBe("gpt-5-codex");
+      expect(MODEL_MAP["gpt-5.3-codex-spark"]).toBe("gpt-5-codex");
+    });
+
     it("keeps canonical GPT-5 codex mapping stable", () => {
       expect(MODEL_MAP["gpt-5-codex"]).toBe("gpt-5-codex");
     });

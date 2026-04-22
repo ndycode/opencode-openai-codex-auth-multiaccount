@@ -30,6 +30,10 @@ function expandDatedAliases(prefix: string, target: string): Record<string, stri
 export const MODEL_MAP: Record<string, string> = {
 	// ============================================================================
 	// GPT-5 Codex Models (canonical stable family)
+	// Keep the broader Codex-family aliases below wired even when shipped
+	// templates prioritize newer defaults. OpenAI surfaces and ChatGPT
+	// entitlements drift independently, so removing these IDs from runtime
+	// normalization breaks officially documented model names for other accounts.
 	// ============================================================================
 	"gpt-5-codex": "gpt-5-codex",
 	"gpt-5-codex-none": "gpt-5-codex",

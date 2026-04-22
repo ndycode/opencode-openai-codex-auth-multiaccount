@@ -351,6 +351,8 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
 
 **Cause:** The selected model is currently not entitled for the active ChatGPT account/workspace.
 
+This does not automatically mean the model ID is deprecated or mapped incorrectly in the plugin. The runtime still preserves older official Codex IDs because different OpenAI surfaces and ChatGPT accounts can expose different subsets.
+
 **Solutions:**
 1. Re-auth/login to refresh workspace selection:
    ```bash
