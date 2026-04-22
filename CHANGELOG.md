@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (placeholder for next release)
 
+## [6.1.1] - 2026-04-22
+
+### Fixed
+- Retry structured `service_unavailable_error` / `server_is_overloaded` payloads as server faults even on non-5xx responses, while preserving overload `retry_after` backoff when the account pool is exhausted.
+- Retry live upstream `server_error` payloads that arrive on non-5xx responses instead of falling straight through as unrecoverable failures.
+- Stabilize merged retry regression coverage so the overload and live `server_error` fetch-loop cases do not leak module state between tests.
+
 ## [6.1.0] - 2026-04-17
 
 ### Added
