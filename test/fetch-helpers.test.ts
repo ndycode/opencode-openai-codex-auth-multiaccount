@@ -608,7 +608,7 @@ describe('Fetch Helpers Module', () => {
 		});
 	});
 
-		describe('handleErrorResponse edge cases', () => {
+	describe('handleErrorResponse edge cases', () => {
 		it('handles 404 with non-JSON body containing usage limit text', async () => {
 			const response = new Response('usage limit exceeded - please try again', { status: 404 });
 			

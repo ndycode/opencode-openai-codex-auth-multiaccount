@@ -27,7 +27,6 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 		try {
 			const body = await response.clone().json();
 			if (
-				body?.type === "error" &&
 				(
 					(body?.error?.type === "service_unavailable_error" &&
 						body?.error?.code === "server_is_overloaded") ||
@@ -265,7 +264,6 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 			.mockResolvedValueOnce(
 				new Response(
 					JSON.stringify({
-						type: "error",
 						sequence_number: 2,
 						error: {
 							type: "server_error",

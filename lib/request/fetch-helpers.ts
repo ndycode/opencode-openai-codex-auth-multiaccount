@@ -34,10 +34,6 @@ export interface EntitlementError {
         message: string;
 }
 
-export interface ServerRetryInfo {
-	retryAsServerError?: boolean;
-}
-
 const CODEX_BASE_URL_OBJECT = new URL(CODEX_BASE_URL);
 const CODEX_BASE_PATH_PREFIX = CODEX_BASE_URL_OBJECT.pathname.endsWith("/")
 	? CODEX_BASE_URL_OBJECT.pathname.slice(0, -1)
