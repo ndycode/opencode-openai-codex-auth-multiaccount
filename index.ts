@@ -1993,11 +1993,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return contextOverflowResult.response;
 									}
 
-									const { response: errorResponse, rateLimit, errorBody } =
-										await handleErrorResponse(response, {
-											requestCorrelationId,
-											threadId: threadIdCandidate,
-										});
+					const { response: errorResponse, rateLimit, errorBody, retryAsServerError } =
+						await handleErrorResponse(response, {
+							requestCorrelationId,
+							threadId: threadIdCandidate,
+						});
 
 			const workspaceDeactivated = isDeactivatedWorkspaceError(errorBody, response.status);
 				if (workspaceDeactivated) {
@@ -2216,9 +2216,12 @@ while (attempted.size < Math.max(1, accountCount)) {
 						logDebug(`[${PLUGIN_NAME}] Recoverable error detected: ${errorType}`);
 					}
 
-					// Handle 5xx server errors by rotating to another account
-					if (response.status >= 500 && response.status < 600) {
-						logWarn(`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`);
+					// Handle 5xx server errors, and exact overload payloads flagged by
+					// handleErrorResponse, by rotating to another account.
+					if (retryAsServerError || (response.status >= 500 && response.status < 600)) {
+						logWarn(
+							`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`,
+						);
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.serverErrors++;
 						runtimeMetrics.accountRotations++;

@@ -34,6 +34,10 @@ export interface EntitlementError {
         message: string;
 }
 
+export interface ServerRetryInfo {
+	retryAsServerError?: boolean;
+}
+
 const CODEX_BASE_URL_OBJECT = new URL(CODEX_BASE_URL);
 const CODEX_BASE_PATH_PREFIX = CODEX_BASE_URL_OBJECT.pathname.endsWith("/")
 	? CODEX_BASE_URL_OBJECT.pathname.slice(0, -1)
@@ -265,6 +269,7 @@ export interface ErrorHandlingResult {
         response: Response;
         rateLimit?: RateLimitInfo;
         errorBody?: unknown;
+        retryAsServerError?: boolean;
 }
 
 export interface ErrorHandlingOptions {
@@ -299,6 +304,18 @@ function getStructuredErrorCode(errorBody: unknown): string | undefined {
 	}
 
 	return undefined;
+}
+
+function isServerOverloadedError(errorBody: unknown): boolean {
+	if (!isRecord(errorBody)) return false;
+
+	const maybeError = errorBody.error;
+	if (!isRecord(maybeError)) return false;
+
+	return (
+		typeof maybeError.code === "string" &&
+		maybeError.code === "server_is_overloaded"
+	);
 }
 
 export function isDeactivatedWorkspaceError(errorBody: unknown, status?: number): boolean {
@@ -599,6 +616,7 @@ export async function handleErrorResponse(
                 diagnostics,
         );
         const errorResponse = ensureJsonErrorResponse(finalResponse, normalizedError);
+        const retryAsServerError = isServerOverloadedError(errorBody);
 
         if (finalResponse.status === HTTP_STATUS.UNAUTHORIZED) {
                 logWarn("Codex upstream returned 401 Unauthorized", diagnostics);
@@ -610,7 +628,12 @@ export async function handleErrorResponse(
                 diagnostics,
         });
 
-        return { response: errorResponse, rateLimit, errorBody: normalizedError };
+        return {
+		response: errorResponse,
+		rateLimit,
+		errorBody: normalizedError,
+		retryAsServerError,
+	};
 }
 
 /**
