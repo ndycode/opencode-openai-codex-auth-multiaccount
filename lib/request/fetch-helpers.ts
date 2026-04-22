@@ -34,6 +34,10 @@ export interface EntitlementError {
         message: string;
 }
 
+export interface ServerRetryInfo {
+	retryAsServerError?: boolean;
+}
+
 const CODEX_BASE_URL_OBJECT = new URL(CODEX_BASE_URL);
 const CODEX_BASE_PATH_PREFIX = CODEX_BASE_URL_OBJECT.pathname.endsWith("/")
 	? CODEX_BASE_URL_OBJECT.pathname.slice(0, -1)
@@ -265,6 +269,7 @@ export interface ErrorHandlingResult {
         response: Response;
         rateLimit?: RateLimitInfo;
         errorBody?: unknown;
+        retryAsServerError?: boolean;
 }
 
 export interface ErrorHandlingOptions {
@@ -299,6 +304,34 @@ function getStructuredErrorCode(errorBody: unknown): string | undefined {
 	}
 
 	return undefined;
+}
+
+function isServerOverloadedError(errorBody: unknown): boolean {
+	if (!isRecord(errorBody)) return false;
+
+	const maybeError = errorBody.error;
+	if (!isRecord(maybeError)) return false;
+
+	if (
+		typeof maybeError.code === "string" &&
+		(maybeError.code === "server_is_overloaded" || maybeError.code === "server_error")
+	) {
+		return true;
+	}
+
+	if (
+		typeof maybeError.type === "string" &&
+		(maybeError.type === "service_unavailable_error" || maybeError.type === "server_error")
+	) {
+		return true;
+	}
+
+	const maybeContext = maybeError.context;
+	return (
+		isRecord(maybeContext) &&
+		typeof maybeContext.type === "string" &&
+		(maybeContext.type === "service_unavailable_error" || maybeContext.type === "server_error")
+	);
 }
 
 export function isDeactivatedWorkspaceError(errorBody: unknown, status?: number): boolean {
@@ -599,6 +632,7 @@ export async function handleErrorResponse(
                 diagnostics,
         );
         const errorResponse = ensureJsonErrorResponse(finalResponse, normalizedError);
+        const retryAsServerError = isServerOverloadedError(errorBody);
 
         if (finalResponse.status === HTTP_STATUS.UNAUTHORIZED) {
                 logWarn("Codex upstream returned 401 Unauthorized", diagnostics);
@@ -610,7 +644,12 @@ export async function handleErrorResponse(
                 diagnostics,
         });
 
-        return { response: errorResponse, rateLimit, errorBody: normalizedError };
+        return {
+		response: errorResponse,
+		rateLimit,
+		errorBody: normalizedError,
+		retryAsServerError,
+	};
 }
 
 /**
@@ -694,6 +733,24 @@ function extractRateLimitInfoFromBody(
                 response.status === HTTP_STATUS.TOO_MANY_REQUESTS;
         const parsed = parseRateLimitBody(bodyText);
 
+		if (
+			isServerOverloadedError(
+				parsed
+					? {
+						error: {
+							code: parsed.code,
+							type: parsed.type,
+							context: parsed.contextType
+								? { type: parsed.contextType }
+								: undefined,
+						},
+					}
+					: undefined,
+			)
+		) {
+			return undefined;
+		}
+
         const haystack = `${parsed?.code ?? ""} ${bodyText}`.toLowerCase();
         
         // Entitlement errors should not be treated as rate limits
@@ -718,6 +775,9 @@ interface RateLimitErrorBody {
 	error?: {
 		code?: string | number;
 		type?: string;
+		context?: {
+			type?: string;
+		};
 		resets_at?: number;
 		reset_at?: number;
 		retry_after_ms?: number;
@@ -727,15 +787,17 @@ interface RateLimitErrorBody {
 
 function parseRateLimitBody(
 	body: string,
-): { code?: string; resetsAt?: number; retryAfterMs?: number } | undefined {
+): { code?: string; type?: string; contextType?: string; resetsAt?: number; retryAfterMs?: number } | undefined {
 	if (!body) return undefined;
 	try {
 		const parsed = JSON.parse(body) as RateLimitErrorBody;
 		const error = parsed?.error ?? {};
 		const code = (error.code ?? error.type ?? "").toString();
+		const type = typeof error.type === "string" ? error.type : undefined;
+		const contextType = typeof error.context?.type === "string" ? error.context.type : undefined;
 		const resetsAt = toNumber(error.resets_at ?? error.reset_at);
 		const retryAfterMs = toNumber(error.retry_after_ms ?? error.retry_after);
-		return { code, resetsAt, retryAfterMs };
+		return { code, type, contextType, resetsAt, retryAfterMs };
 	} catch {
 		return undefined;
 	}

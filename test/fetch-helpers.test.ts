@@ -608,7 +608,7 @@ describe('Fetch Helpers Module', () => {
 		});
 	});
 
-	describe('handleErrorResponse edge cases', () => {
+		describe('handleErrorResponse edge cases', () => {
 		it('handles 404 with non-JSON body containing usage limit text', async () => {
 			const response = new Response('usage limit exceeded - please try again', { status: 404 });
 			
@@ -635,6 +635,73 @@ describe('Fetch Helpers Module', () => {
 			const { response: result, rateLimit } = await handleErrorResponse(response);
 			
 			expect(result.status).toBe(429);
+			expect(rateLimit).toBeUndefined();
+		});
+
+		it('marks exact server overload payload as server retry, not rate limit', async () => {
+			const body = {
+				error: {
+					type: 'service_unavailable_error',
+					code: 'server_is_overloaded',
+					message: 'Our servers are currently overloaded. Please try again later.',
+					param: null,
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { response: result, rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(result.status).toBe(429);
+			expect(retryAsServerError).toBe(true);
+			expect(rateLimit).toBeUndefined();
+		});
+
+		it('marks reduced service_unavailable_error payload as server retry, not rate limit', async () => {
+			const body = {
+				error: {
+					type: 'service_unavailable_error',
+					message: 'Our servers are currently overloaded. Please try again later.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(retryAsServerError).toBe(true);
+			expect(rateLimit).toBeUndefined();
+		});
+
+		it('marks reduced context.service_unavailable_error payload as server retry, not rate limit', async () => {
+			const body = {
+				error: {
+					context: {
+						type: 'service_unavailable_error',
+					},
+					message: 'Our servers are currently overloaded. Please try again later.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(retryAsServerError).toBe(true);
+			expect(rateLimit).toBeUndefined();
+		});
+
+		it('marks live server_error payload as server retry on non-5xx response', async () => {
+			const body = {
+				error: {
+					type: 'server_error',
+					code: 'server_error',
+					message: 'The server had an error processing your request.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 400 });
+
+			const { response: result, rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(result.status).toBe(400);
+			expect(retryAsServerError).toBe(true);
 			expect(rateLimit).toBeUndefined();
 		});
 
