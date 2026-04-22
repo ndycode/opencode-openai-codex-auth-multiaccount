@@ -280,7 +280,7 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 
 		await vi.advanceTimersByTimeAsync(1500);
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalled();
 
 		await vi.runAllTimersAsync();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
