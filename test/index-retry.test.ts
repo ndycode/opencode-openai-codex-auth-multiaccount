@@ -41,7 +41,11 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 	},
 	isDeactivatedWorkspaceError: () => false,
 	resolveUnsupportedCodexFallbackModel: () => undefined,
-	getUnsupportedCodexModelInfo: () => undefined,
+	getUnsupportedCodexModelInfo: () => ({
+		isUnsupported: false,
+		unsupportedModel: undefined,
+		message: undefined,
+	}),
 	shouldFallbackToGpt52OnUnsupportedGpt53: () => false,
 	handleSuccessResponse: async (response: Response) => response,
 }));
@@ -53,19 +57,24 @@ vi.mock("../lib/request/request-transformer.js", () => ({
 vi.mock("../lib/accounts.js", () => {
 	class AccountManager {
 		private calls = 0;
+		private readonly accounts = [
+			null,
+			{ index: 0, accountId: "account-1", email: "user@example.com" },
+			{ index: 1, accountId: "account-2", email: "second@example.com" },
+		] as const;
 
 		static async loadFromDisk() {
 			return new AccountManager();
 		}
 
 		getAccountCount() {
-			return 1;
+			return 2;
 		}
 
 		getCurrentOrNextForFamily() {
+			const account = this.accounts[Math.min(this.calls, this.accounts.length - 1)];
 			this.calls += 1;
-			if (this.calls === 1) return null;
-			return { index: 0, accountId: "account-1", email: "user@example.com" };
+			return account;
 		}
 
 		getCurrentOrNextForFamilyHybrid() {
