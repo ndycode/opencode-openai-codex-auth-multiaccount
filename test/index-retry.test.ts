@@ -34,7 +34,7 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 				code === "server_is_overloaded" ||
 				type === "service_unavailable_error" ||
 				contextType === "service_unavailable_error" ||
-				(code === "server_error" && (type === "server_error" || contextType === "server_error"))
+				(code === "server_error" && type === "server_error")
 			) {
 				return { response, errorBody: body, retryAsServerError: true };
 			}

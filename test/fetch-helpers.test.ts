@@ -710,6 +710,7 @@ describe('Fetch Helpers Module', () => {
 				{ error: { type: 'server_error', message: 'type only' } },
 				{ error: { code: 'server_error', message: 'code only' } },
 				{ error: { code: 'server_error', type: 'other_error', message: 'mismatched type' } },
+				{ error: { code: 'server_error', context: { type: 'server_error' }, message: 'context only' } },
 			];
 
 			for (const body of partialPayloads) {

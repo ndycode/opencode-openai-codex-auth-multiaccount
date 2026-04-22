@@ -324,7 +324,7 @@ function isServerOverloadedError(errorBody: unknown): boolean {
 		return true;
 	}
 
-	return code === "server_error" && (type === "server_error" || contextType === "server_error");
+	return code === "server_error" && type === "server_error";
 }
 
 export function isDeactivatedWorkspaceError(errorBody: unknown, status?: number): boolean {
