@@ -638,12 +638,13 @@ describe('Fetch Helpers Module', () => {
 			expect(rateLimit).toBeUndefined();
 		});
 
-		it('marks exact server overload payload as server retry, not rate limit', async () => {
+		it('marks exact server overload payload as server retry and preserves retry-after', async () => {
 			const body = {
 				error: {
 					type: 'service_unavailable_error',
 					code: 'server_is_overloaded',
 					message: 'Our servers are currently overloaded. Please try again later.',
+					retry_after_ms: 1750,
 					param: null,
 				},
 			};
@@ -653,10 +654,11 @@ describe('Fetch Helpers Module', () => {
 
 			expect(result.status).toBe(429);
 			expect(retryAsServerError).toBe(true);
-			expect(rateLimit).toBeUndefined();
+			expect(rateLimit?.retryAfterMs).toBe(1750);
+			expect(rateLimit?.code).toBe('server_is_overloaded');
 		});
 
-		it('marks reduced service_unavailable_error payload as server retry, not rate limit', async () => {
+		it('marks reduced service_unavailable_error payload as server retry and preserves fallback backoff', async () => {
 			const body = {
 				error: {
 					type: 'service_unavailable_error',
@@ -668,10 +670,10 @@ describe('Fetch Helpers Module', () => {
 			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
 
 			expect(retryAsServerError).toBe(true);
-			expect(rateLimit).toBeUndefined();
+			expect(rateLimit?.retryAfterMs).toBe(60000);
 		});
 
-		it('marks reduced context.service_unavailable_error payload as server retry, not rate limit', async () => {
+		it('marks reduced context.service_unavailable_error payload as server retry and preserves fallback backoff', async () => {
 			const body = {
 				error: {
 					context: {
@@ -685,7 +687,7 @@ describe('Fetch Helpers Module', () => {
 			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
 
 			expect(retryAsServerError).toBe(true);
-			expect(rateLimit).toBeUndefined();
+			expect(rateLimit?.retryAfterMs).toBe(60000);
 		});
 
 		it('handles Response that throws on clone (safeReadBody catch)', async () => {

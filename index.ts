@@ -2219,6 +2219,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 					// Handle 5xx server errors, and exact overload payloads flagged by
 					// handleErrorResponse, by rotating to another account.
 					if (retryAsServerError || (response.status >= 500 && response.status < 600)) {
+						if (retryAsServerError && rateLimit) {
+							accountManager.markRateLimitedWithReason(
+								account,
+								rateLimit.retryAfterMs,
+								modelFamily,
+								parseRateLimitReason(rateLimit.code),
+								model,
+							);
+							account.lastSwitchReason = "rate-limit";
+							accountManager.saveToDiskDebounced();
+						}
 						logWarn(
 							`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`,
 						);

@@ -28,8 +28,11 @@ vi.mock("../lib/request/fetch-helpers.js", () => ({
 			const body = await response.clone().json();
 			if (
 				body?.type === "error" &&
-				body?.error?.type === "service_unavailable_error" &&
-				body?.error?.code === "server_is_overloaded"
+				(
+					body?.error?.code === "server_is_overloaded" ||
+					body?.error?.type === "service_unavailable_error" ||
+					body?.error?.context?.type === "service_unavailable_error"
+				)
 			) {
 				return { response, errorBody: body, retryAsServerError: true };
 			}
@@ -238,7 +241,32 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		expect(response.status).toBe(200);
 	});
 
-	it("retries when the upstream returns server overload payload", async () => {
+	it.each([
+		[
+			"code + type overload payload",
+			{
+				type: "error",
+				sequence_number: 2,
+				error: {
+					type: "service_unavailable_error",
+					code: "server_is_overloaded",
+					message: "Our servers are currently overloaded. Please try again later.",
+					param: null,
+				},
+			},
+		],
+		[
+			"type-only overload payload",
+			{
+				type: "error",
+				sequence_number: 2,
+				error: {
+					type: "service_unavailable_error",
+					message: "Our servers are currently overloaded. Please try again later.",
+				},
+			},
+		],
+	])("retries when the upstream returns %s", async (_label, overloadPayload) => {
 		const { OpenAIAuthPlugin } = (await import("../index.js")) as any;
 		const client = {
 			tui: { showToast: vi.fn() },
@@ -261,16 +289,7 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		fetchMock
 			.mockResolvedValueOnce(
 				new Response(
-					JSON.stringify({
-						type: "error",
-						sequence_number: 2,
-						error: {
-							type: "service_unavailable_error",
-							code: "server_is_overloaded",
-							message: "Our servers are currently overloaded. Please try again later.",
-							param: null,
-						},
-					}),
+					JSON.stringify(overloadPayload),
 					{ status: 400, headers: { "content-type": "application/json" } },
 				),
 			)

@@ -34,10 +34,6 @@ export interface EntitlementError {
         message: string;
 }
 
-export interface ServerRetryInfo {
-	retryAsServerError?: boolean;
-}
-
 const CODEX_BASE_URL_OBJECT = new URL(CODEX_BASE_URL);
 const CODEX_BASE_PATH_PREFIX = CODEX_BASE_URL_OBJECT.pathname.endsWith("/")
 	? CODEX_BASE_URL_OBJECT.pathname.slice(0, -1)
@@ -726,24 +722,23 @@ function extractRateLimitInfoFromBody(
         const isStatusRateLimit =
                 response.status === HTTP_STATUS.TOO_MANY_REQUESTS;
         const parsed = parseRateLimitBody(bodyText);
+        const isServerOverload = isServerOverloadedError(
+                parsed
+                        ? {
+                                        error: {
+                                                code: parsed.code,
+                                                type: parsed.type,
+                                                context: parsed.contextType
+                                                        ? { type: parsed.contextType }
+                                                        : undefined,
+                                        },
+                                }
+                        : undefined,
+        );
 
-		if (
-			isServerOverloadedError(
-				parsed
-					? {
-						error: {
-							code: parsed.code,
-							type: parsed.type,
-							context: parsed.contextType
-								? { type: parsed.contextType }
-								: undefined,
-						},
-					}
-					: undefined,
-			)
-		) {
-			return undefined;
-		}
+        if (isServerOverload && !isStatusRateLimit) {
+                return undefined;
+        }
 
         const haystack = `${parsed?.code ?? ""} ${bodyText}`.toLowerCase();
         
@@ -754,6 +749,7 @@ function extractRateLimitInfoFromBody(
         
         const isRateLimit =
                 isStatusRateLimit ||
+                isServerOverload ||
                 /usage_limit_reached|rate_limit_exceeded|rate_limit|usage limit/i.test(
                         haystack,
                 );
