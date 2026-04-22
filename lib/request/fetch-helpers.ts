@@ -307,6 +307,9 @@ function isServerOverloadedError(errorBody: unknown): boolean {
 
 	const maybeError = errorBody.error;
 	if (!isRecord(maybeError)) return false;
+	const maybeMessage = typeof maybeError.message === "string"
+		? maybeError.message.toLowerCase()
+		: "";
 
 	if (typeof maybeError.code === "string" && maybeError.code === "server_is_overloaded") {
 		return true;
@@ -320,7 +323,8 @@ function isServerOverloadedError(errorBody: unknown): boolean {
 	return (
 		isRecord(maybeContext) &&
 		typeof maybeContext.type === "string" &&
-		maybeContext.type === "service_unavailable_error"
+		maybeContext.type === "service_unavailable_error" &&
+		/overloaded|try again later/.test(maybeMessage)
 	);
 }
 
@@ -622,7 +626,7 @@ export async function handleErrorResponse(
                 diagnostics,
         );
         const errorResponse = ensureJsonErrorResponse(finalResponse, normalizedError);
-        const retryAsServerError = isServerOverloadedError(errorBody);
+        const retryAsServerError = isServerOverloadedError(normalizedError);
 
         if (finalResponse.status === HTTP_STATUS.UNAUTHORIZED) {
                 logWarn("Codex upstream returned 401 Unauthorized", diagnostics);
@@ -721,20 +725,9 @@ function extractRateLimitInfoFromBody(
 ): RateLimitInfo | undefined {
         const isStatusRateLimit =
                 response.status === HTTP_STATUS.TOO_MANY_REQUESTS;
-        const parsed = parseRateLimitBody(bodyText);
-        const isServerOverload = isServerOverloadedError(
-                parsed
-                        ? {
-                                        error: {
-                                                code: parsed.code,
-                                                type: parsed.type,
-                                                context: parsed.contextType
-                                                        ? { type: parsed.contextType }
-                                                        : undefined,
-                                        },
-                                }
-                        : undefined,
-        );
+        const parsedErrorBody = parseStructuredErrorBody(bodyText);
+        const parsed = parseRateLimitBody(parsedErrorBody);
+        const isServerOverload = isServerOverloadedError(parsedErrorBody);
 
         if (isServerOverload && !isStatusRateLimit) {
                 return undefined;
@@ -776,18 +769,22 @@ interface RateLimitErrorBody {
 }
 
 function parseRateLimitBody(
-	body: string,
+	parsedBody: RateLimitErrorBody | undefined,
 ): { code?: string; type?: string; contextType?: string; resetsAt?: number; retryAfterMs?: number } | undefined {
+	if (!parsedBody) return undefined;
+	const error = parsedBody.error ?? {};
+	const code = (error.code ?? error.type ?? "").toString();
+	const type = typeof error.type === "string" ? error.type : undefined;
+	const contextType = typeof error.context?.type === "string" ? error.context.type : undefined;
+	const resetsAt = toNumber(error.resets_at ?? error.reset_at);
+	const retryAfterMs = toNumber(error.retry_after_ms ?? error.retry_after);
+	return { code, type, contextType, resetsAt, retryAfterMs };
+}
+
+function parseStructuredErrorBody(body: string): RateLimitErrorBody | undefined {
 	if (!body) return undefined;
 	try {
-		const parsed = JSON.parse(body) as RateLimitErrorBody;
-		const error = parsed?.error ?? {};
-		const code = (error.code ?? error.type ?? "").toString();
-		const type = typeof error.type === "string" ? error.type : undefined;
-		const contextType = typeof error.context?.type === "string" ? error.context.type : undefined;
-		const resetsAt = toNumber(error.resets_at ?? error.reset_at);
-		const retryAfterMs = toNumber(error.retry_after_ms ?? error.retry_after);
-		return { code, type, contextType, resetsAt, retryAfterMs };
+		return JSON.parse(body) as RateLimitErrorBody;
 	} catch {
 		return undefined;
 	}
@@ -798,6 +795,9 @@ type ErrorPayload = {
                 message: string;
                 type?: string;
                 code?: string | number;
+                context?: {
+                        type?: string;
+                };
                 unsupported_model?: string;
                 diagnostics?: ErrorDiagnostics;
         };
@@ -860,6 +860,12 @@ function normalizeErrorPayload(
                         }
                         if (typeof maybeError.code === "string" || typeof maybeError.code === "number") {
                                 payload.error.code = maybeError.code;
+                        }
+                        if (
+                                isRecord(maybeError.context) &&
+                                typeof maybeError.context.type === "string"
+                        ) {
+                                payload.error.context = { type: maybeError.context.type };
                         }
                         if (diagnostics && Object.keys(diagnostics).length > 0) {
                                 payload.error.diagnostics = diagnostics;

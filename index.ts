@@ -2230,13 +2230,17 @@ while (attempted.size < Math.max(1, accountCount)) {
 							account.lastSwitchReason = "rate-limit";
 							accountManager.saveToDiskDebounced();
 						}
+						const retryableServerLabel =
+							retryAsServerError && response.status < 500
+								? `Retryable server overload (HTTP ${response.status})`
+								: `Server error ${response.status}`;
 						logWarn(
-							`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`,
+							`${retryableServerLabel} for account ${account.index + 1}. Rotating to next account.`,
 						);
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.serverErrors++;
 						runtimeMetrics.accountRotations++;
-						runtimeMetrics.lastError = `HTTP ${response.status}`;
+						runtimeMetrics.lastError = retryableServerLabel;
 						runtimeMetrics.lastErrorCategory = "server";
 						accountManager.refundToken(account, modelFamily, model);
 						accountManager.recordFailure(account, modelFamily, model);

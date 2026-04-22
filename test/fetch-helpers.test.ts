@@ -640,6 +640,7 @@ describe('Fetch Helpers Module', () => {
 
 		it('marks exact server overload payload as server retry and preserves retry-after', async () => {
 			const body = {
+				type: 'error',
 				error: {
 					type: 'service_unavailable_error',
 					code: 'server_is_overloaded',
@@ -687,6 +688,23 @@ describe('Fetch Helpers Module', () => {
 			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
 
 			expect(retryAsServerError).toBe(true);
+			expect(rateLimit?.retryAfterMs).toBe(60000);
+		});
+
+		it('does not treat context.service_unavailable_error without overload wording as server retry', async () => {
+			const body = {
+				error: {
+					context: {
+						type: 'service_unavailable_error',
+					},
+					message: 'Service temporarily unavailable.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(retryAsServerError).toBe(false);
 			expect(rateLimit?.retryAfterMs).toBe(60000);
 		});
 
