@@ -128,16 +128,18 @@ describe("storage", () => {
       await fs.mkdir(testWorkDir, { recursive: true });
       testStoragePath = join(testWorkDir, "accounts-" + Math.random().toString(36).slice(2) + ".json");
       setStoragePathDirect(testStoragePath);
+      await clearAccounts();
     });
 
     afterEach(async () => {
+      await clearAccounts();
       setStoragePathDirect(null);
       await fs.rm(testWorkDir, { recursive: true, force: true });
     });
 
     it("should export accounts to a file", async () => {
       const storage = {
-        version: 3,
+        version: 3 as const,
         activeIndex: 0,
         accounts: [{ accountId: "test", refreshToken: "ref", addedAt: 1, lastUsed: 2 }]
       };
@@ -160,7 +162,7 @@ describe("storage", () => {
     it("defaults to non-destructive export (force=false) and refuses to overwrite", async () => {
       // Arrange: populate storage and a pre-existing export target.
       const storage = {
-        version: 3,
+        version: 3 as const,
         activeIndex: 0,
         accounts: [{ accountId: "test", refreshToken: "ref", addedAt: 1, lastUsed: 2 }],
       };
@@ -180,7 +182,7 @@ describe("storage", () => {
 
     it("should import accounts from a file and merge", async () => {
       const existing = {
-        version: 3,
+        version: 3 as const,
         activeIndex: 0,
         accounts: [{ accountId: "existing", refreshToken: "ref1", addedAt: 1, lastUsed: 2 }]
       };
