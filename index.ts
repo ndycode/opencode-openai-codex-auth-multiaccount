@@ -1993,11 +1993,11 @@ while (attempted.size < Math.max(1, accountCount)) {
 										return contextOverflowResult.response;
 									}
 
-									const { response: errorResponse, rateLimit, errorBody } =
-										await handleErrorResponse(response, {
-											requestCorrelationId,
-											threadId: threadIdCandidate,
-										});
+					const { response: errorResponse, rateLimit, errorBody, retryAsServerError } =
+						await handleErrorResponse(response, {
+							requestCorrelationId,
+							threadId: threadIdCandidate,
+						});
 
 			const workspaceDeactivated = isDeactivatedWorkspaceError(errorBody, response.status);
 				if (workspaceDeactivated) {
@@ -2216,13 +2216,31 @@ while (attempted.size < Math.max(1, accountCount)) {
 						logDebug(`[${PLUGIN_NAME}] Recoverable error detected: ${errorType}`);
 					}
 
-					// Handle 5xx server errors by rotating to another account
-					if (response.status >= 500 && response.status < 600) {
-						logWarn(`Server error ${response.status} for account ${account.index + 1}. Rotating to next account.`);
+					// Handle 5xx server errors, and exact overload payloads flagged by
+					// handleErrorResponse, by rotating to another account.
+					if (retryAsServerError || (response.status >= 500 && response.status < 600)) {
+						if (retryAsServerError && rateLimit) {
+							accountManager.markRateLimitedWithReason(
+								account,
+								rateLimit.retryAfterMs,
+								modelFamily,
+								parseRateLimitReason(rateLimit.code),
+								model,
+							);
+							account.lastSwitchReason = "rate-limit";
+							accountManager.saveToDiskDebounced();
+						}
+						const retryableServerLabel =
+							retryAsServerError && response.status < 500
+								? `Retryable server overload (HTTP ${response.status})`
+								: `Server error ${response.status}`;
+						logWarn(
+							`${retryableServerLabel} for account ${account.index + 1}. Rotating to next account.`,
+						);
 						runtimeMetrics.failedRequests++;
 						runtimeMetrics.serverErrors++;
 						runtimeMetrics.accountRotations++;
-						runtimeMetrics.lastError = `HTTP ${response.status}`;
+						runtimeMetrics.lastError = retryableServerLabel;
 						runtimeMetrics.lastErrorCategory = "server";
 						accountManager.refundToken(account, modelFamily, model);
 						accountManager.recordFailure(account, modelFamily, model);

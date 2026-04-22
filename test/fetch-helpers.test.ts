@@ -608,7 +608,7 @@ describe('Fetch Helpers Module', () => {
 		});
 	});
 
-	describe('handleErrorResponse edge cases', () => {
+		describe('handleErrorResponse edge cases', () => {
 		it('handles 404 with non-JSON body containing usage limit text', async () => {
 			const response = new Response('usage limit exceeded - please try again', { status: 404 });
 			
@@ -636,6 +636,76 @@ describe('Fetch Helpers Module', () => {
 			
 			expect(result.status).toBe(429);
 			expect(rateLimit).toBeUndefined();
+		});
+
+		it('marks exact server overload payload as server retry and preserves retry-after', async () => {
+			const body = {
+				type: 'error',
+				error: {
+					type: 'service_unavailable_error',
+					code: 'server_is_overloaded',
+					message: 'Our servers are currently overloaded. Please try again later.',
+					retry_after_ms: 1750,
+					param: null,
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { response: result, rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(result.status).toBe(429);
+			expect(retryAsServerError).toBe(true);
+			expect(rateLimit?.retryAfterMs).toBe(1750);
+			expect(rateLimit?.code).toBe('server_is_overloaded');
+		});
+
+		it('marks reduced service_unavailable_error payload as server retry and preserves fallback backoff', async () => {
+			const body = {
+				error: {
+					type: 'service_unavailable_error',
+					message: 'Our servers are currently overloaded. Please try again later.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(retryAsServerError).toBe(true);
+			expect(rateLimit?.retryAfterMs).toBe(60000);
+		});
+
+		it('marks reduced context.service_unavailable_error payload as server retry and preserves fallback backoff', async () => {
+			const body = {
+				error: {
+					context: {
+						type: 'service_unavailable_error',
+					},
+					message: 'Our servers are currently overloaded. Please try again later.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(retryAsServerError).toBe(true);
+			expect(rateLimit?.retryAfterMs).toBe(60000);
+		});
+
+		it('does not treat context.service_unavailable_error without overload wording as server retry', async () => {
+			const body = {
+				error: {
+					context: {
+						type: 'service_unavailable_error',
+					},
+					message: 'Service temporarily unavailable.',
+				},
+			};
+			const response = new Response(JSON.stringify(body), { status: 429 });
+
+			const { rateLimit, retryAsServerError } = await handleErrorResponse(response);
+
+			expect(retryAsServerError).toBe(false);
+			expect(rateLimit?.retryAfterMs).toBe(60000);
 		});
 
 		it('handles Response that throws on clone (safeReadBody catch)', async () => {

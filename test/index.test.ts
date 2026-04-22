@@ -2427,6 +2427,140 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(await response.text()).toContain("server errors or auth issues");
 	});
 
+	it("retries single-account overloads when retry-after is preserved on server overloads", async () => {
+		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
+		const accountsModule = await import("../lib/accounts.js");
+		const { AccountManager } = accountsModule;
+
+		vi.useFakeTimers();
+
+		try {
+			const overloadedAccount = {
+				index: 0,
+				accountId: "acc-1",
+				email: "user@example.com",
+				refreshToken: "refresh-1",
+			};
+
+			let rateLimitedUntil = 0;
+			const markRateLimitedWithReason = vi.fn(
+				(_account: typeof overloadedAccount, retryAfterMs: number) => {
+				rateLimitedUntil = Date.now() + retryAfterMs;
+				},
+			);
+			const customManager = {
+				getAccountCount: () => 1,
+				getCurrentOrNextForFamilyHybrid: () => overloadedAccount,
+				getSelectionExplainability: () => [
+					{
+						index: 0,
+						enabled: true,
+						isCurrentForFamily: true,
+						eligible: true,
+						reasons: ["eligible"],
+						healthScore: 100,
+						tokensAvailable: 50,
+						lastUsed: Date.now(),
+					},
+				],
+				toAuthDetails: () => ({
+					type: "oauth" as const,
+					access: "access-overloaded",
+					refresh: overloadedAccount.refreshToken,
+					expires: Date.now() + 60_000,
+				}),
+				hasRefreshToken: () => true,
+				saveToDiskDebounced: vi.fn(),
+				updateFromAuth: vi.fn(),
+				clearAuthFailures: vi.fn(),
+				incrementAuthFailures: vi.fn(() => 1),
+				markAccountCoolingDown: vi.fn(),
+				markRateLimitedWithReason,
+				recordRateLimit: vi.fn(),
+				consumeToken: vi.fn(() => true),
+				refundToken: vi.fn(),
+				markSwitched: vi.fn(),
+				removeAccount: vi.fn(() => false),
+				removeAccountsWithSameRefreshToken: vi.fn(() => 0),
+				recordFailure: vi.fn(),
+				recordSuccess: vi.fn(),
+				getMinWaitTimeForFamily: vi.fn(() => Math.max(0, rateLimitedUntil - Date.now())),
+				shouldShowAccountToast: vi.fn(() => false),
+				markToastShown: vi.fn(),
+				setActiveIndex: vi.fn(() => overloadedAccount),
+				getAccountsSnapshot: vi.fn(() => [overloadedAccount]),
+			};
+			vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+			vi.mocked(fetchHelpers.createCodexHeaders).mockImplementation(
+				(_init, _accountId, accessToken) =>
+					new Headers({ "x-test-access-token": String(accessToken) }),
+			);
+			vi.mocked(fetchHelpers.handleErrorResponse).mockResolvedValueOnce({
+				response: new Response(
+					JSON.stringify({
+						error: {
+							context: {
+								type: "service_unavailable_error",
+							},
+							message: "Our servers are currently overloaded. Please try again later.",
+							retry_after_ms: 1000,
+						},
+					}),
+					{ status: 429 },
+				),
+				rateLimit: { retryAfterMs: 1000, code: "server_is_overloaded" },
+				errorBody: {
+					error: {
+						context: {
+							type: "service_unavailable_error",
+						},
+					},
+				},
+				retryAsServerError: true,
+			});
+
+			globalThis.fetch = vi
+				.fn()
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							error: {
+								context: {
+									type: "service_unavailable_error",
+								},
+								message: "Our servers are currently overloaded. Please try again later.",
+								retry_after_ms: 1000,
+							},
+						}),
+						{ status: 429 },
+					),
+				)
+				.mockResolvedValueOnce(new Response(JSON.stringify({ content: "ok" }), { status: 200 }));
+
+			const { sdk } = await setupPlugin();
+			const fetchPromise = sdk.fetch!("https://api.openai.com/v1/chat", {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.1" }),
+			});
+
+			await vi.advanceTimersByTimeAsync(1500);
+
+			const response = await fetchPromise;
+			expect(response.status).toBe(200);
+			expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+			expect(markRateLimitedWithReason).toHaveBeenCalledWith(
+				overloadedAccount,
+				1000,
+				"gpt-5.1",
+				"unknown",
+				"gpt-5.1",
+			);
+			expect(customManager.getMinWaitTimeForFamily).toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("cools down the account when grouped auth removal removes zero entries", async () => {
 		const fetchHelpers = await import("../lib/request/fetch-helpers.js");
 		const { AccountManager } = await import("../lib/accounts.js");
