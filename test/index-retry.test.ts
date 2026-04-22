@@ -212,6 +212,7 @@ describe("OpenAIAuthPlugin rate-limit retry", () => {
 		}
 
 		vi.restoreAllMocks();
+		vi.resetModules();
 	});
 
 	it("waits and retries when all accounts are rate-limited", async () => {
