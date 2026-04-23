@@ -131,6 +131,12 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 	) {
 		return "codex";
 	}
+	if (/\bgpt(?:-| )5\.5(?:-| )pro(?:\b|[- ])/i.test(normalizedModel)) {
+		return "gpt-5.4-pro";
+	}
+	if (/\bgpt(?:-| )5\.5(?:\b|[- ])/i.test(normalizedModel)) {
+		return "gpt-5.4";
+	}
 	if (/\bgpt(?:-| )5\.4(?:-| )pro(?:\b|[- ])/i.test(normalizedModel)) {
 		return "gpt-5.4-pro";
 	}

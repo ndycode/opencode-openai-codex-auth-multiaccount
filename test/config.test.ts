@@ -180,7 +180,7 @@ describe('Configuration Parsing', () => {
 
 		it('should handle standard gpt-5 model', () => {
 			const gpt5Reasoning = getReasoningConfig('gpt-5', {});
-			expect(gpt5Reasoning.effort).toBe('medium');
+			expect(gpt5Reasoning.effort).toBe('high');
 		});
 	});
 });

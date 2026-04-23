@@ -445,6 +445,23 @@ describe('Fetch Helpers Module', () => {
 			});
 			expect(fallback).toBeUndefined();
 		});
+
+		it('falls back from gpt-5.5-pro to gpt-5.5 when fallback policy is enabled', () => {
+			const fallback = resolveUnsupportedCodexFallbackModel({
+				requestedModel: 'gpt-5.5-pro',
+				errorBody: {
+					error: {
+						code: 'model_not_supported_with_chatgpt_account',
+						message:
+							"The 'gpt-5.5-pro' model is not supported when using Codex with a ChatGPT account.",
+					},
+				},
+				attemptedModels: ['gpt-5.5-pro'],
+				fallbackOnUnsupportedCodexModel: true,
+				fallbackToGpt52OnUnsupportedGpt53: true,
+			});
+			expect(fallback).toBe('gpt-5.5');
+		});
 	});
 
 	describe('handleSuccessResponse', () => {

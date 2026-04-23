@@ -19,7 +19,10 @@ const DATED_ALIAS_EFFORT_SUFFIXES = [
 	"-high",
 	"-xhigh",
 ] as const;
+const GPT_55_RELEASE_EFFORT_SUFFIXES = DATED_ALIAS_EFFORT_SUFFIXES;
 const GPT_54_SNAPSHOT_DATE = "2026-03-05" as const;
+const GPT_55_RELEASE_ID = "gpt-5.5-20260423" as const;
+const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423" as const;
 
 function expandDatedAliases(prefix: string, target: string): Record<string, string> {
 	return Object.fromEntries(
@@ -75,7 +78,31 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.1-codex-max-xhigh": "gpt-5.1-codex-max",
 
 	// ============================================================================
-	// GPT-5.4 Models (latest general-purpose family)
+	// GPT-5.5 Models (latest general-purpose family)
+	// ============================================================================
+	"gpt-5.5": GPT_55_RELEASE_ID,
+	"gpt-5.5-none": GPT_55_RELEASE_ID,
+	"gpt-5.5-low": GPT_55_RELEASE_ID,
+	"gpt-5.5-medium": GPT_55_RELEASE_ID,
+	"gpt-5.5-high": GPT_55_RELEASE_ID,
+	"gpt-5.5-xhigh": GPT_55_RELEASE_ID,
+	...expandDatedAliases(GPT_55_RELEASE_ID, GPT_55_RELEASE_ID),
+
+	// ============================================================================
+	// GPT-5.5 Pro Models (optional/manual config)
+	// ============================================================================
+	"gpt-5.5-pro": GPT_55_PRO_RELEASE_ID,
+	"gpt-5.5-pro-medium": GPT_55_PRO_RELEASE_ID,
+	"gpt-5.5-pro-high": GPT_55_PRO_RELEASE_ID,
+	"gpt-5.5-pro-xhigh": GPT_55_PRO_RELEASE_ID,
+	...Object.fromEntries(
+		GPT_55_RELEASE_EFFORT_SUFFIXES.filter((suffix) =>
+			["", "-medium", "-high", "-xhigh"].includes(suffix),
+		).map((suffix) => [`${GPT_55_PRO_RELEASE_ID}${suffix}`, GPT_55_PRO_RELEASE_ID]),
+	),
+
+	// ============================================================================
+	// GPT-5.4 Models (legacy latest general-purpose family)
 	// ============================================================================
 	"gpt-5.4": "gpt-5.4",
 	"gpt-5.4-none": "gpt-5.4",
@@ -166,9 +193,14 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5-codex-mini-high": "gpt-5.1-codex-mini",
 
 	// ============================================================================
-	// GPT-5 General Purpose Models (LEGACY - maps to gpt-5.4 latest)
+	// GPT-5 General Purpose Models (LEGACY - maps to gpt-5.5 latest)
 	// ============================================================================
-	"gpt-5": "gpt-5.4",
+	"gpt-5": GPT_55_RELEASE_ID,
+	"gpt-5-none": GPT_55_RELEASE_ID,
+	"gpt-5-minimal": GPT_55_RELEASE_ID,
+	"gpt-5-low": GPT_55_RELEASE_ID,
+	"gpt-5-medium": GPT_55_RELEASE_ID,
+	"gpt-5-high": GPT_55_RELEASE_ID,
 	"gpt-5-mini": "gpt-5.4-mini",
 	"gpt-5-nano": "gpt-5.4-nano",
 };
