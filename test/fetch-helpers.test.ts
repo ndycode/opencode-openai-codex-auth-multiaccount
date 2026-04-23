@@ -346,6 +346,17 @@ describe('Fetch Helpers Module', () => {
 			expect(info.unsupportedModel).toBe('gpt-5.3-codex-spark');
 		});
 
+		it('returns unsupported model info from top-level detail payload', () => {
+			const info = getUnsupportedCodexModelInfo({
+				detail:
+					"The 'gpt-5.5-20260423' model is not supported when using Codex with a ChatGPT account.",
+			});
+
+			expect(info.isUnsupported).toBe(true);
+			expect(info.message).toContain('gpt-5.5-20260423');
+			expect(info.unsupportedModel).toBe('gpt-5.5-20260423');
+		});
+
 		it('resolves Spark fallback chain to canonical gpt-5-codex first', () => {
 			const errorBody = {
 				error: {
@@ -461,6 +472,40 @@ describe('Fetch Helpers Module', () => {
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
 			expect(fallback).toBe('gpt-5.5-20260423');
+		});
+
+		it('falls back from the canonical GPT-5.5 release to gpt-5.4 when GPT-5.5 is unsupported', () => {
+			const fallback = resolveUnsupportedCodexFallbackModel({
+				requestedModel: 'gpt-5.5-medium',
+				errorBody: {
+					error: {
+						code: 'model_not_supported_with_chatgpt_account',
+						message:
+							"The 'gpt-5.5-20260423' model is not supported when using Codex with a ChatGPT account.",
+					},
+				},
+				attemptedModels: ['gpt-5.5-20260423'],
+				fallbackOnUnsupportedCodexModel: true,
+				fallbackToGpt52OnUnsupportedGpt53: true,
+			});
+			expect(fallback).toBe('gpt-5.4');
+		});
+
+		it('does not fallback from GPT-5.5 when gpt-5.4 was already attempted', () => {
+			const fallback = resolveUnsupportedCodexFallbackModel({
+				requestedModel: 'gpt-5.5-20260423',
+				errorBody: {
+					error: {
+						code: 'model_not_supported_with_chatgpt_account',
+						message:
+							"The 'gpt-5.5-20260423' model is not supported when using Codex with a ChatGPT account.",
+					},
+				},
+				attemptedModels: ['gpt-5.5-20260423', 'gpt-5.4'],
+				fallbackOnUnsupportedCodexModel: true,
+				fallbackToGpt52OnUnsupportedGpt53: true,
+			});
+			expect(fallback).toBeUndefined();
 		});
 
 		it('does not fallback from gpt-5.5-pro when the canonical GPT-5.5 release was already attempted', () => {

@@ -64,6 +64,21 @@ describe("GPT-5.5 release activation", () => {
 		expect(fallback).toBe("gpt-5.5-20260423");
 	});
 
+	it("falls back from GPT-5.5 to GPT-5.4 when GPT-5.5 is unsupported for ChatGPT accounts", () => {
+		const fallback = resolveUnsupportedCodexFallbackModel({
+			requestedModel: "gpt-5.5-medium",
+			errorBody: {
+				detail:
+					"The 'gpt-5.5-20260423' model is not supported when using Codex with a ChatGPT account.",
+			},
+			attemptedModels: ["gpt-5.5-20260423"],
+			fallbackOnUnsupportedCodexModel: true,
+			fallbackToGpt52OnUnsupportedGpt53: false,
+		});
+
+		expect(fallback).toBe("gpt-5.4");
+	});
+
 	it("does not fallback when GPT-5.5 entitlement fallback is disabled", () => {
 		const fallback = resolveUnsupportedCodexFallbackModel({
 			requestedModel: "gpt-5.5-pro",

@@ -48,6 +48,8 @@ const GPT_55_RELEASE_ID = "gpt-5.5-20260423";
 const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423";
 
 export const DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN: Record<string, string[]> = {
+	"gpt-5.5": ["gpt-5.4"],
+	"gpt-5.5-20260423": ["gpt-5.4"],
 	"gpt-5.5-pro": [GPT_55_RELEASE_ID],
 	"gpt-5.5-pro-20260423": [GPT_55_RELEASE_ID],
 	"gpt-5.4-pro": ["gpt-5.4"],
@@ -151,9 +153,20 @@ export function getUnsupportedCodexModelInfo(
 		return { isUnsupported: false };
 	}
 
+	const directDetail =
+		typeof errorBody.detail === "string" ? errorBody.detail : undefined;
 	const maybeError = errorBody.error;
 	if (!isRecord(maybeError)) {
-		return { isUnsupported: false };
+		const unsupportedModel = directDetail
+			? extractUnsupportedCodexModelFromText(directDetail)
+			: undefined;
+		return {
+			isUnsupported: directDetail
+				? CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN.test(directDetail)
+				: false,
+			message: directDetail,
+			unsupportedModel: unsupportedModel ?? undefined,
+		};
 	}
 
 	const code = typeof maybeError.code === "string" ? maybeError.code : undefined;

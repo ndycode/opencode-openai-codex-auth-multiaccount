@@ -78,11 +78,13 @@ Current defaults are strict entitlement handling:
 - `unsupportedCodexPolicy: "strict"` returns entitlement errors directly
 - set `unsupportedCodexPolicy: "fallback"` (or `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback`) to enable automatic fallback retries
 - `fallbackToGpt52OnUnsupportedGpt53: true` keeps the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge inside fallback mode
+- `gpt-5.5 -> gpt-5.4` is included by default for current ChatGPT-account entitlement gaps
 - `gpt-5.5-pro -> gpt-5.5-20260423` is included by default in fallback mode
 - `gpt-5.4-pro -> gpt-5.4` remains available for older manual configs
 - `unsupportedCodexFallbackChain` lets you override fallback order per model
 
 Default fallback chain (when policy is `fallback`):
+- `gpt-5.5 -> gpt-5.4`
 - `gpt-5.5-pro -> gpt-5.5-20260423`
 - `gpt-5.4-pro -> gpt-5.4` (if you manually select `gpt-5.4-pro`)
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`

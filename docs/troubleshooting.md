@@ -364,6 +364,7 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode
    ```
 4. Default fallback chain (when policy is `fallback` and not overridden):
+   - `gpt-5.5 -> gpt-5.4`
    - `gpt-5.5-pro -> gpt-5.5-20260423`
    - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
    - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
@@ -376,6 +377,7 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    "unsupportedCodexPolicy": "fallback",
    "fallbackOnUnsupportedCodexModel": true,
    "unsupportedCodexFallbackChain": {
+      "gpt-5.5": ["gpt-5.4"],
       "gpt-5.5-pro": ["gpt-5.5-20260423"],
       "gpt-5.4-pro": ["gpt-5.4"],
       "gpt-5-codex": ["gpt-5.2-codex"],
