@@ -22,11 +22,11 @@ Sets the default selected model:
 
 ```json
 {
-  "model": "openai/gpt-5.4"
+  "model": "openai/gpt-5.5-medium"
 }
 ```
 
-Modern OpenCode pairs this with `--variant` at runtime.
+Tested live on OpenCode `1.14.22`, explicit GPT-5.5 preset IDs such as `openai/gpt-5.5-medium` work directly at runtime.
 
 ## `provider.openai.options`
 
@@ -75,10 +75,10 @@ Example:
   "provider": {
     "openai": {
       "models": {
-        "gpt-5.4": {
-          "name": "GPT 5.4 (OAuth)",
+        "gpt-5.5": {
+          "name": "GPT 5.5 20260423 (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -101,17 +101,17 @@ Important fields:
 
 | Field | Purpose |
 |------|---------|
-| model key (`gpt-5.4`) | base model family exposed to OpenCode |
+| model key (`gpt-5.5`) | base model family exposed to OpenCode |
 | `name` | human-readable picker label |
 | `limit` | context/output metadata shown to OpenCode |
 | `modalities` | allowed input/output types |
 | `variants` | reasoning/verbosity presets selected with `--variant` |
 | `options` | per-model defaults when needed |
 
-Modern selection example:
+If your OpenCode release exposes bare base entries, modern selection looks like:
 
 ```bash
-opencode run "task" --model=openai/gpt-5.4-mini --variant=high
+opencode run "task" --model=openai/gpt-5.5 --variant=high
 ```
 
 ### Legacy template fields
@@ -125,10 +125,10 @@ Example:
   "provider": {
     "openai": {
       "models": {
-        "gpt-5.4-high": {
-          "name": "GPT 5.4 High (OAuth)",
+        "gpt-5.5-high": {
+          "name": "GPT 5.5 20260423 High (OAuth)",
           "limit": {
-            "context": 1000000,
+            "context": 1050000,
             "output": 128000
           },
           "modalities": {
@@ -152,7 +152,7 @@ Example:
 Legacy selection example:
 
 ```bash
-opencode run "task" --model=openai/gpt-5.4-high
+opencode run "task" --model=openai/gpt-5.5-high
 ```
 
 ## Model Normalization
@@ -163,11 +163,11 @@ Examples:
 
 | Selected model | Effective upstream family |
 |------|---------|
-| `openai/gpt-5.4` | `gpt-5.4` |
+| `openai/gpt-5.5-medium` | `gpt-5.5-20260423` |
 | `openai/gpt-5.4-mini-xhigh` | `gpt-5.4-mini` |
 | `openai/gpt-5.1-codex-high` | `gpt-5.1-codex` |
-| `openai/gpt-5-mini` | `gpt-5.4` |
-| `openai/gpt-5-nano` | `gpt-5.4` |
+| `openai/gpt-5-mini` | `gpt-5.4-mini` |
+| `openai/gpt-5-nano` | `gpt-5.4-nano` |
 
 This normalization is why legacy aliases and snapshot-like IDs can still route to a stable family while preserving the user-facing config surface.
 
@@ -177,14 +177,14 @@ Use these commands when validating config fields:
 
 ```bash
 opencode debug config
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.4
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.5-medium
 ```
 
 Important behavior:
 
 - `opencode debug config` shows merged config-defined models and variants.
-- `opencode models openai` currently shows only the built-in provider catalog.
-- Because of that, config-defined entries such as `gpt-5.4-mini` may not appear in `opencode models openai` even when they are active in the effective config.
+- On tested OpenCode `1.14.22`, `opencode models openai` exposes explicit GPT-5.5 entries such as `gpt-5.5-medium` / `gpt-5.5-high`.
+- Bare `openai/gpt-5.5` can still be rejected by provider lookup, so use explicit GPT-5.5 preset IDs for reliable CLI verification.
 
 ## Account Metadata Fields
 

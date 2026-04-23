@@ -17,7 +17,7 @@ import type { RequestBody, UserConfig, InputItem } from '../lib/types.js';
 
 describe('Request Transformer Module', () => {
 	describe('normalizeModel', () => {
-		// NOTE: legacy gpt-5 base aliases normalize to gpt-5.4; codex aliases stay on gpt-5-codex.
+		// NOTE: legacy gpt-5 base aliases normalize to the current GPT-5.5 release; codex aliases stay on gpt-5-codex.
 		it('should normalize gpt-5-codex to canonical codex', () => {
 			expect(normalizeModel('gpt-5-codex')).toBe('gpt-5-codex');
 		});
@@ -50,7 +50,7 @@ describe('Request Transformer Module', () => {
 			expect(normalizeModel(undefined)).toBe('gpt-5.4');
 		});
 
-		// Codex CLI preset name tests - legacy gpt-5 base aliases now map to gpt-5.4
+		// Codex CLI preset name tests - legacy gpt-5 base aliases now map to the current GPT-5.5 release
 		describe('Codex CLI preset names', () => {
 			it('should normalize all gpt-5-codex presets to canonical codex', () => {
 				expect(normalizeModel('gpt-5-codex-low')).toBe('gpt-5-codex');
@@ -166,7 +166,7 @@ describe('Request Transformer Module', () => {
 			});
 		});
 
-		// Edge case tests - legacy gpt-5 base aliases now map to gpt-5.4
+		// Edge case tests - legacy gpt-5 base aliases now map to the current GPT-5.5 release
 			describe('Edge cases', () => {
 			it('should handle uppercase model names', () => {
 				expect(normalizeModel('GPT-5-CODEX')).toBe('gpt-5-codex');

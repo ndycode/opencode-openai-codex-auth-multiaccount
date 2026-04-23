@@ -84,7 +84,7 @@ Update your `~/.config/opencode/opencode.json`:
    ```
 3. **Remember: request logs only appear after the first OpenAI request**:
    ```bash
-   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.5
+   ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "test" --model=openai/gpt-5.5-medium
    ```
 4. **Check registry access**:
    ```bash
@@ -317,6 +317,8 @@ opencode run "test" --model=openai/gpt-5-codex-low  # Must match config key
 
 **Note:** `opencode models openai` currently shows only OpenCode's built-in provider catalog. If you add template-defined or custom models, use `opencode debug config` to confirm they were merged into the effective config.
 
+**GPT-5.5 note:** on tested OpenCode `1.14.22`, bare `openai/gpt-5.5` can still fail with `ProviderModelNotFoundError` even when the base template entry exists. Use explicit shipped IDs like `openai/gpt-5.5-medium` or `openai/gpt-5.5-high` for current live CLI tests.
+
 </details>
 
 <details>
@@ -362,7 +364,7 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback opencode
    ```
 4. Default fallback chain (when policy is `fallback` and not overridden):
-   - `gpt-5.5-pro -> gpt-5.5`
+   - `gpt-5.5-pro -> gpt-5.5-20260423`
    - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
    - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
    - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (if Spark IDs are selected manually)
@@ -371,13 +373,13 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
 5. Configure a custom fallback chain in `~/.opencode/openai-codex-auth-config.json`:
    ```json
    {
-     "unsupportedCodexPolicy": "fallback",
-     "fallbackOnUnsupportedCodexModel": true,
-     "unsupportedCodexFallbackChain": {
-       "gpt-5.5-pro": ["gpt-5.5"],
-       "gpt-5.4-pro": ["gpt-5.4"],
-       "gpt-5-codex": ["gpt-5.2-codex"],
-       "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
+   "unsupportedCodexPolicy": "fallback",
+   "fallbackOnUnsupportedCodexModel": true,
+   "unsupportedCodexFallbackChain": {
+      "gpt-5.5-pro": ["gpt-5.5-20260423"],
+      "gpt-5.4-pro": ["gpt-5.4"],
+      "gpt-5-codex": ["gpt-5.2-codex"],
+      "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
        "gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"]
      }
    }
@@ -651,7 +653,7 @@ DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 o
 <summary><b>Inspect Actual API Requests</b></summary>
 
 ```bash
-ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "test" --model=openai/gpt-5.5-low
+ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "test" --model=openai/gpt-5.5-medium
 
 cat ~/.opencode/logs/codex-plugin/request-*-after-transform.json | jq '{
   model: .body.model,

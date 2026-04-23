@@ -26,6 +26,7 @@ Representative suites on `main`:
 
 | File / area | Focus |
 |------|---------|
+| `test/gpt55-release.test.ts` | GPT-5.5 release ids, prompt-family routing, fallback chain |
 | `test/gpt54-models.test.ts` | GPT-5.4 family defaults and model surface |
 | `test/request-transformer.test.ts` | model normalization, request shaping, `store: false`, reasoning options |
 | `test/config.test.ts` | config loading and provider model handling |
@@ -88,7 +89,7 @@ Important note:
 ### Request-path smoke
 
 ```bash
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.4
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.5-medium
 ```
 
 Verify:
@@ -131,7 +132,7 @@ If validation fails, sort the failure first:
 For request-path debugging:
 
 ```bash
-DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "ping" --model=openai/gpt-5.4
+DEBUG_CODEX_PLUGIN=1 ENABLE_PLUGIN_REQUEST_LOGGING=1 CODEX_PLUGIN_LOG_BODIES=1 opencode run "ping" --model=openai/gpt-5.5-medium
 ```
 
 Use that only when you need payload-level detail because it can log sensitive request and response bodies.

@@ -41,10 +41,12 @@ describe("GPT-5.5 release activation", () => {
 
 	it("routes GPT-5.5 prompts through the existing GPT-5.4 prompt families", () => {
 		expect(getModelFamily("gpt-5.5")).toBe("gpt-5.4");
+		expect(getModelFamily("gpt-5.5-20260423")).toBe("gpt-5.4");
 		expect(getModelFamily("gpt-5.5-pro")).toBe("gpt-5.4-pro");
+		expect(getModelFamily("gpt-5.5-pro-20260423")).toBe("gpt-5.4-pro");
 	});
 
-	it("falls back from GPT-5.5 Pro to GPT-5.5 when entitlement fallback is enabled", () => {
+	it("falls back from GPT-5.5 Pro to the canonical GPT-5.5 release when entitlement fallback is enabled", () => {
 		const fallback = resolveUnsupportedCodexFallbackModel({
 			requestedModel: "gpt-5.5-pro",
 			errorBody: {
@@ -56,9 +58,27 @@ describe("GPT-5.5 release activation", () => {
 			},
 			attemptedModels: ["gpt-5.5-pro"],
 			fallbackOnUnsupportedCodexModel: true,
+			fallbackToGpt52OnUnsupportedGpt53: false,
+		});
+
+		expect(fallback).toBe("gpt-5.5-20260423");
+	});
+
+	it("does not fallback when GPT-5.5 entitlement fallback is disabled", () => {
+		const fallback = resolveUnsupportedCodexFallbackModel({
+			requestedModel: "gpt-5.5-pro",
+			errorBody: {
+				error: {
+					code: "model_not_supported_with_chatgpt_account",
+					message:
+						"The 'gpt-5.5-pro' model is not supported when using Codex with a ChatGPT account.",
+				},
+			},
+			attemptedModels: ["gpt-5.5-pro"],
+			fallbackOnUnsupportedCodexModel: false,
 			fallbackToGpt52OnUnsupportedGpt53: true,
 		});
 
-		expect(fallback).toBe("gpt-5.5");
+		expect(fallback).toBeUndefined();
 	});
 });

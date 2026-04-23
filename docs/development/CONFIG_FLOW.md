@@ -30,7 +30,7 @@ OpenCode can also accept override content at process start:
 
 ```bash
 OPENCODE_CONFIG=/path/to/config.json opencode
-OPENCODE_CONFIG_CONTENT='{"model":"openai/gpt-5.4"}' opencode
+OPENCODE_CONFIG_CONTENT='{"model":"openai/gpt-5.5-medium"}' opencode
 ```
 
 ### Plugin runtime config
@@ -68,7 +68,7 @@ It currently ships:
 
 - 9 base model families
 - 34 total variants
-- `gpt-5.4` and `gpt-5.4-pro` at 1,050,000 context / 128,000 output
+- `gpt-5.5` and `gpt-5.5-pro` at 1,050,000 context / 128,000 output
 - `gpt-5.4-mini`, `gpt-5.4-nano`, and Codex families at 400,000 context / 128,000 output
 - `gpt-5.1` at 272,000 context / 128,000 output
 - `store: false` plus `include: ["reasoning.encrypted_content"]`
@@ -110,10 +110,16 @@ Example shape:
 }
 ```
 
-Modern OpenCode selection uses:
+Full/default install, tested live on OpenCode `1.14.22`, uses:
 
 ```bash
-opencode run "task" --model=openai/gpt-5.4 --variant=high
+opencode run "task" --model=openai/gpt-5.5-medium
+```
+
+If your OpenCode release exposes bare base entries, the compact modern template also supports:
+
+```bash
+opencode run "task" --model=openai/gpt-5.5 --variant=high
 ```
 
 ### Legacy template
@@ -123,13 +129,13 @@ opencode run "task" --model=openai/gpt-5.4 --variant=high
 It currently ships:
 
 - 34 explicit model entries
-- separate model IDs such as `gpt-5.4-high` and `gpt-5.4-mini-xhigh`
+- separate model IDs such as `gpt-5.5-medium`, `gpt-5.5-high`, and `gpt-5.4-mini-xhigh`
 - the same OpenAI provider defaults (`store: false`, `reasoning.encrypted_content`)
 
 Legacy OpenCode selection uses:
 
 ```bash
-opencode run "task" --model=openai/gpt-5.4-high
+opencode run "task" --model=openai/gpt-5.5-high
 ```
 
 ## Runtime Resolution
@@ -143,9 +149,9 @@ At runtime, OpenCode passes `provider.openai.options` and `provider.openai.model
 
 Examples:
 
-- `openai/gpt-5.4` stays `gpt-5.4`
+- `openai/gpt-5.5-medium` normalizes to `gpt-5.5-20260423`
 - `openai/gpt-5.4-mini-xhigh` normalizes to `gpt-5.4-mini`
-- legacy aliases such as `gpt-5-mini` normalize to `gpt-5.4`
+- legacy aliases such as `gpt-5-mini` normalize to `gpt-5.4-mini`
 
 ## Verification
 
@@ -153,14 +159,14 @@ Use these commands when checking the effective config:
 
 ```bash
 opencode debug config
-ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.4
+ENABLE_PLUGIN_REQUEST_LOGGING=1 opencode run "ping" --model=openai/gpt-5.5-medium
 ```
 
 Important runtime behavior:
 
 - `opencode debug config` shows merged provider models from your config.
-- `opencode models openai` currently shows OpenCode's built-in provider catalog only.
-- Because of that, config-defined entries such as `gpt-5.4-mini` can appear in `opencode debug config` while being omitted from `opencode models openai`.
+- On tested OpenCode `1.14.22`, `opencode models openai` shows explicit GPT-5.5 entries such as `gpt-5.5-medium` / `gpt-5.5-high`.
+- The same runtime can still reject bare `openai/gpt-5.5`, so explicit GPT-5.5 preset IDs are the reliable current CLI path.
 
 ## File Locations
 

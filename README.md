@@ -15,7 +15,7 @@ Use your ChatGPT Plus/Pro subscription inside OpenCode with OAuth login, GPT-5/C
 ## What This Project Does
 
 - Adds an OpenCode plugin that authenticates with ChatGPT Plus/Pro through official OAuth
-- Ships ready-to-use model templates for `gpt-5.4`, `gpt-5-codex`, and related GPT-5 families
+- Ships ready-to-use GPT-5.5 release templates, explicit `gpt-5.5-medium` / `gpt-5.5-high` selectors, `gpt-5-codex`, and related GPT-5 families
 - Routes requests through a stateless Codex-compatible request pipeline with automatic token refresh
 - Supports multi-account rotation, per-project account storage, and guided onboarding commands
 
@@ -29,7 +29,7 @@ npx -y oc-codex-multi-auth@latest
 opencode auth login
 
 # 3. Run a prompt in OpenCode
-opencode run "Explain this repository" --model=openai/gpt-5.4 --variant=medium
+opencode run "Explain this repository" --model=openai/gpt-5.5-medium
 ```
 
 What the installer does:
@@ -40,14 +40,16 @@ What the installer does:
 - clears the cached plugin copy so OpenCode reinstalls the latest package
 
 By default, the installer now writes a full catalog config that includes both:
-- modern base model entries such as `gpt-5.4` for `--variant` workflows
-- explicit preset entries such as `gpt-5.4-high` so the shipped catalog is visible directly in model pickers
+- modern base model entries such as `gpt-5.5` for `--variant` workflows
+- explicit preset entries such as `gpt-5.5-medium` / `gpt-5.5-high` so the shipped catalog is visible directly in model pickers
+
+Tested live on OpenCode `1.14.22`: explicit GPT-5.5 model IDs like `openai/gpt-5.5-medium` and `openai/gpt-5.5-high` work directly. Some OpenCode releases still reject bare `openai/gpt-5.5` on the CLI even when the base config entry exists in the effective config.
 
 ## Example Usage
 
 ```bash
 # General GPT-5 workflow
-opencode run "Summarize the failing test and suggest a fix" --model=openai/gpt-5.4 --variant=medium
+opencode run "Summarize the failing test and suggest a fix" --model=openai/gpt-5.5-medium
 
 # Codex-focused workflow
 opencode run "Refactor the retry logic and update the tests" --model=openai/gpt-5-codex --variant=high
@@ -84,7 +86,7 @@ OpenCode users often want the same GPT-5 and Codex model experience they use in 
 
 ## Common Workflows
 
-- Personal coding sessions in OpenCode using `gpt-5.4` or `gpt-5-codex`
+- Personal coding sessions in OpenCode using `gpt-5.5-medium`, `gpt-5.5-high`, or `gpt-5-codex`
 - Switching between personal and workspace-linked ChatGPT accounts
 - Keeping separate account pools per project or monorepo
 - Recovering from unsupported-model, auth, or rate-limit issues with guided commands

@@ -44,10 +44,12 @@ const CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN =
 	/model is not supported when using codex with a chatgpt account/i;
 const NORMALIZED_UNSUPPORTED_MODEL_PATTERN =
 	/the model ['"]([^'"]+)['"] is not currently available for this chatgpt account/i;
+const GPT_55_RELEASE_ID = "gpt-5.5-20260423";
+const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423";
 
 export const DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN: Record<string, string[]> = {
-	"gpt-5.5-pro": ["gpt-5.5"],
-	"gpt-5.5-pro-20260423": ["gpt-5.5"],
+	"gpt-5.5-pro": [GPT_55_RELEASE_ID],
+	"gpt-5.5-pro-20260423": [GPT_55_RELEASE_ID],
 	"gpt-5.4-pro": ["gpt-5.4"],
 	"gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"],
 	"gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
@@ -78,7 +80,18 @@ function canonicalizeModelName(model: string | undefined): string | undefined {
 	const stripped = trimmed.includes("/")
 		? (trimmed.split("/").pop() ?? trimmed)
 		: trimmed;
-	return stripped.replace(/-(none|minimal|low|medium|high|xhigh)$/i, "");
+	const withoutEffort = stripped.replace(/-(none|minimal|low|medium|high|xhigh)$/i, "");
+
+	// Keep legacy alias distinctions (for example gpt-5.3-codex-spark vs gpt-5.3-codex)
+	// while still collapsing GPT-5.5 release aliases onto the exact shipped ids.
+	if (withoutEffort === "gpt-5.5") {
+		return GPT_55_RELEASE_ID;
+	}
+	if (withoutEffort === "gpt-5.5-pro") {
+		return GPT_55_PRO_RELEASE_ID;
+	}
+
+	return withoutEffort;
 }
 
 function normalizeFallbackChain(
@@ -473,10 +486,13 @@ export async function transformRequestForCodex(
 		const requestTransformMode = options?.requestTransformMode ?? "legacy";
 
 		if (requestTransformMode === "native") {
+			const normalizedModel = normalizeModel(originalModel);
+			body.model = normalizedModel;
+
 			logRequest(LOG_STAGES.BEFORE_TRANSFORM, {
 				url,
 				originalModel,
-				model: body.model,
+				model: originalModel,
 				hasTools: !!body.tools,
 				hasInput: !!body.input,
 				inputLength: body.input?.length,
@@ -487,7 +503,7 @@ export async function transformRequestForCodex(
 			logRequest(LOG_STAGES.AFTER_TRANSFORM, {
 				url,
 				originalModel,
-				normalizedModel: body.model,
+				normalizedModel,
 				hasTools: !!body.tools,
 				hasInput: !!body.input,
 				inputLength: body.input?.length,

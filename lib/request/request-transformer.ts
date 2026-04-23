@@ -81,7 +81,7 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5-codex";
 	}
 
-	// 4. GPT-5.4 Pro (first-class model)
+	// 4. GPT-5.5 Pro (release model)
 	if (/\bgpt(?:-| )5\.5(?:-| )pro(?:\b|[- ])/.test(normalized)) {
 		return GPT_55_PRO_RELEASE_ID;
 	}
@@ -499,7 +499,7 @@ export function getReasoningConfig(
 
 	// GPT-5.4/5.5 Pro support xhigh but not "none".
 	const isGpt55Pro = canonicalModelName === GPT_55_PRO_RELEASE_ID;
-	const isGpt54Pro =
+	const isProFamily =
 		normalizedName.includes("gpt-5.4-pro") ||
 		normalizedName.includes("gpt 5.4 pro") ||
 		isGpt55Pro;
@@ -514,7 +514,7 @@ export function getReasoningConfig(
 	const isGpt55General = canonicalModelName === GPT_55_RELEASE_ID;
 	const isGpt54General =
 		(normalizedName.includes("gpt-5.4") || normalizedName.includes("gpt 5.4")) &&
-		!isGpt54Pro &&
+		!isProFamily &&
 		!isGpt54Mini &&
 		!isGpt54Nano;
 
@@ -552,7 +552,7 @@ export function getReasoningConfig(
 		!isCodex &&
 		!isGpt54General &&
 		!isGpt54Mini &&
-		!isGpt54Pro &&
+		!isProFamily &&
 		!isGpt52General &&
 		!isCodexMax &&
 		!isCodexMini;
@@ -564,7 +564,7 @@ export function getReasoningConfig(
 		isGpt54General ||
 		isGpt54Mini ||
 		isGpt54Nano ||
-		isGpt54Pro ||
+		isProFamily ||
 		isGpt52General ||
 		isGpt53Codex ||
 		isGpt52Codex ||
@@ -640,7 +640,7 @@ export function getReasoningConfig(
 	// GPT-5.4/5.5 Pro only support medium/high/xhigh reasoning.
 	// originalRequestedEffort is a non-sensitive model setting string, not a token.
 	// Logging this coercion does not introduce new redaction or filesystem-race risk.
-	if (isGpt54Pro && (effort === "low" || effort === "minimal")) {
+	if (isProFamily && (effort === "low" || effort === "minimal")) {
 		logWarn(
 			`GPT-5.4/5.5 Pro supports medium/high/xhigh only; coercing '${originalRequestedEffort}' to 'medium'`,
 		);

@@ -446,7 +446,7 @@ describe('Fetch Helpers Module', () => {
 			expect(fallback).toBeUndefined();
 		});
 
-		it('falls back from gpt-5.5-pro to gpt-5.5 when fallback policy is enabled', () => {
+		it('falls back from gpt-5.5-pro to the canonical GPT-5.5 release when fallback policy is enabled', () => {
 			const fallback = resolveUnsupportedCodexFallbackModel({
 				requestedModel: 'gpt-5.5-pro',
 				errorBody: {
@@ -460,7 +460,24 @@ describe('Fetch Helpers Module', () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
-			expect(fallback).toBe('gpt-5.5');
+			expect(fallback).toBe('gpt-5.5-20260423');
+		});
+
+		it('does not fallback from gpt-5.5-pro when the canonical GPT-5.5 release was already attempted', () => {
+			const fallback = resolveUnsupportedCodexFallbackModel({
+				requestedModel: 'gpt-5.5-pro-20260423',
+				errorBody: {
+					error: {
+						code: 'model_not_supported_with_chatgpt_account',
+						message:
+							"The 'gpt-5.5-pro' model is not supported when using Codex with a ChatGPT account.",
+					},
+				},
+				attemptedModels: ['gpt-5.5-pro-20260423', 'gpt-5.5-20260423'],
+				fallbackOnUnsupportedCodexModel: true,
+				fallbackToGpt52OnUnsupportedGpt53: true,
+			});
+			expect(fallback).toBeUndefined();
 		});
 	});
 
@@ -912,7 +929,7 @@ describe('Fetch Helpers Module', () => {
 	});
 
 		describe('transformRequestForCodex', () => {
-			it('returns passthrough body in native mode without loading codex instructions', async () => {
+			it('normalizes the model in native mode without loading codex instructions', async () => {
 				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
 				const getInstructionsSpy = vi.spyOn(codexPrompts, 'getCodexInstructions');
 				const requestBody = {
@@ -931,8 +948,30 @@ describe('Fetch Helpers Module', () => {
 				);
 
 				expect(result).toBeDefined();
-				expect(result?.body.model).toBe('gpt-5.3-codex');
+				expect(result?.body.model).toBe('gpt-5-codex');
 				expect(result?.body.tools).toEqual([{ name: 'apply_patch' }]);
+				expect(getInstructionsSpy).not.toHaveBeenCalled();
+			});
+
+			it('normalizes GPT-5.5 preset ids to the canonical release id in native mode', async () => {
+				const { transformRequestForCodex } = await import('../lib/request/fetch-helpers.js');
+				const getInstructionsSpy = vi.spyOn(codexPrompts, 'getCodexInstructions');
+				const requestBody = {
+					model: 'gpt-5.5-medium',
+					input: [{ type: 'message', role: 'user', content: 'Hello' }],
+				};
+
+				const result = await transformRequestForCodex(
+					{ body: JSON.stringify(requestBody) },
+					'https://example.com',
+					{ global: {}, models: {} },
+					true,
+					undefined,
+					{ requestTransformMode: 'native' } as any,
+				);
+
+				expect(result).toBeDefined();
+				expect(result?.body.model).toBe('gpt-5.5-20260423');
 				expect(getInstructionsSpy).not.toHaveBeenCalled();
 			});
 

@@ -241,7 +241,7 @@ describe("install-oc-codex-multi-auth script", () => {
 						nested: { foo: "bar" },
 						options: { textVerbosity: "low" },
 						models: {
-							"gpt-5.4": { name: "user override" },
+							"gpt-5.5": { name: "user override" },
 							"my-fine-tune": { name: "custom user model" },
 						},
 					},

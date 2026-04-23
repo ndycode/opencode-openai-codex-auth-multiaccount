@@ -41,7 +41,7 @@ Both templates include:
 - `store: false` and `include: ["reasoning.encrypted_content"]`
 - Context metadata (`gpt-5.5`/`gpt-5.5-pro`: 1,050,000; `gpt-5.4-mini`/`gpt-5.4-nano`/Codex models: 400,000; `gpt-5.1`: 272,000; all output: 128,000)
 
-Use `opencode debug config` to verify that these template entries were merged into your effective config. `opencode models openai` currently shows OpenCode's built-in provider catalog and can omit config-defined entries such as `gpt-5.5`.
+Use `opencode debug config` to verify that these template entries were merged into your effective config. On tested OpenCode `1.14.22`, `opencode models openai` exposes explicit GPT-5.5 entries such as `gpt-5.5-medium` / `gpt-5.5-high`, while bare `gpt-5.5` may still be omitted or rejected by provider lookup even when it exists in the effective config.
 
 If your OpenCode runtime supports global compaction tuning, you can also set:
 - `model_context_window = 1050000`
@@ -55,18 +55,17 @@ If your workspace is entitled, you can add Spark model IDs manually.
 
 ## Usage examples
 
-Modern template (v1.0.210+):
-
-```bash
-opencode run "task" --model=openai/gpt-5.5 --variant=medium
-opencode run "task" --model=openai/gpt-5-codex --variant=high
-```
-
-Legacy template (v1.0.209 and below):
+Recommended real-session selectors (tested on OpenCode `1.14.22`):
 
 ```bash
 opencode run "task" --model=openai/gpt-5.5-medium
-opencode run "task" --model=openai/gpt-5-codex-high
+opencode run "task" --model=openai/gpt-5-codex --variant=high
+```
+
+If your OpenCode release already exposes bare GPT-5.5 base entries, the compact modern template also supports:
+
+```bash
+opencode run "task" --model=openai/gpt-5.5 --variant=medium
 ```
 
 ## Minimal config (advanced)
@@ -79,12 +78,12 @@ Current defaults are strict entitlement handling:
 - `unsupportedCodexPolicy: "strict"` returns entitlement errors directly
 - set `unsupportedCodexPolicy: "fallback"` (or `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback`) to enable automatic fallback retries
 - `fallbackToGpt52OnUnsupportedGpt53: true` keeps the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge inside fallback mode
-- `gpt-5.5-pro -> gpt-5.5` is included by default in fallback mode
+- `gpt-5.5-pro -> gpt-5.5-20260423` is included by default in fallback mode
 - `gpt-5.4-pro -> gpt-5.4` remains available for older manual configs
 - `unsupportedCodexFallbackChain` lets you override fallback order per model
 
 Default fallback chain (when policy is `fallback`):
-- `gpt-5.5-pro -> gpt-5.5`
+- `gpt-5.5-pro -> gpt-5.5-20260423`
 - `gpt-5.4-pro -> gpt-5.4` (if you manually select `gpt-5.4-pro`)
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
 - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (only relevant if Spark IDs are added manually)
