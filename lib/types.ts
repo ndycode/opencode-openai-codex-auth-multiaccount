@@ -143,4 +143,4 @@ export interface GitHubRelease {
 // Re-export SDK types for convenience
 export type { Auth, Provider, Model };
 
-export type OAuthAuthDetails = Extract<Auth, { type: "oauth" }>;
+export type OAuthAuthDetails = Extract<Auth, { type: "oauth" }> & { scope?: string };

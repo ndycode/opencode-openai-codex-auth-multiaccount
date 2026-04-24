@@ -7,7 +7,6 @@
  * to an `AccountState` instance and mutate it through this narrow surface.
  */
 
-import type { Auth } from "@opencode-ai/sdk";
 import { MODEL_FAMILIES, type ModelFamily } from "../prompts/codex.js";
 import type { AccountIdSource, OAuthAuthDetails } from "../types.js";
 import { nowMs } from "../utils.js";
@@ -27,6 +26,7 @@ import {
 } from "../auth/token-utils.js";
 import { getMissingRequiredOAuthScopes, hasRequiredOAuthScopes } from "../auth/scopes.js";
 import { getHealthTracker, getTokenTracker } from "../rotation.js";
+import { logWarn } from "../logger.js";
 
 export interface ManagedAccount {
 	index: number;
@@ -79,7 +79,7 @@ function appendReauthNote(accountNote: string | undefined, missingScopes: string
 }
 
 function getAuthScope(auth: OAuthAuthDetails | undefined): string | undefined {
-	const scope = (auth as (OAuthAuthDetails & { scope?: unknown }) | undefined)?.scope;
+	const scope = auth?.scope;
 	return typeof scope === "string" && scope.trim() ? scope : undefined;
 }
 
@@ -105,6 +105,7 @@ export class AccountState {
 		const fallbackAccountId = extractAccountId(authFallback?.access);
 		const fallbackAccountEmail = sanitizeEmail(extractAccountEmail(authFallback?.access));
 		const fallbackOAuthScope = getAuthScope(authFallback);
+		const fallbackMissingOAuthScopes = getMissingRequiredOAuthScopes(fallbackOAuthScope);
 
 		if (stored && stored.accounts.length > 0) {
 			const baseNow = nowMs();
@@ -170,24 +171,47 @@ export class AccountState {
 						(!!fallbackAccountEmail && account.email === fallbackAccountEmail),
 				);
 
-			if (authFallback && !hasMatchingFallback && hasRequiredOAuthScopes(fallbackOAuthScope)) {
+			if (authFallback && !hasMatchingFallback) {
 				const now = nowMs();
-				this.accounts.push({
-					index: this.accounts.length,
-					accountId: fallbackAccountId,
-					organizationId: undefined,
-					accountIdSource: fallbackAccountId ? "token" : undefined,
-					email: fallbackAccountEmail,
-					refreshToken: authFallback.refresh,
-					enabled: true,
-					access: authFallback.access,
-					expires: authFallback.expires,
-					oauthScope: fallbackOAuthScope,
-					addedAt: now,
-					lastUsed: now,
-					lastSwitchReason: "initial",
-					rateLimitResetTimes: {},
-				});
+				if (fallbackMissingOAuthScopes.length === 0) {
+					this.accounts.push({
+						index: this.accounts.length,
+						accountId: fallbackAccountId,
+						organizationId: undefined,
+						accountIdSource: fallbackAccountId ? "token" : undefined,
+						email: fallbackAccountEmail,
+						refreshToken: authFallback.refresh,
+						enabled: true,
+						access: authFallback.access,
+						expires: authFallback.expires,
+						oauthScope: fallbackOAuthScope,
+						addedAt: now,
+						lastUsed: now,
+						lastSwitchReason: "initial",
+						rateLimitResetTimes: {},
+					});
+				} else if (this.accounts.length === 0) {
+					logWarn(
+						`Stored OAuth fallback is missing required OAuth scope(s): ${fallbackMissingOAuthScopes.join(", ")}. Re-auth required.`,
+					);
+					this.accounts.push({
+						index: 0,
+						accountId: fallbackAccountId,
+						organizationId: undefined,
+						accountIdSource: fallbackAccountId ? "token" : undefined,
+						email: fallbackAccountEmail,
+						refreshToken: authFallback.refresh,
+						enabled: false,
+						accountNote: appendReauthNote(undefined, fallbackMissingOAuthScopes),
+						access: authFallback.access,
+						expires: authFallback.expires,
+						oauthScope: fallbackOAuthScope,
+						addedAt: now,
+						lastUsed: 0,
+						lastSwitchReason: "initial",
+						rateLimitResetTimes: {},
+					});
+				}
 			}
 
 			if (this.accounts.length > 0) {
@@ -205,8 +229,14 @@ export class AccountState {
 			return;
 		}
 
-		if (authFallback && hasRequiredOAuthScopes(fallbackOAuthScope)) {
+		if (authFallback) {
 			const now = nowMs();
+			const enabled = fallbackMissingOAuthScopes.length === 0;
+			if (!enabled) {
+				logWarn(
+					`Stored OAuth fallback is missing required OAuth scope(s): ${fallbackMissingOAuthScopes.join(", ")}. Re-auth required.`,
+				);
+			}
 			this.accounts = [
 				{
 					index: 0,
@@ -215,7 +245,10 @@ export class AccountState {
 					accountIdSource: fallbackAccountId ? "token" : undefined,
 					email: fallbackAccountEmail,
 					refreshToken: authFallback.refresh,
-					enabled: true,
+					enabled,
+					accountNote: enabled
+						? undefined
+						: appendReauthNote(undefined, fallbackMissingOAuthScopes),
 					access: authFallback.access,
 					expires: authFallback.expires,
 					oauthScope: fallbackOAuthScope,
@@ -394,14 +427,14 @@ export class AccountState {
 		account.email = sanitizeEmail(extractAccountEmail(auth.access)) ?? account.email;
 	}
 
-	toAuthDetails(account: ManagedAccount): Auth {
+	toAuthDetails(account: ManagedAccount): OAuthAuthDetails {
 		return {
 			type: "oauth",
 			access: account.access ?? "",
 			refresh: account.refreshToken,
 			expires: account.expires ?? 0,
 			scope: account.oauthScope,
-		} as Auth;
+		};
 	}
 
 	markSwitched(

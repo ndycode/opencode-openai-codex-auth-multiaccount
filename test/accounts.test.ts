@@ -12,6 +12,7 @@ import {
 } from "../lib/accounts.js";
 import { getHealthTracker, getTokenTracker, resetTrackers } from "../lib/rotation.js";
 import type { OAuthAuthDetails } from "../lib/types.js";
+import { SCOPE } from "../lib/auth/auth.js";
 
 vi.mock("../lib/storage.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/storage.js")>();
@@ -196,11 +197,58 @@ describe("AccountManager", () => {
       access: "access-token",
       refresh: "refresh-token",
       expires: Date.now() + 60_000,
+      scope: SCOPE,
     };
 
     const manager = new AccountManager(auth, null);
     expect(manager.getAccountCount()).toBe(1);
     expect(manager.getCurrentAccount()?.refreshToken).toBe("refresh-token");
+  });
+
+  it("creates a disabled fallback account with a re-auth note when fallback scopes are missing", () => {
+    const auth: OAuthAuthDetails = {
+      type: "oauth",
+      access: "access-token",
+      refresh: "refresh-token",
+      expires: Date.now() + 60_000,
+    };
+
+    const manager = new AccountManager(auth, null);
+    expect(manager.getAccountCount()).toBe(1);
+    const account = manager.getCurrentAccount();
+    expect(account?.enabled).toBe(false);
+    expect(account?.accountNote).toContain("Re-auth required");
+    expect(account?.accountNote).toContain("api.connectors.read");
+    expect(account?.accountNote).toContain("api.connectors.invoke");
+  });
+
+  it("does not duplicate the re-auth note when the same fallback account is reloaded", () => {
+    const now = Date.now();
+    const stored = {
+      version: 3 as const,
+      activeIndex: 0,
+      accounts: [
+        {
+          refreshToken: "refresh-token",
+          accountNote:
+            "Re-auth required for missing OAuth scope(s): openid, profile, email, offline_access, api.connectors.read, api.connectors.invoke.",
+          addedAt: now,
+          lastUsed: now,
+        },
+      ],
+    };
+
+    const auth: OAuthAuthDetails = {
+      type: "oauth",
+      access: "access-token",
+      refresh: "refresh-token",
+      expires: now + 60_000,
+    };
+
+    const manager = new AccountManager(auth, stored);
+    const account = manager.getCurrentAccount();
+    expect(account?.enabled).toBe(false);
+    expect(account?.accountNote?.match(/Re-auth required/g)).toHaveLength(1);
   });
 
   it("rotates when the active account is rate-limited", () => {
@@ -1113,6 +1161,7 @@ describe("AccountManager", () => {
       const account = manager.getCurrentAccount()!;
       account.access = "access-token";
       account.expires = now + 3600000;
+      account.oauthScope = SCOPE;
       
       const auth = manager.toAuthDetails(account);
       
@@ -1121,6 +1170,7 @@ describe("AccountManager", () => {
         expect(auth.access).toBe("access-token");
         expect(auth.refresh).toBe("token-1");
         expect(auth.expires).toBe(now + 3600000);
+        expect(auth.scope).toBe(SCOPE);
       }
     });
 

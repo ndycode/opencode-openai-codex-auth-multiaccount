@@ -3,7 +3,7 @@
  * These functions break down the complex fetch logic into manageable, testable units
  */
 
-import type { Auth, OpencodeClient } from "@opencode-ai/sdk";
+import type { OpencodeClient } from "@opencode-ai/sdk";
 import { queuedRefresh } from "../refresh-queue.js";
 import { logRequest, logError, logWarn } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
@@ -13,7 +13,7 @@ import {
 	GPT_55_PRO_MODEL_ID,
 } from "./helpers/model-map.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
-import type { UserConfig, RequestBody } from "../types.js";
+import type { OAuthAuthDetails, UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
 import { DEACTIVATED_WORKSPACE_ERROR_CODE } from "../error-sentinels.js";
 import { isRecord } from "../utils.js";
@@ -387,20 +387,17 @@ export function shouldRefreshToken(auth: Auth, skewMs = 0): boolean {
  * @returns Updated auth (throws on failure)
  */
 export async function refreshAndUpdateToken(
-	currentAuth: Auth,
+	currentAuth: OAuthAuthDetails,
 	client: OpencodeClient,
-): Promise<Auth> {
-	const refreshToken = currentAuth.type === "oauth" ? currentAuth.refresh : "";
+): Promise<OAuthAuthDetails> {
+	const refreshToken = currentAuth.refresh;
 	const refreshResult = await queuedRefresh(refreshToken);
 
 	if (refreshResult.type === "failed") {
 		throw new CodexAuthError(ERROR_MESSAGES.TOKEN_REFRESH_FAILED, { retryable: false });
 	}
 
-	const currentScope =
-		typeof (currentAuth as Auth & { scope?: unknown }).scope === "string"
-			? (currentAuth as Auth & { scope?: string }).scope
-			: undefined;
+	const currentScope = currentAuth.scope;
 	const nextScope = refreshResult.scope ?? currentScope;
 
 	await client.auth.set({
@@ -415,13 +412,10 @@ export async function refreshAndUpdateToken(
 		} as Parameters<typeof client.auth.set>[0]["body"],
 	});
 
-	// Update current auth reference if it's OAuth type
-	if (currentAuth.type === "oauth") {
-		currentAuth.access = refreshResult.access;
-		currentAuth.refresh = refreshResult.refresh;
-		currentAuth.expires = refreshResult.expires;
-		(currentAuth as Auth & { scope?: string }).scope = nextScope;
-	}
+	currentAuth.access = refreshResult.access;
+	currentAuth.refresh = refreshResult.refresh;
+	currentAuth.expires = refreshResult.expires;
+	currentAuth.scope = nextScope;
 
 	return currentAuth;
 }
