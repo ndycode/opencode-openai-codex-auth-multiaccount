@@ -2,7 +2,11 @@ import { logDebug, logWarn } from "../logger.js";
 import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
 import { renderCodexOpenCodeBridge } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
-import { getNormalizedModel } from "./helpers/model-map.js";
+import {
+	GPT_55_PRO_RELEASE_ID,
+	GPT_55_RELEASE_ID,
+	getNormalizedModel,
+} from "./helpers/model-map.js";
 import {
 	filterOpenCodeSystemPromptsWithCachedPrompt,
 	normalizeOrphanedToolOutputs,
@@ -22,9 +26,6 @@ type FastSessionStrategy = "hybrid" | "always";
 type SupportedReasoningSummary = "auto" | "concise" | "detailed";
 
 const PLAN_MODE_ONLY_TOOLS = new Set(["request_user_input"]);
-const GPT_55_RELEASE_ID = "gpt-5.5-20260423";
-const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423";
-
 export {
 	isOpenCodeSystemPrompt,
 	filterOpenCodeSystemPromptsWithCachedPrompt,

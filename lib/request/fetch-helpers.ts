@@ -8,6 +8,10 @@ import { queuedRefresh } from "../refresh-queue.js";
 import { logRequest, logError, logWarn } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
+import {
+	GPT_55_PRO_RELEASE_ID,
+	GPT_55_RELEASE_ID,
+} from "./helpers/model-map.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
@@ -44,14 +48,9 @@ const CHATGPT_CODEX_UNSUPPORTED_MODEL_PATTERN =
 	/model is not supported when using codex with a chatgpt account/i;
 const NORMALIZED_UNSUPPORTED_MODEL_PATTERN =
 	/the model ['"]([^'"]+)['"] is not currently available for this chatgpt account/i;
-const GPT_55_RELEASE_ID = "gpt-5.5-20260423";
-const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423";
-
 export const DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN: Record<string, string[]> = {
-	"gpt-5.5": ["gpt-5.4"],
-	"gpt-5.5-20260423": ["gpt-5.4"],
-	"gpt-5.5-pro": [GPT_55_RELEASE_ID],
-	"gpt-5.5-pro-20260423": [GPT_55_RELEASE_ID],
+	[GPT_55_RELEASE_ID]: ["gpt-5.4"],
+	[GPT_55_PRO_RELEASE_ID]: [GPT_55_RELEASE_ID],
 	"gpt-5.4-pro": ["gpt-5.4"],
 	"gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"],
 	"gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],

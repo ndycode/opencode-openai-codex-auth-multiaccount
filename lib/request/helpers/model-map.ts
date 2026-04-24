@@ -21,8 +21,8 @@ const DATED_ALIAS_EFFORT_SUFFIXES = [
 ] as const;
 const GPT_55_RELEASE_EFFORT_SUFFIXES = DATED_ALIAS_EFFORT_SUFFIXES;
 const GPT_54_SNAPSHOT_DATE = "2026-03-05" as const;
-const GPT_55_RELEASE_ID = "gpt-5.5-20260423" as const;
-const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423" as const;
+export const GPT_55_RELEASE_ID = "gpt-5.5-20260423" as const;
+export const GPT_55_PRO_RELEASE_ID = "gpt-5.5-pro-20260423" as const;
 
 function expandDatedAliases(prefix: string, target: string): Record<string, string> {
 	return Object.fromEntries(
