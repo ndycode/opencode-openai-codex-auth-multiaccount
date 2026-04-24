@@ -140,6 +140,131 @@
             "store": false
           }
         },
+        "gpt-5.5-fast-none": {
+          "name": "GPT 5.5 Fast None (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "none",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.5-fast-low": {
+          "name": "GPT 5.5 Fast Low (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "low",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.5-fast-medium": {
+          "name": "GPT 5.5 Fast Medium (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.5-fast-high": {
+          "name": "GPT 5.5 Fast High (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.5-fast-xhigh": {
+          "name": "GPT 5.5 Fast Extra High (OAuth)",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
         "gpt-5.4-mini-none": {
           "name": "GPT 5.4 Mini None (OAuth)",
           "limit": {

@@ -67,8 +67,8 @@ Important detail:
 It currently ships:
 
 - 9 base model families
-- 34 total variants
-- `gpt-5.5` and `gpt-5.5-pro` at 1,050,000 context / 128,000 output
+- 36 total variants
+- `gpt-5.5` and `gpt-5.5-fast` at 1,050,000 context / 128,000 output
 - `gpt-5.4-mini`, `gpt-5.4-nano`, and Codex families at 400,000 context / 128,000 output
 - `gpt-5.1` at 272,000 context / 128,000 output
 - `store: false` plus `include: ["reasoning.encrypted_content"]`
@@ -78,7 +78,7 @@ It currently ships:
 The default installer mode combines:
 
 - the 9 modern base model entries from `config/opencode-modern.json`
-- the 34 explicit preset entries from `config/opencode-legacy.json`
+- the 36 explicit preset entries from `config/opencode-legacy.json`
 
 That hybrid install mode is what fixes the "only 9 models" complaint without removing `--variant` support.
 
@@ -114,6 +114,7 @@ Full/default install, tested live on OpenCode `1.14.22`, uses:
 
 ```bash
 opencode run "task" --model=openai/gpt-5.5-medium
+opencode run "task" --model=openai/gpt-5.5-fast-medium
 ```
 
 If your OpenCode release exposes bare base entries, the compact modern template also supports:
@@ -128,8 +129,8 @@ opencode run "task" --model=openai/gpt-5.5 --variant=high
 
 It currently ships:
 
-- 34 explicit model entries
-- separate model IDs such as `gpt-5.5-medium`, `gpt-5.5-high`, and `gpt-5.4-mini-xhigh`
+- 36 explicit model entries
+- separate model IDs such as `gpt-5.5-medium`, `gpt-5.5-fast-medium`, `gpt-5.5-high`, and `gpt-5.4-mini-xhigh`
 - the same OpenAI provider defaults (`store: false`, `reasoning.encrypted_content`)
 
 Legacy OpenCode selection uses:

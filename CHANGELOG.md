@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (placeholder for next release)
 
+## [6.1.4] - 2026-04-24
+
+### Fixed
+- Ship the `gpt-5.5-fast` modern config entry and explicit `gpt-5.5-fast-{none,low,medium,high,xhigh}` legacy selectors so OpenCode resolves `openai/gpt-5.5-fast-medium` before plugin routing.
+- Clear OpenCode's newer package cache layout at `~/.cache/opencode/packages/{oc-codex-multi-auth,oc-chatgpt-multi-auth}@latest` during installer cache refresh.
+- Normalize stale managed file-path and `file:///.../node_modules/...` plugin entries back to the official `oc-codex-multi-auth` package name when the installer runs.
+
 ## [6.1.3] - 2026-04-24
 
 ### Added
