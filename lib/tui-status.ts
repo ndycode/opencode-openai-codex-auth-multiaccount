@@ -117,6 +117,18 @@ function resolveProviderReasoningVariant(
 	);
 }
 
+function resolveAgentReasoningVariant(
+	agent: Record<string, unknown> | undefined,
+): ReasoningVariant | undefined {
+	if (!agent) return undefined;
+	const options = isRecord(agent.options) ? agent.options : undefined;
+	return (
+		normalizeReasoningVariant(getString(agent.variant)) ??
+		normalizeReasoningVariant(getString(agent.reasoningEffort)) ??
+		normalizeReasoningVariant(getString(options?.reasoningEffort))
+	);
+}
+
 export function resolvePromptReasoningVariant(params: {
 	messages?: readonly PromptStatusMessage[];
 	config?: PromptStatusConfig;
@@ -141,7 +153,7 @@ export function resolvePromptReasoningVariant(params: {
 	const config = params.config;
 	if (!config) return undefined;
 	const agent = resolveAgentConfig(config);
-	const agentVariant = normalizeReasoningVariant(getString(agent?.variant));
+	const agentVariant = resolveAgentReasoningVariant(agent);
 	if (agentVariant) return agentVariant;
 
 	const agentModel = getString(agent?.model);

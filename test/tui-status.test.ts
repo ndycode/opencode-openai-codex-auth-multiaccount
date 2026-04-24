@@ -104,4 +104,26 @@ describe("TUI prompt status helpers", () => {
 			}),
 		).toBe("high");
 	});
+
+	it("prefers the selected agent reasoning effort over provider defaults", () => {
+		const config: PromptStatusConfig = {
+			model: "openai/gpt-5.5",
+			default_agent: "Sisyphus - Ultraworker",
+			agent: {
+				"Sisyphus - Ultraworker": {
+					model: "openai/gpt-5.5",
+					reasoningEffort: "xhigh",
+				},
+			},
+			provider: {
+				openai: {
+					options: {
+						reasoningEffort: "medium",
+					},
+				},
+			},
+		};
+
+		expect(resolvePromptReasoningVariant({ config })).toBe("xhigh");
+	});
 });
