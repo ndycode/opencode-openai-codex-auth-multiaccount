@@ -1,4 +1,5 @@
 import type { TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
+import type { Event } from "@opencode-ai/sdk/v2";
 import type { JSX } from "@opentui/solid";
 
 import {
@@ -21,7 +22,7 @@ import { loadAccounts } from "./lib/storage.js";
 
 const CACHE_KEY = "oc-codex-multi-auth:tui-status:v2";
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const MIN_FETCH_INTERVAL_MS = 2 * 60 * 1000;
+const EVENT_REFRESH_DEBOUNCE_MS = 750;
 
 type StoredQuotaStatus = {
 	fingerprint: string;
@@ -134,9 +135,6 @@ async function refreshQuotaStatusInner(
 		const fingerprint = createUsageAccountFingerprint(selection.account);
 		const cached = readStoredQuotaStatus(api, fingerprint);
 		const now = Date.now();
-		if (cached && now - cached.fetchedAt < MIN_FETCH_INTERVAL_MS) {
-			return toCompactQuotaStatus(cached, false);
-		}
 
 		try {
 			const credentials = await ensureCodexUsageAccessToken({
@@ -182,6 +180,31 @@ function refreshQuotaStatus(api: TuiPluginApi): Promise<CompactQuotaStatus> {
 	return inFlightRefresh;
 }
 
+export function shouldRefreshQuotaForEvent(event: Event): boolean {
+	switch (event.type) {
+		case "message.updated":
+			return (
+				event.properties.info.role === "assistant" &&
+				typeof event.properties.info.time.completed === "number"
+			);
+		case "message.part.updated": {
+			const { part } = event.properties;
+			if (part.type === "step-finish") return true;
+			if (part.type !== "tool") return false;
+			return (
+				part.state.status === "completed" || part.state.status === "error"
+			);
+		}
+		case "session.idle":
+		case "session.error":
+			return true;
+		case "session.status":
+			return event.properties.status.type === "idle";
+		default:
+			return false;
+	}
+}
+
 function createPromptStatus(
 	api: TuiPluginApi,
 	solid: SolidRuntime,
@@ -194,10 +217,44 @@ function createPromptStatus(
 			setQuota({ type: "unavailable" });
 		});
 	};
+	let refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+	const scheduleRefresh = (): void => {
+		if (refreshTimeout) clearTimeout(refreshTimeout);
+		refreshTimeout = setTimeout(() => {
+			refreshTimeout = undefined;
+			refresh();
+		}, EVENT_REFRESH_DEBOUNCE_MS);
+	};
 
 	refresh();
 	const interval = setInterval(refresh, REFRESH_INTERVAL_MS);
-	solid.onCleanup(() => clearInterval(interval));
+	const disposeMessageUpdated = api.event.on("message.updated", (event) => {
+		if (shouldRefreshQuotaForEvent(event)) scheduleRefresh();
+	});
+	const disposeMessagePartUpdated = api.event.on(
+		"message.part.updated",
+		(event) => {
+			if (shouldRefreshQuotaForEvent(event)) scheduleRefresh();
+		},
+	);
+	const disposeSessionIdle = api.event.on("session.idle", (event) => {
+		if (shouldRefreshQuotaForEvent(event)) scheduleRefresh();
+	});
+	const disposeSessionStatus = api.event.on("session.status", (event) => {
+		if (shouldRefreshQuotaForEvent(event)) scheduleRefresh();
+	});
+	const disposeSessionError = api.event.on("session.error", (event) => {
+		if (shouldRefreshQuotaForEvent(event)) scheduleRefresh();
+	});
+	solid.onCleanup(() => {
+		clearInterval(interval);
+		if (refreshTimeout) clearTimeout(refreshTimeout);
+		disposeMessageUpdated();
+		disposeMessagePartUpdated();
+		disposeSessionIdle();
+		disposeSessionStatus();
+		disposeSessionError();
+	});
 
 	const node = solid.createElement("text");
 	solid.spread(
