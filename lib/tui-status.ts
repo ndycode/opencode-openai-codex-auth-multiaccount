@@ -2,14 +2,18 @@ import type { Config } from "@opencode-ai/sdk/v2";
 
 export type ReasoningVariant = "none" | "low" | "medium" | "high" | "xhigh";
 
+export type CompactQuotaLimit = {
+	label: string;
+	leftPercent: number | null;
+};
+
 export type CompactQuotaStatus =
 	| { type: "loading" }
 	| { type: "missing" }
 	| { type: "unavailable" }
 	| {
 			type: "ready";
-			primaryLeftPercent: number | null;
-			secondaryLeftPercent: number | null;
+			limits: readonly CompactQuotaLimit[];
 			stale: boolean;
 	  };
 
@@ -168,42 +172,22 @@ function isPercent(value: number | null): value is number {
 	return typeof value === "number" && Number.isFinite(value);
 }
 
-function formatQuotaNormal(quota: CompactQuotaStatus): string | undefined {
+function formatQuotaLimit(limit: CompactQuotaLimit): string | undefined {
+	if (!isPercent(limit.leftPercent)) return undefined;
+	const label = limit.label.trim() || "quota";
+	return `${label} ${limit.leftPercent}%`;
+}
+
+function formatQuota(quota: CompactQuotaStatus): string | undefined {
 	if (quota.type === "ready") {
-		if (
-			isPercent(quota.primaryLeftPercent) &&
-			isPercent(quota.secondaryLeftPercent)
-		) {
-			return `5h ${quota.primaryLeftPercent}% · weekly ${quota.secondaryLeftPercent}%`;
-		}
-		if (isPercent(quota.primaryLeftPercent)) {
-			return `5h ${quota.primaryLeftPercent}%`;
-		}
-		if (isPercent(quota.secondaryLeftPercent)) {
-			return `weekly ${quota.secondaryLeftPercent}%`;
-		}
-		return undefined;
+		const parts = quota.limits
+			.map(formatQuotaLimit)
+			.filter((part): part is string => Boolean(part));
+		return parts.length > 0 ? parts.join(" · ") : undefined;
 	}
 	if (quota.type === "missing") return "no auth";
 	if (quota.type === "unavailable") return "limits ?";
 	if (quota.type === "loading") return "limits ...";
-	return undefined;
-}
-
-function formatQuotaCompact(quota: CompactQuotaStatus): string | undefined {
-	if (quota.type !== "ready") return formatQuotaNormal(quota);
-	if (
-		isPercent(quota.primaryLeftPercent) &&
-		isPercent(quota.secondaryLeftPercent)
-	) {
-		return `5h ${quota.primaryLeftPercent} · wk ${quota.secondaryLeftPercent}`;
-	}
-	if (isPercent(quota.primaryLeftPercent)) {
-		return `5h ${quota.primaryLeftPercent}`;
-	}
-	if (isPercent(quota.secondaryLeftPercent)) {
-		return `wk ${quota.secondaryLeftPercent}`;
-	}
 	return undefined;
 }
 
@@ -222,13 +206,11 @@ export function formatPromptStatusText(params: {
 	width?: number;
 }): string {
 	const variant = params.variant;
-	const normalQuota = formatQuotaNormal(params.quota);
-	const compactQuota = formatQuotaCompact(params.quota);
+	const quota = formatQuota(params.quota);
 	const candidates = [
-		[variant, normalQuota].filter(Boolean).join(" · "),
-		[variant, compactQuota].filter(Boolean).join(" · "),
+		[variant, quota].filter(Boolean).join(" · "),
 		variant,
-		compactQuota,
+		quota,
 	].filter((candidate): candidate is string => Boolean(candidate));
 	const maxChars = maxStatusChars(params.width);
 	return candidates.find((candidate) => candidate.length <= maxChars) ?? "";

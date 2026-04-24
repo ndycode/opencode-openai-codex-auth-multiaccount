@@ -11,19 +11,21 @@ import {
 describe("TUI prompt status helpers", () => {
 	const quota: CompactQuotaStatus = {
 		type: "ready",
-		primaryLeftPercent: 88,
-		secondaryLeftPercent: 83,
+		limits: [
+			{ label: "5h", leftPercent: 88 },
+			{ label: "7d", leftPercent: 83 },
+		],
 		stale: false,
 	};
 
-	it("formats full and compact prompt status text", () => {
+	it("formats prompt status text from supplied quota labels", () => {
 		expect(
 			formatPromptStatusText({
 				variant: "xhigh",
 				quota,
 				width: 120,
 			}),
-		).toBe("xhigh · 5h 88% · weekly 83%");
+		).toBe("xhigh · 5h 88% · 7d 83%");
 
 		expect(
 			formatPromptStatusText({
@@ -31,7 +33,7 @@ describe("TUI prompt status helpers", () => {
 				quota,
 				width: 80,
 			}),
-		).toBe("xhigh · 5h 88 · wk 83");
+		).toBe("xhigh · 5h 88% · 7d 83%");
 
 		expect(
 			formatPromptStatusText({

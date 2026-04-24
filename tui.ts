@@ -6,7 +6,9 @@ import {
 	createUsageAccountFingerprint,
 	ensureCodexUsageAccessToken,
 	fetchCodexUsage,
+	formatUsageWindowLabel,
 	getUsageLeftPercent,
+	hasUsageWindow,
 	parseCodexUsagePayload,
 	resolveCodexUsageAccountId,
 	resolveCodexUsageActiveAccount,
@@ -14,20 +16,20 @@ import {
 import {
 	formatPromptStatusText,
 	resolvePromptReasoningVariant,
+	type CompactQuotaLimit,
 	type CompactQuotaStatus,
 	type PromptStatusMessage,
 } from "./lib/tui-status.js";
 import { loadAccounts } from "./lib/storage.js";
 
-const CACHE_KEY = "oc-codex-multi-auth:tui-status:v1";
+const CACHE_KEY = "oc-codex-multi-auth:tui-status:v2";
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const MIN_FETCH_INTERVAL_MS = 2 * 60 * 1000;
 
 type StoredQuotaStatus = {
 	fingerprint: string;
 	fetchedAt: number;
-	primaryLeftPercent: number | null;
-	secondaryLeftPercent: number | null;
+	limits: CompactQuotaLimit[];
 };
 
 type StatusSlotInput = {
@@ -56,14 +58,23 @@ function isNullablePercent(value: unknown): value is number | null {
 	);
 }
 
+function isStoredQuotaLimit(value: unknown): value is CompactQuotaLimit {
+	return (
+		isRecord(value) &&
+		typeof value.label === "string" &&
+		value.label.trim().length > 0 &&
+		isNullablePercent(value.leftPercent)
+	);
+}
+
 function isStoredQuotaStatus(value: unknown): value is StoredQuotaStatus {
 	return (
 		isRecord(value) &&
 		typeof value.fingerprint === "string" &&
 		typeof value.fetchedAt === "number" &&
 		Number.isFinite(value.fetchedAt) &&
-		isNullablePercent(value.primaryLeftPercent) &&
-		isNullablePercent(value.secondaryLeftPercent)
+		Array.isArray(value.limits) &&
+		value.limits.every(isStoredQuotaLimit)
 	);
 }
 
@@ -101,9 +112,18 @@ function toCompactQuotaStatus(
 ): CompactQuotaStatus {
 	return {
 		type: "ready",
-		primaryLeftPercent: stored.primaryLeftPercent,
-		secondaryLeftPercent: stored.secondaryLeftPercent,
+		limits: stored.limits,
 		stale,
+	};
+}
+
+function toCompactQuotaLimit(
+	window: { usedPercent?: number; windowMinutes?: number },
+): CompactQuotaLimit | undefined {
+	if (!hasUsageWindow(window)) return undefined;
+	return {
+		label: formatUsageWindowLabel(window.windowMinutes),
+		leftPercent: getUsageLeftPercent(window.usedPercent) ?? null,
 	};
 }
 
@@ -171,12 +191,14 @@ async function refreshQuotaStatusInner(
 				organizationId: selection.account.organizationId,
 			});
 			const usage = parseCodexUsagePayload(payload);
+			const limits = [
+				toCompactQuotaLimit(usage.primary),
+				toCompactQuotaLimit(usage.secondary),
+			].filter((limit): limit is CompactQuotaLimit => Boolean(limit));
 			const stored: StoredQuotaStatus = {
 				fingerprint,
 				fetchedAt: now,
-				primaryLeftPercent: getUsageLeftPercent(usage.primary.usedPercent) ?? null,
-				secondaryLeftPercent:
-					getUsageLeftPercent(usage.secondary.usedPercent) ?? null,
+				limits,
 			};
 			writeStoredQuotaStatus(api, stored);
 			return toCompactQuotaStatus(stored, false);
