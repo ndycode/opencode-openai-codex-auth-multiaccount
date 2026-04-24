@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Quota status cache writes no longer block the request response path and coalesce rapid duplicate writes.
 - Account switching clears stale TUI quota state so the next session reflects the selected account.
+- Multi-account quota status now follows the actual account used by the latest request, including non-`codex` model families, so real response-header quota snapshots are not filtered out as stale.
 
 ## [6.1.5] - 2026-04-24
 

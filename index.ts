@@ -1985,6 +1985,10 @@ while (attempted.size < Math.max(1, accountCount)) {
 											}
 											account.email =
 												extractAccountEmail(accountAuth.access) ?? account.email;
+											// Keep the persisted active identity in step with the account used
+											// for this request so the TUI quota cache accepts the next real
+											// response-header snapshot instead of filtering it as stale.
+											accountManager.saveToDiskDebounced();
 
 											if (
 												accountCount > 1 &&

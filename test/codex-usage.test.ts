@@ -93,4 +93,21 @@ describe("codex usage helpers", () => {
 			account: { accountId: "acc-2" },
 		});
 	});
+
+	it("uses the most recently persisted request account for usage display", () => {
+		const storage: AccountStorageV3 = {
+			version: 3,
+			activeIndex: 0,
+			activeIndexByFamily: { codex: 0 },
+			accounts: [
+				{ refreshToken: "r1", accountId: "acc-1", addedAt: 0, lastUsed: 10 },
+				{ refreshToken: "r2", accountId: "acc-2", addedAt: 0, lastUsed: 20 },
+			],
+		};
+
+		expect(resolveCodexUsageActiveAccount(storage)).toMatchObject({
+			index: 1,
+			account: { accountId: "acc-2" },
+		});
+	});
 });

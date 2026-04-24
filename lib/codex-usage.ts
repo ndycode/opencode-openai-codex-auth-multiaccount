@@ -518,8 +518,29 @@ export function resolveCodexUsageActiveAccount(
 		0,
 		Math.min(storage.accounts.length - 1, Math.trunc(numericIndex)),
 	);
-	const account = storage.accounts[index];
-	return account ? { index, account } : null;
+	const activeAccount = storage.accounts[index];
+	if (!activeAccount) return null;
+
+	const activeLastUsed =
+		typeof activeAccount.lastUsed === "number" && Number.isFinite(activeAccount.lastUsed)
+			? activeAccount.lastUsed
+			: 0;
+	let newestIndex = index;
+	let newestLastUsed = activeLastUsed;
+	for (let i = 0; i < storage.accounts.length; i += 1) {
+		const account = storage.accounts[i];
+		const lastUsed =
+			typeof account?.lastUsed === "number" && Number.isFinite(account.lastUsed)
+				? account.lastUsed
+				: 0;
+		if (account && lastUsed > newestLastUsed) {
+			newestIndex = i;
+			newestLastUsed = lastUsed;
+		}
+	}
+
+	const account = storage.accounts[newestIndex];
+	return account ? { index: newestIndex, account } : null;
 }
 
 export function resolveCodexUsageAccountId(params: {

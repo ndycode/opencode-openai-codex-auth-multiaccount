@@ -2501,6 +2501,119 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		}
 	});
 
+	it("persists the selected account before writing TUI quota snapshots", async () => {
+		const accountsModule = await import("../lib/accounts.js");
+		const { AccountManager } = accountsModule;
+		const previousStateDir = process.env.OPENCODE_STATE_DIR;
+		const stateDir = await mkdtemp(join(tmpdir(), "tui-quota-selected-"));
+		const selectedAccount = {
+			index: 1,
+			accountId: "acc-2",
+			email: "user2@example.com",
+			refreshToken: "refresh-2",
+		};
+		const saveToDiskDebounced = vi.fn();
+		const customManager = {
+			getAccountCount: () => 2,
+			getCurrentOrNextForFamilyHybrid: () => selectedAccount,
+			getSelectionExplainability: () => [
+				{
+					index: 0,
+					enabled: true,
+					isCurrentForFamily: false,
+					eligible: true,
+					reasons: ["eligible"],
+					healthScore: 100,
+					tokensAvailable: 50,
+					lastUsed: Date.now(),
+				},
+				{
+					index: 1,
+					enabled: true,
+					isCurrentForFamily: true,
+					eligible: true,
+					reasons: ["eligible"],
+					healthScore: 100,
+					tokensAvailable: 50,
+					lastUsed: Date.now(),
+				},
+			],
+			toAuthDetails: () => ({
+				type: "oauth" as const,
+				access: "access-2",
+				refresh: selectedAccount.refreshToken,
+				expires: Date.now() + 60_000,
+			}),
+			hasRefreshToken: () => true,
+			saveToDiskDebounced,
+			updateFromAuth: vi.fn(),
+			clearAuthFailures: vi.fn(),
+			incrementAuthFailures: vi.fn(() => 1),
+			markAccountCoolingDown: vi.fn(),
+			markRateLimitedWithReason: vi.fn(),
+			recordRateLimit: vi.fn(),
+			consumeToken: vi.fn(() => true),
+			refundToken: vi.fn(),
+			markSwitched: vi.fn(),
+			removeAccount: vi.fn(() => false),
+			removeAccountsWithSameRefreshToken: vi.fn(() => 0),
+			recordFailure: vi.fn(),
+			recordSuccess: vi.fn(),
+			getMinWaitTimeForFamily: vi.fn(() => 0),
+			shouldShowAccountToast: vi.fn(() => false),
+			markToastShown: vi.fn(),
+			setActiveIndex: vi.fn(() => selectedAccount),
+			getAccountsSnapshot: vi.fn(() => [
+				{ index: 0, accountId: "acc-1", email: "user1@example.com", refreshToken: "refresh-1" },
+				selectedAccount,
+			]),
+		};
+		process.env.OPENCODE_STATE_DIR = stateDir;
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(customManager as never);
+		try {
+			globalThis.fetch = vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ content: "test" }), {
+					status: 200,
+					headers: {
+						"x-codex-primary-used-percent": "12",
+						"x-codex-primary-window-minutes": "300",
+					},
+				}),
+			);
+
+			const { sdk } = await setupPlugin();
+			const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.1" }),
+			});
+			const { getTuiQuotaCachePath, readTuiQuotaSnapshot } = await import(
+				"../lib/tui-quota-cache.js"
+			);
+			let snapshot = await readTuiQuotaSnapshot(getTuiQuotaCachePath(stateDir));
+			for (let attempt = 0; !snapshot && attempt < 20; attempt += 1) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				snapshot = await readTuiQuotaSnapshot(getTuiQuotaCachePath(stateDir));
+			}
+
+			expect(response.status).toBe(200);
+			expect(saveToDiskDebounced).toHaveBeenCalledTimes(1);
+			expect(snapshot).toEqual(
+				expect.objectContaining({
+					source: "headers",
+					accountIndex: 2,
+					accountCount: 2,
+				}),
+			);
+		} finally {
+			if (previousStateDir === undefined) {
+				delete process.env.OPENCODE_STATE_DIR;
+			} else {
+				process.env.OPENCODE_STATE_DIR = previousStateDir;
+			}
+			await rm(stateDir, { recursive: true, force: true });
+		}
+	});
+
 	it("handles network errors and rotates to next account", async () => {
 		globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
 
@@ -3587,7 +3700,7 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 				expect.any(Number),
 				"auth-failure",
 			);
-			expect(saveToDiskDebounced).toHaveBeenCalledTimes(1);
+			expect(saveToDiskDebounced).toHaveBeenCalledTimes(2);
 			expect(body).toEqual({
 				error: {
 					message: "All 1 account(s) failed (server errors or auth issues). Check account health with `codex-health`.",
