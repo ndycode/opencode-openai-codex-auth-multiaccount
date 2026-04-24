@@ -3,15 +3,12 @@
  * These functions break down the complex fetch logic into manageable, testable units
  */
 
-import type { OpencodeClient } from "@opencode-ai/sdk";
+import type { Auth, OpencodeClient } from "@opencode-ai/sdk";
 import { queuedRefresh } from "../refresh-queue.js";
 import { logRequest, logError, logWarn } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
-import {
-	GPT_55_MODEL_ID,
-	GPT_55_PRO_MODEL_ID,
-} from "./helpers/model-map.js";
+import { GPT_55_MODEL_ID } from "./helpers/model-map.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
 import type { OAuthAuthDetails, UserConfig, RequestBody } from "../types.js";
 import { CodexAuthError } from "../errors.js";
@@ -50,7 +47,6 @@ const NORMALIZED_UNSUPPORTED_MODEL_PATTERN =
 	/the model ['"]([^'"]+)['"] is not currently available for this chatgpt account/i;
 export const DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN: Record<string, string[]> = {
 	[GPT_55_MODEL_ID]: ["gpt-5.4"],
-	[GPT_55_PRO_MODEL_ID]: [GPT_55_MODEL_ID],
 	"gpt-5.4-pro": ["gpt-5.4"],
 	"gpt-5.3-codex-spark": ["gpt-5-codex", "gpt-5.3-codex", "gpt-5.2-codex"],
 	"gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
@@ -85,11 +81,17 @@ function canonicalizeModelName(model: string | undefined): string | undefined {
 
 	// Keep legacy alias distinctions (for example gpt-5.3-codex-spark vs gpt-5.3-codex)
 	// while collapsing rejected dated GPT-5.5 release aliases onto the public Codex ids.
-	if (withoutEffort === "gpt-5.5" || withoutEffort === "gpt-5.5-20260423") {
+	// `gpt-5.5-pro*` also collapses here: GPT-5.5 Pro is ChatGPT-only per the
+	// 2026-04-23 launch, so anything still typed as Pro is treated as a 5.5 request
+	// so the gpt-5.5 -> gpt-5.4 fallback chain can rescue it.
+	if (
+		withoutEffort === "gpt-5.5" ||
+		withoutEffort === "gpt-5.5-20260423" ||
+		withoutEffort === "gpt-5.5-fast" ||
+		withoutEffort === "gpt-5.5-pro" ||
+		withoutEffort === "gpt-5.5-pro-20260423"
+	) {
 		return GPT_55_MODEL_ID;
-	}
-	if (withoutEffort === "gpt-5.5-pro" || withoutEffort === "gpt-5.5-pro-20260423") {
-		return GPT_55_PRO_MODEL_ID;
 	}
 
 	return withoutEffort;
@@ -193,14 +195,27 @@ export function getUnsupportedCodexModelInfo(
 export function resolveUnsupportedCodexFallbackModel(
 	options: ResolveUnsupportedCodexFallbackOptions,
 ): string | undefined {
-	if (!options.fallbackOnUnsupportedCodexModel) return undefined;
-
 	const unsupported = getUnsupportedCodexModelInfo(options.errorBody);
 	if (!unsupported.isUnsupported) return undefined;
 
 	const requestedModel = canonicalizeModelName(options.requestedModel);
 	const currentModel = requestedModel ?? unsupported.unsupportedModel;
 	if (!currentModel) return undefined;
+
+	// During the GPT-5.5 rollout period, the backend gates `gpt-5.5` per-account
+	// even though the plugin maps every GPT-5.5 alias to it. Without a scoped
+	// auto-fallback, every one of the pooled accounts returns
+	// `model_not_supported_with_chatgpt_account` and rotation exhausts the pool
+	// with a misleading "server errors or auth issues" message. Gate this to
+	// gpt-5.5 only so legacy families keep their opt-in behavior.
+	const isGpt55AutoFallbackOptOut =
+		process.env.CODEX_AUTH_DISABLE_GPT55_AUTO_FALLBACK === "1";
+	const shouldAutoFallbackForGpt55 =
+		!isGpt55AutoFallbackOptOut && currentModel === GPT_55_MODEL_ID;
+
+	if (!options.fallbackOnUnsupportedCodexModel && !shouldAutoFallbackForGpt55) {
+		return undefined;
+	}
 
 	const attempted = new Set<string>();
 	for (const model of options.attemptedModels ?? []) {

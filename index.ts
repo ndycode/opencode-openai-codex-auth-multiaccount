@@ -2428,12 +2428,27 @@ while (attempted.size < Math.max(1, accountCount)) {
 								}
 
 								const waitLabel = waitMs > 0 ? formatWaitTime(waitMs) : "a bit";
+								const wasEntitlementExhaustion =
+									runtimeMetrics.lastErrorCategory === "unsupported-model";
+								const entitlementModel =
+									typeof runtimeMetrics.lastError === "string"
+										? runtimeMetrics.lastError.replace(
+												/^Unsupported model.*?:\s*/i,
+												"",
+											).trim()
+										: "";
+								const entitlementDetail =
+									entitlementModel.length > 0
+										? ` The backend rejected '${entitlementModel}' as not entitled for Codex OAuth on every pooled account.`
+										: "";
 								const message =
 									count === 0
 										? "No Codex accounts configured. Run `opencode auth login`."
 										: waitMs > 0
 											? `All ${count} account(s) are rate-limited. Try again in ${waitLabel} or add another account with \`opencode auth login\`.`
-											: `All ${count} account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;
+											: wasEntitlementExhaustion
+												? `All ${count} account(s) returned 'model not supported' for the requested model.${entitlementDetail} If this is a GPT-5.5 request during the rollout period, set \`unsupportedCodexPolicy: "fallback"\` (or \`CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback\`) to auto-fallback to gpt-5.4. See \`codex-health\` for per-account details.`
+												: `All ${count} account(s) failed (server errors or auth issues). Check account health with \`codex-health\`.`;
 								runtimeMetrics.failedRequests++;
 								runtimeMetrics.lastError = message;
 								runtimeMetrics.lastErrorCategory = waitMs > 0 ? "rate-limit" : "account-failure";
