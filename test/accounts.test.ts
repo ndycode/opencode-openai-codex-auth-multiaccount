@@ -222,7 +222,7 @@ describe("AccountManager", () => {
     expect(account?.accountNote).toContain("api.connectors.invoke");
   });
 
-  it("does not duplicate the re-auth note when the same fallback account is reloaded", () => {
+	it("does not duplicate the re-auth note when the same fallback account is reloaded", () => {
     const now = Date.now();
     const stored = {
       version: 3 as const,
@@ -248,10 +248,40 @@ describe("AccountManager", () => {
     const manager = new AccountManager(auth, stored);
     const account = manager.getCurrentAccount();
     expect(account?.enabled).toBe(false);
-    expect(account?.accountNote?.match(/Re-auth required/g)).toHaveLength(1);
-  });
+		expect(account?.accountNote?.match(/Re-auth required/g)).toHaveLength(1);
+	});
 
-  it("rotates when the active account is rate-limited", () => {
+	it("keeps stored accounts enabled when OAuth scope metadata is missing", () => {
+		const now = Date.now();
+		const stored = {
+			version: 3 as const,
+			activeIndex: 0,
+			accounts: [
+				{
+					refreshToken: "refresh-token",
+					accountId: "org-legacy",
+					email: "legacy@example.com",
+					addedAt: now,
+					lastUsed: now,
+				},
+			],
+		};
+
+		const auth: OAuthAuthDetails = {
+			type: "oauth",
+			access: "access-token",
+			refresh: "refresh-token",
+			expires: now + 60_000,
+		};
+
+		const manager = new AccountManager(auth, stored);
+		const account = manager.getCurrentAccount();
+
+		expect(account?.enabled).toBe(true);
+		expect(account?.accountNote).toBeUndefined();
+	});
+
+	it("rotates when the active account is rate-limited", () => {
     const now = Date.now();
     const stored = {
       version: 3 as const,

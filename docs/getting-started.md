@@ -81,7 +81,7 @@ Then choose:
 1. `OpenAI`
 2. `Codex OAuth (ChatGPT Plus/Pro)`
 
-The browser-based OAuth flow uses the same local callback port as Codex CLI. The authorize redirect is `http://localhost:1455/auth/callback`, while the local callback server binds both `127.0.0.1:1455` and `[::1]:1455` for dual-stack localhost redirects.
+The browser-based OAuth flow uses the same local callback port as Codex CLI. The authorize redirect is `http://localhost:1455/auth/callback`, while the local callback server binds `http://127.0.0.1:1455/auth/callback` and `[::1]:1455` for dual-stack localhost redirects.
 
 If you authenticated before the connector scopes were added, re-run `opencode auth login`. Current account records persist the granted OAuth scope and accounts missing `api.connectors.read` / `api.connectors.invoke` are marked for re-auth instead of being silently reused.
 

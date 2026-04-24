@@ -9,6 +9,7 @@ import {
     filterOpenCodeSystemPrompts,
     filterOpenCodeSystemPromptsWithCachedPrompt,
     addCodexBridgeMessage,
+    upsertBackendModelIdentityMessage,
     transformRequestBody,
 } from '../lib/request/request-transformer.js';
 import { TOOL_REMAP_MESSAGE } from '../lib/prompts/codex.js';
@@ -18,6 +19,47 @@ import type { RequestBody, UserConfig, InputItem } from '../lib/types.js';
 describe('Request Transformer Module', () => {
 	describe('normalizeModel', () => {
 		// NOTE: legacy gpt-5 base aliases normalize to the current GPT-5.5 release; codex aliases stay on gpt-5-codex.
+		it.each([
+			['openai/gpt-5-codex', 'gpt-5-codex'],
+			['openai/gpt-5-codex-high', 'gpt-5-codex'],
+			['openai/gpt-5-codex-low', 'gpt-5-codex'],
+			['openai/gpt-5-codex-medium', 'gpt-5-codex'],
+			['openai/gpt-5.1-codex', 'gpt-5-codex'],
+			['openai/gpt-5.1-codex-high', 'gpt-5-codex'],
+			['openai/gpt-5.1-codex-low', 'gpt-5-codex'],
+			['openai/gpt-5.1-codex-max', 'gpt-5.1-codex-max'],
+			['openai/gpt-5.1-codex-max-high', 'gpt-5.1-codex-max'],
+			['openai/gpt-5.1-codex-max-low', 'gpt-5.1-codex-max'],
+			['openai/gpt-5.1-codex-max-medium', 'gpt-5.1-codex-max'],
+			['openai/gpt-5.1-codex-max-xhigh', 'gpt-5.1-codex-max'],
+			['openai/gpt-5.1-codex-medium', 'gpt-5-codex'],
+			['openai/gpt-5.1-codex-mini', 'gpt-5.1-codex-mini'],
+			['openai/gpt-5.1-codex-mini-high', 'gpt-5.1-codex-mini'],
+			['openai/gpt-5.1-codex-mini-medium', 'gpt-5.1-codex-mini'],
+			['openai/gpt-5.2', 'gpt-5.2'],
+			['openai/gpt-5.2-codex', 'gpt-5-codex'],
+			['openai/gpt-5.3-codex', 'gpt-5-codex'],
+			['openai/gpt-5.3-codex-spark', 'gpt-5-codex'],
+			['openai/gpt-5.4', 'gpt-5.4'],
+			['openai/gpt-5.4-fast', 'gpt-5.4'],
+			['openai/gpt-5.4-mini', 'gpt-5.4-mini'],
+			['openai/gpt-5.4-mini-fast', 'gpt-5.4-mini'],
+			['openai/gpt-5.5', 'gpt-5.5'],
+			['openai/gpt-5.5-fast', 'gpt-5.5'],
+			['openai/gpt-5.5-fast-none', 'gpt-5.5'],
+			['openai/gpt-5.5-fast-low', 'gpt-5.5'],
+			['openai/gpt-5.5-fast-medium', 'gpt-5.5'],
+			['openai/gpt-5.5-fast-high', 'gpt-5.5'],
+			['openai/gpt-5.5-fast-xhigh', 'gpt-5.5'],
+			['openai/gpt-5.5-high', 'gpt-5.5'],
+			['openai/gpt-5.5-low', 'gpt-5.5'],
+			['openai/gpt-5.5-medium', 'gpt-5.5'],
+			['openai/gpt-5.5-none', 'gpt-5.5'],
+			['openai/gpt-5.5-xhigh', 'gpt-5.5'],
+		])('normalizes shipped OpenCode selector %s to backend %s', (selector, backend) => {
+			expect(normalizeModel(selector)).toBe(backend);
+		});
+
 		it('should normalize gpt-5-codex to canonical codex', () => {
 			expect(normalizeModel('gpt-5-codex')).toBe('gpt-5-codex');
 		});
@@ -802,6 +844,24 @@ describe('Request Transformer Module', () => {
 		});
 	});
 
+	describe('upsertBackendModelIdentityMessage', () => {
+		it('prepends exactly one backend identity message based on the outgoing model', () => {
+			const input: InputItem[] = [
+				{ type: 'message', role: 'user', content: 'hello' },
+			];
+
+			const first = upsertBackendModelIdentityMessage(input, 'gpt-5.5');
+			const second = upsertBackendModelIdentityMessage(first, 'gpt-5.4');
+			const firstText = String((second?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+			const allText = JSON.stringify(second);
+
+			expect(second).toHaveLength(2);
+			expect(firstText).toContain('actual backend model ID');
+			expect(firstText).toContain('`gpt-5.4`');
+			expect(allText).not.toContain('`gpt-5.5`');
+		});
+	});
+
 	describe('transformRequestBody', () => {
 			const codexInstructions = 'Test Codex Instructions';
 
@@ -834,7 +894,8 @@ describe('Request Transformer Module', () => {
 
 			expect(result.store).toBe(false);
 			expect(result.stream).toBe(true);
-			expect(result.instructions).toBe(codexInstructions);
+			expect(result.instructions).toContain('identified to the backend as gpt-5.5');
+			expect(result.instructions).toContain(codexInstructions);
 		});
 
 		it('should normalize model name', async () => {
@@ -968,7 +1029,8 @@ describe('Request Transformer Module', () => {
 					'hybrid',
 				);
 
-				expect(result.instructions).toBe(longInstructions);
+				expect(result.instructions).toContain('identified to the backend as gpt-5-codex');
+				expect(result.instructions).toContain(longInstructions);
 			});
 
 			it('should apply fast settings for simple prompts in hybrid strategy even with tools available', async () => {
@@ -1251,7 +1313,8 @@ describe('Request Transformer Module', () => {
 					.reverse()
 					.find((item) => item.role === 'user');
 				expect(lastUser?.content).toBe('hi');
-				expect(result.instructions).toBe(codexInstructions);
+				expect(result.instructions).toContain('identified to the backend as gpt-5-codex');
+				expect(result.instructions).toContain(codexInstructions);
 				expect(result.reasoning?.effort).toBe('low');
 				expect(result.text?.verbosity).toBe('low');
 			});
@@ -2248,8 +2311,12 @@ describe('Request Transformer Module', () => {
 				const toolNames = ((result.tools ?? []) as Array<{ function?: { name?: string } }>)
 					.map((tool) => tool.function?.name)
 					.filter(Boolean);
+				const bridgeText = String((result.input?.[0].content as Array<{ text?: string }>)?.[0]?.text ?? '');
+				const manifestText = bridgeText.split('\n\n# Codex Running in OpenCode')[0] ?? bridgeText;
 
 				expect(toolNames).toEqual(['exec_command']);
+				expect(manifestText).toContain('`exec_command`');
+				expect(manifestText).not.toContain('`request_user_input`');
 			});
 
 			it('should keep request_user_input tool in plan collaboration mode', async () => {
@@ -2506,7 +2573,8 @@ describe('Request Transformer Module', () => {
 					// Codex fields set
 					expect(result.store).toBe(false);
 					expect(result.stream).toBe(true);
-					expect(result.instructions).toBe(codexInstructions);
+					expect(result.instructions).toContain('identified to the backend as gpt-5-codex');
+					expect(result.instructions).toContain(codexInstructions);
 					expect(result.include).toEqual(['reasoning.encrypted_content']);
 				});
 			});

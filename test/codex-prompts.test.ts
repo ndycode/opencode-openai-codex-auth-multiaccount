@@ -13,7 +13,7 @@ vi.mock("node:fs", () => ({
 const originalFetch = global.fetch;
 let mockFetch: ReturnType<typeof vi.fn>;
 
-import { getModelFamily, getCodexInstructions, MODEL_FAMILIES, TOOL_REMAP_MESSAGE, __clearCacheForTesting } from "../lib/prompts/codex.js";
+import { getModelFamily, getCodexInstructions, ensureInstructionIdentity, MODEL_FAMILIES, TOOL_REMAP_MESSAGE, __clearCacheForTesting } from "../lib/prompts/codex.js";
 
 const mockedReadFile = vi.mocked(fs.readFile);
 const mockedWriteFile = vi.mocked(fs.writeFile);
@@ -160,6 +160,120 @@ describe("Codex Prompts Module", () => {
 
 				const result = await getCodexInstructions("gpt-5.2");
 				expect(result).toBe("disk cached instructions");
+			});
+
+			it("prepends backend identity when native instructions have no model identity", () => {
+				const result = ensureInstructionIdentity(
+					"Existing native instructions.",
+					"gpt-5.5",
+				);
+
+				expect(result).toContain(
+					"You are the model identified to the backend as gpt-5.5, running in the Codex CLI, a terminal-based coding assistant.",
+				);
+				expect(result).toContain("Existing native instructions.");
+			});
+
+			it("rewrites the instruction identity to the exact backend model id", async () => {
+				const recentTimestamp = Date.now() - 5 * 60 * 1000;
+				mockedReadFile.mockImplementation((filePath) => {
+					if (typeof filePath === "string" && filePath.includes("-meta.json")) {
+						return Promise.resolve(JSON.stringify({
+							etag: "cached-etag",
+							tag: "rust-v0.43.0",
+							lastChecked: recentTimestamp,
+							url: "https://example.com",
+						}));
+					}
+					return Promise.resolve(
+						"You are GPT-5.2 running in the Codex CLI, a terminal-based coding assistant.\n\nRest of prompt.",
+					);
+				});
+
+				const result = await getCodexInstructions("gpt-5.5");
+				expect(result).toContain(
+					"You are the model identified to the backend as gpt-5.5, running in the Codex CLI, a terminal-based coding assistant.",
+				);
+				expect(result).not.toContain("You are GPT-5.2 running in the Codex CLI");
+			});
+
+			it("keeps the backend model id accurate for legacy aliases too", async () => {
+				const recentTimestamp = Date.now() - 5 * 60 * 1000;
+				mockedReadFile.mockImplementation((filePath) => {
+					if (typeof filePath === "string" && filePath.includes("-meta.json")) {
+						return Promise.resolve(JSON.stringify({
+							etag: "cached-etag",
+							tag: "rust-v0.43.0",
+							lastChecked: recentTimestamp,
+							url: "https://example.com",
+						}));
+					}
+					return Promise.resolve(
+						"You are GPT-5.2 running in the Codex CLI, a terminal-based coding assistant.\n\nRest of prompt.",
+					);
+				});
+
+				const result = await getCodexInstructions("gpt-5-codex");
+				expect(result).toContain(
+					"You are the model identified to the backend as gpt-5-codex, running in the Codex CLI, a terminal-based coding assistant.",
+				);
+			});
+
+			it.each([
+				"gpt-5.5",
+				"gpt-5.4",
+				"gpt-5.4-mini",
+				"gpt-5.4-nano",
+				"gpt-5.4-pro",
+				"gpt-5.2",
+				"gpt-5.1",
+				"gpt-5-codex",
+				"gpt-5.1-codex-max",
+				"gpt-5.1-codex-mini",
+			])("rewrites stale prompt-family identity for backend %s", async (backendModel) => {
+				const recentTimestamp = Date.now() - 5 * 60 * 1000;
+				mockedReadFile.mockImplementation((filePath) => {
+					if (typeof filePath === "string" && filePath.includes("-meta.json")) {
+						return Promise.resolve(JSON.stringify({
+							etag: "cached-etag",
+							tag: "rust-v0.43.0",
+							lastChecked: recentTimestamp,
+							url: "https://example.com",
+						}));
+					}
+					return Promise.resolve(
+						"You are GPT-5.2 running in the Codex CLI, a terminal-based coding assistant.\n\nRest of prompt.",
+					);
+				});
+
+				const result = await getCodexInstructions(backendModel);
+				expect(result).toContain(
+					`You are the model identified to the backend as ${backendModel}, running in the Codex CLI, a terminal-based coding assistant.`,
+				);
+				expect(result).not.toContain("You are GPT-5.2 running in the Codex CLI");
+			});
+
+			it("rewrites the current Codex-family identity line to the backend model id", async () => {
+				const recentTimestamp = Date.now() - 5 * 60 * 1000;
+				mockedReadFile.mockImplementation((filePath) => {
+					if (typeof filePath === "string" && filePath.includes("-meta.json")) {
+						return Promise.resolve(JSON.stringify({
+							etag: "cached-etag",
+							tag: "rust-v0.43.0",
+							lastChecked: recentTimestamp,
+							url: "https://example.com",
+						}));
+					}
+					return Promise.resolve(
+						"You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.\n\nRest of prompt.",
+					);
+				});
+
+				const result = await getCodexInstructions("gpt-5-codex");
+				expect(result).toContain(
+					"You are the model identified to the backend as gpt-5-codex, running in the Codex CLI, a terminal-based coding assistant.",
+				);
+				expect(result).not.toContain("You are Codex, based on GPT-5.");
 			});
 		});
 

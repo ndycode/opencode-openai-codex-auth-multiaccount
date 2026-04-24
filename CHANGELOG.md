@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Explicit `gpt-5.5-fast` / `gpt-5.5-fast-{none,low,medium,high,xhigh}` entries in the model map, normalizing to `gpt-5.5`. Without the explicit map entry, picking OpenCode's built-in `GPT-5.5 Fast` catalog item fell through the regex fallback with no per-model config lookup, which contributed to the `All N account(s) failed (server errors or auth issues)` symptom.
+- Scoped auto-fallback for GPT-5.5: when the backend returns `model_not_supported_with_chatgpt_account` for `gpt-5.5`, the plugin now routes the retry to `gpt-5.4` automatically, even without `unsupportedCodexPolicy: "fallback"` or `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback`. Opt out with `CODEX_AUTH_DISABLE_GPT55_AUTO_FALLBACK=1`. Legacy family fallback behavior is unchanged.
+
+### Removed
+- **GPT-5.5 Pro** model map entries (`gpt-5.5-pro`, `gpt-5.5-pro-{medium,high,xhigh}`, `gpt-5.5-pro-20260423*`), config template entries in `config/opencode-modern.json` and `config/opencode-legacy.json`, the `GPT_55_PRO_MODEL_ID` constant, the `gpt-5.5-pro -> gpt-5.5` fallback chain edge, and the related request-transformer / prompt-family branches. Per OpenAI's 2026-04-23 launch, GPT-5.5 Pro ships to ChatGPT only, not Codex; routing `gpt-5.5-pro*` through the Codex OAuth pipeline was producing `model_not_supported_with_chatgpt_account` on every pooled account. Any user-typed `gpt-5.5-pro*` still canonicalizes to `gpt-5.5` so the scoped auto-fallback chain can rescue it.
+
+### Fixed
+- The terminal aggregator message in `index.ts` no longer misreports across-the-pool entitlement 400s as `server errors or auth issues`. When `lastErrorCategory === "unsupported-model"` at exhaustion, the response now names the model and points to the fallback env var.
+- Pre-existing `lib/request/fetch-helpers.ts` typecheck regression from the 6.1.2 release: `shouldRefreshToken(auth: Auth, ...)` referenced an `Auth` type that had been removed from the SDK import. Re-imported `Auth` from `@opencode-ai/sdk`.
+
 ## [6.1.2] - 2026-04-24
 
 ### Added

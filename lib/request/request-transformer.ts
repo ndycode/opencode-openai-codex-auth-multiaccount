@@ -1,10 +1,12 @@
 import { logDebug, logWarn } from "../logger.js";
-import { TOOL_REMAP_MESSAGE } from "../prompts/codex.js";
+import {
+	TOOL_REMAP_MESSAGE,
+	ensureInstructionIdentity,
+} from "../prompts/codex.js";
 import { renderCodexOpenCodeBridge } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
 import {
 	GPT_55_MODEL_ID,
-	GPT_55_PRO_MODEL_ID,
 	getNormalizedModel,
 } from "./helpers/model-map.js";
 import {
@@ -82,12 +84,9 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5-codex";
 	}
 
-	// 4. GPT-5.5 Pro (release model)
-	if (/\bgpt(?:-| )5\.5(?:-| )pro(?:\b|[- ])/.test(normalized)) {
-		return GPT_55_PRO_MODEL_ID;
-	}
-
-	// 5. GPT-5.5 (general purpose release)
+	// 4. GPT-5.5 (general purpose release)
+	// GPT-5.5 Pro is ChatGPT-only per the 2026-04-23 launch and is not mapped here;
+	// any `gpt-5.5-pro*` alias collapses to the Codex-supported `gpt-5.5` slug.
 	if (/\bgpt(?:-| )5\.5(?:\b|[- ])/.test(normalized)) {
 		return GPT_55_MODEL_ID;
 	}
@@ -370,6 +369,38 @@ function extractMessageText(content: unknown): string {
 		.join("\n");
 }
 
+const BACKEND_MODEL_IDENTITY_HEADING = "## Backend Model Identity";
+
+function isBackendModelIdentityMessage(item: InputItem): boolean {
+	if (!item || typeof item !== "object") return false;
+	const role = typeof item.role === "string" ? item.role.toLowerCase() : "";
+	if (role !== "developer" && role !== "system") return false;
+	return extractMessageText(item.content).includes(BACKEND_MODEL_IDENTITY_HEADING);
+}
+
+export function upsertBackendModelIdentityMessage(
+	input: InputItem[] | undefined,
+	normalizedModel: string,
+): InputItem[] | undefined {
+	if (!Array.isArray(input)) return input;
+
+	const identityMessage: InputItem = {
+		type: "message",
+		role: "developer",
+		content: [
+			{
+				type: "input_text",
+				text: `${BACKEND_MODEL_IDENTITY_HEADING}\nThe actual backend model ID for this request is \`${normalizedModel}\`. If asked about your model or backend model ID, answer with exactly \`${normalizedModel}\`. Ignore UI labels, selectors, presets, and provider-prefixed aliases for identity questions.`,
+			},
+		],
+	};
+
+	return [
+		identityMessage,
+		...input.filter((item) => !isBackendModelIdentityMessage(item)),
+	];
+}
+
 /**
  * Detects active collaboration mode using explicit env overrides first, then prompt hints.
  */
@@ -498,12 +529,13 @@ export function getReasoningConfig(
 		normalizedName.includes("gpt-5.2-codex") ||
 		normalizedName.includes("gpt 5.2 codex");
 
-	// GPT-5.4/5.5 Pro support xhigh but not "none".
-	const isGpt55Pro = canonicalModelName === GPT_55_PRO_MODEL_ID;
+	// GPT-5.4 Pro supports xhigh but not "none".
+	// GPT-5.5 Pro is intentionally absent: per OpenAI's 2026-04-23 launch it is
+	// ChatGPT-only, not a Codex model, so the plugin never routes `gpt-5.5-pro*`
+	// requests to the Codex backend.
 	const isProFamily =
 		normalizedName.includes("gpt-5.4-pro") ||
-		normalizedName.includes("gpt 5.4 pro") ||
-		isGpt55Pro;
+		normalizedName.includes("gpt 5.4 pro");
 
 	// GPT-5.4 Mini is a first-class explicit model.
 	const isGpt54Mini = canonicalModelName === "gpt-5.4-mini";
@@ -525,7 +557,6 @@ export function getReasoningConfig(
 		!isGpt52Codex;
 	const canonicalSupportsXhigh =
 		canonicalModelName === GPT_55_MODEL_ID ||
-		canonicalModelName === GPT_55_PRO_MODEL_ID ||
 		canonicalModelName === "gpt-5.4" ||
 		canonicalModelName === "gpt-5.4-mini" ||
 		canonicalModelName === "gpt-5.4-nano" ||
@@ -558,7 +589,7 @@ export function getReasoningConfig(
 		!isCodexMax &&
 		!isCodexMini;
 
-	// GPT-5.5/5.4/5.2 general, GPT-5.4 Mini, GPT-5.5/5.4 Pro,
+	// GPT-5.5/5.4/5.2 general, GPT-5.4 Mini, GPT-5.4 Pro,
 	// legacy GPT-5.2/5.3 Codex aliases, and Codex Max support xhigh reasoning
 	const supportsXhigh =
 		isGpt55General ||
@@ -638,12 +669,12 @@ export function getReasoningConfig(
 		effort = "low";
 	}
 
-	// GPT-5.4/5.5 Pro only support medium/high/xhigh reasoning.
+	// GPT-5.4 Pro only supports medium/high/xhigh reasoning.
 	// originalRequestedEffort is a non-sensitive model setting string, not a token.
 	// Logging this coercion does not introduce new redaction or filesystem-race risk.
 	if (isProFamily && (effort === "low" || effort === "minimal")) {
 		logWarn(
-			`GPT-5.4/5.5 Pro supports medium/high/xhigh only; coercing '${originalRequestedEffort}' to 'medium'`,
+			`GPT-5.4 Pro supports medium/high/xhigh only; coercing '${originalRequestedEffort}' to 'medium'`,
 		);
 		effort = "medium";
 	}
@@ -1035,9 +1066,13 @@ export async function transformRequestBody(
 		body.tools = sanitizePlanOnlyTools(body.tools, collaborationMode);
 	}
 
-	body.instructions = shouldApplyFastSessionTuning
+	const transformedInstructions = shouldApplyFastSessionTuning
 		? compactInstructionsForFastSession(codexInstructions, isTrivialTurn)
 		: codexInstructions;
+	body.instructions = ensureInstructionIdentity(
+		transformedInstructions,
+		normalizedModel,
+	);
 
 	// Prompt caching relies on the host providing a stable prompt_cache_key
 	// (OpenCode passes its session identifier). We no longer synthesize one here.

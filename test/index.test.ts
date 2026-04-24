@@ -137,6 +137,7 @@ vi.mock("../lib/config.js", () => ({
 
 vi.mock("../lib/request/request-transformer.js", () => ({
 	applyFastSessionDefaults: <T>(config: T) => config,
+	upsertBackendModelIdentityMessage: (input: unknown) => input,
 }));
 
 vi.mock("../lib/logger.js", () => ({
@@ -683,17 +684,30 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result.fetch).toBeDefined();
 		});
 
-		it("returns empty for non-oauth auth when no stored accounts exist", async () => {
+		it("returns SDK config for non-oauth auth when no stored accounts exist", async () => {
 			const accountsModule = await import("../lib/accounts.js");
 			vi.spyOn(accountsModule.AccountManager, "loadFromDisk").mockResolvedValue({
 				getAccountCount: () => 0,
+				getSelectionExplainability: () => null,
+				getCurrentOrNextForFamilyHybrid: () => null,
+				getMinWaitTimeForFamily: () => 0,
 				hasRefreshToken: () => false,
 				saveToDisk: async () => {},
 			} as unknown as InstanceType<typeof accountsModule.AccountManager>);
 
 			const getAuth = async () => ({ type: "apikey" as const, key: "test" });
 			const result = await plugin.auth.loader(getAuth, {});
-			expect(result).toEqual({});
+			expect(result.apiKey).toBeDefined();
+			expect(result.baseURL).toBeDefined();
+			expect(result.fetch).toBeDefined();
+
+			const response = await result.fetch("https://api.openai.com/v1/responses", {
+				method: "POST",
+				body: "{}",
+			});
+			expect(response.status).toBe(503);
+			const body = await response.text();
+			expect(body).toContain("No Codex accounts configured");
 		});
 
 		it("returns SDK config for oauth without multiAccount marker", async () => {

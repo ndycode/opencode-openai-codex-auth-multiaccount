@@ -19,12 +19,9 @@ const DATED_ALIAS_EFFORT_SUFFIXES = [
 	"-high",
 	"-xhigh",
 ] as const;
-const GPT_55_RELEASE_EFFORT_SUFFIXES = DATED_ALIAS_EFFORT_SUFFIXES;
 const GPT_54_SNAPSHOT_DATE = "2026-03-05" as const;
 const GPT_55_REJECTED_DATED_RELEASE_ID = "gpt-5.5-20260423" as const;
-const GPT_55_PRO_REJECTED_DATED_RELEASE_ID = "gpt-5.5-pro-20260423" as const;
 export const GPT_55_MODEL_ID = "gpt-5.5" as const;
-export const GPT_55_PRO_MODEL_ID = "gpt-5.5-pro" as const;
 
 function expandDatedAliases(prefix: string, target: string): Record<string, string> {
 	return Object.fromEntries(
@@ -81,6 +78,11 @@ export const MODEL_MAP: Record<string, string> = {
 
 	// ============================================================================
 	// GPT-5.5 Models (latest general-purpose family)
+	//
+	// GPT-5.5 Pro is intentionally NOT mapped here: per OpenAI's 2026-04-23
+	// launch announcement, GPT-5.5 Pro ships to ChatGPT only, not to Codex.
+	// Attempting to route `gpt-5.5-pro*` through the Codex OAuth pipeline
+	// produces `model_not_supported_with_chatgpt_account` on every account.
 	// ============================================================================
 	"gpt-5.5": GPT_55_MODEL_ID,
 	"gpt-5.5-none": GPT_55_MODEL_ID,
@@ -88,20 +90,13 @@ export const MODEL_MAP: Record<string, string> = {
 	"gpt-5.5-medium": GPT_55_MODEL_ID,
 	"gpt-5.5-high": GPT_55_MODEL_ID,
 	"gpt-5.5-xhigh": GPT_55_MODEL_ID,
+	"gpt-5.5-fast": GPT_55_MODEL_ID,
+	"gpt-5.5-fast-none": GPT_55_MODEL_ID,
+	"gpt-5.5-fast-low": GPT_55_MODEL_ID,
+	"gpt-5.5-fast-medium": GPT_55_MODEL_ID,
+	"gpt-5.5-fast-high": GPT_55_MODEL_ID,
+	"gpt-5.5-fast-xhigh": GPT_55_MODEL_ID,
 	...expandDatedAliases(GPT_55_REJECTED_DATED_RELEASE_ID, GPT_55_MODEL_ID),
-
-	// ============================================================================
-	// GPT-5.5 Pro Models (optional/manual config)
-	// ============================================================================
-	"gpt-5.5-pro": GPT_55_PRO_MODEL_ID,
-	"gpt-5.5-pro-medium": GPT_55_PRO_MODEL_ID,
-	"gpt-5.5-pro-high": GPT_55_PRO_MODEL_ID,
-	"gpt-5.5-pro-xhigh": GPT_55_PRO_MODEL_ID,
-	...Object.fromEntries(
-		GPT_55_RELEASE_EFFORT_SUFFIXES.filter((suffix) =>
-			["", "-medium", "-high", "-xhigh"].includes(suffix),
-		).map((suffix) => [`${GPT_55_PRO_REJECTED_DATED_RELEASE_ID}${suffix}`, GPT_55_PRO_MODEL_ID]),
-	),
 
 	// ============================================================================
 	// GPT-5.4 Models (legacy latest general-purpose family)

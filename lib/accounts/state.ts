@@ -24,7 +24,7 @@ import {
 	sanitizeEmail,
 	shouldUpdateAccountIdFromToken,
 } from "../auth/token-utils.js";
-import { getMissingRequiredOAuthScopes, hasRequiredOAuthScopes } from "../auth/scopes.js";
+import { getMissingRequiredOAuthScopes } from "../auth/scopes.js";
 import { getHealthTracker, getTokenTracker } from "../rotation.js";
 import { logWarn } from "../logger.js";
 
@@ -78,6 +78,16 @@ function appendReauthNote(accountNote: string | undefined, missingScopes: string
 	return `${accountNote} ${suffix}`;
 }
 
+const MISSING_SCOPE_NOTE_MARKER = "Re-auth required for missing OAuth scope(s):";
+
+function hasExplicitOAuthScope(scope: string | undefined): scope is string {
+	return typeof scope === "string" && scope.trim().length > 0;
+}
+
+function hasMissingScopeReauthNote(accountNote: string | undefined): boolean {
+	return typeof accountNote === "string" && accountNote.includes(MISSING_SCOPE_NOTE_MARKER);
+}
+
 function getAuthScope(auth: OAuthAuthDetails | undefined): string | undefined {
 	const scope = auth?.scope;
 	return typeof scope === "string" && scope.trim() ? scope : undefined;
@@ -128,7 +138,9 @@ export class AccountState {
 						matchesFallback && authFallback ? authFallback.refresh : account.refreshToken;
 					const oauthScope =
 						matchesFallback && fallbackOAuthScope ? fallbackOAuthScope : accountOAuthScope;
-					const missingOAuthScopes = getMissingRequiredOAuthScopes(oauthScope);
+					const hasExplicitScope = hasExplicitOAuthScope(accountOAuthScope);
+					const shouldEnforceScope = hasExplicitScope || hasMissingScopeReauthNote(account.accountNote);
+					const missingOAuthScopes = shouldEnforceScope ? getMissingRequiredOAuthScopes(oauthScope) : [];
 
 					return {
 						index,
@@ -146,7 +158,9 @@ export class AccountState {
 							? fallbackAccountEmail ?? sanitizeEmail(account.email)
 							: sanitizeEmail(account.email),
 						refreshToken,
-						enabled: account.enabled !== false && missingOAuthScopes.length === 0,
+						enabled:
+							account.enabled !== false &&
+							(!shouldEnforceScope || missingOAuthScopes.length === 0),
 						access:
 							matchesFallback && authFallback ? authFallback.access : account.accessToken,
 						expires:
@@ -190,7 +204,7 @@ export class AccountState {
 						lastSwitchReason: "initial",
 						rateLimitResetTimes: {},
 					});
-				} else if (this.accounts.length === 0) {
+				} else {
 					logWarn(
 						`Stored OAuth fallback is missing required OAuth scope(s): ${fallbackMissingOAuthScopes.join(", ")}. Re-auth required.`,
 					);
@@ -382,7 +396,7 @@ export class AccountState {
 			return null;
 		}
 		const account = this.accounts[index];
-		if (!account || account.enabled === false) {
+		if (!account) {
 			return null;
 		}
 		return account;

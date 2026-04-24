@@ -275,6 +275,7 @@ describe('Auth Module', () => {
 					refresh: '',
 					expires: 3_601_000,
 					idToken: undefined,
+					scope: SCOPE,
 					multiAccount: true,
 				});
 			} finally {

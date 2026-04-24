@@ -35,7 +35,6 @@ controls how much thinking the model does.
 | model | supported values |
 |-------|------------------|
 | `gpt-5.5` | none, low, medium, high, xhigh |
-| `gpt-5.5-pro` | medium, high, xhigh |
 | `gpt-5.4` | none, low, medium, high, xhigh |
 | `gpt-5.4-mini` | none, low, medium, high, xhigh |
 | `gpt-5.4-pro` | low, medium, high, xhigh (optional/manual model) |
@@ -48,14 +47,14 @@ controls how much thinking the model does.
 | `gpt-5.1-codex-mini` | medium, high |
 | `gpt-5.1` | none, low, medium, high |
 
-The shipped config templates include 9 base model families and 34 shipped presets overall (34 modern variants or 34 legacy explicit entries). On OpenCode `v1.0.210+`, those 34 presets intentionally appear as 9 base model entries plus `--variant` values. `gpt-5.5-pro` ships in the templates but may still be entitlement-gated at runtime, while `gpt-5.3-codex-spark` remains a manual add-on for entitled workspaces only.
+The shipped config templates include 9 base model families and 34 shipped presets overall (34 modern variants or 34 legacy explicit entries). On OpenCode `v1.0.210+`, those 34 presets intentionally appear as 9 base model entries plus `--variant` values. `gpt-5.5-pro` is ChatGPT-only (not routed by this plugin), while `gpt-5.3-codex-spark` remains a manual add-on for entitled workspaces only.
 For context sizing, shipped templates use:
-- `gpt-5.5` and `gpt-5.5-pro`: `context=1050000`, `output=128000`
+- `gpt-5.5`: `context=1050000`, `output=128000`
 - `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, and `gpt-5.1-codex-mini`: `context=400000`, `output=128000`
 - `gpt-5.1`: `context=272000`, `output=128000`
 
 model normalization aliases:
-- `gpt-5.5*` and `gpt-5.5-pro*` normalize to the public Codex model ids `gpt-5.5` and `gpt-5.5-pro`
+- `gpt-5.5*` and user-typed `gpt-5.5-pro*` normalize to the public Codex model id `gpt-5.5`
 - legacy `gpt-5` maps to `gpt-5.5`; legacy `gpt-5-mini` / `gpt-5-nano` map to `gpt-5.4-mini` / `gpt-5.4-nano`
 - snapshot ids `gpt-5.4-2026-03-05*`, `gpt-5.4-mini-2026-03-05*`, and `gpt-5.4-pro-2026-03-05*` map to stable `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-pro`
 - `opencode debug config` is the reliable way to confirm merged custom/template model entries; on tested OpenCode `1.14.22`, `opencode models openai` exposes explicit GPT-5.5 entries like `gpt-5.5-medium` / `gpt-5.5-high`, while bare `gpt-5.5` can still be omitted or rejected by provider lookup
@@ -70,11 +69,11 @@ tested live selector note:
 - use explicit shipped GPT-5.5 preset IDs for reliable CLI verification today
 
 what they mean:
-- `none` - no reasoning phase (base general-purpose families only; codex families degrade it to `low`, while pro families such as `gpt-5.5-pro` / `gpt-5.4-pro` ultimately coerce it to `medium`)
+- `none` - no reasoning phase (base general-purpose families only; pro families such as `gpt-5.4-pro` ultimately coerce it to `medium`)
 - `low` - light reasoning, fastest
 - `medium` - balanced (default)
 - `high` - deep reasoning
-- `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`; available for `gpt-5.5`, `gpt-5.4`, and optional `gpt-5.5-pro` / `gpt-5.4-pro`)
+- `xhigh` - max depth for complex tasks (default for legacy `gpt-5.3-codex` / `gpt-5.2-codex` aliases and `gpt-5.1-codex-max`; available for `gpt-5.5`, `gpt-5.4`, and optional `gpt-5.4-pro`)
 
 ### Reasoning Summary
 
@@ -140,7 +139,6 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
   "fallbackOnUnsupportedCodexModel": false,
   "fallbackToGpt52OnUnsupportedGpt53": true,
   "unsupportedCodexFallbackChain": {
-    "gpt-5.5-pro": ["gpt-5.5"],
     "gpt-5.4-pro": ["gpt-5.4"],
     "gpt-5-codex": ["gpt-5.2-codex"]
   }
@@ -172,7 +170,7 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `unsupportedCodexPolicy` | `strict` | unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry with configured fallback chain) |
 | `fallbackOnUnsupportedCodexModel` | `false` | legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
-| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`; default includes `gpt-5.5 -> gpt-5.4` and `gpt-5.5-pro -> gpt-5.5`) |
+| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`; default includes `gpt-5.5 -> gpt-5.4`). `gpt-5.5` auto-fallback is on by default during the rollout; set `CODEX_AUTH_DISABLE_GPT55_AUTO_FALLBACK=1` to opt out. GPT-5.5 Pro is not mapped: it is ChatGPT-only per OpenAI's 2026-04-23 launch. |
 | `sessionRecovery` | `true` | auto-recover from common api errors |
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |
@@ -197,7 +195,6 @@ set `unsupportedCodexPolicy: "fallback"` to enable model fallback after account/
 
 defaults when fallback policy is enabled and `unsupportedCodexFallbackChain` is empty:
 - `gpt-5.5 -> gpt-5.4`
-- `gpt-5.5-pro -> gpt-5.5`
 - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
 - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
 - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (applies if you manually select Spark model IDs)
@@ -213,7 +210,6 @@ custom chain example:
   "fallbackOnUnsupportedCodexModel": true,
   "unsupportedCodexFallbackChain": {
     "gpt-5.5": ["gpt-5.4"],
-    "gpt-5.5-pro": ["gpt-5.5"],
     "gpt-5.4-pro": ["gpt-5.4"],
     "gpt-5-codex": ["gpt-5.2-codex"],
     "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],
@@ -255,6 +251,7 @@ override any config with env vars:
 | `CODEX_AUTH_UNSUPPORTED_MODEL_POLICY=fallback` | enable generic unsupported-model fallback policy |
 | `CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL=1` | legacy fallback toggle (prefer policy variable above) |
 | `CODEX_AUTH_FALLBACK_GPT53_TO_GPT52=0` | disable only the legacy `gpt-5.3-codex -> gpt-5.2-codex` edge |
+| `CODEX_AUTH_DISABLE_GPT55_AUTO_FALLBACK=1` | disable automatic `gpt-5.5 -> gpt-5.4` fallback during rollout |
 | `CODEX_AUTH_ACCOUNT_ID=acc_xxx` | force specific workspace id |
 | `CODEX_AUTH_FETCH_TIMEOUT_MS=120000` | override fetch timeout |
 | `CODEX_AUTH_STREAM_STALL_TIMEOUT_MS=60000` | override SSE stall timeout |

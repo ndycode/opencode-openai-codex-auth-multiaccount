@@ -102,6 +102,36 @@ const CACHE_FILES: Record<ModelFamily, string> = {
 	"gpt-5.1": "gpt-5.1-instructions.md",
 };
 
+const CODEX_IDENTITY_LINE_PATTERNS = [
+	/^You are .*? running in the Codex CLI, a terminal-based coding assistant\./,
+	/^You are Codex, based on GPT-5\. You are running as a coding agent in the Codex CLI on a user's computer\./,
+] as const;
+
+export function getBackendInstructionIdentityLine(
+	normalizedModel: string,
+): string {
+	return `You are the model identified to the backend as ${normalizedModel}, running in the Codex CLI, a terminal-based coding assistant.`;
+}
+
+export function ensureInstructionIdentity(
+	instructions: string | undefined,
+	normalizedModel: string,
+): string {
+	const identityLine = getBackendInstructionIdentityLine(normalizedModel);
+	if (!instructions?.trim()) {
+		return identityLine;
+	}
+	for (const pattern of CODEX_IDENTITY_LINE_PATTERNS) {
+		if (pattern.test(instructions)) {
+			return instructions.replace(pattern, identityLine);
+		}
+	}
+	if (instructions.startsWith(identityLine)) {
+		return instructions;
+	}
+	return `${identityLine}\n\n${instructions}`;
+}
+
 /**
  * Determine the model family based on the normalized model name
  * @param normalizedModel - The normalized model name (e.g., "gpt-5-codex", "gpt-5.1-codex-max", "gpt-5.2", "gpt-5.1")
@@ -131,9 +161,9 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 	) {
 		return "codex";
 	}
-	if (/\bgpt(?:-| )5\.5(?:-| )pro(?:\b|[- ])/i.test(normalizedModel)) {
-		return "gpt-5.4-pro";
-	}
+	// GPT-5.5 Pro is ChatGPT-only per the 2026-04-23 launch and is not
+	// routed through Codex. Any `gpt-5.5-pro*` that still reaches this path
+	// (through aliases or user config) gets the general 5.4 prompt family.
 	if (/\bgpt(?:-| )5\.5(?:\b|[- ])/i.test(normalizedModel)) {
 		return "gpt-5.4";
 	}
@@ -150,6 +180,19 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 		return "gpt-5.2";
 	}
 	return "gpt-5.1";
+}
+
+function rewriteInstructionIdentity(
+	instructions: string,
+	normalizedModel: string,
+): string {
+	const identityLine = getBackendInstructionIdentityLine(normalizedModel);
+	for (const pattern of CODEX_IDENTITY_LINE_PATTERNS) {
+		if (pattern.test(instructions)) {
+			return instructions.replace(pattern, identityLine);
+		}
+	}
+	return instructions;
 }
 
 async function readFileOrNull(path: string): Promise<string | null> {
@@ -245,7 +288,7 @@ export async function getCodexInstructions(
 	const now = Date.now();
 	const cached = memoryCache.get(modelFamily);
 	if (cached && now - cached.timestamp < CACHE_TTL_MS) {
-		return cached.content;
+		return rewriteInstructionIdentity(cached.content, normalizedModel);
 	}
 
 	const promptFile = PROMPT_FILES[modelFamily];
@@ -272,7 +315,7 @@ export async function getCodexInstructions(
 	if (diskContent && cachedMetadata?.lastChecked) {
 		if (now - cachedMetadata.lastChecked < CACHE_TTL_MS) {
 			setCacheEntry(modelFamily, { content: diskContent, timestamp: now });
-			return diskContent;
+			return rewriteInstructionIdentity(diskContent, normalizedModel);
 		}
 		// Stale-while-revalidate: return stale cache immediately and refresh in background.
 		setCacheEntry(modelFamily, { content: diskContent, timestamp: now });
@@ -283,7 +326,7 @@ export async function getCodexInstructions(
 			cacheMetaFile,
 			cachedMetadata,
 		);
-		return diskContent;
+		return rewriteInstructionIdentity(diskContent, normalizedModel);
 	}
 
 	if (cached && now - cached.timestamp >= CACHE_TTL_MS) {
@@ -296,17 +339,18 @@ export async function getCodexInstructions(
 			cacheMetaFile,
 			cachedMetadata,
 		);
-		return cached.content;
+		return rewriteInstructionIdentity(cached.content, normalizedModel);
 	}
 
 	try {
-		return await fetchAndPersistInstructions(
+		const instructions = await fetchAndPersistInstructions(
 			modelFamily,
 			promptFile,
 			cacheFile,
 			cacheMetaFile,
 			cachedMetadata,
 		);
+		return rewriteInstructionIdentity(instructions, normalizedModel);
 	} catch (error) {
 		const err = error as Error;
 		logError(
@@ -316,7 +360,7 @@ export async function getCodexInstructions(
 		if (diskContent) {
 			logWarn(`Using cached ${modelFamily} instructions`);
 			setCacheEntry(modelFamily, { content: diskContent, timestamp: now });
-			return diskContent;
+			return rewriteInstructionIdentity(diskContent, normalizedModel);
 		}
 
 		logWarn(`Falling back to bundled instructions for ${modelFamily}`);
@@ -325,7 +369,7 @@ export async function getCodexInstructions(
 			"utf8",
 		);
 		setCacheEntry(modelFamily, { content: bundled, timestamp: now });
-		return bundled;
+		return rewriteInstructionIdentity(bundled, normalizedModel);
 	}
 }
 
