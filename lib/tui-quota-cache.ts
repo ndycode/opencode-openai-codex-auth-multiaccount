@@ -23,6 +23,7 @@ export type TuiQuotaSnapshot = {
 	source: TuiQuotaSource;
 	accountIndex?: number;
 	accountCount?: number;
+	accountEmail?: string;
 	accountLabel?: string;
 	planType?: string;
 	activeLimit?: number;
@@ -226,6 +227,8 @@ export function isTuiQuotaSnapshot(value: unknown): value is TuiQuotaSnapshot {
 		(value.source === "headers" || value.source === "usage") &&
 		isOptionalFiniteNumber(value.accountIndex) &&
 		isOptionalFiniteNumber(value.accountCount) &&
+		(value.accountEmail === undefined ||
+			typeof value.accountEmail === "string") &&
 		(value.accountLabel === undefined ||
 			typeof value.accountLabel === "string") &&
 		(value.planType === undefined || typeof value.planType === "string") &&

@@ -619,6 +619,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 					fingerprint: createUsageAccountFingerprint(account),
 					accountIndex: account.index + 1,
 					accountCount,
+					accountEmail: account.email?.trim() || undefined,
 					accountLabel: formatAccountLabel(account, account.index),
 				});
 				if (!snapshot) return;

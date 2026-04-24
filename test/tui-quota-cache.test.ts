@@ -27,6 +27,7 @@ describe("TUI quota cache", () => {
 			fingerprint: "acct",
 			accountIndex: 2,
 			accountCount: 3,
+			accountEmail: "user2@example.com",
 			accountLabel: "Account 2",
 			fetchedAt: 1000,
 		});
@@ -37,6 +38,7 @@ describe("TUI quota cache", () => {
 				source: "headers",
 				accountIndex: 2,
 				accountCount: 3,
+				accountEmail: "user2@example.com",
 				accountLabel: "Account 2",
 				planType: "plus",
 				activeLimit: 40,

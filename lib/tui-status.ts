@@ -25,6 +25,7 @@ export type CompactQuotaStatus =
 			fingerprint?: string;
 			accountIndex?: number;
 			accountCount?: number;
+			accountEmail?: string;
 			accountLabel?: string;
 			planType?: string;
 			activeLimit?: number;
@@ -53,6 +54,8 @@ const variantSuffixes: ReasoningVariant[] = [
 	"none",
 ];
 const STATUS_SEPARATOR = ` ${String.fromCharCode(183)} `;
+const WARNING_LIMIT_LEFT_PERCENT = 25;
+const DANGER_LIMIT_LEFT_PERCENT = 10;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -186,10 +189,27 @@ function isPercent(value: number | null): value is number {
 	return typeof value === "number" && Number.isFinite(value);
 }
 
-function formatQuotaLimit(limit: CompactQuotaLimit): string | undefined {
+function extractEmailFromLabel(label: string | undefined): string | undefined {
+	const match = label?.match(/[^\s(),<>]+@[^\s(),<>]+/);
+	return match?.[0];
+}
+
+function formatAccountEmail(email: string | undefined): string | undefined {
+	const trimmed = email?.trim() || undefined;
+	return trimmed ? `[${trimmed}]` : undefined;
+}
+
+function formatQuotaLimit(
+	limit: CompactQuotaLimit,
+	resetLimit: CompactQuotaLimit | undefined,
+	includeReset: boolean,
+): string | undefined {
 	if (!isPercent(limit.leftPercent)) return undefined;
 	const label = limit.label.trim() || "quota";
-	return `${label} ${limit.leftPercent}%`;
+	const base = `${label} ${limit.leftPercent}%`;
+	const reset =
+		includeReset && limit === resetLimit ? formatResetTime(limit.resetAtMs) : undefined;
+	return reset ? `${base} resets ${reset}` : base;
 }
 
 function formatAccountHint(quota: CompactQuotaStatus): string | undefined {
@@ -207,14 +227,45 @@ function formatAccountHint(quota: CompactQuotaStatus): string | undefined {
 	) {
 		return undefined;
 	}
+	const email =
+		formatAccountEmail(quota.accountEmail) ??
+		formatAccountEmail(extractEmailFromLabel(quota.accountLabel));
+	if (email) return email;
 	return `A${quota.accountIndex}`;
+}
+
+function findResetLimitForStatus(
+	limits: readonly CompactQuotaLimit[],
+): CompactQuotaLimit | undefined {
+	const eligible = limits.filter((limit) => isPercent(limit.leftPercent));
+	if (eligible.length === 0) return undefined;
+	const lowest = eligible.reduce((current, limit) =>
+		(limit.leftPercent ?? 100) < (current.leftPercent ?? 100)
+			? limit
+			: current,
+	);
+	if ((lowest.leftPercent ?? 100) > WARNING_LIMIT_LEFT_PERCENT) {
+		return undefined;
+	}
+	return formatResetTime(lowest.resetAtMs) ? lowest : undefined;
+}
+
+function formatQuotaParts(
+	quota: CompactQuotaStatus,
+	includeReset: boolean,
+): string[] {
+	if (quota.type !== "ready") return [];
+	const resetLimit = includeReset
+		? findResetLimitForStatus(quota.limits)
+		: undefined;
+	return quota.limits
+		.map((limit) => formatQuotaLimit(limit, resetLimit, includeReset))
+		.filter((part): part is string => Boolean(part));
 }
 
 function formatQuota(quota: CompactQuotaStatus): string | undefined {
 	if (quota.type === "ready") {
-		const parts = quota.limits
-			.map(formatQuotaLimit)
-			.filter((part): part is string => Boolean(part));
+		const parts = formatQuotaParts(quota, true);
 		return parts.length > 0 ? parts.join(STATUS_SEPARATOR) : undefined;
 	}
 	if (quota.type === "missing") return "no auth";
@@ -224,11 +275,11 @@ function formatQuota(quota: CompactQuotaStatus): string | undefined {
 
 function maxStatusChars(width: number | undefined): number {
 	if (!width || !Number.isFinite(width)) return 32;
-	if (width >= 120) return 34;
-	if (width >= 96) return 30;
-	if (width >= 78) return 24;
-	if (width >= 60) return 18;
-	return 10;
+	if (width >= 120) return 48;
+	if (width >= 96) return 40;
+	if (width >= 78) return 32;
+	if (width >= 60) return 22;
+	return 12;
 }
 
 export function formatPromptStatusText(params: {
@@ -238,13 +289,28 @@ export function formatPromptStatusText(params: {
 }): string {
 	const variant = params.variant;
 	const account = formatAccountHint(params.quota);
-	const quota = formatQuota(params.quota);
+	const quotaParts = formatQuotaParts(params.quota, true);
+	const quotaPartsWithoutReset = formatQuotaParts(params.quota, false);
+	const quota = quotaParts.length > 0
+		? quotaParts.join(STATUS_SEPARATOR)
+		: formatQuota(params.quota);
+	const primaryQuota = quotaParts[0] ?? quota;
+	const quotaWithoutReset = quotaPartsWithoutReset.length > 0
+		? quotaPartsWithoutReset.join(STATUS_SEPARATOR)
+		: quota;
+	const primaryQuotaWithoutReset = quotaPartsWithoutReset[0] ?? primaryQuota;
 	const candidates = [
-		[variant, account, quota].filter(Boolean).join(STATUS_SEPARATOR),
 		[account, quota].filter(Boolean).join(STATUS_SEPARATOR),
+		[account, primaryQuota].filter(Boolean).join(STATUS_SEPARATOR),
+		quota,
+		primaryQuota,
+		[account, quotaWithoutReset].filter(Boolean).join(STATUS_SEPARATOR),
+		[account, primaryQuotaWithoutReset].filter(Boolean).join(STATUS_SEPARATOR),
+		quotaWithoutReset,
+		primaryQuotaWithoutReset,
+		[variant, account, quota].filter(Boolean).join(STATUS_SEPARATOR),
 		[variant, quota].filter(Boolean).join(STATUS_SEPARATOR),
 		variant,
-		quota,
 		account,
 	].filter((candidate): candidate is string => Boolean(candidate));
 	const maxChars = maxStatusChars(params.width);
@@ -268,8 +334,8 @@ export function resolveQuotaPromptTone(
 			.filter(isPercent);
 		if (percents.length === 0) return "unknown";
 		const lowest = Math.min(...percents);
-		if (lowest <= 10) return "danger";
-		if (lowest <= 25) return "warning";
+		if (lowest <= DANGER_LIMIT_LEFT_PERCENT) return "danger";
+		if (lowest <= WARNING_LIMIT_LEFT_PERCENT) return "warning";
 		return "normal";
 	}
 	if (quota.type === "loading") return "unknown";
@@ -298,6 +364,19 @@ function formatReset(resetAtMs: number | undefined): string | undefined {
 		day: "2-digit",
 	});
 	return `${time} on ${day}`;
+}
+
+function formatResetTime(resetAtMs: number | undefined): string | undefined {
+	if (!resetAtMs || !Number.isFinite(resetAtMs) || resetAtMs <= 0) {
+		return undefined;
+	}
+	const date = new Date(resetAtMs);
+	if (!Number.isFinite(date.getTime())) return undefined;
+	return date.toLocaleTimeString(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	});
 }
 
 function formatUpdatedAge(fetchedAt: number | undefined, now: number): string {

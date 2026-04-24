@@ -90,10 +90,25 @@ function toCompactQuotaStatus(
 		fingerprint: stored.fingerprint,
 		accountIndex: stored.accountIndex,
 		accountCount: stored.accountCount,
+		accountEmail: stored.accountEmail,
 		accountLabel: stored.accountLabel,
 		planType: stored.planType,
 		activeLimit: stored.activeLimit,
 	};
+}
+
+function getQuotaSnapshotRevision(snapshot: {
+	source?: string;
+	fetchedAt?: number;
+}): string | undefined {
+	if (
+		!snapshot.source ||
+		typeof snapshot.fetchedAt !== "number" ||
+		!Number.isFinite(snapshot.fetchedAt)
+	) {
+		return undefined;
+	}
+	return `${snapshot.source}:${snapshot.fetchedAt}`;
 }
 
 function toCompactQuotaLimit(
@@ -204,6 +219,7 @@ async function refreshQuotaStatusInner(
 				source: "usage",
 				accountIndex: selection.index + 1,
 				accountCount: storage.accounts.length,
+				accountEmail: selection.account.email?.trim() || undefined,
 				accountLabel: formatTuiAccountLabel(
 					selection.account,
 					selection.index,
@@ -264,9 +280,16 @@ function createPromptStatus(
 		type: "loading",
 	});
 	let currentFingerprint: string | undefined;
+	let currentSnapshotRevision: string | undefined;
 	const applyQuota = (next: CompactQuotaStatus): void => {
-		if (next.type === "ready") currentFingerprint = next.fingerprint;
-		if (next.type === "missing") currentFingerprint = undefined;
+		if (next.type === "ready") {
+			currentFingerprint = next.fingerprint;
+			currentSnapshotRevision = getQuotaSnapshotRevision(next);
+		}
+		if (next.type === "missing") {
+			currentFingerprint = undefined;
+			currentSnapshotRevision = undefined;
+		}
 		setQuota(next);
 	};
 	const refresh = (): void => {
@@ -285,14 +308,37 @@ function createPromptStatus(
 
 	refresh();
 	const interval = setInterval(refresh, REFRESH_INTERVAL_MS);
-	const accountInterval = setInterval(() => {
-		void resolveActiveQuotaFingerprint().then((fingerprint) => {
-			if (fingerprint === currentFingerprint) return;
-			currentFingerprint = fingerprint;
-			setQuota({ type: "loading" });
-			refresh();
+	let cachePollInFlight = false;
+	const pollSharedQuotaCache = (): void => {
+		if (cachePollInFlight) return;
+		cachePollInFlight = true;
+		void (async () => {
+			const fingerprint = await resolveActiveQuotaFingerprint();
+			if (!fingerprint) {
+				if (currentFingerprint) applyQuota({ type: "missing" });
+				return;
+			}
+			if (fingerprint !== currentFingerprint) {
+				currentFingerprint = fingerprint;
+				currentSnapshotRevision = undefined;
+				setQuota({ type: "loading" });
+				refresh();
+				return;
+			}
+			const shared = await readSharedQuotaStatus(api, fingerprint);
+			if (!shared) return;
+			const revision = getQuotaSnapshotRevision(shared);
+			if (!revision || revision === currentSnapshotRevision) return;
+			writeStoredQuotaStatus(api, shared);
+			applyQuota(toCompactQuotaStatus(shared, false));
+		})().finally(() => {
+			cachePollInFlight = false;
 		});
-	}, ACCOUNT_POLL_INTERVAL_MS);
+	};
+	const accountInterval = setInterval(
+		pollSharedQuotaCache,
+		ACCOUNT_POLL_INTERVAL_MS,
+	);
 	const disposeMessageUpdated = api.event.on("message.updated", (event) => {
 		if (shouldRefreshQuotaForEvent(event)) scheduleRefresh();
 	});

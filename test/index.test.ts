@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@opencode-ai/plugin/tool", () => {
@@ -2426,6 +2430,71 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		});
 
 		expect(response.status).toBe(200);
+	});
+
+	it("records TUI quota cache from successful Codex response headers", async () => {
+		const previousStateDir = process.env.OPENCODE_STATE_DIR;
+		const stateDir = await mkdtemp(join(tmpdir(), "tui-quota-index-"));
+		process.env.OPENCODE_STATE_DIR = stateDir;
+		try {
+			globalThis.fetch = vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ content: "test" }), {
+					status: 200,
+					headers: {
+						"x-codex-primary-used-percent": "6",
+						"x-codex-primary-window-minutes": "300",
+						"x-codex-secondary-used-percent": "17",
+						"x-codex-secondary-window-minutes": "10080",
+						"x-codex-plan-type": "plus",
+						"x-codex-active-limit": "40",
+					},
+				}),
+			);
+
+			const { sdk } = await setupPlugin();
+			const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+				method: "POST",
+				body: JSON.stringify({ model: "gpt-5.1" }),
+			});
+			const { getTuiQuotaCachePath, readTuiQuotaSnapshot } = await import(
+				"../lib/tui-quota-cache.js"
+			);
+			const snapshot = await readTuiQuotaSnapshot(getTuiQuotaCachePath(stateDir));
+
+			expect(response.status).toBe(200);
+			expect(snapshot).toEqual(
+				expect.objectContaining({
+					source: "headers",
+					accountIndex: 1,
+					accountCount: 1,
+					accountEmail: "user@example.com",
+					accountLabel: "Account 1",
+					planType: "plus",
+					activeLimit: 40,
+				}),
+			);
+			expect(snapshot?.limits).toEqual([
+				expect.objectContaining({
+					label: "5h",
+					leftPercent: 94,
+					usedPercent: 6,
+					windowMinutes: 300,
+				}),
+				expect.objectContaining({
+					label: "7d",
+					leftPercent: 83,
+					usedPercent: 17,
+					windowMinutes: 10080,
+				}),
+			]);
+		} finally {
+			if (previousStateDir === undefined) {
+				delete process.env.OPENCODE_STATE_DIR;
+			} else {
+				process.env.OPENCODE_STATE_DIR = previousStateDir;
+			}
+			await rm(stateDir, { recursive: true, force: true });
+		}
 	});
 
 	it("handles network errors and rotates to next account", async () => {
