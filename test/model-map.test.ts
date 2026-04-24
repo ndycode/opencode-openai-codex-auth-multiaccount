@@ -38,13 +38,19 @@ describe("Model Map Module", () => {
 	      expect(MODEL_MAP["gpt-5.4-2026-03-05-high"]).toBe("gpt-5.4");
 	    });
 
-	    it("contains GPT-5.5 models", () => {
+	    it("contains GPT-5.5 models including the fast variant", () => {
 	      expect(MODEL_MAP["gpt-5.5"]).toBe("gpt-5.5");
 	      expect(MODEL_MAP["gpt-5.5-high"]).toBe("gpt-5.5");
 	      expect(MODEL_MAP["gpt-5.5-xhigh"]).toBe("gpt-5.5");
-	      expect(MODEL_MAP["gpt-5.5-pro"]).toBe("gpt-5.5-pro");
-	      expect(MODEL_MAP["gpt-5.5-pro-high"]).toBe("gpt-5.5-pro");
-	      expect(MODEL_MAP["gpt-5.5-pro-xhigh"]).toBe("gpt-5.5-pro");
+	      expect(MODEL_MAP["gpt-5.5-fast"]).toBe("gpt-5.5");
+	      expect(MODEL_MAP["gpt-5.5-fast-high"]).toBe("gpt-5.5");
+	      expect(MODEL_MAP["gpt-5.5-fast-xhigh"]).toBe("gpt-5.5");
+	    });
+
+	    it("does not map GPT-5.5 Pro (ChatGPT-only per 2026-04-23 launch)", () => {
+	      expect(MODEL_MAP["gpt-5.5-pro"]).toBeUndefined();
+	      expect(MODEL_MAP["gpt-5.5-pro-high"]).toBeUndefined();
+	      expect(MODEL_MAP["gpt-5.5-pro-xhigh"]).toBeUndefined();
 	    });
 
     it("contains GPT-5.4 Pro models (medium/high/xhigh only)", () => {
@@ -231,7 +237,6 @@ describe("Model Map Module", () => {
         "gpt-5.1",
         "gpt-5.2",
         "gpt-5.5",
-        "gpt-5.5-pro",
         "gpt-5.4",
         "gpt-5.4-pro",
         "gpt-5.4-mini",

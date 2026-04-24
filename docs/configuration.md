@@ -172,7 +172,7 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `unsupportedCodexPolicy` | `strict` | unsupported-model behavior: `strict` (return entitlement error) or `fallback` (retry with configured fallback chain) |
 | `fallbackOnUnsupportedCodexModel` | `false` | legacy fallback toggle mapped to `unsupportedCodexPolicy` (prefer using `unsupportedCodexPolicy`) |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | legacy compatibility toggle for the `gpt-5.3-codex -> gpt-5.2-codex` edge when generic fallback is enabled |
-| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`; default includes `gpt-5.5 -> gpt-5.4` and `gpt-5.5-pro -> gpt-5.5`) |
+| `unsupportedCodexFallbackChain` | `{}` | optional per-model fallback-chain override (map of `model -> [fallback1, fallback2, ...]`; default includes `gpt-5.5 -> gpt-5.4`). `gpt-5.5` auto-fallback is on by default during the rollout; set `CODEX_AUTH_DISABLE_GPT55_AUTO_FALLBACK=1` to opt out. GPT-5.5 Pro is not mapped: it is ChatGPT-only per OpenAI's 2026-04-23 launch. |
 | `sessionRecovery` | `true` | auto-recover from common api errors |
 | `autoResume` | `true` | auto-resume after thinking block recovery |
 | `tokenRefreshSkewMs` | `60000` | refresh tokens this many ms before expiry |

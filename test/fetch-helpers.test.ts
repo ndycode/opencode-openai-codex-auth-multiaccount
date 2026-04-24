@@ -457,7 +457,11 @@ describe('Fetch Helpers Module', () => {
 			expect(fallback).toBeUndefined();
 		});
 
-		it('falls back from gpt-5.5-pro to GPT-5.5 when fallback policy is enabled', () => {
+		it('collapses gpt-5.5-pro to gpt-5.4 via the GPT-5.5 canonicalization step', () => {
+			// GPT-5.5 Pro is ChatGPT-only per the 2026-04-23 launch. If a user still
+			// types `gpt-5.5-pro`, canonicalizeModelName collapses it to gpt-5.5 so the
+			// gpt-5.5 -> gpt-5.4 fallback chain rescues the request instead of burning
+			// through every pooled account with entitlement 400s.
 			const fallback = resolveUnsupportedCodexFallbackModel({
 				requestedModel: 'gpt-5.5-pro',
 				errorBody: {
@@ -471,7 +475,7 @@ describe('Fetch Helpers Module', () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
-			expect(fallback).toBe('gpt-5.5');
+			expect(fallback).toBe('gpt-5.4');
 		});
 
 		it('falls back from GPT-5.5 to gpt-5.4 when GPT-5.5 is unsupported', () => {
@@ -508,7 +512,9 @@ describe('Fetch Helpers Module', () => {
 			expect(fallback).toBeUndefined();
 		});
 
-		it('does not fallback from gpt-5.5-pro when GPT-5.5 was already attempted', () => {
+		it('does not loop through gpt-5.5-pro once gpt-5.4 has been attempted', () => {
+			// Pro canonicalizes to gpt-5.5, so once gpt-5.4 is in attemptedModels the
+			// chain has no further targets and the rotation returns undefined.
 			const fallback = resolveUnsupportedCodexFallbackModel({
 				requestedModel: 'gpt-5.5-pro',
 				errorBody: {
@@ -518,7 +524,7 @@ describe('Fetch Helpers Module', () => {
 							"The 'gpt-5.5-pro' model is not supported when using Codex with a ChatGPT account.",
 					},
 				},
-				attemptedModels: ['gpt-5.5-pro', 'gpt-5.5'],
+				attemptedModels: ['gpt-5.5-pro', 'gpt-5.5', 'gpt-5.4'],
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
