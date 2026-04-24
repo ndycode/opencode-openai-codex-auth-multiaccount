@@ -4,7 +4,6 @@ import { renderCodexOpenCodeBridge } from "../prompts/codex-opencode-bridge.js";
 import { getOpenCodeCodexPrompt } from "../prompts/opencode-codex.js";
 import {
 	GPT_55_MODEL_ID,
-	GPT_55_PRO_MODEL_ID,
 	getNormalizedModel,
 } from "./helpers/model-map.js";
 import {
@@ -82,12 +81,9 @@ export function normalizeModel(model: string | undefined): string {
 		return "gpt-5-codex";
 	}
 
-	// 4. GPT-5.5 Pro (release model)
-	if (/\bgpt(?:-| )5\.5(?:-| )pro(?:\b|[- ])/.test(normalized)) {
-		return GPT_55_PRO_MODEL_ID;
-	}
-
-	// 5. GPT-5.5 (general purpose release)
+	// 4. GPT-5.5 (general purpose release)
+	// GPT-5.5 Pro is ChatGPT-only per the 2026-04-23 launch and is not mapped here;
+	// any `gpt-5.5-pro*` alias collapses to the Codex-supported `gpt-5.5` slug.
 	if (/\bgpt(?:-| )5\.5(?:\b|[- ])/.test(normalized)) {
 		return GPT_55_MODEL_ID;
 	}
@@ -498,12 +494,13 @@ export function getReasoningConfig(
 		normalizedName.includes("gpt-5.2-codex") ||
 		normalizedName.includes("gpt 5.2 codex");
 
-	// GPT-5.4/5.5 Pro support xhigh but not "none".
-	const isGpt55Pro = canonicalModelName === GPT_55_PRO_MODEL_ID;
+	// GPT-5.4 Pro supports xhigh but not "none".
+	// GPT-5.5 Pro is intentionally absent: per OpenAI's 2026-04-23 launch it is
+	// ChatGPT-only, not a Codex model, so the plugin never routes `gpt-5.5-pro*`
+	// requests to the Codex backend.
 	const isProFamily =
 		normalizedName.includes("gpt-5.4-pro") ||
-		normalizedName.includes("gpt 5.4 pro") ||
-		isGpt55Pro;
+		normalizedName.includes("gpt 5.4 pro");
 
 	// GPT-5.4 Mini is a first-class explicit model.
 	const isGpt54Mini = canonicalModelName === "gpt-5.4-mini";
@@ -525,7 +522,6 @@ export function getReasoningConfig(
 		!isGpt52Codex;
 	const canonicalSupportsXhigh =
 		canonicalModelName === GPT_55_MODEL_ID ||
-		canonicalModelName === GPT_55_PRO_MODEL_ID ||
 		canonicalModelName === "gpt-5.4" ||
 		canonicalModelName === "gpt-5.4-mini" ||
 		canonicalModelName === "gpt-5.4-nano" ||

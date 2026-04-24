@@ -131,9 +131,9 @@ export function getModelFamily(normalizedModel: string): ModelFamily {
 	) {
 		return "codex";
 	}
-	if (/\bgpt(?:-| )5\.5(?:-| )pro(?:\b|[- ])/i.test(normalizedModel)) {
-		return "gpt-5.4-pro";
-	}
+	// GPT-5.5 Pro is ChatGPT-only per the 2026-04-23 launch and is not
+	// routed through Codex. Any `gpt-5.5-pro*` that still reaches this path
+	// (through aliases or user config) gets the general 5.4 prompt family.
 	if (/\bgpt(?:-| )5\.5(?:\b|[- ])/i.test(normalizedModel)) {
 		return "gpt-5.4";
 	}
