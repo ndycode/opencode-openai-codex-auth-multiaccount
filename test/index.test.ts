@@ -37,7 +37,7 @@ vi.mock("../lib/auth/auth.js", () => ({
 			state: stateMatch?.[1],
 		};
 	}),
-	REDIRECT_URI: "http://127.0.0.1:1455/auth/callback",
+	REDIRECT_URI: "http://localhost:1455/auth/callback",
 }));
 
 vi.mock("../lib/refresh-queue.js", () => ({
@@ -594,7 +594,7 @@ describe("OpenAIOAuthPlugin", () => {
 			};
 
 			const flow = await manualMethod.authorize();
-			const invalidInput = "http://127.0.0.1:1455/auth/callback?code=abc123&state=wrong-state";
+			const invalidInput = "http://localhost:1455/auth/callback?code=abc123&state=wrong-state";
 
 			expect(flow.validate(invalidInput)).toContain("state mismatch");
 			const result = await flow.callback(invalidInput);

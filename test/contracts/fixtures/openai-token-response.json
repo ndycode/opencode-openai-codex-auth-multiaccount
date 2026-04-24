@@ -4,5 +4,5 @@
   "id_token": "FAKE.JWT.FOR_CONTRACT_TESTS",
   "token_type": "Bearer",
   "expires_in": 3600,
-  "scope": "openid profile email offline_access"
+  "scope": "openid profile email offline_access api.connectors.read api.connectors.invoke"
 }

@@ -81,7 +81,7 @@ Then choose:
 1. `OpenAI`
 2. `Codex OAuth (ChatGPT Plus/Pro)`
 
-The browser-based OAuth flow uses the same local callback port as Codex CLI: `http://127.0.0.1:1455/auth/callback`.
+The browser-based OAuth flow uses the same local callback port as Codex CLI. The authorize redirect is `http://localhost:1455/auth/callback`, while the local callback server binds `127.0.0.1:1455`.
 
 ### Remote or Headless Login
 

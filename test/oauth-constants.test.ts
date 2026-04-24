@@ -13,13 +13,12 @@ describe("oauth callback constants", () => {
 		expect(OAUTH_CALLBACK_PATH).toBe("/auth/callback");
 		expect(OAUTH_CALLBACK_LOOPBACK_HOST).toBe("127.0.0.1");
 		expect(OAUTH_CALLBACK_BIND_URL).toBe(`http://127.0.0.1:${OAUTH_CALLBACK_PORT}`);
-		// RFC 8252 §7.3: redirect URI MUST use the 127.0.0.1 literal, matching
-		// the host the callback server binds to. `localhost` would resolve via
-		// DNS and is not equivalent.
+		// Codex's OAuth client is registered with localhost in redirect_uri, while
+		// the local server binds the concrete IPv4 loopback interface.
 		expect(REDIRECT_URI).toBe(
-			`http://${OAUTH_CALLBACK_LOOPBACK_HOST}:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`,
+			`http://localhost:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`,
 		);
-		expect(REDIRECT_URI).toContain("127.0.0.1");
-		expect(REDIRECT_URI).not.toContain("localhost");
+		expect(REDIRECT_URI).toContain("localhost");
+		expect(OAUTH_CALLBACK_BIND_URL).toContain(OAUTH_CALLBACK_LOOPBACK_HOST);
 	});
 });

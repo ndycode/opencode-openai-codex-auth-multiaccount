@@ -13,11 +13,11 @@ import { safeParseOAuthTokenResponse } from "../schemas.js";
 export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 export const TOKEN_URL = "https://auth.openai.com/oauth/token";
-// RFC 8252 §7.3: the redirect URI MUST use the exact loopback IP literal that
-// the callback server binds to. Using `localhost` here would resolve via DNS
-// and could be hijacked or mismatch the bind host on dual-stack systems.
-export const REDIRECT_URI = `http://${OAUTH_CALLBACK_LOOPBACK_HOST}:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
-export const SCOPE = "openid profile email offline_access";
+// The current Codex OAuth client registration expects localhost in the
+// authorize redirect_uri, while the callback server still binds the concrete
+// 127.0.0.1 loopback interface for local-only listening.
+export const REDIRECT_URI = `http://localhost:${OAUTH_CALLBACK_PORT}${OAUTH_CALLBACK_PATH}`;
+export const SCOPE = "openid profile email offline_access api.connectors.read api.connectors.invoke";
 
 /**
  * Generate a random state value for OAuth flow

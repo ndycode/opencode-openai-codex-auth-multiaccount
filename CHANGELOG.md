@@ -8,7 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- (placeholder for next release)
+- GPT-5.5 release activation for OpenCode selectors such as `openai/gpt-5.5-medium` and `openai/gpt-5.5-high`.
+
+### Changed
+- `gpt-5` and `gpt-5.5*` aliases now normalize to the Codex backend release id `gpt-5.5-20260423`; `gpt-5.5-pro*` normalizes to `gpt-5.5-pro-20260423`.
+- Bare `gpt-5` / `gpt-5.5` selectors now inherit the GPT-5.5 general-family default reasoning effort of `high`; set `reasoningEffort: "medium"` or use `openai/gpt-5.5-medium` to keep medium reasoning explicit.
+- OAuth login now matches the current Codex authorize request shape by using the `localhost` redirect URI and connector scopes expected by OpenAI auth.
+
+### Fixed
+- GPT-5.5 unsupported-model fallback now handles backend 400 payloads that report the message in top-level `detail`.
 
 ## [6.1.1] - 2026-04-22
 
