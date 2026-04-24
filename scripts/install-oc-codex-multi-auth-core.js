@@ -22,6 +22,7 @@ function printHelp() {
 	console.log(`Usage: ${PACKAGE_NAME} [--modern|--full|--legacy] [--dry-run] [--no-cache-clear]\n\n` +
 		"Default behavior:\n" +
 		"  - Installs/updates global config at ~/.config/opencode/opencode.json\n" +
+		"  - Enables the prompt status bar TUI plugin at ~/.config/opencode/tui.json\n" +
 		"  - Uses compact UI config by default (9 base OAuth models + variant picker presets)\n" +
 		"  - Ensures plugin is unpinned (latest)\n" +
 		"  - Clears OpenCode plugin cache\n\n" +
@@ -69,6 +70,7 @@ function buildPaths(homeDir) {
 	return {
 		configDir,
 		configPath: join(configDir, "opencode.json"),
+		tuiConfigPath: join(configDir, "tui.json"),
 		cacheDir,
 		cacheNodeModulesPaths: getManagedPackageNames().map((name) => join(cacheDir, "node_modules", name)),
 		cachePackagePaths: getManagedPackageNames().map((name) => join(cacheDir, "packages", `${name}@latest`)),
@@ -137,6 +139,16 @@ function normalizePluginList(list) {
 	const entries = Array.isArray(list) ? list.filter(Boolean) : [];
 	const filtered = entries.filter((entry) => !isManagedPluginEntry(entry));
 	return [...filtered, PACKAGE_NAME];
+}
+
+function mergeTuiConfig(existingConfig) {
+	const existing = isPlainObject(existingConfig) ? { ...existingConfig } : {};
+	const next = { ...existing };
+	if (typeof next.$schema !== "string" || !next.$schema.trim()) {
+		next.$schema = "https://opencode.ai/tui.json";
+	}
+	next.plugin = normalizePluginList(existing.plugin);
+	return next;
 }
 
 function formatJson(obj) {
@@ -476,15 +488,39 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 		log("No existing config found. Creating new global config.");
 	}
 
+	let nextTuiConfig = mergeTuiConfig(undefined);
+	let existingTuiConfig;
+	if (existsSync(paths.tuiConfigPath)) {
+		const backupPath = await backupConfig(paths.tuiConfigPath, dryRun);
+		log(`${dryRun ? "[dry-run] Would create backup" : "Backup created"}: ${backupPath}`);
+
+		try {
+			const existing = await readJson(paths.tuiConfigPath);
+			existingTuiConfig = existing;
+			nextTuiConfig = mergeTuiConfig(existing);
+		} catch (error) {
+			log(`Warning: Could not parse existing TUI config (${formatErrorForLog(error)}). Replacing with minimal TUI config.`);
+			existingTuiConfig = undefined;
+			nextTuiConfig = mergeTuiConfig(undefined);
+		}
+	} else {
+		log("No existing TUI config found. Creating new global TUI config.");
+	}
+
 	let wrote = false;
 	if (dryRun) {
 		log(`[dry-run] Would write ${paths.configPath} using ${configMode} config`);
 		log(`[dry-run] Diff for ${paths.configPath}:`);
 		log(formatConfigDiff(existingConfig, nextConfig));
+		log(`[dry-run] Would write ${paths.tuiConfigPath} with the TUI status plugin`);
+		log(`[dry-run] Diff for ${paths.tuiConfigPath}:`);
+		log(formatConfigDiff(existingTuiConfig, nextTuiConfig));
 	} else {
 		await writeFileAtomic(paths.configPath, formatJson(nextConfig));
+		await writeFileAtomic(paths.tuiConfigPath, formatJson(nextTuiConfig));
 		wrote = true;
 		log(`Wrote ${paths.configPath} (${configMode} config)`);
+		log(`Wrote ${paths.tuiConfigPath} (TUI status plugin)`);
 	}
 
 	await clearCache(paths, dryRun, skipCacheClear);
@@ -506,6 +542,7 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 		action: "install",
 		configMode,
 		configPath: paths.configPath,
+		tuiConfigPath: paths.tuiConfigPath,
 		dryRun: Boolean(dryRun),
 		wrote,
 	};
@@ -518,6 +555,7 @@ export const __test = {
 	formatConfigDiff,
 	mergeFullTemplate,
 	mergeOpenaiProvider,
+	mergeTuiConfig,
 	parseCliArgs,
 	writeFileAtomic,
 	renameWithWindowsRetry,

@@ -6,7 +6,7 @@ export default [
     ignores: ["dist/**", "node_modules/**", "winston/**", "*.cjs", "*.mjs"],
   },
   {
-    files: ["index.ts", "lib/**/*.ts"],
+    files: ["index.ts", "tui.ts", "lib/**/*.ts"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

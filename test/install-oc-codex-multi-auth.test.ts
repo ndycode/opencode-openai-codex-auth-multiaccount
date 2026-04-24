@@ -166,6 +166,65 @@ describe("install-oc-codex-multi-auth script", () => {
 		expect(saved.provider.openai.models["gpt-5.5-fast-medium"]).toBeDefined();
 	});
 
+	it("merges tui.json plugin entries without clobbering plugin_enabled", async () => {
+		vi.resetModules();
+		tempHome = await createTempHome();
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
+		const configDir = join(tempHome, ".config", "opencode");
+		const configPath = join(configDir, "opencode.json");
+		const tuiConfigPath = join(configDir, "tui.json");
+
+		await mkdir(configDir, { recursive: true });
+		await writeFile(configPath, JSON.stringify({ plugin: [] }, null, 2), "utf-8");
+		await writeFile(
+			tuiConfigPath,
+			JSON.stringify(
+				{
+					plugin: [
+						"other-tui-plugin",
+						"oc-chatgpt-multi-auth@old",
+						"file:///C:/Users/neil/pkg/node_modules/oc-codex-multi-auth",
+					],
+					plugin_enabled: {
+						"other.id": false,
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		await expect(
+			runInstaller(["--no-cache-clear"], {
+				env: {
+					...process.env,
+					HOME: tempHome,
+					USERPROFILE: tempHome,
+				},
+			}),
+		).resolves.toMatchObject({
+			action: "install",
+			tuiConfigPath,
+		});
+
+		const saved = JSON.parse(await readFile(tuiConfigPath, "utf-8")) as {
+			$schema: string;
+			plugin: string[];
+			plugin_enabled: Record<string, boolean>;
+		};
+		expect(saved.$schema).toBe("https://opencode.ai/tui.json");
+		expect(saved.plugin).toEqual(["other-tui-plugin", "oc-codex-multi-auth"]);
+		expect(saved.plugin_enabled).toEqual({ "other.id": false });
+		const configEntries = await readdir(configDir);
+		expect(configEntries).toEqual(
+			expect.arrayContaining([
+				"tui.json",
+				expect.stringMatching(/^tui\.json\.bak-/),
+			]),
+		);
+	});
+
 	it("parses BOM-prefixed existing config and preserves custom keys on merge", async () => {
 		vi.resetModules();
 		tempHome = await createTempHome();

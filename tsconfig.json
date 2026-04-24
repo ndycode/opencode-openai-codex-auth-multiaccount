@@ -25,6 +25,7 @@
   },
   "include": [
     "index.ts",
+    "tui.ts",
     "lib/**/*.ts",
     "lib/**/*.d.ts"
   ],
