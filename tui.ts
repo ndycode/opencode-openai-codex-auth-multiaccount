@@ -434,7 +434,6 @@ const module: TuiPluginModule = {
 
 		api.slots.register({
 			slots: {
-				home_prompt_right: () => createPromptStatus(api, solid),
 				session_prompt_right: () => createPromptStatus(api, solid),
 			},
 		});
