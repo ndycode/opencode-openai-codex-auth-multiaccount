@@ -30,10 +30,10 @@ opencode run "Explain this repository" --model=openai/gpt-5.5-medium
 The installer updates `~/.config/opencode/opencode.json`, backs up the previous config, normalizes the plugin entry to `oc-codex-multi-auth`, and clears the cached plugin copy so OpenCode reinstalls the latest package.
 
 By default, the installer writes a full catalog config so you get both:
-- modern base model entries such as `gpt-5.5` for `--variant` workflows
-- explicit preset entries such as `gpt-5.5-medium` / `gpt-5.5-high` so the full shipped catalog is visible directly in pickers
+- modern base model entries such as `gpt-5.5` and `gpt-5.5-fast` for `--variant` workflows
+- explicit preset entries such as `gpt-5.5-medium` / `gpt-5.5-fast-medium` / `gpt-5.5-high` so the full shipped catalog is visible directly in pickers
 
-Tested live on OpenCode `1.14.22`: use explicit GPT-5.5 selectors like `openai/gpt-5.5-medium` or `openai/gpt-5.5-high` for real-session verification. Bare `openai/gpt-5.5 --variant=...` may or may not work depending on your OpenCode release.
+Tested live on OpenCode `1.14.22`: use explicit GPT-5.5 selectors like `openai/gpt-5.5-medium`, `openai/gpt-5.5-fast-medium`, or `openai/gpt-5.5-high` for real-session verification. Bare `openai/gpt-5.5 --variant=...` may or may not work depending on your OpenCode release.
 
 If you prefer the compact variant-only config on OpenCode `v1.0.210+`, use:
 
@@ -115,11 +115,11 @@ The repository ships two supported templates:
 | `v1.0.209` and earlier | [`config/opencode-legacy.json`](../config/opencode-legacy.json) |
 
 The templates include the supported GPT-5/Codex families, required `store: false` handling, and `reasoning.encrypted_content` for multi-turn sessions.
-Current templates expose 9 shipped base model families and 34 shipped presets overall (34 modern variants or 34 legacy explicit entries).
+Current templates expose 9 shipped base model families and 36 shipped presets overall (36 modern variants or 36 legacy explicit entries).
 
 On OpenCode `v1.0.210+`, the modern template intentionally shows 9 base model entries because the additional presets are selected through `--variant` instead of separate model keys.
 
-`gpt-5.5-pro` ships in the templates but can still be entitlement-gated by your workspace. Add entitlement-gated Spark variants manually only when your workspace supports them.
+`gpt-5.5-pro` is not shipped in the Codex templates because it is ChatGPT-only, not Codex-routable. Add entitlement-gated Spark variants manually only when your workspace supports them.
 
 ## Verify the Setup
 
@@ -128,6 +128,7 @@ Run one of these commands:
 ```bash
 # Recommended current GPT-5.5 path
 opencode run "Create a short TODO list for this repo" --model=openai/gpt-5.5-medium
+opencode run "Create a short TODO list for this repo" --model=openai/gpt-5.5-fast-medium
 opencode run "Inspect the retry logic and summarize it" --model=openai/gpt-5-codex --variant=high
 
 # Compact modern template, only if your OpenCode release exposes bare base entries

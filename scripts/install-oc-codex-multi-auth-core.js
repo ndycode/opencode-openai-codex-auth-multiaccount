@@ -17,7 +17,7 @@ function printHelp() {
 	console.log(`Usage: ${PACKAGE_NAME} [--modern|--legacy] [--dry-run] [--no-cache-clear]\n\n` +
 		"Default behavior:\n" +
 		"  - Installs/updates global config at ~/.config/opencode/opencode.json\n" +
-		"  - Uses full catalog config by default (9 base models + 34 explicit presets)\n" +
+		"  - Uses full catalog config by default (9 base models + 36 explicit presets)\n" +
 		"  - Ensures plugin is unpinned (latest)\n" +
 		"  - Clears OpenCode plugin cache\n\n" +
 		"Options:\n" +
@@ -65,6 +65,7 @@ function buildPaths(homeDir) {
 		configPath: join(configDir, "opencode.json"),
 		cacheDir,
 		cacheNodeModulesPaths: getManagedPackageNames().map((name) => join(cacheDir, "node_modules", name)),
+		cachePackagePaths: getManagedPackageNames().map((name) => join(cacheDir, "packages", `${name}@latest`)),
 		cacheBunLock: join(cacheDir, "bun.lock"),
 		cachePackageJson: join(cacheDir, "package.json"),
 		modernTemplatePath,
@@ -95,13 +96,37 @@ function parseCliArgs(argv = process.argv.slice(2)) {
 	};
 }
 
+function normalizePluginEntryForMatch(entry) {
+	const trimmed = entry.trim();
+	let normalized = trimmed.toLowerCase();
+	try {
+		normalized = decodeURIComponent(normalized);
+	} catch {
+		// Keep the raw lowercased value when a malformed URI escape is present.
+	}
+	normalized = normalized.replace(/\\/g, "/").replace(/\/+$/g, "");
+	if (normalized.endsWith("/dist")) {
+		normalized = normalized.slice(0, -"/dist".length);
+	}
+	return normalized;
+}
+
+function isManagedPluginEntry(entry) {
+	if (typeof entry !== "string") return false;
+	const trimmed = entry.trim().toLowerCase();
+	const normalized = normalizePluginEntryForMatch(entry);
+	return getManagedPackageNames().some((name) => {
+		const lowerName = name.toLowerCase();
+		return trimmed === lowerName ||
+			trimmed.startsWith(`${lowerName}@`) ||
+			normalized.endsWith(`/${lowerName}`) ||
+			normalized.endsWith(`/node_modules/${lowerName}`);
+	});
+}
+
 function normalizePluginList(list) {
 	const entries = Array.isArray(list) ? list.filter(Boolean) : [];
-	const managedNames = getManagedPackageNames();
-	const filtered = entries.filter((entry) => {
-		if (typeof entry !== "string") return true;
-		return !managedNames.some((name) => entry === name || entry.startsWith(`${name}@`));
-	});
+	const filtered = entries.filter((entry) => !isManagedPluginEntry(entry));
 	return [...filtered, PACKAGE_NAME];
 }
 
@@ -351,10 +376,16 @@ async function clearCache(paths, dryRun, skipCacheClear) {
 		for (const cacheNodeModulesPath of paths.cacheNodeModulesPaths) {
 			log(`[dry-run] Would remove ${cacheNodeModulesPath}`);
 		}
+		for (const cachePackagePath of paths.cachePackagePaths) {
+			log(`[dry-run] Would remove ${cachePackagePath}`);
+		}
 		log(`[dry-run] Would remove ${paths.cacheBunLock}`);
 	} else {
 		for (const cacheNodeModulesPath of paths.cacheNodeModulesPaths) {
 			await rm(cacheNodeModulesPath, { recursive: true, force: true });
+		}
+		for (const cachePackagePath of paths.cachePackagePaths) {
+			await rm(cachePackagePath, { recursive: true, force: true });
 		}
 		await rm(paths.cacheBunLock, { force: true });
 	}
@@ -429,10 +460,10 @@ export async function runInstaller(argv = process.argv.slice(2), options = {}) {
 	log("\nDone. Restart OpenCode to (re)install the plugin.");
 	log("Example: opencode");
 	if (configMode === "modern") {
-		log("Note: Modern config intentionally shows 9 base model entries; use --variant to access all 34 shipped presets.");
+		log("Note: Modern config intentionally shows 9 base model entries; use --variant to access all 36 shipped presets.");
 	}
 	if (configMode === "legacy") {
-		log("Note: Legacy config writes 34 explicit preset entries and is also safe for older OpenCode versions.");
+		log("Note: Legacy config writes 36 explicit preset entries and is also safe for older OpenCode versions.");
 	}
 	if (configMode === "full") {
 		log("Note: Full config installs both modern base models and explicit preset entries so the full shipped catalog is visible by default.");

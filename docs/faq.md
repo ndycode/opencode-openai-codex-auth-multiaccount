@@ -25,7 +25,7 @@ See [config/README.md](../config/README.md) for the template split.
 
 ## What models are included by default?
 
-The shipped templates focus on current GPT-5 and Codex families such as `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4-mini`, `gpt-5-codex`, and `gpt-5.1-*`. Optional or entitlement-gated model IDs can be added manually when your workspace supports them.
+The shipped templates focus on current GPT-5 and Codex families such as `gpt-5.5`, `gpt-5.5-fast`, `gpt-5.4-mini`, `gpt-5-codex`, and `gpt-5.1-*`. Optional or entitlement-gated model IDs can be added manually when your workspace supports them. `gpt-5.5-pro` is ChatGPT-only and is not routed through this Codex plugin.
 
 ## Can I use multiple accounts?
 

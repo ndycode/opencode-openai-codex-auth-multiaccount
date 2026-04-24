@@ -368,7 +368,6 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    ```
 4. Default fallback chain (when policy is `fallback` and not overridden):
    - `gpt-5.5 -> gpt-5.4`
-   - `gpt-5.5-pro -> gpt-5.5`
    - `gpt-5.4-pro -> gpt-5.4` (if `gpt-5.4-pro` is selected manually)
    - `gpt-5.3-codex -> gpt-5-codex -> gpt-5.2-codex`
    - `gpt-5.3-codex-spark -> gpt-5-codex -> gpt-5.3-codex -> gpt-5.2-codex` (if Spark IDs are selected manually)
@@ -381,7 +380,6 @@ resolvedConfig: { reasoningEffort: 'low', ... }  ← Should show your options
    "fallbackOnUnsupportedCodexModel": true,
    "unsupportedCodexFallbackChain": {
       "gpt-5.5": ["gpt-5.4"],
-      "gpt-5.5-pro": ["gpt-5.5"],
       "gpt-5.4-pro": ["gpt-5.4"],
       "gpt-5-codex": ["gpt-5.2-codex"],
       "gpt-5.3-codex": ["gpt-5-codex", "gpt-5.2-codex"],

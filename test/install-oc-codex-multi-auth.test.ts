@@ -53,7 +53,12 @@ describe("install-oc-codex-multi-auth script", () => {
 		await writeFile(
 			configPath,
 			JSON.stringify({
-				plugin: ["existing-plugin", "oc-chatgpt-multi-auth@old"],
+				plugin: [
+					"existing-plugin",
+					"oc-chatgpt-multi-auth@old",
+					"file:///C:/Users/neil/DevTools/pkg/npm-global/node_modules/oc-codex-multi-auth",
+					"C:\\Users\\neil\\DevTools\\pkg\\npm-global\\node_modules\\oc-chatgpt-multi-auth\\dist",
+				],
 				provider: {
 					anthropic: { baseURL: "https://example.invalid" },
 					openai: {
@@ -106,6 +111,8 @@ describe("install-oc-codex-multi-auth script", () => {
 		expect(Object.keys(saved.provider.openai.models)).toHaveLength(expectedCount);
 		expect(saved.provider.openai.models["gpt-5.5"]).toBeDefined();
 		expect(saved.provider.openai.models["gpt-5.5-high"]).toBeDefined();
+		expect(saved.provider.openai.models["gpt-5.5-fast"]).toBeDefined();
+		expect(saved.provider.openai.models["gpt-5.5-fast-medium"]).toBeDefined();
 		// User-added model survives deep-merge without overriding template ids.
 		expect(saved.provider.openai.models["old"]).toEqual({ name: "old" });
 		const configEntries = await readdir(configDir);
@@ -436,6 +443,75 @@ describe("install-oc-codex-multi-auth script", () => {
 		expect(cachePackage.dependencies["oc-chatgpt-multi-auth"]).toBeUndefined();
 		expect(cachePackage.dependencies["oc-codex-multi-auth"]).toBeUndefined();
 		expect(cachePackage.dependencies.other).toBe("^1.0.0");
+	});
+
+	it("clears OpenCode node_modules and package cache layouts", async () => {
+		vi.resetModules();
+		tempHome = await createTempHome();
+		const { runInstaller } = await import("../scripts/install-oc-codex-multi-auth-core.js");
+		const configDir = join(tempHome, ".config", "opencode");
+		const configPath = join(configDir, "opencode.json");
+		const cacheDir = join(tempHome, ".cache", "opencode");
+		const legacyCacheNodeModules = join(cacheDir, "node_modules", "oc-chatgpt-multi-auth");
+		const cacheNodeModules = join(cacheDir, "node_modules", "oc-codex-multi-auth");
+		const legacyCachePackage = join(cacheDir, "packages", "oc-chatgpt-multi-auth@latest");
+		const cachePackage = join(cacheDir, "packages", "oc-codex-multi-auth@latest");
+		const cacheBunLock = join(cacheDir, "bun.lock");
+		const cachePackageJson = join(cacheDir, "package.json");
+
+		await mkdir(configDir, { recursive: true });
+		await mkdir(cacheNodeModules, { recursive: true });
+		await mkdir(legacyCacheNodeModules, { recursive: true });
+		await mkdir(cachePackage, { recursive: true });
+		await mkdir(legacyCachePackage, { recursive: true });
+		await writeFile(configPath, JSON.stringify({ plugin: [] }, null, 2), "utf-8");
+		await writeFile(join(cacheNodeModules, "package.json"), "{}", "utf-8");
+		await writeFile(join(legacyCacheNodeModules, "package.json"), "{}", "utf-8");
+		await writeFile(join(cachePackage, "package.json"), "{}", "utf-8");
+		await writeFile(join(legacyCachePackage, "package.json"), "{}", "utf-8");
+		await writeFile(cacheBunLock, "lockfile", "utf-8");
+		await writeFile(
+			cachePackageJson,
+			JSON.stringify(
+				{
+					dependencies: {
+						"oc-chatgpt-multi-auth": "file:../pinned-plugin.tgz",
+						"oc-codex-multi-auth": "file:../new-plugin.tgz",
+						other: "^1.0.0",
+					},
+				},
+				null,
+				2,
+			),
+			"utf-8",
+		);
+
+		await expect(
+			runInstaller([], {
+				env: {
+					...process.env,
+					HOME: tempHome,
+					USERPROFILE: tempHome,
+				},
+			}),
+		).resolves.toMatchObject({
+			action: "install",
+			configMode: "full",
+			exitCode: 0,
+		});
+
+		await expect(readdir(cacheNodeModules)).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(readdir(legacyCacheNodeModules)).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(readdir(cachePackage)).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(readdir(legacyCachePackage)).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(readFile(cacheBunLock, "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+
+		const cachedPackageJson = JSON.parse(await readFile(cachePackageJson, "utf-8")) as {
+			dependencies: Record<string, string>;
+		};
+		expect(cachedPackageJson.dependencies["oc-chatgpt-multi-auth"]).toBeUndefined();
+		expect(cachedPackageJson.dependencies["oc-codex-multi-auth"]).toBeUndefined();
+		expect(cachedPackageJson.dependencies.other).toBe("^1.0.0");
 	});
 
 	it("rejects full-mode merges when modern and legacy templates overlap", async () => {

@@ -43,6 +43,9 @@ describe("Model Map Module", () => {
 	      expect(MODEL_MAP["gpt-5.5-high"]).toBe("gpt-5.5");
 	      expect(MODEL_MAP["gpt-5.5-xhigh"]).toBe("gpt-5.5");
 	      expect(MODEL_MAP["gpt-5.5-fast"]).toBe("gpt-5.5");
+	      expect(MODEL_MAP["gpt-5.5-fast-none"]).toBe("gpt-5.5");
+	      expect(MODEL_MAP["gpt-5.5-fast-low"]).toBe("gpt-5.5");
+	      expect(MODEL_MAP["gpt-5.5-fast-medium"]).toBe("gpt-5.5");
 	      expect(MODEL_MAP["gpt-5.5-fast-high"]).toBe("gpt-5.5");
 	      expect(MODEL_MAP["gpt-5.5-fast-xhigh"]).toBe("gpt-5.5");
 	    });
