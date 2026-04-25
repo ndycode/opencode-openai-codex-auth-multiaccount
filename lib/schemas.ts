@@ -45,6 +45,7 @@ export const PluginConfigSchema = z.object({
 	perProjectAccounts: z.boolean().optional(),
 	sessionRecovery: z.boolean().optional(),
 	autoResume: z.boolean().optional(),
+	autoUpdate: z.boolean().optional(),
 	parallelProbing: z.boolean().optional(),
 	parallelProbingMaxConcurrency: z.number().min(1).max(5).optional(),
 	emptyResponseMaxRetries: z.number().min(0).optional(),

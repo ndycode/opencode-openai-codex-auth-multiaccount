@@ -131,6 +131,7 @@ advanced settings go in `~/.opencode/openai-codex-auth-config.json`:
     "server": 2
   },
   "perProjectAccounts": true,
+  "autoUpdate": true,
   "toastDurationMs": 5000,
   "retryAllAccountsRateLimited": true,
   "retryAllAccountsMaxWaitMs": 0,
@@ -163,6 +164,7 @@ The sample above intentionally sets `"retryAllAccountsMaxRetries": 3` as a bound
 | `retryProfile` | `balanced` | retry budget profile for request classes (`conservative`, `balanced`, `aggressive`) |
 | `retryBudgetOverrides` | `{}` | optional per-class budget overrides (`authRefresh`, `network`, `server`, `rateLimitShort`, `rateLimitGlobal`, `emptyResponse`) |
 | `perProjectAccounts` | `true` | each project gets its own account storage |
+| `autoUpdate` | `true` | check npm daily and clear the OpenCode-managed plugin cache on exit when a newer version is available; restart OpenCode to install it |
 | `toastDurationMs` | `5000` | how long toast notifications stay visible (ms) |
 | `retryAllAccountsRateLimited` | `true` | wait and retry when all accounts hit rate limits |
 | `retryAllAccountsMaxWaitMs` | `0` | max wait time in ms (0 = unlimited) |
@@ -244,6 +246,7 @@ override any config with env vars:
 | `CODEX_AUTH_BEGINNER_SAFE_MODE=1` | enable beginner-safe retry behavior |
 | `CODEX_AUTH_RETRY_PROFILE=aggressive` | override retry profile (`conservative`, `balanced`, `aggressive`) |
 | `CODEX_AUTH_PER_PROJECT_ACCOUNTS=0` | disable per-project accounts |
+| `CODEX_AUTH_AUTO_UPDATE=0` | disable automatic OpenCode plugin cache refresh when npm has a newer plugin version |
 | `CODEX_AUTH_TOAST_DURATION_MS=8000` | set toast duration |
 | `CODEX_AUTH_RETRY_ALL_RATE_LIMITED=0` | disable wait-and-retry |
 | `CODEX_AUTH_RETRY_ALL_MAX_WAIT_MS=30000` | set max wait time |

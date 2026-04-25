@@ -70,6 +70,7 @@ import {
 	getTokenRefreshSkewMs,
 	getSessionRecovery,
 	getAutoResume,
+	getAutoUpdate,
 	getToastDurationMs,
 	getPerProjectAccounts,
 	getEmptyResponseMaxRetries,
@@ -1545,6 +1546,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 				const sessionRecoveryEnabled = getSessionRecovery(pluginConfig);
 				const autoResumeEnabled = getAutoResume(pluginConfig);
+				const autoUpdateEnabled = getAutoUpdate(pluginConfig);
 				const emptyResponseMaxRetries = getEmptyResponseMaxRetries(pluginConfig);
 				const emptyResponseRetryDelayMs = getEmptyResponseRetryDelayMs(pluginConfig);
 				const pidOffsetEnabled = getPidOffsetEnabled(pluginConfig);
@@ -1591,7 +1593,7 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 
 			checkAndNotify(async (message, variant) => {
 				await showToast(message, variant);
-			}).catch((err) => {
+			}, { autoUpdate: autoUpdateEnabled }).catch((err) => {
 				logDebug(`Update check failed: ${err instanceof Error ? err.message : String(err)}`);
 			});
 			await runStartupPreflight();

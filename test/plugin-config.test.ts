@@ -20,6 +20,7 @@ import {
 	getRequestTransformMode,
 	getFetchTimeoutMs,
 	getStreamStallTimeoutMs,
+	getAutoUpdate,
 } from '../lib/config.js';
 import type { PluginConfig } from '../lib/types.js';
 import * as fs from 'node:fs';
@@ -63,6 +64,7 @@ describe('Plugin Configuration', () => {
 		'CODEX_AUTH_UNSUPPORTED_MODEL_POLICY',
 		'CODEX_AUTH_FALLBACK_UNSUPPORTED_MODEL',
 		'CODEX_AUTH_FALLBACK_GPT53_TO_GPT52',
+		'CODEX_AUTH_AUTO_UPDATE',
 	] as const;
 	const originalEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
 
@@ -115,6 +117,7 @@ describe('Plugin Configuration', () => {
 				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
+				autoUpdate: true,
 				parallelProbing: false,
 				parallelProbingMaxConcurrency: 2,
 				emptyResponseMaxRetries: 2,
@@ -159,6 +162,7 @@ describe('Plugin Configuration', () => {
 				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
+				autoUpdate: true,
 				parallelProbing: false,
 				parallelProbingMaxConcurrency: 2,
 				emptyResponseMaxRetries: 2,
@@ -200,6 +204,7 @@ describe('Plugin Configuration', () => {
 				perProjectAccounts: true,
 				sessionRecovery: true,
 				autoResume: true,
+				autoUpdate: true,
 				parallelProbing: false,
 				parallelProbingMaxConcurrency: 2,
 				emptyResponseMaxRetries: 2,
@@ -252,6 +257,7 @@ describe('Plugin Configuration', () => {
 		perProjectAccounts: true,
 		sessionRecovery: true,
 		autoResume: true,
+		autoUpdate: true,
 		parallelProbing: false,
 		parallelProbingMaxConcurrency: 2,
 		emptyResponseMaxRetries: 2,
@@ -298,6 +304,7 @@ describe('Plugin Configuration', () => {
 			perProjectAccounts: true,
 			sessionRecovery: true,
 			autoResume: true,
+			autoUpdate: true,
 			parallelProbing: false,
 			parallelProbingMaxConcurrency: 2,
 			emptyResponseMaxRetries: 2,
@@ -447,6 +454,25 @@ describe('Plugin Configuration', () => {
 			expect(getFastSession({ fastSession: true })).toBe(false);
 			process.env.CODEX_AUTH_FAST_SESSION = '1';
 			expect(getFastSession({ fastSession: false })).toBe(true);
+		});
+	});
+
+	describe('getAutoUpdate', () => {
+		it('should default to true', () => {
+			delete process.env.CODEX_AUTH_AUTO_UPDATE;
+			expect(getAutoUpdate({})).toBe(true);
+		});
+
+		it('should use config value when env var not set', () => {
+			delete process.env.CODEX_AUTH_AUTO_UPDATE;
+			expect(getAutoUpdate({ autoUpdate: false })).toBe(false);
+		});
+
+		it('should prioritize env var over config', () => {
+			process.env.CODEX_AUTH_AUTO_UPDATE = '0';
+			expect(getAutoUpdate({ autoUpdate: true })).toBe(false);
+			process.env.CODEX_AUTH_AUTO_UPDATE = '1';
+			expect(getAutoUpdate({ autoUpdate: false })).toBe(true);
 		});
 	});
 

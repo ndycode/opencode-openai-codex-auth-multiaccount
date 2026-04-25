@@ -41,6 +41,8 @@ What the installer does:
 - normalizes the plugin entry to `"oc-codex-multi-auth"`
 - clears the cached plugin copy so OpenCode reinstalls the latest package
 
+After install, the plugin checks npm once per day. When a newer version exists, it clears its OpenCode-managed cached package on exit; restart OpenCode and the latest package is installed automatically. Disable this with `"autoUpdate": false` in `~/.opencode/openai-codex-auth-config.json` or `CODEX_AUTH_AUTO_UPDATE=0`.
+
 By default, the installer writes the compact UI config:
 - model picker entries stay on actual OAuth model families such as `gpt-5.5` and `gpt-5.5-fast`
 - reasoning presets are selected through OpenCode's model variant picker (`none`, `low`, `medium`, `high`, `xhigh`)
@@ -86,6 +88,7 @@ OpenCode users often want the same GPT-5 and Codex model experience they use in 
 - Beginner-focused commands such as `codex-setup`, `codex-help`, `codex-doctor`, and `codex-next`
 - Interactive account switching, labeling, tagging, and backup/import commands
 - Stateless request handling with `reasoning.encrypted_content` for multi-turn sessions
+- Daily npm update detection with OpenCode cache refresh on restart
 - Request logging and troubleshooting hooks for debugging OpenCode integration issues
 
 ## Common Workflows

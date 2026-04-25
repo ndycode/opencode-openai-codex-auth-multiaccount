@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "./logger.js";
@@ -6,10 +6,13 @@ import { createLogger } from "./logger.js";
 const log = createLogger("update-checker");
 
 const PACKAGE_NAME = "oc-codex-multi-auth";
+const LEGACY_PACKAGE_NAMES = ["oc-chatgpt-multi-auth"];
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 const CACHE_DIR = join(homedir(), ".opencode", "cache");
 const CACHE_FILE = join(CACHE_DIR, "update-check-cache.json");
+const OPENCODE_CACHE_DIR = join(homedir(), ".cache", "opencode");
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let cacheEvictionScheduled = false;
 
 interface UpdateCheckCache {
   lastCheck: number;
@@ -98,6 +101,52 @@ export interface UpdateCheckResult {
   updateCommand: string;
 }
 
+export interface CheckAndNotifyOptions {
+  autoUpdate?: boolean;
+  scheduleCacheClear?: () => boolean;
+}
+
+function getManagedPackageNames(): string[] {
+  return [PACKAGE_NAME, ...LEGACY_PACKAGE_NAMES];
+}
+
+function getManagedCachePaths(): string[] {
+  return getManagedPackageNames().flatMap((name) => [
+    join(OPENCODE_CACHE_DIR, "packages", `${name}@latest`),
+    join(OPENCODE_CACHE_DIR, "node_modules", name),
+  ]);
+}
+
+export function clearManagedOpenCodePluginCache(paths = getManagedCachePaths()): boolean {
+  let cleared = false;
+
+  for (const cachePath of paths) {
+    try {
+      if (!existsSync(cachePath)) continue;
+      rmSync(cachePath, { recursive: true, force: true });
+      cleared = true;
+      log.info("Cleared OpenCode plugin cache for update", { path: cachePath });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn("Failed to clear OpenCode plugin cache for update", {
+        path: cachePath,
+        error: message,
+      });
+    }
+  }
+
+  return cleared;
+}
+
+export function scheduleOpenCodePluginCacheClearOnExit(): boolean {
+  if (cacheEvictionScheduled) return true;
+  cacheEvictionScheduled = true;
+  process.once("exit", () => {
+    clearManagedOpenCodePluginCache();
+  });
+  return true;
+}
+
 export async function checkForUpdates(force = false): Promise<UpdateCheckResult> {
   const currentVersion = getCurrentVersion();
   const cache = loadCache();
@@ -133,6 +182,7 @@ export async function checkForUpdates(force = false): Promise<UpdateCheckResult>
 
 export async function checkAndNotify(
   showToast?: (message: string, variant: "info" | "warning") => Promise<void>,
+  options: CheckAndNotifyOptions = {},
 ): Promise<void> {
   try {
     const result = await checkForUpdates();
@@ -140,12 +190,16 @@ export async function checkAndNotify(
     if (result.hasUpdate && result.latestVersion) {
       const message = `Update available: ${PACKAGE_NAME} v${result.latestVersion} (current: v${result.currentVersion})`;
       log.info(message);
+      const autoUpdate = options.autoUpdate ?? true;
+      const scheduled = autoUpdate
+        ? (options.scheduleCacheClear ?? scheduleOpenCodePluginCacheClearOnExit)()
+        : false;
 
       if (showToast) {
-        await showToast(
-          `Plugin update available: v${result.latestVersion}. Run: ${result.updateCommand}`,
-          "info",
-        );
+        const instruction = scheduled
+          ? "Restart OpenCode to install it automatically."
+          : `Run: ${result.updateCommand}`;
+        await showToast(`Plugin update available: v${result.latestVersion}. ${instruction}`, "info");
       }
     }
   } catch (error) {

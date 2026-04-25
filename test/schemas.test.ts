@@ -51,6 +51,7 @@ describe("PluginConfigSchema", () => {
 			perProjectAccounts: true,
 			sessionRecovery: true,
 			autoResume: false,
+			autoUpdate: true,
 			fetchTimeoutMs: 60000,
 			streamStallTimeoutMs: 45000,
 		};

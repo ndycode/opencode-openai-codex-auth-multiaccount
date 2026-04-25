@@ -54,6 +54,7 @@ const DEFAULT_CONFIG: PluginConfig = {
 	perProjectAccounts: true,
 	sessionRecovery: true,
 	autoResume: true,
+	autoUpdate: true,
 	parallelProbing: false,
 	parallelProbingMaxConcurrency: 2,
 	emptyResponseMaxRetries: 2,
@@ -495,6 +496,14 @@ export function getAutoResume(pluginConfig: PluginConfig): boolean {
 	return resolveBooleanSetting(
 		"CODEX_AUTH_AUTO_RESUME",
 		pluginConfig.autoResume,
+		true,
+	);
+}
+
+export function getAutoUpdate(pluginConfig: PluginConfig): boolean {
+	return resolveBooleanSetting(
+		"CODEX_AUTH_AUTO_UPDATE",
+		pluginConfig.autoUpdate,
 		true,
 	);
 }

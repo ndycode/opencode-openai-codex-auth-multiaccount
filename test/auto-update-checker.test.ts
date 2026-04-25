@@ -5,6 +5,7 @@ vi.mock("node:fs", () => ({
 	writeFileSync: vi.fn(),
 	existsSync: vi.fn(),
 	mkdirSync: vi.fn(),
+	rmSync: vi.fn(),
 }));
 
 describe("auto-update-checker", () => {
@@ -12,6 +13,7 @@ describe("auto-update-checker", () => {
 	let checkForUpdates: typeof import("../lib/auto-update-checker.js").checkForUpdates;
 	let checkAndNotify: typeof import("../lib/auto-update-checker.js").checkAndNotify;
 	let clearUpdateCache: typeof import("../lib/auto-update-checker.js").clearUpdateCache;
+	let clearManagedOpenCodePluginCache: typeof import("../lib/auto-update-checker.js").clearManagedOpenCodePluginCache;
 
 	const mockPackageJson = { version: "4.12.0" };
 
@@ -21,6 +23,7 @@ describe("auto-update-checker", () => {
 		vi.setSystemTime(new Date("2026-01-30T12:00:00Z"));
 
 		fs = await import("node:fs");
+		vi.clearAllMocks();
 		vi.mocked(fs.readFileSync).mockImplementation((path: unknown) => {
 			if (String(path).includes("package.json")) {
 				return JSON.stringify(mockPackageJson);
@@ -35,6 +38,7 @@ describe("auto-update-checker", () => {
 		checkForUpdates = module.checkForUpdates;
 		checkAndNotify = module.checkAndNotify;
 		clearUpdateCache = module.clearUpdateCache;
+		clearManagedOpenCodePluginCache = module.clearManagedOpenCodePluginCache;
 	});
 
 	afterEach(() => {
@@ -233,19 +237,41 @@ describe("auto-update-checker", () => {
 	});
 
 	describe("checkAndNotify", () => {
-		it("shows toast when update available", async () => {
+		it("shows restart toast and schedules cache clear when update available", async () => {
 			vi.mocked(globalThis.fetch).mockResolvedValue({
 				ok: true,
 				json: async () => ({ version: "5.0.0" }),
 			} as Response);
 			const showToast = vi.fn().mockResolvedValue(undefined);
+			const scheduleCacheClear = vi.fn(() => true);
 
-			await checkAndNotify(showToast);
+			await checkAndNotify(showToast, { scheduleCacheClear });
 
 			expect(showToast).toHaveBeenCalledWith(
-				expect.stringContaining("v5.0.0"),
+				expect.stringContaining("Restart OpenCode to install it automatically"),
 				"info"
 			);
+			expect(scheduleCacheClear).toHaveBeenCalledOnce();
+		});
+
+		it("keeps manual update command when autoUpdate is disabled", async () => {
+			vi.mocked(globalThis.fetch).mockResolvedValue({
+				ok: true,
+				json: async () => ({ version: "5.0.0" }),
+			} as Response);
+			const showToast = vi.fn().mockResolvedValue(undefined);
+			const scheduleCacheClear = vi.fn(() => true);
+
+			await checkAndNotify(showToast, {
+				autoUpdate: false,
+				scheduleCacheClear,
+			});
+
+			expect(showToast).toHaveBeenCalledWith(
+				expect.stringContaining("Run: npm update -g"),
+				"info"
+			);
+			expect(scheduleCacheClear).not.toHaveBeenCalled();
 		});
 
 		it("does not show toast when no update", async () => {
@@ -299,6 +325,38 @@ describe("auto-update-checker", () => {
 			clearUpdateCache();
 
 			expect(fs.writeFileSync).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("clearManagedOpenCodePluginCache", () => {
+		it("removes managed OpenCode package cache paths", () => {
+			vi.mocked(fs.existsSync).mockReturnValue(true);
+
+			const cleared = clearManagedOpenCodePluginCache([
+				"C:\\cache\\packages\\oc-codex-multi-auth@latest",
+				"C:\\cache\\node_modules\\oc-codex-multi-auth",
+			]);
+
+			expect(cleared).toBe(true);
+			expect(fs.rmSync).toHaveBeenCalledWith(
+				"C:\\cache\\packages\\oc-codex-multi-auth@latest",
+				{ recursive: true, force: true },
+			);
+			expect(fs.rmSync).toHaveBeenCalledWith(
+				"C:\\cache\\node_modules\\oc-codex-multi-auth",
+				{ recursive: true, force: true },
+			);
+		});
+
+		it("returns false when no managed cache paths exist", () => {
+			vi.mocked(fs.existsSync).mockReturnValue(false);
+
+			const cleared = clearManagedOpenCodePluginCache([
+				"C:\\cache\\packages\\oc-codex-multi-auth@latest",
+			]);
+
+			expect(cleared).toBe(false);
+			expect(fs.rmSync).not.toHaveBeenCalled();
 		});
 	});
 });

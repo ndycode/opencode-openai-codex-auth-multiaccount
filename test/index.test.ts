@@ -125,6 +125,7 @@ vi.mock("../lib/config.js", () => ({
 	getTokenRefreshSkewMs: () => 60000,
 	getSessionRecovery: () => false,
 	getAutoResume: () => false,
+	getAutoUpdate: () => true,
 	getToastDurationMs: () => 5000,
 	getPerProjectAccounts: () => false,
 	getEmptyResponseMaxRetries: () => 2,
