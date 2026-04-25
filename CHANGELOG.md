@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (placeholder for next release)
 
+### Fixed
+- Local `npm link` installs now run the CLI wrapper correctly by resolving symlinked bin paths before direct-execution detection.
+
 ## [6.1.7] - 2026-04-25
 
 ### Added

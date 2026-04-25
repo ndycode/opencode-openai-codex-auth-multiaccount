@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 type OpenAiTemplate = {
 	provider: {
@@ -40,6 +40,26 @@ describe("install-oc-codex-multi-auth script", () => {
 
 		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Usage: oc-codex-multi-auth"));
 		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	it("detects direct CLI execution after path normalization", async () => {
+		vi.resetModules();
+		const { isDirectRunPath } = await import("../scripts/install-oc-codex-multi-auth.js");
+		const scriptPath = resolve("scripts", "install-oc-codex-multi-auth.js");
+		const symlinkedScriptPath = join(
+			process.cwd(),
+			"global",
+			"node_modules",
+			"oc-codex-multi-auth",
+			"install-oc-codex-multi-auth.js",
+		);
+		const resolveRealPath = (path: string) => path === symlinkedScriptPath ? scriptPath : path;
+
+		expect(isDirectRunPath(symlinkedScriptPath, scriptPath, resolveRealPath)).toBe(true);
+		expect(
+			isDirectRunPath(resolve("scripts", "install-oc-codex-multi-auth-core.js"), scriptPath),
+		).toBe(false);
+		expect(isDirectRunPath(undefined, scriptPath)).toBe(false);
 	});
 
 	it("writes compact UI catalog by default, preserves user model entries, and normalizes plugin entries", async () => {
