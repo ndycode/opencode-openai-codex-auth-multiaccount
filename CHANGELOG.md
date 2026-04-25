@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (placeholder for next release)
 
+## [6.1.7] - 2026-04-25
+
+### Added
+- OpenCode TUI prompt status plugin that shows the active Codex quota during sessions, including real response-header quota updates, account-aware display, color thresholds, and a quota details command.
+- Daily npm update detection now clears the OpenCode-managed plugin cache on exit when a newer package version is available, so restarting OpenCode installs the latest plugin automatically.
+
+### Changed
+- The installer now manages OpenCode `tui.json` alongside the main plugin config so the TUI status module is available from the published package.
+- TUI startup keeps the home prompt clean and only shows quota status inside active sessions.
+- Added an `autoUpdate` config option and `CODEX_AUTH_AUTO_UPDATE=0` environment override for users who prefer manual update prompts.
+
+### Fixed
+- Quota status cache writes no longer block the request response path and coalesce rapid duplicate writes.
+- Account switching clears stale TUI quota state so the next session reflects the selected account.
+- Multi-account quota status now follows the actual account used by the latest request, including non-`codex` model families, so real response-header quota snapshots are not filtered out as stale.
+
 ## [6.1.6] - 2026-04-24
 
 ### Added
