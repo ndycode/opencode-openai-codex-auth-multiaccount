@@ -180,6 +180,85 @@ describe("runtime documentation parity", () => {
 		}
 	});
 
+	it("keeps the documented docs layout aligned with the live docs tree", () => {
+		const docsFiles = collectRepoFiles("docs");
+		const requiredDocs = [
+			"docs/_config.yml",
+			"docs/DOCUMENTATION.md",
+			"docs/README.md",
+			"docs/index.md",
+			"docs/getting-started.md",
+			"docs/configuration.md",
+			"docs/troubleshooting.md",
+			"docs/faq.md",
+			"docs/privacy.md",
+			"docs/OPENCODE_PR_PROPOSAL.md",
+			"docs/development/ARCHITECTURE.md",
+			"docs/development/CONFIG_FIELDS.md",
+			"docs/development/CONFIG_FLOW.md",
+			"docs/development/TESTING.md",
+			"docs/development/TUI_PARITY_CHECKLIST.md",
+			"docs/audits/INDEX.md",
+			"docs/audits/_findings/T01-architecture.md",
+			"docs/audits/_findings/T16-code-health.md",
+			"docs/audits/_meta/findings-ledger.csv",
+			"docs/audits/_meta/verification-report.md",
+		];
+
+		for (const relativePath of requiredDocs) {
+			expect(docsFiles).toContain(relativePath);
+		}
+
+		const numberedAuditFiles = docsFiles.filter((relativePath) =>
+			/^docs\/audits\/\d{2}-[a-z0-9-]+\.md$/.test(relativePath),
+		);
+		const findingFiles = docsFiles.filter((relativePath) =>
+			/^docs\/audits\/_findings\/T\d{2}-[a-z0-9-]+\.md$/.test(relativePath),
+		);
+
+		expect(numberedAuditFiles).toHaveLength(16);
+		expect(findingFiles).toHaveLength(16);
+
+		const docsExpectations: Array<[string, string[]]> = [
+			[
+				"docs/DOCUMENTATION.md",
+				[
+					"OPENCODE_PR_PROPOSAL.md",
+					"development/",
+					"audits/",
+					"_findings/",
+					"_meta/",
+				],
+			],
+			[
+				"docs/development/ARCHITECTURE.md",
+				[
+					"## Documentation Layout",
+					"DOCUMENTATION.md",
+					"OPENCODE_PR_PROPOSAL.md",
+					"current-structure audit corpus",
+				],
+			],
+			[
+				"docs/audits/02-system-map.md",
+				[
+					"Documentation map:",
+					"docs/",
+					"development/",
+					"audits/",
+					"Doc/code alignment rule",
+				],
+			],
+		];
+
+		for (const [relativePath, fragments] of docsExpectations) {
+			const fileContents = readRepoFile(relativePath);
+			for (const fragment of fragments) {
+				expect(fileContents).toContain(fragment);
+			}
+		}
+	});
+
 	it("keeps regenerated audit docs free of stale pre-split anchors", () => {
 		const stalePatterns = [
 			/d92a8/i,

@@ -21,6 +21,35 @@ lib/
 
 The single `index.ts` of earlier releases has been split: account management lives under `lib/accounts/`, storage under `lib/storage/`, and every registered `codex-*` tool is its own file under `lib/tools/`. `index.ts` now holds the plugin loader, request pipeline wiring, context construction, and registry attachment.
 
+## Documentation Layout
+
+The current docs tree mirrors the codebase boundaries above: user docs cover setup and operations, maintainer docs cover internal architecture and validation, and the regenerated audit corpus records point-in-time architecture findings.
+
+```text
+docs/
+├── index.md                  # docs landing page
+├── README.md                 # docs portal navigation
+├── DOCUMENTATION.md          # repository documentation map
+├── getting-started.md        # install, auth, and first-run guide
+├── configuration.md          # public config reference
+├── troubleshooting.md        # operational failure modes and fixes
+├── faq.md                    # short common answers
+├── privacy.md                # local data and upstream request notes
+├── OPENCODE_PR_PROPOSAL.md   # upstream OpenCode proposal notes
+├── _config.yml               # docs site config
+├── development/              # maintainer architecture and validation docs
+│   ├── ARCHITECTURE.md
+│   ├── CONFIG_FIELDS.md
+│   ├── CONFIG_FLOW.md
+│   ├── TESTING.md
+│   └── TUI_PARITY_CHECKLIST.md
+└── audits/                   # current-structure audit corpus
+    ├── INDEX.md
+    ├── 01-executive-summary.md ... 16-verdict.md
+    ├── _findings/            # T01 through T16 detailed findings
+    └── _meta/                # audit rubric, ledger, environment, verification
+```
+
 ## Table of Contents
 - [Architecture Overview](#architecture-overview)
 - [Stateless vs Stateful Mode](#stateless-vs-stateful-mode)
