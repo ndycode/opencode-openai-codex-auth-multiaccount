@@ -435,6 +435,102 @@ describe("runtime documentation parity", () => {
 		expect(hits).toEqual([]);
 	});
 
+	it("keeps GitHub CI aligned with the full local validation gate", () => {
+		const ciWorkflow = readRepoFile(".github/workflows/ci.yml");
+		const requiredCommands = [
+			"npm ci",
+			"npm run typecheck",
+			"npm run lint",
+			"npm test",
+			"npm run build",
+			"npm run audit:ci",
+		];
+
+		for (const command of requiredCommands) {
+			expect(ciWorkflow).toContain(command);
+		}
+
+		expect(ciWorkflow).not.toContain("run: npm run audit:prod");
+	});
+
+	it("keeps package metadata aligned with shipped source and install surfaces", () => {
+		const packageJson = JSON.parse(readRepoFile("package.json")) as {
+			bin?: Record<string, string>;
+			exports?: Record<string, { import?: string; types?: string }>;
+			files?: string[];
+			scripts?: Record<string, string>;
+		};
+		const requiredPackageFiles = [
+			"dist/",
+			"assets/",
+			"config/",
+			"scripts/",
+			"README.md",
+			"LICENSE",
+		];
+
+		for (const entry of requiredPackageFiles) {
+			expect(packageJson.files).toContain(entry);
+			if (entry !== "dist/") {
+				expect(repoPathExists(entry.replace(/\/$/, ""))).toBe(true);
+			}
+		}
+
+		const installerPath = packageJson.bin?.["oc-codex-multi-auth"];
+		expect(installerPath).toBe("scripts/install-oc-codex-multi-auth.js");
+		expect(repoPathExists(installerPath ?? "")).toBe(true);
+		expect(readRepoFile(installerPath ?? "")).toMatch(/^#!\/usr\/bin\/env node/);
+		expect(packageJson.scripts?.build).toContain("node scripts/clean-dist.js");
+		expect(repoPathExists("scripts/clean-dist.js")).toBe(true);
+
+		const exports = packageJson.exports ?? {};
+		const sourceForExport = new Map([
+			["./dist/index.js", "index.ts"],
+			["./dist/tui.js", "tui.ts"],
+		]);
+
+		for (const entry of Object.values(exports)) {
+			expect(entry.import).toBeDefined();
+			expect(entry.types).toBeDefined();
+			expect(entry.types).toBe(entry.import?.replace(/\.js$/, ".d.ts"));
+			const sourcePath = sourceForExport.get(entry.import ?? "");
+			expect(sourcePath).toBeDefined();
+			expect(repoPathExists(sourcePath ?? "")).toBe(true);
+		}
+	});
+
+	it("keeps committed fixtures free of static OpenAI-style secret strings", () => {
+		const scannedFiles = [
+			"AGENTS.md",
+			"README.md",
+			"CONTRIBUTING.md",
+			"SECURITY.md",
+			"package.json",
+			...collectRepoFiles(".github"),
+			...collectRepoFiles("config"),
+			...collectRepoFiles("docs"),
+			...collectRepoFiles("lib"),
+			...collectRepoFiles("scripts"),
+			...collectRepoFiles("skills"),
+			...collectRepoFiles("test"),
+		].filter((relativePath) => /\.(?:[cm]?[jt]s|json|md|ya?ml)$/.test(relativePath));
+		const secretPatterns: Array<[RegExp, string]> = [
+			[/sk-(?:live_|proj-)?[A-Za-z0-9._:-]{20,}/, "OpenAI-style API key"],
+		];
+		const hits: string[] = [];
+
+		for (const relativePath of scannedFiles) {
+			const fileContents = readRepoFile(relativePath);
+			for (const [pattern, label] of secretPatterns) {
+				if (pattern.test(fileContents)) {
+					hits.push(`${relativePath}: ${label}`);
+				}
+			}
+		}
+
+		expect(hits).toEqual([]);
+	});
+
 	it("keeps repo-local path references in current documentation resolvable", () => {
 		const hits: string[] = [];
 

@@ -13,7 +13,6 @@ tool into the OpenCode plugin surface.
 ```
 lib/tools/
   AGENTS.md
-  _shared.ts              # re-exports closure-free helpers from lib/runtime.ts
   index.ts                # ToolContext type + createToolRegistry(ctx) barrel
   codex-list.ts           # one file per tool
   codex-switch.ts

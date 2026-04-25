@@ -21,7 +21,7 @@ What they cover:
 - `typecheck`: `tsc --noEmit`
 - `test`: Vitest suite across auth, config, request transformation, storage, UI, recovery, and rotation
 - `test:coverage`: Vitest coverage threshold gate from `vitest.config.ts`; statements/functions/lines keep an 80% global floor, while branch and legacy `index.ts` floors are calibrated to the current baseline
-- `build`: compile TypeScript and materialize `dist/lib/oauth-success.html` from `lib/oauth-success.ts` via `scripts/copy-oauth-success.js`
+- `build`: clean `dist/`, compile TypeScript, and materialize `dist/lib/oauth-success.html` from `lib/oauth-success.ts` via `scripts/copy-oauth-success.js`
 - `audit:ci`: production dependency audit plus the dev-advisory allowlist
 
 ## Current High-Value Test Areas

@@ -53,8 +53,8 @@ jobs:
       - name: Build
         run: npm run build
 
-  audit-prod:
-    name: Production dependency audit
+  audit-ci:
+    name: Dependency audit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -71,5 +71,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Audit production dependencies (high+)
-        run: npm run audit:prod
+      - name: Audit dependencies and dev allowlist
+        run: npm run audit:ci

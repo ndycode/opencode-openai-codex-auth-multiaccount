@@ -21,6 +21,7 @@ test/
 ├── codex.test.ts                  # Codex instructions/caching
 ├── config.test.ts                 # configuration parsing/merging
 ├── context-overflow.test.ts       # context length handling
+├── clean-dist.test.ts             # build cleanup script tests
 ├── copy-oauth-success.test.ts     # build script tests
 ├── doc-parity.test.ts             # docs/config/current-structure parity
 ├── errors.test.ts                 # custom error types

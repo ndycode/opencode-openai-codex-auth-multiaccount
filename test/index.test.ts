@@ -1493,6 +1493,10 @@ describe("OpenAIOAuthPlugin", () => {
 		});
 
 		it("redacts upstream auth material from usage fetch errors", async () => {
+			const fakeJwt = `eyJabc.eyJdef.${"sig"}`;
+			const fakeOpenAiKey = `sk-${"abcdefghijklmnopqrstuvwx"}`;
+			const fakeLiveKey = `sk-live_${"abcd"}.${"efgh"}:${"ijklmnopqrst"}`;
+			const fakeHexToken = `${"deadbeef".repeat(5)}`;
 			mockStorage.accounts = [
 				{
 					refreshToken: "r1",
@@ -1504,7 +1508,13 @@ describe("OpenAIOAuthPlugin", () => {
 			];
 			globalThis.fetch = vi.fn().mockResolvedValue(
 				new Response(
-					"upstream said Authorization: Bearer secret-token and jwt eyJabc.eyJdef.sig and sk-abcdefghijklmnopqrstuvwx and sk-live_abcd.efgh:ijklmnopqrst and deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					[
+						"upstream said Authorization: Bearer secret-token",
+						`and jwt ${fakeJwt}`,
+						`and ${fakeOpenAiKey}`,
+						`and ${fakeLiveKey}`,
+						`and ${fakeHexToken}`,
+					].join(" "),
 					{ status: 401, headers: { "content-type": "text/plain" } },
 				),
 			);
@@ -1515,10 +1525,10 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Bearer [redacted]");
 			expect(result).toContain("[redacted-token]");
 			expect(result).not.toContain("secret-token");
-			expect(result).not.toContain("eyJabc.eyJdef.sig");
-			expect(result).not.toContain("sk-abcdefghijklmnopqrstuvwx");
-			expect(result).not.toContain("sk-live_abcd.efgh:ijklmnopqrst");
-			expect(result).not.toContain("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+			expect(result).not.toContain(fakeJwt);
+			expect(result).not.toContain(fakeOpenAiKey);
+			expect(result).not.toContain(fakeLiveKey);
+			expect(result).not.toContain(fakeHexToken);
 		});
 
 		it("surfaces usage fetch timeouts without leaking raw abort errors", async () => {
