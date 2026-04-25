@@ -1,6 +1,6 @@
 # LIB KNOWLEDGE BASE
 
-Generated: 2026-02-03
+Generated: 2026-04-25
 
 ## OVERVIEW
 Core plugin logic: authentication, request pipeline, account management, prompt templates.
@@ -35,6 +35,7 @@ lib/
 ├── recovery.ts           # session recovery
 ├── recovery/
 │   ├── constants.ts
+│   ├── hook.ts
 │   ├── index.ts
 │   ├── storage.ts
 │   └── types.ts
@@ -53,9 +54,17 @@ lib/
 ├── shutdown.ts           # graceful shutdown
 ├── storage.ts            # V3 JSON storage, per-project/global
 ├── storage/
+│   ├── atomic-write.ts
+│   ├── export-import.ts
+│   ├── flagged.ts
+│   ├── identity.ts
+│   ├── keychain.ts
+│   ├── load-save.ts
 │   ├── migrations.ts     # V1/V2 → V3 migration
-│   └── paths.ts          # project root detection
+│   ├── paths.ts          # project root detection
+│   └── worktree-lock.ts
 ├── table-formatter.ts    # CLI table formatting
+├── tools/                # 21 codex-* tool factories + registry
 ├── types.ts              # TypeScript interfaces
 └── utils.ts              # shared utilities
 ```
@@ -77,7 +86,9 @@ lib/
 | Account rate limits | `accounts/rate-limits.ts` | per-account tracking |
 | Storage format | `storage.ts` | V3 with migration from V1/V2 |
 | Storage paths | `storage/paths.ts` | project root detection |
+| Storage keychain | `storage/keychain.ts` | optional native keychain backend |
 | Storage migrations | `storage/migrations.ts` | V1/V2 → V3 upgrade |
+| Tool registry | `tools/index.ts` | `ToolContext`, `createToolRegistry` |
 | Error types | `errors.ts` | StorageError, custom errors |
 | Health monitoring | `health.ts` | account health status |
 | Parallel probes | `parallel-probe.ts` | concurrent health checks |
@@ -86,7 +97,7 @@ lib/
 | Shared utilities | `utils.ts` | common helpers |
 
 ## CONVENTIONS
-- All exports via `lib/index.ts` barrel.
+- Public exports via `lib/index.ts` barrel; internal code imports focused modules directly.
 - Model families defined in `prompts/codex.ts`: `MODEL_FAMILIES` constant.
 - Account health: 0-100 score, decrements on failure, resets on success.
 - Token bucket: per-account request tracking for rate limit avoidance.

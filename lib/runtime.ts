@@ -8,7 +8,7 @@
  * plugin state into the call graph.
  *
  * Future RC-1 follow-ups will move additional closure-independent helpers here
- * and extract the 18 inline tools into `lib/tools/*` factories that consume a
+ * and keep `lib/tools/*` factories consuming a
  * `ToolContext` assembled inside `OpenAIOAuthPlugin`.
  */
 

@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-02-03
-Commit: 461ea2b
+Generated: 2026-04-25
+Source baseline: 3331324cb14d2b80dd8dfb424619870a88476706
 Branch: main
 
 ## OVERVIEW
@@ -10,7 +10,7 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 ## STRUCTURE
 ```
 ./
-├── index.ts              # plugin entry (7-step fetch pipeline, tool registration)
+├── index.ts              # plugin entry (context wiring + 5-stage fetch pipeline)
 ├── lib/                  # core logic (see lib/AGENTS.md)
 ├── test/                 # vitest suites (see test/AGENTS.md)
 ├── scripts/              # install + build helpers
@@ -23,11 +23,12 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 ## WHERE TO LOOK
 | Task | Location | Notes |
 | --- | --- | --- |
-| Plugin orchestration | `index.ts` | 7-step request pipeline, tool registration |
+| Plugin orchestration | `index.ts` | 5-stage request pipeline: URL rewrite, body transform, OAuth headers, SSE conversion, error handling |
+| Tool registry | `lib/tools/index.ts` + `lib/tools/codex-*.ts` | 21 registered `codex-*` tools |
 | OAuth flow + PKCE | `lib/auth/auth.ts` | token refresh, JWT decode |
 | OAuth callback server | `lib/auth/server.ts` | binds port 1455 |
 | Multi-account rotation | `lib/accounts.ts` | health scoring, cooldown, selection |
-| Account storage | `lib/storage.ts` | V3 format, per-project/global paths |
+| Account storage | `lib/storage.ts` + `lib/storage/` | V3 facade, per-project/global paths, keychain, import/export |
 | Request transformation | `lib/request/request-transformer.ts` | model normalization, prompt injection |
 | Headers + rate limits | `lib/request/fetch-helpers.ts` | Codex headers, error mapping |
 | SSE to JSON | `lib/request/response-handler.ts` | stream parsing |
@@ -37,13 +38,13 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 | Graceful shutdown | `lib/shutdown.ts` | cleanup on process exit |
 | Health monitoring | `lib/health.ts` | account health status |
 | Circuit breaker | `lib/circuit-breaker.ts` | failure isolation |
-| Tests | `test/` | vitest globals, 80% coverage threshold |
+| Tests | `test/` | vitest globals, coverage threshold gate |
 
 ## CONVENTIONS
 - Source: root `index.ts` + `lib/`; `dist/` is generated output.
 - ESLint flat config: `no-explicit-any` enforced, unused args prefixed `_`.
 - Tests relax lint rules (see `eslint.config.js`).
-- Build emits `dist/lib/oauth-success.html` from the TypeScript source via `scripts/copy-oauth-success.js`.
+- Build cleans `dist/`, then emits `dist/lib/oauth-success.html` from the TypeScript source via `scripts/copy-oauth-success.js`.
 - ESM only (`"type": "module"`), Node >= 18.
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -54,9 +55,11 @@ OpenCode plugin: intercepts OpenAI SDK calls, routes through ChatGPT Codex backe
 
 ## COMMANDS
 ```bash
-npm run build       # tsc + copy oauth-success.html
+npm run build       # clean dist + tsc + copy oauth-success.html
 npm run typecheck   # type checking only
 npm test            # vitest once
+npm run test:coverage # vitest coverage
+npm run audit:ci    # prod audit + dev allowlist
 npm run test:watch  # vitest watch mode
 npm run lint        # eslint
 ```
@@ -82,7 +85,7 @@ Skills to load when delegating tasks in this codebase.
 |-------|---------------|
 | `typescript-senior` | Strict mode, template literal types (`QuotaKey`), discriminated unions (`TokenResult`), Zod inference |
 | `node-backend` | ESM-first, `node:crypto`, Buffer API, async patterns |
-| `testing-js` | Vitest with 80% coverage threshold, `vi.mock`, `vi.useFakeTimers` |
+| `testing-js` | Vitest coverage gates, `vi.mock`, `vi.useFakeTimers` |
 | `mcp-builder` | Uses `@opencode-ai/plugin/tool` pattern for tool registration |
 
 ### Domain-Specific Skills (load when touching these areas)

@@ -27,7 +27,7 @@ export function createCodexExportTool(ctx: ToolContext): ToolDefinition {
 			force: tool.schema
 				.boolean()
 				.optional()
-				.describe("Overwrite existing file (default: true)"),
+				.describe("Overwrite existing file (default: false)"),
 			timestamped: tool.schema
 				.boolean()
 				.optional()
@@ -53,7 +53,7 @@ export function createCodexExportTool(ctx: ToolContext): ToolDefinition {
 						? createTimestampedBackupPath()
 						: "codex-backup.json";
 			try {
-				await exportAccounts(resolvedExportPath, force ?? true);
+				await exportAccounts(resolvedExportPath, force ?? false);
 				const storage = await loadAccounts();
 				const count = storage?.accounts.length ?? 0;
 				if (ui.v2Enabled) {

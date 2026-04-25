@@ -1,6 +1,8 @@
 # Test Suite
 
 This directory contains the Vitest suites for `oc-codex-multi-auth`.
+The tree evolves frequently; use `rg --files test` as the source of truth
+when adding coverage.
 
 ## Test Structure
 
@@ -19,7 +21,9 @@ test/
 ├── codex.test.ts                  # Codex prompt/instructions behavior
 ├── config.test.ts                 # Configuration parsing/merging tests
 ├── context-overflow.test.ts       # Context length handling tests
+├── clean-dist.test.ts             # Build cleanup script tests
 ├── copy-oauth-success.test.ts     # Build script tests
+├── doc-parity.test.ts             # Documentation/config/current-structure parity
 ├── errors.test.ts                 # Custom error type tests
 ├── fetch-helpers.test.ts          # Fetch flow helper tests
 ├── health.test.ts                 # Account health status tests
@@ -57,6 +61,7 @@ test/
 ├── table-formatter.test.ts        # CLI table output tests
 ├── token-utils.test.ts            # Token validation tests
 ├── tool-utils.test.ts             # Tool schema helper tests
+├── tools-codex-*.test.ts          # Extracted tool module tests
 └── utils.test.ts                  # Shared utility tests
 ```
 
@@ -118,11 +123,17 @@ Tests SSE to JSON conversion:
 - Status preservation
 
 ### fetch-helpers.test.ts
-Tests focused helpers used in the 7-step fetch flow:
+Tests focused helpers used in the 5-stage fetch pipeline:
 - URL rewriting
 - Header construction
 - Body normalization
 - Request/response edge cases
+
+### doc-parity.test.ts
+Pins documentation and example config claims that must match runtime behavior:
+- `store: false`
+- `reasoning.encrypted_content`
+- Current `lib/tools` registry and audit metadata
 
 ### rotation.test.ts + rotation-integration.test.ts
 Tests account selection algorithm:

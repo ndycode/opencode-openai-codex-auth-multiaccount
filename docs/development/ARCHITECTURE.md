@@ -1,13 +1,13 @@
 # Plugin Architecture & Technical Decisions
 
-> Reflects the codebase as of v6.0.0. Post-refactor structure after Phase 2 architecture work (see `docs/audits/07-refactoring-plan.md`). Individual section version markers refer to the release that introduced a feature and are retained for historical context only.
+> Reflects the codebase as of the 2026-04-25 current-structure audit. Individual section version markers refer to the release that introduced a feature and are retained for historical context only.
 
 This document explains the technical design decisions, architecture, and implementation details of the OpenAI Codex OAuth plugin for OpenCode.
 
 ## Module Layout (v6.0.0)
 
 ```
-index.ts              # plugin entry (~3200 lines): fetch pipeline + tool registration
+index.ts              # plugin entry: context wiring + fetch pipeline
 lib/
 ├── accounts/         # state, persistence, rotation, rate-limits, recovery
 ├── auth/             # OAuth flow, PKCE, callback server
@@ -15,11 +15,40 @@ lib/
 ├── recovery/         # session recovery (tool_result_missing, thinking blocks)
 ├── request/          # transformer, fetch-helpers, response-handler
 ├── storage/          # atomic writes, migrations, paths, flagged, backup/export/import
-├── tools/            # 19 OpenCode tools (codex-list, codex-switch, codex-doctor, ...)
+├── tools/            # 21 OpenCode tools (codex-list, codex-switch, codex-doctor, ...)
 └── ui/               # terminal UI runtime, theme, formatting, beginner checklist
 ```
 
-The single `index.ts` of earlier releases has been split: account management lives under `lib/accounts/`, storage under `lib/storage/`, and every `codex-*` tool is its own file under `lib/tools/`. `index.ts` now holds the plugin loader, request pipeline wiring, and tool registration only.
+The single `index.ts` of earlier releases has been split: account management lives under `lib/accounts/`, storage under `lib/storage/`, and every registered `codex-*` tool is its own file under `lib/tools/`. `index.ts` now holds the plugin loader, request pipeline wiring, context construction, and registry attachment.
+
+## Documentation Layout
+
+The current docs tree mirrors the codebase boundaries above: user docs cover setup and operations, maintainer docs cover internal architecture and validation, and the regenerated audit corpus records point-in-time architecture findings.
+
+```text
+docs/
+├── index.md                  # docs landing page
+├── README.md                 # docs portal navigation
+├── DOCUMENTATION.md          # repository documentation map
+├── getting-started.md        # install, auth, and first-run guide
+├── configuration.md          # public config reference
+├── troubleshooting.md        # operational failure modes and fixes
+├── faq.md                    # short common answers
+├── privacy.md                # local data and upstream request notes
+├── OPENCODE_PR_PROPOSAL.md   # upstream OpenCode proposal notes
+├── _config.yml               # docs site config
+├── development/              # maintainer architecture and validation docs
+│   ├── ARCHITECTURE.md
+│   ├── CONFIG_FIELDS.md
+│   ├── CONFIG_FLOW.md
+│   ├── TESTING.md
+│   └── TUI_PARITY_CHECKLIST.md
+└── audits/                   # current-structure audit corpus
+    ├── INDEX.md
+    ├── 01-executive-summary.md ... 16-verdict.md
+    ├── _findings/            # T01 through T16 detailed findings
+    └── _meta/                # audit rubric, ledger, environment, verification
+```
 
 ## Table of Contents
 - [Architecture Overview](#architecture-overview)
@@ -87,7 +116,7 @@ The plugin uses **`store: false`** (stateless mode) because:
    {"detail":"Store must be set to false"}
    ```
 
-2. **Codex CLI Behavior** (`tmp/codex/codex-rs/core/src/client.rs:215-232`):
+2. **Codex CLI Behavior** (external Codex CLI `codex-rs/core/src/client.rs`):
    ```rust
    // Codex CLI uses store:false for ChatGPT OAuth
    let azure_workaround = self.provider.is_azure_responses_endpoint();
@@ -181,7 +210,7 @@ const body = {
 
 ### The Solution
 
-**Filter AI SDK Constructs + Strip IDs** (`lib/request/request-transformer.ts:114-135`):
+**Filter AI SDK Constructs + Strip IDs** (`lib/request/request-transformer.ts`, `filterInput`):
 ```typescript
 export function filterInput(input: InputItem[]): InputItem[] {
   return input
@@ -224,7 +253,7 @@ console.log(`[openai-codex-plugin] Successfully removed all ${originalIds.length
 console.warn(`[openai-codex-plugin] WARNING: ${remainingIds.length} IDs still present after filtering:`, remainingIds);
 ```
 
-**Source**: `lib/request/request-transformer.ts:287-301`
+**Source**: `lib/request/request-transformer.ts` (`transformRequestBody` debug logging)
 
 ---
 
@@ -260,7 +289,7 @@ Client → [Request with encrypted content, no IDs] → Server
          Server → [Response + new encrypted reasoning] → Client
 ```
 
-**Codex CLI equivalent** (`tmp/codex/codex-rs/core/src/client.rs:190-194`):
+**Codex CLI equivalent** (external Codex CLI `codex-rs/core/src/client.rs`):
 ```rust
 let include: Vec<String> = if reasoning.is_some() {
     vec!["reasoning.encrypted_content".to_string()]
@@ -269,7 +298,7 @@ let include: Vec<String> = if reasoning.is_some() {
 };
 ```
 
-**Source**: `lib/request/request-transformer.ts:303`
+**Source**: `lib/request/request-transformer.ts` (`resolveInclude` and `transformRequestBody`)
 
 ---
 
@@ -302,7 +331,7 @@ let include: Vec<String> = if reasoning.is_some() {
    - Preserve host-provided prompt_cache_key session headers when present
 ~~~
 
-**Source**: lib/request/fetch-helpers.ts:379-454, lib/request/request-transformer.ts:843-1015
+**Source**: `lib/request/fetch-helpers.ts` and `lib/request/request-transformer.ts`
 
 ---
 
@@ -540,7 +569,7 @@ Operational implications:
 **Prompt Caching**: Uses `promptCacheKey` for session-based caching
 **Result**: Reduced token usage on subsequent turns
 
-**Source**: `tmp/opencode/packages/opencode/src/provider/transform.ts:90-92`
+**Source**: external OpenCode provider transform implementation
 
 ---
 

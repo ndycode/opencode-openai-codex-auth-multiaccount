@@ -188,7 +188,7 @@ Contract tests in `test/contracts/` pin external API response shapes (OAuth toke
 **Never commit real tokens, real account ids, real organization ids, real JWT payloads, or any PII in fixtures.** The fixtures live in version control; treat them as public.
 
 ### Debug OAuth flow locally
-Set `CODEX_DEBUG_AUTH=1` in your shell before running. See `docs/development/AUTH_FLOW.md` (if present) for protocol details.
+Set `CODEX_DEBUG_AUTH=1` in your shell before running. See `docs/development/ARCHITECTURE.md#oauth-flow` for protocol details.
 
 ### Testing the OS-keychain backend
 

@@ -93,7 +93,7 @@ export function createCodexRemoveTool(ctx: ToolContext): ToolDefinition {
 								formatUiItem(ui, "No account selected.", "warning"),
 								formatUiItem(
 									ui,
-									"Run again and pick an account, or pass codex-remove index=2.",
+									"Run again and pick an account, or pass codex-remove index=2 confirm=true.",
 									"muted",
 								),
 							].join("\n");
@@ -105,10 +105,10 @@ export function createCodexRemoveTool(ctx: ToolContext): ToolDefinition {
 							...formatUiHeader(ui, "Remove account"),
 							"",
 							formatUiItem(ui, "Missing account number.", "warning"),
-							formatUiItem(ui, "Use: codex-remove index=2", "accent"),
+							formatUiItem(ui, "Use: codex-remove index=2 confirm=true", "accent"),
 						].join("\n");
 					}
-					return "Missing account number. Use: codex-remove index=2";
+					return "Missing account number. Use: codex-remove index=2 confirm=true";
 				}
 				resolvedIndex = selectedIndex + 1;
 			}

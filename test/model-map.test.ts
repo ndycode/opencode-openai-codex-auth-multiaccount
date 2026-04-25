@@ -1,5 +1,48 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { MODEL_MAP, getNormalizedModel, isKnownModel } from "../lib/request/helpers/model-map.js";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+
+type ConfigModel = {
+  variants?: Record<string, unknown>;
+};
+
+type OpenCodeConfig = {
+  model?: string;
+  provider?: {
+    openai?: {
+      models?: Record<string, ConfigModel>;
+    };
+  };
+};
+
+function readConfig(relativePath: string): OpenCodeConfig {
+  return JSON.parse(
+    readFileSync(path.resolve(testDir, "..", relativePath), "utf8"),
+  ) as OpenCodeConfig;
+}
+
+function collectConfigModelIds(relativePath: string): string[] {
+  const config = readConfig(relativePath);
+  const modelIds = new Set<string>();
+  const providerModels = config.provider?.openai?.models ?? {};
+
+  if (config.model?.startsWith("openai/")) {
+    modelIds.add(config.model.slice("openai/".length));
+  }
+
+  for (const [modelId, modelConfig] of Object.entries(providerModels)) {
+    modelIds.add(modelId);
+    for (const variant of Object.keys(modelConfig.variants ?? {})) {
+      modelIds.add(`${modelId}-${variant}`);
+    }
+  }
+
+  return Array.from(modelIds).sort();
+}
 
 describe("Model Map Module", () => {
   describe("MODEL_MAP", () => {
@@ -227,6 +270,20 @@ describe("Model Map Module", () => {
   });
 
   describe("Model count and completeness", () => {
+    it("covers every model id shipped in the OpenCode config examples", () => {
+      const configModelIds = [
+        ...collectConfigModelIds("config/minimal-opencode.json"),
+        ...collectConfigModelIds("config/opencode-modern.json"),
+        ...collectConfigModelIds("config/opencode-legacy.json"),
+      ];
+
+      expect(configModelIds.length).toBeGreaterThan(0);
+      for (const modelId of configModelIds) {
+        expect(isKnownModel(modelId), modelId).toBe(true);
+        expect(getNormalizedModel(modelId), modelId).toBeDefined();
+      }
+    });
+
     it("has expected number of model mappings", () => {
       const modelCount = Object.keys(MODEL_MAP).length;
       expect(modelCount).toBeGreaterThanOrEqual(30);

@@ -10,7 +10,9 @@ Run these before opening a PR:
 npm run lint
 npm run typecheck
 npm test
+npm run test:coverage
 npm run build
+npm run audit:ci
 ```
 
 What they cover:
@@ -18,7 +20,9 @@ What they cover:
 - `lint`: ESLint for TypeScript sources and `scripts/`
 - `typecheck`: `tsc --noEmit`
 - `test`: Vitest suite across auth, config, request transformation, storage, UI, recovery, and rotation
-- `build`: compile TypeScript and copy `lib/oauth-success.html` into `dist/lib/`
+- `test:coverage`: Vitest coverage threshold gate from `vitest.config.ts`; statements/functions/lines keep an 80% global floor, while branch and legacy `index.ts` floors are calibrated to the current baseline
+- `build`: clean `dist/`, compile TypeScript, and materialize `dist/lib/oauth-success.html` from `lib/oauth-success.ts` via `scripts/copy-oauth-success.js`
+- `audit:ci`: production dependency audit plus the dev-advisory allowlist
 
 ## Current High-Value Test Areas
 
@@ -32,6 +36,8 @@ Representative suites on `main`:
 | `test/config.test.ts` | config loading and provider model handling |
 | `test/plugin-config.test.ts` | plugin runtime config defaults and env overrides |
 | `test/index.test.ts` | tool registration, beginner flows, account command behavior |
+| `test/tools-codex-*.test.ts` | per-tool regressions for extracted `lib/tools` modules |
+| `test/doc-parity.test.ts` | docs/config parity with runtime contracts and current structure |
 | `test/beginner-ui.test.ts` | checklist, doctor findings, next-action output |
 | `test/storage.test.ts` / `test/storage-async.test.ts` | account persistence, backup paths, import/export safety |
 | `test/recovery*.test.ts` | recovery storage and resume behavior |
@@ -45,7 +51,7 @@ The repository also includes `test/property/` and `test/chaos/` directories for 
 
 When documentation changes touch setup or config guidance, verify the docs against the live repo surface:
 
-1. Confirm commands exist in `index.ts`.
+1. Confirm commands exist in `lib/tools/index.ts` and have a matching `lib/tools/codex-*.ts` module.
 2. Confirm config examples match `config/opencode-modern.json`, `config/opencode-legacy.json`, and `config/minimal-opencode.json`.
 3. Confirm install/update guidance matches `scripts/install-oc-codex-multi-auth.js`.
 4. Confirm repo scripts listed in docs still exist in `package.json`.
@@ -53,7 +59,7 @@ When documentation changes touch setup or config guidance, verify the docs again
 Useful commands:
 
 ```bash
-rg -n "codex-setup|codex-doctor|codex-next|codex-help" index.ts
+rg -n "codex-setup|codex-doctor|codex-next|codex-help" lib/tools
 rg -n "\"build\"|\"typecheck\"|\"lint\"|\"test\"" package.json
 ```
 
@@ -142,7 +148,9 @@ Use that only when you need payload-level detail because it can log sensitive re
 - `npm run lint`
 - `npm run typecheck`
 - `npm test`
+- `npm run test:coverage`
 - `npm run build`
+- `npm run audit:ci`
 - Manual doc/config spot-check if the PR changes docs, setup, or config templates
 
 ## See Also

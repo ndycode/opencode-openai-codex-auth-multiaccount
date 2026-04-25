@@ -541,7 +541,7 @@ Your input exceeds the context window
    ```text
    codex-switch index=2
    codex-label index=2 label="Work"
-   codex-remove index=2
+   codex-remove index=2 confirm=true
    ```
 2. Run from an interactive terminal when you want picker menus.
 3. Use `codex-list` first to inspect valid index range.

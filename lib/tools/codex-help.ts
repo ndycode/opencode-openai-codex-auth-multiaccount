@@ -21,7 +21,7 @@ export function createCodexHelpTool(ctx: ToolContext): ToolDefinition {
 				.string()
 				.optional()
 				.describe(
-					"Optional topic: setup, switch, health, backup, dashboard, metrics.",
+					"Optional topic: setup, switch, health, backup, dashboard.",
 				),
 		},
 		async execute({ topic }) {
@@ -52,7 +52,7 @@ export function createCodexHelpTool(ctx: ToolContext): ToolDefinition {
 						"Set account tags: codex-tag index=2 tags=\"work,team-a\"",
 						"Set account note: codex-note index=2 note=\"weekday primary\"",
 						"Filter by tag: codex-list tag=\"work\"",
-						"Remove account: codex-remove index=2",
+						"Remove account: codex-remove index=2 confirm=true",
 					],
 				},
 				{
@@ -92,7 +92,7 @@ export function createCodexHelpTool(ctx: ToolContext): ToolDefinition {
 			const visibleSections =
 				normalizedTopic.length === 0
 					? sections
-					: sections.filter((section) => section.key.includes(normalizedTopic));
+					: sections.filter((section) => section.key === normalizedTopic);
 			if (visibleSections.length === 0) {
 				const available = sections.map((section) => section.key).join(", ");
 				if (ui.v2Enabled) {

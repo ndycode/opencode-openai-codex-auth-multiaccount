@@ -1,6 +1,6 @@
 # TEST KNOWLEDGE BASE
 
-Generated: 2026-02-03
+Generated: 2026-04-25
 
 ## OVERVIEW
 Vitest suites for OAuth flow, request transforms, response handling, rotation logic, and more.
@@ -21,7 +21,9 @@ test/
 ├── codex.test.ts                  # Codex instructions/caching
 ├── config.test.ts                 # configuration parsing/merging
 ├── context-overflow.test.ts       # context length handling
+├── clean-dist.test.ts             # build cleanup script tests
 ├── copy-oauth-success.test.ts     # build script tests
+├── doc-parity.test.ts             # docs/config/current-structure parity
 ├── errors.test.ts                 # custom error types
 ├── fetch-helpers.test.ts          # fetch flow helpers
 ├── health.test.ts                 # account health status
@@ -59,6 +61,7 @@ test/
 ├── table-formatter.test.ts        # CLI table output
 ├── token-utils.test.ts            # token validation
 ├── tool-utils.test.ts             # tool schema helpers
+├── tools-codex-*.test.ts          # extracted tool module regressions
 └── utils.test.ts                  # shared utilities
 ```
 
@@ -78,10 +81,12 @@ test/
 | Circuit breaker | `circuit-breaker.test.ts` | failure isolation |
 | Health checks | `health.test.ts`, `parallel-probe.test.ts` | account health |
 | Chaos testing | `chaos/fault-injection.test.ts` | fault injection |
+| Current structure docs | `doc-parity.test.ts` | docs/config/tool registry drift |
+| Extracted tools | `tools-codex-*.test.ts`, `index.test.ts` | per-tool behavior and registry wiring |
 
 ## CONVENTIONS
 - Vitest globals are enabled (`describe`, `it`, `expect`).
-- Coverage thresholds: 80% across statements/branches/functions/lines.
+- Coverage thresholds are enforced by `vitest.config.ts`; statements/functions/lines keep an 80% global floor, while branch and legacy `index.ts` floors are calibrated to the current broad coverage baseline.
 - Lint rules are relaxed for tests (see `eslint.config.js`).
 - Property tests use fast-check for randomized testing.
 

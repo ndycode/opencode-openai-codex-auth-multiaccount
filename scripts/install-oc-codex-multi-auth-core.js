@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -16,6 +16,24 @@ const STALE_MANAGED_MODEL_KEYS = new Set([
 
 function getManagedPackageNames() {
 	return [PACKAGE_NAME, ...LEGACY_PACKAGE_NAMES];
+}
+
+export function normalizePathForCompare(path, resolveRealPath = realpathSync) {
+	const resolved = resolve(path);
+	try {
+		const realPath = resolveRealPath(resolved);
+		return process.platform === "win32" ? realPath.toLowerCase() : realPath;
+	} catch {
+		return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+	}
+}
+
+export function isDirectRunPath(argvPath, modulePath, resolveRealPath = realpathSync) {
+	if (!argvPath || !modulePath) return false;
+	return (
+		normalizePathForCompare(argvPath, resolveRealPath) ===
+		normalizePathForCompare(modulePath, resolveRealPath)
+	);
 }
 
 function printHelp() {

@@ -14,18 +14,27 @@ This file describes how docs are organized in this repository.
 
 ```text
 docs/
-  index.md                     # documentation landing page
-  README.md                    # docs portal / navigation
-  getting-started.md           # install + first-run guide
-  configuration.md             # full config reference
-  troubleshooting.md           # operational debugging guide
-  privacy.md                   # data handling notes
-  development/
-    ARCHITECTURE.md            # technical design
-    CONFIG_FLOW.md             # config resolution internals
-    CONFIG_FIELDS.md           # config field semantics
-    TESTING.md                 # testing strategy and commands
-    TUI_PARITY_CHECKLIST.md    # auth dashboard UI parity checks
+├── _config.yml                 # docs site config
+├── DOCUMENTATION.md            # this repository documentation map
+├── README.md                   # docs portal / navigation
+├── index.md                    # documentation landing page
+├── getting-started.md          # install + first-run guide
+├── configuration.md            # full config reference
+├── troubleshooting.md          # operational debugging guide
+├── faq.md                      # short common answers
+├── privacy.md                  # data handling notes
+├── OPENCODE_PR_PROPOSAL.md     # upstream OpenCode proposal notes
+├── development/
+│   ├── ARCHITECTURE.md         # technical design and current module/docs layout
+│   ├── CONFIG_FIELDS.md        # config field semantics
+│   ├── CONFIG_FLOW.md          # config resolution internals
+│   ├── TESTING.md              # testing strategy and commands
+│   └── TUI_PARITY_CHECKLIST.md # auth dashboard UI parity checks
+└── audits/
+    ├── INDEX.md
+    ├── 01-executive-summary.md ... 16-verdict.md
+    ├── _findings/              # T01 through T16 detailed findings
+    └── _meta/                  # audit rubric, ledger, environment, verification
 ```
 
 ## config/ (copy-paste templates)

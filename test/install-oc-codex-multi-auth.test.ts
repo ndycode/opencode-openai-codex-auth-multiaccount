@@ -44,7 +44,7 @@ describe("install-oc-codex-multi-auth script", () => {
 
 	it("detects direct CLI execution after path normalization", async () => {
 		vi.resetModules();
-		const { isDirectRunPath } = await import("../scripts/install-oc-codex-multi-auth.js");
+		const { isDirectRunPath } = await import("../scripts/install-oc-codex-multi-auth-core.js");
 		const scriptPath = resolve("scripts", "install-oc-codex-multi-auth.js");
 		const symlinkedScriptPath = join(
 			process.cwd(),

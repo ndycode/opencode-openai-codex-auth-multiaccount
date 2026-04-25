@@ -1493,6 +1493,10 @@ describe("OpenAIOAuthPlugin", () => {
 		});
 
 		it("redacts upstream auth material from usage fetch errors", async () => {
+			const fakeJwt = `eyJabc.eyJdef.${"sig"}`;
+			const fakeOpenAiKey = `sk-${"abcdefghijklmnopqrstuvwx"}`;
+			const fakeLiveKey = `sk-live_${"abcd"}.${"efgh"}:${"ijklmnopqrst"}`;
+			const fakeHexToken = `${"deadbeef".repeat(5)}`;
 			mockStorage.accounts = [
 				{
 					refreshToken: "r1",
@@ -1504,7 +1508,13 @@ describe("OpenAIOAuthPlugin", () => {
 			];
 			globalThis.fetch = vi.fn().mockResolvedValue(
 				new Response(
-					"upstream said Authorization: Bearer secret-token and jwt eyJabc.eyJdef.sig and sk-abcdefghijklmnopqrstuvwx and sk-live_abcd.efgh:ijklmnopqrst and deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					[
+						"upstream said Authorization: Bearer secret-token",
+						`and jwt ${fakeJwt}`,
+						`and ${fakeOpenAiKey}`,
+						`and ${fakeLiveKey}`,
+						`and ${fakeHexToken}`,
+					].join(" "),
 					{ status: 401, headers: { "content-type": "text/plain" } },
 				),
 			);
@@ -1515,10 +1525,10 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(result).toContain("Bearer [redacted]");
 			expect(result).toContain("[redacted-token]");
 			expect(result).not.toContain("secret-token");
-			expect(result).not.toContain("eyJabc.eyJdef.sig");
-			expect(result).not.toContain("sk-abcdefghijklmnopqrstuvwx");
-			expect(result).not.toContain("sk-live_abcd.efgh:ijklmnopqrst");
-			expect(result).not.toContain("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+			expect(result).not.toContain(fakeJwt);
+			expect(result).not.toContain(fakeOpenAiKey);
+			expect(result).not.toContain(fakeLiveKey);
+			expect(result).not.toContain(fakeHexToken);
 		});
 
 		it("surfaces usage fetch timeouts without leaking raw abort errors", async () => {
@@ -1734,6 +1744,14 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-help"].execute({ topic: "backup" });
 			expect(result).toContain("Backup and migration");
 			expect(result).toContain("codex-export");
+		});
+
+		it("matches topics exactly instead of by substring", async () => {
+			const result = await plugin.tool["codex-help"].execute({ topic: "s" });
+			expect(result).toContain("Unknown topic");
+			expect(result).toContain("Available topics");
+			expect(result).not.toContain("Quickstart");
+			expect(result).not.toContain("Daily account operations");
 		});
 
 		it("handles unknown topics", async () => {
@@ -1985,7 +2003,7 @@ describe("OpenAIOAuthPlugin", () => {
 			mockStorage.accounts = [{ refreshToken: "r1", email: "user@example.com" }];
 			const result = await plugin.tool["codex-remove"].execute({ confirm: true });
 			expect(result).toContain("Missing account number");
-			expect(result).toContain("codex-remove index=2");
+			expect(result).toContain("codex-remove index=2 confirm=true");
 		});
 
 		it("returns error for invalid index", async () => {
@@ -2069,7 +2087,7 @@ describe("OpenAIOAuthPlugin", () => {
 				path: "/tmp/backup.json",
 			});
 			expect(result).toContain("Exported");
-			expect(storageModule.exportAccounts).toHaveBeenCalledWith("/tmp/backup.json", true);
+			expect(storageModule.exportAccounts).toHaveBeenCalledWith("/tmp/backup.json", false);
 		});
 
 		it("exports to timestamped path when path is omitted", async () => {
@@ -2081,7 +2099,7 @@ describe("OpenAIOAuthPlugin", () => {
 			expect(storageModule.createTimestampedBackupPath).toHaveBeenCalledWith();
 			expect(storageModule.exportAccounts).toHaveBeenCalledWith(
 				"/tmp/codex-backup-20260101-000000.json",
-				true,
+				false,
 			);
 		});
 
@@ -2091,7 +2109,18 @@ describe("OpenAIOAuthPlugin", () => {
 			const result = await plugin.tool["codex-export"].execute({ timestamped: false });
 			expect(result).toContain("codex-backup.json");
 			expect(storageModule.createTimestampedBackupPath).not.toHaveBeenCalled();
-			expect(storageModule.exportAccounts).toHaveBeenCalledWith("codex-backup.json", true);
+			expect(storageModule.exportAccounts).toHaveBeenCalledWith("codex-backup.json", false);
+		});
+
+		it("passes explicit force=true when the caller opts into overwrite", async () => {
+			mockStorage.accounts = [{ refreshToken: "r1" }];
+			const storageModule = await import("../lib/storage.js");
+			const result = await plugin.tool["codex-export"].execute({
+				path: "/tmp/backup.json",
+				force: true,
+			});
+			expect(result).toContain("Exported");
+			expect(storageModule.exportAccounts).toHaveBeenCalledWith("/tmp/backup.json", true);
 		});
 	});
 

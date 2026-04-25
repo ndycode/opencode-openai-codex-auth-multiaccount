@@ -1,91 +1,30 @@
-﻿> **Audit SHA**: d92a8eedad906fcda94cd45f9b75a6244fd9ef51 | **Generated**: 2026-04-17T09:28:39Z | **Task**: T18 Synthesis | **Source**: docs/audits/_meta/findings-ledger.csv
+> Audit source: 3331324cb14d2b80dd8dfb424619870a88476706 | Generated: 2026-04-25T12:45:33+08:00 | Scope: index
 
-# Repo Audit — INDEX
+# Audit Index
 
-**Repository**: `oc-codex-multi-auth` — OpenCode plugin, ChatGPT Codex OAuth backend with multi-account rotation.
-**Branch**: `main`
-**Rubric**: [`_meta/AUDIT-RUBRIC.md`](./_meta/AUDIT-RUBRIC.md) (version 1)
+This corpus supersedes the earlier pre-split audit. All files were regenerated for the current source layout.
 
----
+Top-level reports:
 
-## Executive quote
+- [01 Executive Summary](01-executive-summary.md)
+- [02 System Map](02-system-map.md)
+- [03 Critical Issues](03-critical-issues.md)
+- [04 High Priority](04-high-priority.md)
+- [05 Medium](05-medium.md)
+- [06 Low Priority](06-low-priority.md)
+- [07 Refactoring Plan](07-refactoring-plan.md)
+- [08 Feature Recommendations](08-feature-recommendations.md)
+- [09 Security And Trust](09-security-trust.md)
+- [10 Testing Gaps](10-testing-gaps.md)
+- [11 DX CLI Docs](11-dx-cli-docs.md)
+- [12 Quick Wins](12-quick-wins.md)
+- [13 Phased Roadmap](13-phased-roadmap.md)
+- [14 Top Items](14-top20.md)
+- [15 File By File](15-file-by-file.md)
+- [16 Verdict](16-verdict.md)
 
-> The project is **structurally healthy** — mature TS/Node posture, explicit schemas, decent docs — but **operationally exposed** through one active race, destructive defaults, dead-code promises in privacy features, and no CI gating. The remediation cost is modest: **Phase 1 (safety + CI) is 3-5 days for a single maintainer**.
->
-> — [§01-executive-summary.md](01-executive-summary.md)
+Metadata:
 
----
-
-## Severity distribution (post-verification, post-dedup, post-caps)
-
-| Severity | Count | Cap | File |
-|---|---:|---:|---|
-| CRITICAL | 1 | 5 | [§03-critical-issues.md](03-critical-issues.md) |
-| HIGH | 15 | 15 | [§04-high-priority.md](04-high-priority.md) |
-| MEDIUM | 40 | 40 | [§05-medium.md](05-medium.md) |
-| LOW | 93 | — | [§06-low-priority.md](06-low-priority.md) |
-| **Total** | **149** | | |
-
-All budgets respected. See `_meta/severity-reclassifications.md` for the 78 demotions applied in T17.
-
----
-
-## User-facing reports (this audit)
-
-| # | Report | Purpose |
-|---|---|---|
-| 01 | [01-executive-summary.md](01-executive-summary.md) | Maturity, strengths, risks, top-5 priorities |
-| 02 | [02-system-map.md](02-system-map.md) | Architecture + trust/risk boundaries (Mermaid) |
-| 03 | [03-critical-issues.md](03-critical-issues.md) | 1 CRITICAL (auth-failure race) |
-| 04 | [04-high-priority.md](04-high-priority.md) | 15 HIGH across security, storage, CI, DX |
-| 05 | [05-medium.md](05-medium.md) | 40 MEDIUM with cross-cutting theme notes |
-| 06 | [06-low-priority.md](06-low-priority.md) | 93 LOW as batched backlog |
-| 07 | [07-refactoring-plan.md](07-refactoring-plan.md) | RC-1..RC-10 structural refactors |
-| 08 | [08-feature-recommendations.md](08-feature-recommendations.md) | 10 features, each pain-anchored |
-| 09 | [09-security-trust.md](09-security-trust.md) | Credential lifecycle + hardening steps |
-| 10 | [10-testing-gaps.md](10-testing-gaps.md) | Race, contract, property tests to add |
-| 11 | [11-dx-cli-docs.md](11-dx-cli-docs.md) | Command ergonomics + OSS-readiness scorecard |
-| 12 | [12-quick-wins.md](12-quick-wins.md) | 20 ≤ 2-hour high-ROI items |
-| 13 | [13-phased-roadmap.md](13-phased-roadmap.md) | 4 phases with rollback posture |
-| 14 | [14-top20.md](14-top20.md) | Ranked top-20 action items |
-| 15 | [15-file-by-file.md](15-file-by-file.md) | 28 file dispositions (cap ≤30) |
-| 16 | [16-verdict.md](16-verdict.md) | Scorecard + ship/hold + never-break list |
-
----
-
-## Meta artefacts
-
-- [`_meta/sha.lock`](./_meta/sha.lock) — immutable SHA at audit start
-- [`_meta/AUDIT-RUBRIC.md`](./_meta/AUDIT-RUBRIC.md) — severity rubric, finding template, exclusions
-- [`_meta/scope-whitelist.txt`](./_meta/scope-whitelist.txt) — in-scope file list
-- [`_meta/environment.md`](./_meta/environment.md) — Node version, branch, git snapshot
-- [`_meta/findings-ledger.csv`](./_meta/findings-ledger.csv) — 320-row master ledger (257 PASSED, 149 surviving non-duplicate)
-- [`_meta/verification-report.md`](./_meta/verification-report.md) — T17 Layer-2 citation verification (63 FAILED)
-- [`_meta/dedup-report.md`](./_meta/dedup-report.md) — 54 clusters, 108 duplicates
-- [`_meta/severity-reclassifications.md`](./_meta/severity-reclassifications.md) — 78 demotions applied
-- [`_meta/oracle-review.md`](./_meta/oracle-review.md) — top-20 adversarial review verdicts (20 CONFIRMED)
-- [`_findings/`](./_findings/) — 16 raw per-task finding files (10,841 lines total)
-
----
-
-## Reading order (recommended)
-
-1. **Skim**: `01-executive-summary.md` + `16-verdict.md` (≈ 2 minutes).
-2. **Act**: `14-top20.md` + `12-quick-wins.md` (ranked to-do).
-3. **Plan**: `13-phased-roadmap.md` (calendar-ready).
-4. **Reason**: `07-refactoring-plan.md` + `02-system-map.md` (understand the why).
-5. **Drill down**: `03`/`04`/`05`/`06` for individual findings, `15-file-by-file.md` for file-by-file disposition, `_findings/T<NN>-*.md` for full verbatim finding text.
-6. **Audit the audit**: `_meta/AUDIT-RUBRIC.md` + `_meta/oracle-review.md` + `_meta/verification-report.md`.
-
----
-
-## Status
-
-- **T0 (setup)**: complete — meta artefacts + skeleton INDEX.
-- **T1–T16 (domain audits)**: complete — 10,841 lines in `_findings/`.
-- **T17 (verification + dedup + severity reclassification)**: complete — ledger + three reports in `_meta/`.
-- **T18 (synthesis + user-facing reports)**: **complete** — this file + 16 chapters + oracle-review.
-
----
-
-*Synthesis generated by T18 from the locked SHA. All file links resolve relative to `docs/audits/`.*
+- [_meta/sha.lock](_meta/sha.lock)
+- [_meta/findings-ledger.csv](_meta/findings-ledger.csv)
+- [_meta/verification-report.md](_meta/verification-report.md)

@@ -1,5 +1,5 @@
 /**
- * Tool registry — RC-1 Phase 2 (incremental).
+ * Tool registry.
  *
  * `ToolContext` bundles the plugin-closure state and helpers each
  * `codex-*` tool needs. The plugin builds a `ToolContext` inside
@@ -7,11 +7,9 @@
  * tool factory can access closure state (mutable refs, helpers) without
  * living inside the plugin function body.
  *
- * **Status**: This PR lands the scaffolding plus the first three tool
- * extractions (`codex-help`, `codex-next`, `codex-setup`). The remaining
- * 15 inline tools in `index.ts` will move into per-file modules in
- * follow-up PRs using the same pattern. The factories below reference
- * only the already-extracted files to keep the build green.
+ * **Status**: all registered `codex-*` tools live in per-tool modules under
+ * `lib/tools/`. The plugin entrypoint wires the shared context once and
+ * exposes the returned registry on the OpenCode plugin surface.
  *
  * See `docs/audits/07-refactoring-plan.md#rc-1` and `lib/tools/AGENTS.md`.
  */
@@ -82,11 +80,10 @@ export type MutableRef<T> = { current: T };
  *
  * The factory `create<Name>Tool(ctx)` returns a standard `tool({...})`
  * result. Keeping the surface in one type lets us evolve it without
- * threading dozens of arguments through 18 call sites.
+ * threading dozens of arguments through 21 call sites.
  *
- * The type already lists every field the remaining 15 tools will
- * eventually need so that later PRs can extract them without churning
- * this interface. Each tool only destructures the subset it uses.
+ * The type lists the closure state and helpers used across the current
+ * registry. Each tool only destructures the subset it uses.
  */
 export interface ToolContext {
 	// --- Mutable plugin-closure state ---------------------------------------
@@ -218,10 +215,7 @@ export interface ToolContext {
  * Returned shape matches the `tool: { … }` map the plugin exposes on the
  * `Plugin` output object.
  *
- * Only the first three extracted tools are wired here today. When each
- * remaining inline tool moves into `lib/tools/codex-<name>.ts`, its
- * factory import + map entry is added below and the corresponding
- * inline definition is deleted from `index.ts`.
+ * Every exported entry below maps directly to a per-file tool factory.
  */
 export type CodexToolRegistry = Record<string, ToolDefinition>;
 
