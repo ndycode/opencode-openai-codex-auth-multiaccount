@@ -10,8 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (placeholder for next release)
 
+## [6.1.8] - 2026-04-29
+
 ### Fixed
 - Local `npm link` installs now run the CLI wrapper correctly by resolving symlinked bin paths before direct-execution detection.
+- Current audit validation follow-ups are resolved, including refreshed docs parity coverage.
+- Request filtering now defaults missing or null `function_call.arguments` values to `{}` before forwarding.
 
 ## [6.1.7] - 2026-04-25
 
